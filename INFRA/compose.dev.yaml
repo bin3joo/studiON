@@ -1,0 +1,12 @@
+services:
+  mysql:
+    ports:
+      - "3307:3306"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  redis:
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

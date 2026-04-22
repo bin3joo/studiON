@@ -25,3 +25,20 @@ outputs/
 models/
 checkpoints/
 
+# PyCharm / JetBrains IDE
+.idea/
+*.iml
+out/
+
+# PyCharm local settings
+workspace.xml
+tasks.xml
+usage.statistics.xml
+dictionaries/
+shelf/
+
+# PyCharm HTTP client
+.httpRequests/
+
+# JetBrains caches
+.idea_modules/

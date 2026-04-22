@@ -1,6 +1,3 @@
-<!-- Quick Actions -->
-/label ~"Type::Feature"
-
 <!--
 제목 규칙:
 [FE] or [BE] + 한글 영어 요약

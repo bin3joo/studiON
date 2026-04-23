@@ -20,6 +20,13 @@ from app.persistence.projections import (
     RuntimeGraphProjections,
     WorkflowGraphProjections,
 )
+from app.services.workflow_orchestration import (
+    WorkflowDispatchAccepted,
+    WorkflowResumePayload,
+    WorkflowStartPayload,
+    resume_workflow_job,
+    start_workflow_job,
+)
 
 router = APIRouter()
 
@@ -58,6 +65,10 @@ class ApplyRunRequest(BaseModel):
 class WorkflowRunResponse(BaseModel):
     graph_state: WorkflowState
     projections: WorkflowGraphProjections
+
+
+class WorkflowDispatchResponse(BaseModel):
+    job: WorkflowDispatchAccepted
 
 
 class RuntimeRunResponse(BaseModel):
@@ -113,6 +124,16 @@ def apply_graph_summary() -> dict[str, Any]:
 def workflow_graph_run(request: WorkflowRunRequest) -> WorkflowRunResponse:
     state = run_workflow_graph(request.model_dump())
     return WorkflowRunResponse.model_validate(build_workflow_response(state))
+
+
+@router.post("/workflow/jobs/start")
+def workflow_job_start(request: WorkflowStartPayload) -> WorkflowDispatchResponse:
+    return WorkflowDispatchResponse(job=start_workflow_job(request))
+
+
+@router.post("/workflow/jobs/resume")
+def workflow_job_resume(request: WorkflowResumePayload) -> WorkflowDispatchResponse:
+    return WorkflowDispatchResponse(job=resume_workflow_job(request))
 
 
 @router.post("/graph/runtime/run")

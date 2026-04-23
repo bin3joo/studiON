@@ -38,6 +38,7 @@ BROWSER_CANDIDATES = (
 
 ENTRY_PATH_MAP = {
     "init_state": "init_state",
+    "fail_workflow": "fail_workflow",
     "wait_user_mix_intent": "wait_user_mix_intent",
     "resume_after_mix_intent": "resume_after_mix_intent",
     "wait_user_selection": "wait_user_selection",

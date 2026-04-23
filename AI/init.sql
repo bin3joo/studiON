@@ -573,3 +573,23 @@ CREATE TABLE `ai_workflow_node_timing` (
 
   ALTER TABLE `ai_workflow_node_timing`
   ADD CONSTRAINT `PK_AI_WORKFLOW_NODE_TIMING` PRIMARY KEY (`id`);
+
+CREATE TABLE `ai_analysis_job` (
+      `id` VARCHAR(64) NOT NULL COMMENT 'AI workflow durable job ID',
+      `projectId` VARCHAR(64) NOT NULL COMMENT 'AI workflow target project ID',
+      `status` VARCHAR(32) NOT NULL COMMENT 'Durable workflow job status',
+      `phase` VARCHAR(64) NOT NULL COMMENT 'Current workflow phase',
+      `currentNode` VARCHAR(64) NULL COMMENT 'Last persisted workflow node',
+      `progress` TINYINT NOT NULL DEFAULT 0 COMMENT 'Workflow progress percent',
+      `langgraphThreadId` VARCHAR(128) NOT NULL COMMENT 'LangGraph thread identifier',
+      `timelineSnapshotId` VARCHAR(128) NULL COMMENT 'Timeline snapshot reference',
+      `requestedBy` INT NULL COMMENT 'User who requested the workflow run',
+      `startedAt` VARCHAR(64) NULL COMMENT 'Workflow start time',
+      `completedAt` VARCHAR(64) NULL COMMENT 'Workflow completion time',
+      `errorCode` VARCHAR(64) NULL COMMENT 'Failure code for terminal errors',
+      `errorMessage` VARCHAR(255) NULL COMMENT 'Failure message for terminal errors',
+      `stateJson` JSON NOT NULL COMMENT 'Worker resume용 최소 orchestration 상태'
+  );
+
+  ALTER TABLE `ai_analysis_job`
+  ADD CONSTRAINT `PK_AI_ANALYSIS_JOB` PRIMARY KEY (`id`);

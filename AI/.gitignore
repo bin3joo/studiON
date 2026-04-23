@@ -5,8 +5,8 @@ __pycache__/
 
 # Virtual environments
 .venv/
-venv/
-env/
+*.pyc
+.env
 
 # Tool caches
 .pytest_cache/
@@ -42,3 +42,5 @@ shelf/
 
 # JetBrains caches
 .idea_modules/
+
+AI/.pyppeteer/

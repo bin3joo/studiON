@@ -25,10 +25,11 @@
 - 수정안은 자연어 설명만이 아니라 구조화된 action을 반드시 포함해야 한다.
 - preview는 최종 반영과 분리한다.
 - runtime 처리와 offline evaluation은 분리한다.
-- GPU 서버는 추론만 담당하고, 판단 로직은 AI 오케스트레이터에서 수행한다.
+- GPU 서버가 있다면 추론만 담당하고, 판단 로직은 AI 오케스트레이터에서 수행한다.
 
 ## 리뷰 입력
 아래 입력을 기준으로 리뷰한다.
+
 - 작업 요약
 - 변경된 파일 목록
 - diff 또는 코드 조각
@@ -65,6 +66,7 @@
 - retrieval이 분석 자체를 대체하지 않는가
 - retrieval 결과를 그대로 최종 답변처럼 사용하지 않는가
 - retrieval이 없으면 deterministic하게 처리 가능한 부분까지 과하게 retrieval에 의존하지 않는가
+- web fallback이 추가되지 않았는가
 
 ### 5. 수정안 출력
 - structured action이 포함되는가
@@ -77,6 +79,7 @@
 - MySQL에 큰 JSON 전문을 직접 넣지 않는가
 - Redis를 영구 저장소처럼 사용하지 않는가
 - MongoDB가 상세 artifact 저장소 역할을 유지하는가
+- Qdrant가 RAG 벡터 저장소 역할에만 사용되는가
 - interrupt / preview 상태의 source of truth가 Redis TTL에만 의존하지 않는가
 
 ### 7. 테스트와 문서

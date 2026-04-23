@@ -86,3 +86,8 @@ MongoDB는 요약 상태 저장소가 아니라 상세 문서 저장소다.
 - preview 생성과 최종 반영을 한 단계로 합치기
 - runtime과 offline eval을 한 워크플로우로 섞기
 - 보컬 판별 외 일반 악기 분류를 현재 범위처럼 문서화하기
+
+## Execution Plan Docs
+- Active execution plan documents must be stored under `/AI/docs/exec-plans/active`.
+- When a task is completed, move its execution plan document to `/AI/docs/exec-plans/complete`.
+- Keep `active` limited to in-progress work only; completed plans should not remain there.

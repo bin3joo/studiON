@@ -1,0 +1,57 @@
+//유저화면에 띄울 프론트 코드(src내부)를 검사하고 싶으면 tsconfig.app.json으로 가게하기
+{
+  //공통 전역 규칙 app, node로 나누었지만 @만큼은 똑같이 이해해야하는 것.
+  // @가 있으면 src안을 찾도록 한다.
+  //tsconfig.json(vscode를 위해 적어놓은것)에 적혀 있어도 자동으로 복사되지 않음 실제 화면을 검사하는 코드
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    //임시 저장소. 코드를 수정할때마다 처음부터 검사하지 않고 바뀐 부분만 빠르게 바꾸기 위한 캐시 파일
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    //코드의 문법을 어떤 버전으로 해석할지 결정
+    "target": "es2023",
+    //코드가 실행될 환경(브라우저, node.js 등)에서 지원하는 기능들을 명시
+    //dom이 있어야 개발자게 웹 브라우저 긴능인 document.getElementById를 인식한다.
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "module": "esnext",
+    //타입스크립트에게 vite가 제공하는 타입들을 사용하겠다고 선언
+    //vite가 import.meta.glob, env불러오기 같은 기능을 사용하는데, 이 기능에 대한 타입 정보를 가져온다.
+    "types": [
+      "vite/client"
+    ],
+    //외부 라이브러리안의 타입까지 일일히 검사하지 않고 넘엊가자-> 속도 향상위해서.
+    "skipLibCheck": true,
+    /* Bundler mode */
+    //모듈을 가져오는 방식을 브라우저가 이해할 수 있는 방식으로 설정
+    "moduleResolution": "bundler",
+    //ts파일을 import할때 .ts 확장자를 생략해도 되도록 허용
+    "allowImportingTsExtensions": true,
+    //모듈 문법을 엄격하게 적용
+    "verbatimModuleSyntax": true,
+    //모듈을 강제로 인식
+    "moduleDetection": "force",
+    //컴파일 결과물을 출력하지 않음
+    //문법이 맞는지 검사만 하고 실제 파일 변환은 Vite에게 맡긴다.
+    "noEmit": true,
+    //자바스크립트안에서 HTML 태그를 쓸 수 있게 해주는 설정 -> 화면 상단에 import React from 'react' 안해도 됨.
+    "jsx": "react-jsx",
+    /* Linting */
+    //사용하지 않는 변수나 함수가 있으면 에러 표시
+    "noUnusedLocals": true,
+    //사용하지 않는 매개변수가 있으면 에러 표시
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  //위에서 선언한 규칙들을 모두 src폴더에만 적용(프로젝트 화면 코드를 지킨다!)
+  "include": [
+    "src"
+  ]
+}

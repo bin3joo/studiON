@@ -1,34 +1,25 @@
+//통합안내데스크, 타입스크립트와 vs코드에게 코드에 따라 어디로 가야하는지 알려준다.
 {
-  "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "paths": {
-      "@/*": ["./src/*"]
+  //타입스크립트에게 해당 파일은 어떤 검사도 하지 않을거라고 선언, 브라우저와 노드를 분리했으니까
+  "files": [],
+  //유저화면에 띄울 프론트 코드(src내부)를 검사하고 싶으면 tsconfig.app.json으로 가게하기
+  //환경설정파일(vite.config.ts)를 검사하고 싶으면 tsconfig.node.json으로 가게하기->화면단에서 node.js문법이 섞이지 않게 할 수 있다.
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
     }
-  },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  //공통 전역 규칙 app, node로 나누었지만 @만큼은 똑같이 이해해야하는 것.
+  //@가 있으면 src안을 찾도록 한다.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  }
 }

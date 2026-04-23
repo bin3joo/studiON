@@ -1,0 +1,46 @@
+//vite.config.ts를 읽고 검사하기 위한 파일
+//개발자의 컴퓨터(node.js)에서 돌아가는 설정 파일 관리소
+//유저의 웹 브라우저에서 돌아갈 코드는(tsconfig.app.json)에서 관리한다.
+{
+  "compilerOptions": {
+    //임시 저장소. 코드를 수정할때마다 처음부터 검사하지 않고 바뀐 부분만 빠르게 바꾸기 위한 캐시 파일
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    //코드의 문법을 어떤 버전으로 해석할지 결정
+    "target": "es2023",
+    //코드가 실행될 환경(브라우저, node.js 등)에서 지원하는 기능들을 명시
+    "lib": [
+      "ES2023"
+    ],
+    //코드가 어떤 방식으로 모듈을 가져오고 내보낼지 결정
+    "module": "esnext",
+    //이 파일에서 사용할 타입들을 명시<이파일은 브라우저가 아니라 노드 환경에서 돌아간다고 선언>
+    "types": [
+      "node"
+    ],
+    //외부 라이브러리안의 타입까지 일일히 검사하지 않고 넘엊가자-> 속도 향상위해서.
+    "skipLibCheck": true,
+    /* Bundler mode */
+    //번들러 최적화 설정
+    "moduleResolution": "bundler",
+    //ts파일을 import할때 .ts 확장자를 생략해도 되도록 허용
+    "allowImportingTsExtensions": true,
+    //모듈 문법을 엄격하게 적용
+    "verbatimModuleSyntax": true,
+    //모듈을 강제로 인식
+    "moduleDetection": "force",
+    //컴파일 결과물을 출력하지 않음
+    //문법이 맞는지 검사만 하고 실제 파일 변환은 Vite에게 맡긴다.
+    "noEmit": true,
+    /* Linting */
+    //사용하지 않는 변수나 함수가 있으면 에러 표시
+    "noUnusedLocals": true,
+    //사용하지 않는 매개변수가 있으면 에러 표시
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  //위에서 선언한 규칙들을 모두 vite.config.ts에만 적용(프로젝트 환경 설정 파일을 지킨다!)
+  "include": [
+    "vite.config.ts"
+  ]
+}

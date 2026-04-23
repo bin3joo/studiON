@@ -1,4 +1,13 @@
 services:
+  nginx:
+    build: ./FE
+
+  backend:
+    build: ./BE
+
+  ai:
+    build: ./AI
+
   redis:
     image: redis:7
     container_name: redis

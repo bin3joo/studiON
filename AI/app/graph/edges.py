@@ -2,6 +2,8 @@ from app.graph.state import WorkflowState
 
 
 def route_after_entry(state: WorkflowState) -> str:
+    if state.get("runtime_status") == "failed" or state.get("durable_status") == "FAILED":
+        return "fail_workflow"
     if state.get("phase") == "waiting_for_user_mix_intent":
         if state.get("main_track_id") is not None:
             return "resume_after_mix_intent"

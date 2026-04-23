@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.graph.state import WorkflowState, utc_now
+from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 
 
 def _append_transition(state: WorkflowState, name: str) -> list[str]:
@@ -40,12 +41,139 @@ def _artifact_id(state: WorkflowState, label: str) -> str:
 
 
 def load_entry_context(state: WorkflowState) -> WorkflowState:
+    dispatch_type = state.get("dispatch_type")
+    if dispatch_type:
+        return _load_worker_entry_context(state)
     return {
         "current_node": "load_entry_context",
         "phase": state.get("phase", "queued"),
         "progress": state.get("progress", 0),
         "heartbeat_at": utc_now(),
         "transition_log": _append_transition(state, "load_entry_context"),
+    }
+
+
+def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
+    store = get_workflow_job_store()
+    job = store.get_job(state["job_id"])
+    if job is None:
+        return _entry_failure(
+            state,
+            failure_code="WORKFLOW_JOB_NOT_FOUND",
+            failure_message="The workflow job could not be restored for worker execution.",
+        )
+    if job.project_id != state["project_id"]:
+        return _entry_failure(
+            state,
+            failure_code="WORKFLOW_PROJECT_MISMATCH",
+            failure_message="The queued workflow payload did not match the stored project.",
+        )
+
+    dispatch = WorkflowDispatchMessage.model_validate(
+        {
+            "job_id": state["job_id"],
+            "project_id": state["project_id"],
+            "dispatch_type": state["dispatch_type"],
+            "requested_by": state.get("requested_by"),
+            "main_track_id": state.get("main_track_id"),
+            "selected_action_ids": state.get("selected_action_ids", []),
+            "user_decision": state.get("user_decision"),
+        }
+    )
+    failure = _validate_dispatch(job.state_snapshot, dispatch)
+    if failure is not None:
+        return _entry_failure(state, failure_code=failure[0], failure_message=failure[1])
+
+    restored = deepcopy(job.state_snapshot)
+    # worker는 최소 큐 payload만 받으므로, 이 노드에서 durable 저장소 기준으로
+    # 그래프 상태를 다시 조립한 뒤 LangGraph 내부 라우팅으로 넘긴다.
+    restored.update(
+        {
+            "job_id": dispatch.job_id,
+            "project_id": dispatch.project_id,
+            "dispatch_type": dispatch.dispatch_type,
+            "requested_by": dispatch.requested_by
+            if dispatch.requested_by is not None
+            else restored.get("requested_by"),
+            "runtime_status": "running",
+            "durable_status": "IN_PROGRESS",
+            "heartbeat_at": utc_now(),
+            "transition_log": _append_transition(restored, "load_entry_context"),
+            "current_node": "load_entry_context",
+        }
+    )
+    # 재개 입력은 여기서 합쳐야 entry 라우팅이 phase별 사용자 입력을 검증할 수 있고,
+    # downstream 노드가 Dramatiq payload 형태를 알 필요도 없어진다.
+    if dispatch.main_track_id is not None:
+        restored["main_track_id"] = dispatch.main_track_id
+    if dispatch.selected_action_ids:
+        restored["selected_action_ids"] = dispatch.selected_action_ids
+    if dispatch.user_decision is not None:
+        restored["user_decision"] = dispatch.user_decision
+    return restored
+
+
+def _validate_dispatch(
+    snapshot: dict,
+    dispatch: WorkflowDispatchMessage,
+) -> tuple[str, str] | None:
+    phase = snapshot.get("phase", "queued")
+    # phase와 dispatch를 함께 검증해 오래된 큐 메시지가 다른 사용자 대기 지점을
+    # 잘못 재개하지 못하게 막는다.
+    if dispatch.dispatch_type == "start":
+        if phase != "queued":
+            return (
+                "INVALID_START_PHASE",
+                f"Queued workflow start expected 'queued' phase, got '{phase}'.",
+            )
+        return None
+    if dispatch.dispatch_type == "resume_mix_intent":
+        if phase != "waiting_for_user_mix_intent":
+            return (
+                "INVALID_RESUME_PHASE",
+                f"Mix-intent resume expected 'waiting_for_user_mix_intent', got '{phase}'.",
+            )
+        if dispatch.main_track_id is None:
+            return ("MISSING_MAIN_TRACK", "main_track_id is required for mix-intent resume.")
+        return None
+    if dispatch.dispatch_type == "resume_selection":
+        if phase != "waiting_for_user_selection":
+            return (
+                "INVALID_RESUME_PHASE",
+                f"Selection resume expected 'waiting_for_user_selection', got '{phase}'.",
+            )
+        if not dispatch.selected_action_ids:
+            return (
+                "MISSING_SELECTED_ACTIONS",
+                "selected_action_ids is required for selection resume.",
+            )
+        return None
+    if phase != "waiting_for_user_confirm":
+        return (
+            "INVALID_RESUME_PHASE",
+            f"Confirmation resume expected 'waiting_for_user_confirm', got '{phase}'.",
+        )
+    if dispatch.user_decision is None:
+        return ("MISSING_USER_DECISION", "user_decision is required for confirmation resume.")
+    return None
+
+
+def _entry_failure(
+    state: WorkflowState,
+    *,
+    failure_code: str,
+    failure_message: str,
+) -> WorkflowState:
+    return {
+        "current_node": "load_entry_context",
+        "phase": state.get("phase", "queued"),
+        "progress": state.get("progress", 0),
+        "heartbeat_at": utc_now(),
+        "transition_log": _append_transition(state, "load_entry_context"),
+        "runtime_status": "failed",
+        "durable_status": "FAILED",
+        "failure_code": failure_code,
+        "failure_message": failure_message,
     }
 
 

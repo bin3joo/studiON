@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from typing_extensions import TypedDict
 
 IssueType = Literal["band_overlap", "clipping", "sibilance", "high_band_harshness"]
 ValidatorOutcome = Literal["PASS", "REVISE", "REJECT"]
 CriticOutcome = Literal["PASS", "REVISE", "REJECT"]
+WorkflowDispatchType = Literal[
+    "start",
+    "resume_mix_intent",
+    "resume_selection",
+    "resume_confirm",
+]
 RuntimeStatus = Literal[
     "queued",
     "running",
@@ -27,6 +36,7 @@ UserDecision = Literal["confirm", "retry", "cancel"]
 class WorkflowState(TypedDict, total=False):
     job_id: str
     project_id: str
+    dispatch_type: WorkflowDispatchType | None
     phase: str
     current_node: str
     progress: int
@@ -85,7 +95,10 @@ ApplyState = WorkflowState
 
 
 def utc_now() -> str:
-    return datetime.now(UTC).isoformat()
+    try:
+        return datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
+    except ZoneInfoNotFoundError:
+        return datetime.now(UTC).isoformat()
 
 
 def build_workflow_initial_state(
@@ -96,6 +109,7 @@ def build_workflow_initial_state(
     state: WorkflowState = {
         "job_id": job_id,
         "project_id": project_id,
+        "dispatch_type": None,
         "phase": "queued",
         "current_node": "load_entry_context",
         "progress": 0,

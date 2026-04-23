@@ -1,6 +1,15 @@
 services:
   nginx:
     build: ./FE
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
 
   backend:
     build: ./BE
@@ -15,4 +24,6 @@ services:
       - redis_data:/data
 
 volumes:
+  certbot_certs:
+  certbot_www:
   redis_data:

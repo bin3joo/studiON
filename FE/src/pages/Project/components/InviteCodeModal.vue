@@ -1,110 +1,208 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Button } from '@/shared/ui/button'
-import { createProjectInviteCode } from '../api/project.api'
-import type { CreateInviteCodeResponse, ProjectId } from '../types/project.types'
+import { computed, ref, watch } from 'vue'
+import { Check, Copy, KeyRound, RefreshCw, X } from 'lucide-vue-next'
+import { createProjectInviteCode } from '@/pages/Project/api/project.api'
 
 interface Props {
   open: boolean
-  projectId: ProjectId
+  projectId: string
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  close: []
+  (e: 'close'): void
 }>()
 
 const inviteCode = ref('')
-const errorMessage = ref('')
 const isLoading = ref(false)
+const isCopied = ref(false)
+const errorMessage = ref('')
 
-const hasInviteCode = computed(() => inviteCode.value.length > 0)
+watch(
+  () => props.open,
+  async (isOpen) => {
+    if (!isOpen) {
+      resetState()
+      return
+    }
 
-function extractInviteCode(response: CreateInviteCodeResponse): string {
-  return response.inviteCode
-    ?? response.code
-    ?? response.data?.inviteCode
-    ?? response.data?.code
+    await generateInviteCode()
+  },
+  { immediate: true },
+)
+
+function resetState() {
+  inviteCode.value = ''
+  isLoading.value = false
+  isCopied.value = false
+  errorMessage.value = ''
+}
+
+function extractInviteCode(response: any): string {
+  return response?.data?.inviteCode
+    ?? response?.inviteCode
     ?? ''
 }
 
-async function handleGenerateInviteCode() {
+async function generateInviteCode() {
   isLoading.value = true
   errorMessage.value = ''
-  inviteCode.value = ''
+  isCopied.value = false
 
   try {
     const response = await createProjectInviteCode(props.projectId)
-    const generatedCode = extractInviteCode(response)
+    const nextInviteCode = extractInviteCode(response)
 
-    if (!generatedCode) {
-      throw new Error('응답에서 초대코드를 찾을 수 없습니다.')
+    if (!nextInviteCode) {
+      throw new Error('초대코드를 생성할 수 없습니다.')
     }
 
-    inviteCode.value = generatedCode
+    inviteCode.value = nextInviteCode
   }
   catch (error) {
     errorMessage.value = error instanceof Error
       ? error.message
-      : '초대코드 생성 중 문제가 발생했습니다.'
+      : '초대코드 생성에 실패했습니다.'
   }
   finally {
     isLoading.value = false
   }
 }
+
+async function handleCopy() {
+  if (!inviteCode.value || isLoading.value)
+    return
+
+  try {
+    await navigator.clipboard.writeText(inviteCode.value)
+    isCopied.value = true
+
+    window.setTimeout(() => {
+      isCopied.value = false
+    }, 1500)
+  }
+  catch {
+    errorMessage.value = '초대코드 복사에 실패했습니다.'
+  }
+}
+
+function handleClose() {
+  emit('close')
+}
+
+function handleComplete() {
+  emit('close')
+}
+
+const displayedCode = computed(() => {
+  if (isLoading.value)
+    return '생성 중...'
+
+  if (errorMessage.value)
+    return 'ERROR'
+
+  return inviteCode.value || '------'
+})
 </script>
 
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-    @click.self="emit('close')"
+    class="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4"
+    @click.self="handleClose"
   >
-    <div class="w-full max-w-md rounded-xl bg-background p-6 shadow-xl">
-      <div class="space-y-2">
-        <h2 class="text-xl font-semibold">
-          초대코드 생성
-        </h2>
-        <p class="text-sm text-muted-foreground">
-          프로젝트 참여용 초대코드를 생성할 수 있습니다.
-        </p>
+    <div class="relative w-full max-w-md rounded-2xl border border-[#ff9800] bg-[#222222] p-7 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
+      <!-- 닫기 버튼 -->
+      <button
+        type="button"
+        aria-label="닫기"
+        class="absolute right-4 top-4 grid h-12 w-12 place-items-center rounded-2xl border border-white/10 text-[#aeb3c3] transition hover:bg-white/5 hover:text-white"
+        @click="handleClose"
+      >
+        <X class="h-6 w-6" />
+      </button>
+
+      <!-- 헤더 -->
+      <div class="mb-6 flex items-center gap-3">
+        <div class="grid h-10 w-10 place-items-center rounded-lg text-white">
+          <KeyRound class="h-5 w-5" />
+        </div>
+        <div>
+          <h2 class="text-2xl font-extrabold tracking-tight text-white">
+            코드생성
+          </h2>
+        </div>
       </div>
 
-      <div class="mt-6 space-y-4">
-        <Button
-          type="button"
-          class="w-full"
-          :disabled="isLoading"
-          @click="handleGenerateInviteCode"
-        >
-          {{ isLoading ? '생성 중...' : '초대코드 생성하기' }}
-        </Button>
+      <!-- 안내 문구 -->
+      <div class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span class="text-base font-medium text-[#9ca3af]">
+          초대코드
+        </span>
+        <span class="text-2xl font-extrabold text-white">
+          초대 코드는 5분 동안 유효합니다.
+        </span>
+      </div>
 
-        <p
-          v-if="errorMessage"
-          class="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          {{ errorMessage }}
-        </p>
+      <!-- 코드 박스 -->
+      <div class="mb-6 rounded-xl border-2 border-[#9198aa] bg-[#262626] p-3">
+        <div class="flex items-center gap-3">
+          <div class="min-w-0 flex-1 px-3 py-4">
+            <div
+              class="truncate text-2xl font-extrabold tracking-[0.28em]"
+              :class="errorMessage ? 'text-red-400' : 'text-white'"
+            >
+              {{ displayedCode }}
+            </div>
 
-        <div class="rounded-md border border-border bg-muted/40 px-4 py-3">
-          <p class="text-xs text-muted-foreground">
-            생성된 초대코드
-          </p>
-          <p class="mt-2 font-mono text-lg font-semibold tracking-[0.2em]">
-            {{ hasInviteCode ? inviteCode : '-' }}
-          </p>
+            <p
+              v-if="errorMessage"
+              class="mt-2 text-sm text-red-400"
+            >
+              {{ errorMessage }}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            class="grid h-12 w-12 shrink-0 place-items-center rounded-lg text-[#aeb3c3] transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="isLoading"
+            @click="generateInviteCode"
+          >
+            <RefreshCw
+              class="h-6 w-6"
+              :class="isLoading ? 'animate-spin' : ''"
+            />
+          </button>
+
+          <button
+            type="button"
+            class="grid h-12 w-12 shrink-0 place-items-center rounded-lg text-[#aeb3c3] transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="isLoading || !inviteCode"
+            @click="handleCopy"
+          >
+            <Check
+              v-if="isCopied"
+              class="h-6 w-6 text-white"
+            />
+            <Copy
+              v-else
+              class="h-6 w-6"
+            />
+          </button>
         </div>
+      </div>
 
-        <Button
+      <!-- 완료 버튼 -->
+      <div class="flex justify-center">
+        <button
           type="button"
-          variant="outline"
-          class="w-full"
-          @click="emit('close')"
+          class="inline-flex min-w-[152px] items-center justify-center rounded-full bg-white px-8 py-3 text-lg font-extrabold text-black transition hover:bg-white/90"
+          @click="handleComplete"
         >
-          닫기
-        </Button>
+          완료
+        </button>
       </div>
     </div>
   </div>

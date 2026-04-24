@@ -91,3 +91,5 @@ MongoDB는 요약 상태 저장소가 아니라 상세 문서 저장소다.
 - Active execution plan documents must be stored under `/AI/docs/exec-plans/active`.
 - When a task is completed, move its execution plan document to `/AI/docs/exec-plans/complete`.
 - Keep `active` limited to in-progress work only; completed plans should not remain there.
+- 새로 작성하거나 갱신하는 execution plan 문서는 한글로 작성한다.
+- 작업 경계, 상태 복원 이유, 검증 의도처럼 구현 오해를 막기 위한 코드 주석은 한글로 작성한다.

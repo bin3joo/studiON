@@ -4,15 +4,5 @@ import { Button } from '@/shared/ui/button' // 아까 다운받은 버튼 부품
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center space-y-6">
-    <div class="text-center space-y-2">
-      <h1 class="text-4xl font-bold text-blue-500">
-        StudiON Vue 버전
-      </h1>
-    </div>
-
-    <Button variant="default" size="lg">
-      shadcn-vue 버튼 테스트
-    </Button>
-  </div>
+  <RouterView/>
 </template>

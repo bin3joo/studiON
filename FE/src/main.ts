@@ -6,5 +6,6 @@ import { createApp } from 'vue'
 //디자인 가져오기
 import './style.css'
 import App from './app/App.vue'
+import router from './app/router'
 //마운트된 앱을 index.html의 #app에 연결
-createApp(App).mount('#app')
+createApp(App).use(router).mount('#app')

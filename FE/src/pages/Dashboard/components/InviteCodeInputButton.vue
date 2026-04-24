@@ -86,12 +86,12 @@ function handleKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex flex-col items-end">
+  <div class="relative flex flex-col items-end">
     <div
       class="flex items-center overflow-hidden rounded-full border bg-secondary/40 transition-all duration-300 ease-out"
       :class="isInputMode
         ? [
-          'w-[280px] px-4 py-2 md:w-[340px]',
+          'h-10 w-[280px] px-4 md:w-[340px]',
           errorMessage
             ? 'border-destructive animate-shake'
             : 'border-primary/40',
@@ -101,7 +101,7 @@ function handleKeydown(event: KeyboardEvent) {
       <button
         v-if="!isInputMode"
         type="button"
-        class="inline-flex items-center gap-1.5 px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-primary transition md:text-xs"
+        class="inline-flex h-10 items-center gap-1.5 px-4 text-[10px] font-medium uppercase tracking-[0.2em] text-primary transition md:text-xs"
         @click="openInputMode"
       >
         <KeyRound class="h-3.5 w-3.5" />
@@ -158,7 +158,7 @@ function handleKeydown(event: KeyboardEvent) {
 
     <p
       v-if="errorMessage"
-      class="mt-2 text-[11px] tracking-wide text-destructive animate-fade-in"
+      class="absolute -bottom-6 right-0 text-[11px] tracking-wide text-destructive animate-fade-in"
     >
       {{ errorMessage }}
     </p>

@@ -5,16 +5,20 @@ services:
       - "443:443"
     restart: unless-stopped
     depends_on:
+      - frontend
       - backend
 
-    certbot:
-      entrypoint: >
-        certbot certonly --webroot
-        --webroot-path=/var/www/certbot
-        --email dev.seoliee49@gmail.com
-        --agree-tos
-        --no-eff-email
-        -d k14a205.p.ssafy.io
+  certbot:
+    entrypoint: >
+      certbot certonly --webroot
+      --webroot-path=/var/www/certbot
+      --email dev.seoliee49@gmail.com
+      --agree-tos
+      --no-eff-email
+      -d k14a205.p.ssafy.io
+
+  frontend:
+    restart: unless-stopped
 
   backend:
     env_file:

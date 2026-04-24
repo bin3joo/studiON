@@ -1,19 +1,22 @@
 //프로젝트 지침, 서버 켜기, 리액트 코드 읽기등
 //Vite 환경 설정을 도와주는 도구를 가져오고 코드 자동완성을 띄워줌
 import { defineConfig } from 'vite'
-//Vite에게 react언어를 번역하는 능력 부여
-import react from '@vitejs/plugin-react'
-//경로를 편하게 설정하기 위해 가져옴 윈도우와 맥의 표기법이 달라서
-import path from "path"
+//vite에게 뷰언어 번역 능력 부여
+import vue from '@vitejs/plugin-vue'
+//tailwind css 번역 능력 부여
+import tailwindcss from '@tailwindcss/vite'
+//npm다운 말고 노드제이에스 원래 부품을 가져오기
+import path from 'node:path'
+
 // https://vite.dev/config/
-//지침내보내기
+//지침을 내보낸다.
 export default defineConfig({
-  //플러그인 : 리액트 번역기를 우리 프로젝트에 적용해준다. -> 코드를 수정할때 바로 화면이 바뀜
-  plugins: [react()],
+  //바이트에 장착하는 플러그인
+  plugins: [vue(), tailwindcss()],
   resolve: {
-    //경로 설정 : @를 src로 인식하게 한다.
+    //dirname 설정파일이 있는 FE폴더, @는 src폴더를 가리킴
     alias: {
-      "@": path.resolve(__dirname, "./src"),
-    }
-  }
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
 })

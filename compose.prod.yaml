@@ -1,9 +1,42 @@
 services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: on-failure:2
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - frontend
+      - backend
+
+  certbot:
+    entrypoint: >
+      certbot certonly --webroot
+      --webroot-path=/var/www/certbot
+      --email dev.seoliee49@gmail.com
+      --agree-tos
+      --no-eff-email
+      -d k14a205.p.ssafy.io
+
+  frontend:
+    restart: on-failure:2
+
+  backend:
+    env_file:
+      - .env.prod
+    restart: on-failure:2
+
+  ai:
+    env_file:
+      - .env.prod
+    restart: on-failure:2
+    
   redis:
     command: redis-server --requirepass ${REDIS_PASSWORD}
     env_file:
       - .env.prod
-    restart: unless-stopped
+    restart: on-failure:2
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:

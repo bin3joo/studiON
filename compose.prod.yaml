@@ -4,6 +4,8 @@ services:
       - "80:80"
       - "443:443"
     restart: on-failure:2
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - frontend
       - backend

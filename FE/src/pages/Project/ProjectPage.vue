@@ -1,52 +1,79 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useRoute } from 'vue-router'
-import InviteCodeModal from './components/InviteCodeModal.vue'
 import ProjectHeader from './components/ProjectHeader.vue'
-import ProjectLayout from './ProjectLayout.vue'
-import type { ProjectId } from './types/project.types'
+import InviteCodeModal from './components/InviteCodeModal.vue'
 
-interface Props {
-  projectId?: ProjectId
+const route = useRoute()
+const projectId = route.params.projectId as string
+
+const isInviteModalOpen = ref(false)
+
+function handleRename() {
+  console.log('프로젝트 이름 수정')
 }
 
-const props = defineProps<Props>()
-const route = useRoute()
-const isInviteCodeModalOpen = ref(false)
+function handleExport() {
+  console.log('내보내기')
+}
 
-const resolvedProjectId = computed<ProjectId>(() => {
-  const routeProjectId = route.params.projectId
+function handleSaveVersion() {
+  console.log('버전 저장')
+}
 
-  if (typeof routeProjectId === 'string' && routeProjectId.length > 0) {
-    return routeProjectId
-  }
+function handleSave() {
+  console.log('저장')
+}
 
-  if (props.projectId !== undefined) {
-    return props.projectId
-  }
+function handleUndo() {
+  console.log('undo')
+}
 
-  if (typeof window === 'undefined') {
-    return '1'
-  }
+function handleRedo() {
+  console.log('redo')
+}
 
-  const pathSegments = window.location.pathname.split('/').filter(Boolean)
-  return pathSegments.at(-1) ?? '1'
-})
+function handleOpenInvite() {
+  isInviteModalOpen.value = true
+}
+
+function handleCloseInvite() {
+  isInviteModalOpen.value = false
+}
+
+function handleOpenComments() {
+  console.log('코멘트 열기')
+}
+
+function handleOpenHistory() {
+  console.log('버전 기록 열기')
+}
 </script>
 
 <template>
-  <ProjectLayout>
-    <ProjectHeader @open-invite-code-modal="isInviteCodeModalOpen = true" />
+  <div class="min-h-screen bg-background text-foreground">
+    <ProjectHeader
+      :project-name="`프로젝트 ${projectId}`"
+      last-saved-at="13:24"
+      @rename="handleRename"
+      @export="handleExport"
+      @save-version="handleSaveVersion"
+      @save="handleSave"
+      @undo="handleUndo"
+      @redo="handleRedo"
+      @open-invite="handleOpenInvite"
+      @open-comments="handleOpenComments"
+      @open-history="handleOpenHistory"
+    />
 
-    <div class="mt-6 rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground">
-      <p>프로젝트 페이지 본문 영역</p>
-      <p class="mt-2">projectId: {{ resolvedProjectId }}</p>
-    </div>
+    <main class="p-6">
+      프로젝트 본문
+    </main>
 
     <InviteCodeModal
-      :open="isInviteCodeModalOpen"
-      :project-id="resolvedProjectId"
-      @close="isInviteCodeModalOpen = false"
+      :open="isInviteModalOpen"
+      :project-id="projectId"
+      @close="handleCloseInvite"
     />
-  </ProjectLayout>
+  </div>
 </template>

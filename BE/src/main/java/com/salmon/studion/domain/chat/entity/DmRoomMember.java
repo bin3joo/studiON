@@ -10,31 +10,22 @@ import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 
-@Table(name = "dm_room_member")
+@Table(name = "dm_room_member",
+    uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "dm_room_id"}))
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class DmRoomMember extends BaseEntity {
 
-    @EmbeddedId
-    private DmRoomMemberId id;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
 
-    @MapsId("dmRoomId")
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "dm_room_id")
     private DmRoom dmRoom;
 
-    @MapsId("userId")
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;
-
-    @Embeddable
-    @EqualsAndHashCode
-    @Getter
-    @NoArgsConstructor
-    public static class DmRoomMemberId implements Serializable {
-        private Integer userId;
-        private Integer dmRoomId;
-    }
 }

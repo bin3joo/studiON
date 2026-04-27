@@ -11,9 +11,13 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex border-b border-border group">
+  <div 
+    :aria-label="`트랙: ${track.name}`" 
+    class="flex border-b border-border group"
+  >
     
     <div 
+      :aria-label="`${track.name} 컨트롤 패널`"
       class="sticky left-0 z-20 flex shrink-0 cursor-pointer flex-col gap-2 border-r border-border bg-[#1c1c1c] p-3 transition-colors group-hover:bg-white/5"
       :style="{ 
         width: '224px', 
@@ -24,42 +28,42 @@ defineProps<{
         <span class="truncate text-sm font-bold tracking-wide text-white">
           {{ track.name }}
         </span>
-        <button class="text-muted-foreground transition hover:text-white">
+        <button aria-label="트랙 이름 수정" class="text-muted-foreground transition hover:text-white">
           <Pencil class="h-3.5 w-3.5" />
         </button>
       </div>
 
       <div class="flex items-center gap-1.5">
-        <button class="grid h-7 w-8 place-items-center rounded-md border border-white/30 bg-white/10 text-white transition hover:bg-white/20">
+        <button aria-label="음소거 토글" class="grid h-7 w-8 place-items-center rounded-md border border-white/30 bg-white/10 text-white transition hover:bg-white/20">
           <VolumeX class="h-4 w-4" />
         </button>
-        <button class="grid h-7 w-8 place-items-center rounded-md border border-transparent bg-white/5 text-muted-foreground transition hover:bg-white/10 hover:text-white">
+        <button aria-label="솔로 토글" class="grid h-7 w-8 place-items-center rounded-md border border-transparent bg-white/5 text-muted-foreground transition hover:bg-white/10 hover:text-white">
           <span class="text-[11px] font-bold">S</span>
         </button>
       </div>
 
       <div class="mt-auto flex flex-col gap-2">
         
-        <div class="flex items-center gap-2">
-          <span class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">VOL</span>
+        <div aria-label="볼륨 조절" class="flex items-center gap-2">
+          <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">VOL</span>
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60">
             <div class="absolute inset-y-0 left-0 rounded-full bg-[#ff9800] shadow-[0_0_8px_#ff9800]" style="width: 50%"></div>
             <div class="absolute top-1/2 -mt-2 ml-[50%] h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c]"></div>
           </div>
-          <div class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
+          <div aria-label="현재 볼륨 수치" class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
             <span class="font-mono text-[10px] tabular-nums text-white">
               {{ (track.volume || 0).toFixed(1) }}
             </span>
           </div>
         </div>
 
-        <div class="flex items-center gap-2">
-          <span class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">PAN</span>
+        <div aria-label="패닝 조절" class="flex items-center gap-2">
+          <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">PAN</span>
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60">
             <div class="absolute inset-y-0 left-0 rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" style="width: 50%"></div>
             <div class="absolute top-1/2 -mt-2 ml-[50%] h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c]"></div>
           </div>
-          <div class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
+          <div aria-label="현재 패닝 수치" class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
             <span class="font-mono text-[10px] tabular-nums text-white">
               {{ track.pan === 0 ? 'C' : (track.pan || 0) }}
             </span>
@@ -69,11 +73,13 @@ defineProps<{
       </div>
     </div>
 
-    <div class="relative flex flex-1 select-none bg-transparent py-1.5 touch-none">
-      
+    <div 
+      aria-label="오디오 클립 작업 영역" 
+      class="relative flex flex-1 select-none bg-transparent py-1.5 touch-none"
+    >
       <div class="relative flex-1 overflow-hidden border-y border-r border-white/5 bg-[#141414] shadow-inner">
         
-        <div class="pointer-events-none absolute inset-0 flex">
+        <div aria-hidden="true" class="pointer-events-none absolute inset-0 flex">
           <div 
             v-for="i in 32" 
             :key="i" 
@@ -89,6 +95,7 @@ defineProps<{
         <div 
           v-for="clip in track.clips" 
           :key="clip.clipId"
+          :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 cursor-grab rounded-md border-2 transition active:cursor-grabbing"
           :style="{ 
             left: `${clip.start}%`, 
@@ -99,6 +106,7 @@ defineProps<{
           }"
         >
           <div 
+            aria-hidden="true"
             class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
             :style="{ color: clip.color }"
           >

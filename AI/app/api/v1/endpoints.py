@@ -24,9 +24,11 @@ from app.services.workflow_orchestration import (
     WorkflowDispatchAccepted,
     WorkflowResumePayload,
     WorkflowStartPayload,
+    get_workflow_job_status,
     resume_workflow_job,
     start_workflow_job,
 )
+from app.services.workflow_snapshots import ProjectSnapshot
 
 router = APIRouter()
 
@@ -35,10 +37,13 @@ class WorkflowRunRequest(BaseModel):
     job_id: str
     project_id: str
     track_ids: list[int] = Field(default_factory=list)
+    project_snapshot: ProjectSnapshot | None = None
     issue_types: list[str] = Field(default_factory=lambda: ["band_overlap"])
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
-    main_track_id: int | None = None
+    selected_region_id: str | None = None
+    preserve_clip_id: str | None = None
+    user_feedback_message: str | None = None
     selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
@@ -47,6 +52,7 @@ class RuntimeRunRequest(BaseModel):
     job_id: str
     project_id: str
     track_ids: list[int] = Field(default_factory=list)
+    project_snapshot: ProjectSnapshot | None = None
     issue_types: list[str] = Field(default_factory=lambda: ["band_overlap"])
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
@@ -57,7 +63,6 @@ class ApplyRunRequest(BaseModel):
     project_id: str
     preview_id: str
     suggestion_group_id: str
-    main_track_id: int | None = None
     selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
@@ -69,6 +74,26 @@ class WorkflowRunResponse(BaseModel):
 
 class WorkflowDispatchResponse(BaseModel):
     job: WorkflowDispatchAccepted
+
+
+class WorkflowJobView(BaseModel):
+    id: str
+    project_id: str
+    status: str
+    phase: str
+    current_node: str | None = None
+    progress: int = 0
+    timeline_snapshot_id: str | None = None
+    requested_by: int | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class WorkflowJobStatusResponse(BaseModel):
+    job: WorkflowJobView
+    projections: WorkflowGraphProjections
 
 
 class RuntimeRunResponse(BaseModel):
@@ -92,7 +117,7 @@ def workflow_graph_summary() -> dict[str, Any]:
         "graph": "workflow",
         "entrypoint": "load_entry_context",
         "terminal_nodes": [
-            "wait_user_mix_intent",
+            "wait_user_plan_input",
             "wait_user_selection",
             "wait_user_confirm",
             "finalize_output",
@@ -125,7 +150,10 @@ def workflow_graph_run(request: WorkflowRunRequest) -> WorkflowRunResponse:
     state = run_workflow_graph(request.model_dump())
     return WorkflowRunResponse.model_validate(build_workflow_response(state))
 
-
+# 프론트에서 AI 분석 시작을 눌렀을 때 받는 API
+# 프론트의 "AI 분석 시작" 버튼이 직접 호출하는 진입 API다.
+# 여기서는 그래프를 바로 실행하지 않고 start_workflow_job으로 넘겨
+# 비동기 워크플로우 시작만 요청한다.
 @router.post("/workflow/jobs/start")
 def workflow_job_start(request: WorkflowStartPayload) -> WorkflowDispatchResponse:
     return WorkflowDispatchResponse(job=start_workflow_job(request))
@@ -134,6 +162,12 @@ def workflow_job_start(request: WorkflowStartPayload) -> WorkflowDispatchRespons
 @router.post("/workflow/jobs/resume")
 def workflow_job_resume(request: WorkflowResumePayload) -> WorkflowDispatchResponse:
     return WorkflowDispatchResponse(job=resume_workflow_job(request))
+
+
+@router.get("/workflow/jobs/{job_id}")
+def workflow_job_status(job_id: str) -> WorkflowJobStatusResponse:
+    # 프론트 polling은 이 조회 하나로 job 상태와 projection을 함께 받는다.
+    return WorkflowJobStatusResponse.model_validate(get_workflow_job_status(job_id))
 
 
 @router.post("/graph/runtime/run")
@@ -149,7 +183,6 @@ def apply_graph_run(request: ApplyRunRequest) -> ApplyRunResponse:
         "project_id": request.project_id,
         "preview_id": request.preview_id,
         "suggestion_group_id": request.suggestion_group_id,
-        "main_track_id": request.main_track_id,
         "selected_action_ids": request.selected_action_ids,
         "user_decision": request.user_decision,
     }

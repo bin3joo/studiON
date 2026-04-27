@@ -51,3 +51,10 @@ AI 관련 작업을 할 때는 아래 순서로 판단한다.
 - preview 생성과 최종 반영을 한 단계로 합치기
 - runtime과 offline eval을 한 워크플로우로 섞기
 - 보컬 판별 외 일반 악기 분류를 현재 범위처럼 문서화하기
+
+## Execution Plan Docs
+- Active execution plan documents must be stored under `/AI/docs/exec-plans/active`.
+- When a task is completed, move its execution plan document to `/AI/docs/exec-plans/complete`.
+- Keep `active` limited to in-progress work only; completed plans should not remain there.
+- 새로 작성하거나 갱신하는 execution plan 문서는 한글로 작성한다.
+- 작업 경계, 상태 복원 이유, 검증 의도처럼 구현 오해를 막기 위한 코드 주석은 한글로 작성한다.

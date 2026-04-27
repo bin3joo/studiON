@@ -1,3 +1,4 @@
+//프로젝트 도메인 관련한 백엔드 통신을 모아둠.
 import type {
   CreateInviteCodeResponse,
   CreateProjectRequest,
@@ -6,8 +7,57 @@ import type {
   JoinProjectResponse,
   ProjectId,
 } from '../types/project.types'
+import { axiosInstance } from '@/shared/api/axiosInstance';
+import type { TrackDto } from '@/pages/Project/types';
 
-const MOCK_PROJECT_CREATE_DELAY_MS = 400
+// ==========================================
+// [인터페이스] 백엔드 응답 규격 (명세서 기반)
+// ==========================================
+
+//프로젝트 상세보기 응답
+export interface ProjectDetailResponse {
+  code: number;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    projectId: number;
+    rootNote: string;
+    mode: string;
+    tempo: number;
+    timeSigNumerator: number;
+    timeSigDenominator: number;
+    totalBarCount: number;
+    totalPlayTime: number;
+    tracks: TrackDto[];
+
+  }
+}
+
+
+// ==========================================
+// [API 객체] 프로젝트 관련 통신 모음집
+// ==========================================
+export const projectApi = {
+  // ------------------------------------------
+  // 1. 프로젝트 초기 데이터
+  // ------------------------------------------
+  /**
+   * 프로젝트 상세 조회 (초기 로딩)
+   * GET /api/v1/projects/{projectId}
+   */
+  getProjectDetail: async (projectId: number) => {
+    //shared에서 정의한 axios사용 -> 인증로직 자동첨부됨
+    const response = await axiosInstance.get<ProjectDetailResponse>(`/api/v1/projects/${projectId}`);
+
+    //인터셉터 덕분에 response.data에 data객체가 바로 들어있음
+    return response.data.data;
+  }
+}
+
+
+
+
+const MOCK_PROJECT_CREATE_DELAY_MS = 400;
 
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))

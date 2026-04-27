@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.audio.entity;
 
 import com.salmon.studion.domain.project.entity.Project;
+import com.salmon.studion.global.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -10,7 +11,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "project_master_audio_version")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class ProjectMasterAudioVersion {
+public class ProjectMasterAudioVersion extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,7 +23,7 @@ public class ProjectMasterAudioVersion {
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "audio_metadata_id", nullable = false)
-    private AudioMetadata audioMetadataId;
+    private AudioMetadata audioMetadata;
 
     @Column(name = "name", nullable = false, length = 30)
     private String name;

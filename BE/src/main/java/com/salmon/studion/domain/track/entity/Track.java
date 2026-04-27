@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.track.entity;
 
 import com.salmon.studion.domain.project.entity.Project;
+import com.salmon.studion.global.common.entity.BaseEntity;
 import com.salmon.studion.global.common.enums.TrackType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -11,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "track")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Track {
+public class Track extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

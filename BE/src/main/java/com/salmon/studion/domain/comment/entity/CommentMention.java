@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.comment.entity;
 
 import com.salmon.studion.domain.auth.entity.User;
+import com.salmon.studion.global.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
@@ -13,7 +14,7 @@ import java.io.Serializable;
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class CommentMention {
+public class CommentMention extends BaseEntity {
     @EmbeddedId
     private CommentMentionId id;
 

@@ -16,8 +16,9 @@ public class GlobalExceptionHandler {
 
     // 비즈니스 예외 처리
     @ExceptionHandler(BusinessException.class)
-    public ApiResponse<?> handleBusinessException(BusinessException e) {
-        return ApiResponse.fail(e.getErrorCode(), e.getMessage());
+    public ResponseEntity<ApiResponse<?>> handleBusinessException(BusinessException e) {
+        return ResponseEntity.status(e.getErrorCode().getStatus())
+                .body(ApiResponse.fail(e.getErrorCode(), e.getMessage()));
     }
 
     // 요청 바디 검증 실패 처리

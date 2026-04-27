@@ -2,6 +2,7 @@ package com.salmon.studion.domain.clip.entity;
 
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.track.entity.Track;
+import com.salmon.studion.global.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -11,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "clip")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Clip {
+public class Clip extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

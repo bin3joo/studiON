@@ -16,12 +16,13 @@
 현재는 보컬 판별만 다룬다.
 현재는 일반 악기 전체 분류를 기본 기능으로 취급하지 않는다.
 
-## 핵심 동작 원칙
-- clipping은 자동 보정한다.
-- band overlap과 sibilance는 제안 후 사용자 승인으로 처리한다.
-- preview는 임시 결과이며 최종 반영과 분리한다.
-- worker는 사용자 입력을 기다리며 점유되지 않는다.
-- runtime 처리와 offline evaluation은 분리한다.
+## 현재 동작 원칙
+- clipping은 자동 보정 대상이다.
+- band overlap과 sibilance는 기본적으로 사용자 승인 대상이다.
+- preview는 최종 반영과 분리한다.
+- runtime graph와 offline evaluation graph는 분리한다.
+- worker는 사용자 입력을 기다리며 붙잡혀 있지 않는다.
+- interrupt가 발생하면 상태를 저장하고 suspend/resume 방식으로 처리한다.
 
 ## 저장소 경계
 ### MySQL
@@ -60,7 +61,6 @@ Redis 값이 없어져도 MySQL 기준으로 복구 가능해야 한다.
 MongoDB는 큰 JSON 아티팩트 저장소다.
 
 ## 현재 retrieval 원칙
-- web fallback 없음
 - 내부 curated policy 문서만 retrieval
 - retrieval은 분석 자체가 아니라 suggestion generation 보조 역할
 - 동일 조건 retrieval은 cache 가능
@@ -71,6 +71,7 @@ MongoDB는 큰 JSON 아티팩트 저장소다.
 - generator LLM: 수정 제안 생성
 - critic: 의미 검증
 - offline judge: 개발용 평가
+- - 모델별 세부 선택은 코드와 환경 설정을 따르되, 출력 계약과 검증 정책은 docs 기준을 우선한다.
 
 ## 비목표
 - 모든 악기 정확 분류

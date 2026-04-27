@@ -34,6 +34,7 @@
     }
   ]
 }
+```
 상위 필드 규칙
 groupTitle
 사용자에게 보이는 짧은 그룹 제목이다.
@@ -74,6 +75,7 @@ actions
 실제로 저장 가능하고 preview에 연결 가능한 액션 목록이다.
 빈 배열이면 안 된다.
 action 기본 스키마
+```json
 {
   "actionType": "GAIN_TRIM | EQ_CUT | DYNAMIC_EQ | HPF | DE_ESSER | SIDECHAIN_COMPRESS | PAN_ADJUST | FADE_ADJUST",
   "targetTrackId": 0,
@@ -85,6 +87,7 @@ action 기본 스키마
   "gainDeltaDb": null,
   "params": {}
 }
+```
 공통 action 규칙
 actionType은 허용된 값만 사용한다.
 targetTrackId는 가능한 한 항상 넣는다.
@@ -294,6 +297,7 @@ critic이 근거와 비교 가능하다.
 preview에 바로 연결 가능하다.
 사용자가 대안 차이를 이해할 수 있다.
 예시 출력
+```json
 {
   "groupTitle": "보컬 치찰음 완화",
   "groupSummary": "보컬 트랙의 고역 자극 구간을 보수적으로 제어하는 대안들입니다.",
@@ -342,3 +346,4 @@ preview에 바로 연결 가능하다.
     }
   ]
 }
+```

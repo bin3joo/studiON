@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.graph.nodes.common import append_transition, workflow_update
+from app.graph.nodes.common import append_transition, artifact_id, workflow_update
 from app.graph.state import WorkflowState, utc_now
+from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 
 
@@ -80,41 +81,92 @@ def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
     )
 
 
-def auto_fix_clipping(state: WorkflowState) -> WorkflowState:
-    # clipping은 사용자 승인 없이도 닫히는 경로라서 preview 분기와 분리해 둔다.
-    clipping_regions = [
+def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
+    sibilance_regions = [
         region
         for region in state.get("analysis_regions", [])
-        if region.get("issue_type") == "clipping"
+        if region.get("issue_type") == "sibilance"
     ]
-    clipping_fix_applied = bool(clipping_regions)
+    sibilance_fix_applied = bool(sibilance_regions)
     notes = [*state.get("notes", [])]
-    if clipping_fix_applied:
-        notes.append(
-            f"Applied deterministic clipping repair candidate to {len(clipping_regions)} region(s)."
+    auto_fix_recipe_artifact_id = None
+    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
+    latest_artifact_id = state.get("latest_artifact_id")
+
+    if sibilance_fix_applied:
+        auto_fix_recipe_artifact_id = artifact_id(state, "sibilance-auto-fix")
+        get_workflow_artifact_store().upsert_artifact(
+            WorkflowArtifactDocument(
+                id=auto_fix_recipe_artifact_id,
+                job_id=state["job_id"],
+                artifact_type="auto_fix_recipe",
+                payload={
+                    "issueType": "sibilance",
+                    "recipes": [_build_sibilance_fix_recipe(region) for region in sibilance_regions],
+                },
+            )
         )
+        mongo_artifact_ids.append(auto_fix_recipe_artifact_id)
+        latest_artifact_id = auto_fix_recipe_artifact_id
+        notes.append(
+            f"Applied deterministic sibilance repair recipe to {len(sibilance_regions)} region(s)."
+        )
+
     return workflow_update(
         state,
-        node="auto_fix_clipping",
-        phase="clipping_autofix_processed",
+        node="auto_fix_sibilance",
+        phase="sibilance_autofix_processed",
         progress=88,
         extra={
-            "clipping_fix_applied": clipping_fix_applied,
+            "clipping_fix_applied": False,
+            "clipping_fix_log_id": None,
+            "sibilance_fix_applied": sibilance_fix_applied,
+            "auto_fix_recipe_artifact_id": auto_fix_recipe_artifact_id,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
             "notes": notes,
         },
     )
 
 
-def log_clipping_fix(state: WorkflowState) -> WorkflowState:
-    clipping_fix_log_id = None
-    if state.get("clipping_fix_applied"):
-        clipping_fix_log_id = f"{state['job_id']}-clipping-fix-log"
+def log_sibilance_fix(state: WorkflowState) -> WorkflowState:
+    sibilance_fix_log_id = None
+    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
+    latest_artifact_id = state.get("latest_artifact_id")
+
+    if state.get("sibilance_fix_applied"):
+        sibilance_fix_log_id = artifact_id(state, "sibilance-fix-log")
+        get_workflow_artifact_store().upsert_artifact(
+            WorkflowArtifactDocument(
+                id=sibilance_fix_log_id,
+                job_id=state["job_id"],
+                artifact_type="auto_fix_log",
+                payload={
+                    "issueType": "sibilance",
+                    "recipeArtifactId": state.get("auto_fix_recipe_artifact_id"),
+                    "regionCount": len(
+                        [
+                            region
+                            for region in state.get("analysis_regions", [])
+                            if region.get("issue_type") == "sibilance"
+                        ]
+                    ),
+                },
+            )
+        )
+        mongo_artifact_ids.append(sibilance_fix_log_id)
+        latest_artifact_id = sibilance_fix_log_id
+
     return workflow_update(
         state,
-        node="log_clipping_fix",
-        phase="clipping_fix_logged",
+        node="log_sibilance_fix",
+        phase="sibilance_fix_logged",
         progress=90,
-        extra={"clipping_fix_log_id": clipping_fix_log_id},
+        extra={
+            "sibilance_fix_log_id": sibilance_fix_log_id,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
+        },
     )
 
 
@@ -295,8 +347,6 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
         return _entry_failure(state, failure_code=failure[0], failure_message=failure[1])
 
     restored = deepcopy(job.state_snapshot)
-    # worker는 최소 큐 payload만 받으므로, 이 노드에서 durable 저장소 기준으로
-    # 그래프 상태를 다시 조립한 뒤 LangGraph 내부 라우팅으로 넘긴다.
     restored.update(
         {
             "job_id": dispatch.job_id,
@@ -312,8 +362,6 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "current_node": "load_entry_context",
         }
     )
-    # 재개 입력은 여기서 합쳐야 entry 라우팅이 phase별 사용자 입력을 검증할 수 있고,
-    # downstream 노드가 Dramatiq payload 형태를 알 필요도 없어진다.
     if dispatch.selected_region_id is not None:
         restored["selected_region_id"] = dispatch.selected_region_id
     if dispatch.preserve_clip_id is not None:
@@ -332,8 +380,6 @@ def _validate_dispatch(
     dispatch: WorkflowDispatchMessage,
 ) -> tuple[str, str] | None:
     phase = snapshot.get("phase", "queued")
-    # phase와 dispatch를 함께 검증해 오래된 큐 메시지가 다른 사용자 대기 지점을
-    # 잘못 재개하지 못하게 막는다.
     if dispatch.dispatch_type == "start":
         if phase != "queued":
             return (
@@ -396,4 +442,27 @@ def _entry_failure(
         "durable_status": "FAILED",
         "failure_code": failure_code,
         "failure_message": failure_message,
+    }
+
+
+def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:
+    score = float(region.get("score", 0.0))
+    reduction_target_db = round(min(max(1.5 + (score * 8.0), 2.0), 6.5), 2)
+    return {
+        "regionId": region.get("id"),
+        "actionType": "DE_ESSER",
+        "targetScope": "TRACK",
+        "targetTrackId": int(region.get("track_id") or 0),
+        "startMs": int(region.get("start_ms") or 0),
+        "endMs": int(region.get("end_ms") or 0),
+        "bandLowHz": region.get("band_low_hz"),
+        "bandHighHz": region.get("band_high_hz"),
+        "params": {
+            "threshold": -18,
+            "ratio": 2.4,
+            "attackMs": 2,
+            "releaseMs": 60,
+            "mix": 1.0,
+            "gainReductionDbTarget": reduction_target_db,
+        },
     }

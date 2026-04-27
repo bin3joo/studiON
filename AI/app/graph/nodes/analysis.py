@@ -801,30 +801,35 @@ def _find_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
         #
         # true_peak_dbfs > 0.0:
         # frame 파형을 4배 업샘플링했을 때 실제 복원 파형의 최대치가 0dBFS를 넘는 상태다.
-        # 샘플 피크는 안전해 보여도 inter-sample peak 때문에 재생/인코딩 단계에서 클리핑이 날 수 있다.
+        # 샘플 피크는 안전해 보여도 inter-sample peak 때문에
+        # 재생/인코딩 단계에서 클리핑이 날 수 있다.
         #
         # clip_ratio >= 0.002:
-        # frame 안에서 절대값이 거의 최대치(0.999 이상)에 붙어 있는 샘플 비율이 0.2% 이상이라는 뜻이다.
+        # frame 안에서 절대값이 거의 최대치(0.999 이상)에 붙어 있는
+        # 샘플 비율이 0.2% 이상이라는 뜻이다.
         # 즉 순간 피크 한 번이 아니라, 파형 일부가 실제로 눌리거나 잘렸을 가능성을 본다.
-        if (
-            window["peak_dbfs"] >= -0.1
-            or window["true_peak_dbfs"] > 0.0
-            or window["clip_ratio"] >= 0.002
-        ):
-            score = round(
-                (max(window["true_peak_dbfs"], 0.0) * 0.55)
-                + (window["clip_ratio"] * 18),
-                3,
-            )
-            candidates.append(
-                {
-                    "track_id": window["target_track_id"],
-                    "start_ms": window["start_ms"],
-                    "end_ms": window["end_ms"],
-                    "score": score,
-                    "summary": "Detected clipping candidate with fixable gain envelope.",
-                }
-            )
+        true_peak_dbfs = float(window["true_peak_dbfs"])
+        if true_peak_dbfs <= 0.0:
+            continue
+
+        # true peak가 0dBFS를 넘은 경우만 clipping region으로 승격한다.
+        # sample peak 근접도와 clip_ratio는 심각도 보정용 보조 신호로만 사용한다.
+        peak_near_ceiling = max(float(window["peak_dbfs"]) + 0.1, 0.0)
+        score = round(
+            (true_peak_dbfs * 0.75)
+            + (peak_near_ceiling * 0.25)
+            + (float(window["clip_ratio"]) * 12),
+            3,
+        )
+        candidates.append(
+            {
+                "track_id": window["target_track_id"],
+                "start_ms": window["start_ms"],
+                "end_ms": window["end_ms"],
+                "score": score,
+                "summary": "Detected clipping candidate from oversampled true-peak overflow.",
+            }
+        )
     return _merge_candidate_windows("clipping", candidates)
 
 
@@ -989,8 +994,9 @@ def _materialize_regions(
                 "start_ms": region["start_ms"],
                 "end_ms": region["end_ms"],
                 "severity": _severity_from_score(issue=issue, score=region["score"]),
-                # sibilance는 사용자 plan 입력 없이 자동 계획 경로로 바로 넘긴다.
-                "requires_user_action": issue not in {"clipping", "sibilance"},
+                # clipping과 다른 user-facing 이슈는 사용자가 구간을 보고 선택한다.
+                # sibilance만 자동 보정 경로로 넘긴다.
+                "requires_user_action": issue != "sibilance",
                 "evidence_doc_id": evidence_doc_id,
                 "track_id": region.get("track_id"),
                 "secondary_track_id": region.get("secondary_track_id"),

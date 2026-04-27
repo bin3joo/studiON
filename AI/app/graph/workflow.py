@@ -59,7 +59,6 @@ DSP_SCAN_PATH_MAP = {
 
 RANKING_PATH_MAP = {
     "wait_user_plan_input": "wait_user_plan_input",
-    "build_rule_candidates": "build_rule_candidates",
     "materialize_execution_plan": "materialize_execution_plan",
 }
 
@@ -115,8 +114,8 @@ WORKFLOW_NODE_LABELS = {
     "plan_critic": "plan_critic / 계획 비평",
     "approve_plan": "approve_plan / 계획 승인",
     "materialize_execution_plan": "materialize_execution_plan / 실행 계획 구체화",
-    "auto_fix_clipping": "auto_fix_clipping / 클리핑 자동 보정",
-    "log_clipping_fix": "log_clipping_fix / 보정 로그 기록",
+    "auto_fix_sibilance": "auto_fix_sibilance / 치찰음 자동 보정",
+    "log_sibilance_fix": "log_sibilance_fix / 치찰음 보정 로그 기록",
     "persist_analysis_result": "persist_analysis_result / 분석 결과 저장",
     "user_action_gate": "user_action_gate / 사용자 승인 필요 여부",
     "wait_user_selection": "wait_user_selection / 사용자 선택 대기",
@@ -160,8 +159,8 @@ def build_workflow_graph():
     graph.add_node("plan_critic", nodes.plan_critic)
     graph.add_node("approve_plan", nodes.approve_plan)
     graph.add_node("materialize_execution_plan", nodes.materialize_execution_plan)
-    graph.add_node("auto_fix_clipping", nodes.auto_fix_clipping)
-    graph.add_node("log_clipping_fix", nodes.log_clipping_fix)
+    graph.add_node("auto_fix_sibilance", nodes.auto_fix_sibilance)
+    graph.add_node("log_sibilance_fix", nodes.log_sibilance_fix)
     graph.add_node("persist_analysis_result", nodes.persist_analysis_result)
     graph.add_node("user_action_gate", nodes.user_action_gate)
     graph.add_node("wait_user_selection", nodes.wait_user_selection)
@@ -215,9 +214,9 @@ def build_workflow_graph():
         CRITIC_PATH_MAP,
     )
     graph.add_edge("approve_plan", "materialize_execution_plan")
-    graph.add_edge("materialize_execution_plan", "auto_fix_clipping")
-    graph.add_edge("auto_fix_clipping", "log_clipping_fix")
-    graph.add_edge("log_clipping_fix", "persist_analysis_result")
+    graph.add_edge("materialize_execution_plan", "auto_fix_sibilance")
+    graph.add_edge("auto_fix_sibilance", "log_sibilance_fix")
+    graph.add_edge("log_sibilance_fix", "persist_analysis_result")
     graph.add_edge("persist_analysis_result", "user_action_gate")
     graph.add_conditional_edges(
         "user_action_gate",

@@ -40,10 +40,10 @@
   - 선택 region, preserve clip, 사용자 요구 입력을 기다린다.
 - `resume_after_plan_input`
   - plan input 필수값을 검증하고 plan loop로 복귀시킨다.
-- `auto_fix_clipping`
-  - clipping-only 경로를 deterministic auto-fix로 정리한다.
-- `log_clipping_fix`
-  - clipping auto-fix 로그 id를 남긴다.
+- `auto_fix_sibilance`
+  - sibilance-only 경로를 deterministic de-esser recipe auto-fix로 정리한다.
+- `log_sibilance_fix`
+  - sibilance auto-fix 로그 id를 남긴다.
 - `persist_analysis_result`
   - preview 필요 여부와 user action 필요 여부를 projection 관점으로 정리한다.
 - `user_action_gate`

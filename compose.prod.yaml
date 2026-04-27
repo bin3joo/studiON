@@ -16,7 +16,10 @@ services:
       --email dev.seoliee49@gmail.com
       --agree-tos
       --no-eff-email
-      -d k14a205.p.ssafy.io
+      -d studion.ai.kr
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
 
   backend:
     env_file:

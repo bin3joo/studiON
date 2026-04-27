@@ -4,7 +4,7 @@ import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
 import { ref } from 'vue';
 //백엔드 통신 담당
-import { projectApi } from '../api/project.api';
+//import { projectApi } from '../api/project.api';
 //트랙과 클립의 타입
 import type { TrackUIState, ClipUIState } from '../types';
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
@@ -33,7 +33,59 @@ export const useTrackStore = defineStore('track', () => {
         // 통신 중 인터넷이 끊기거나 에러가 나더라도 앱이 터지지 않게 안저망을 치는 구문
         try {
             // 백엔드에서 프로젝트 정보를 가져옴 await 백엔드의 db에서 가져올때까지 기다림
-            const data = await projectApi.getProjectDetail(projectId);
+            //const data = await projectApi.getProjectDetail(projectId); 실제 연결 주석 처리
+
+            // 1. 임시 가짜 데이터 (타입스크립트 완벽 호환)
+            const data = {
+                projectId: projectId, // 파라미터로 받은 id 재사용 (에러 8, 9번 해결용)
+                tempo: 120,
+                rootNote: 'C',
+                mode: 'MAJOR',
+                timeSigNumerator: 4,
+                timeSigDenominator: 4,
+                totalBarCount: 100,
+                tracks: [
+                    {
+                        trackId: 1,
+                        name: "보컬 메인",
+                        volume: 0,
+                        type: "AUDIO", // 트랙 타입 (예상)
+                        preTrackId: null, // 이전 트랙 ID
+                        postTrackId: null, // 다음 트랙 ID
+                        isMuted: false,
+                        isSoloed: false,
+                        pan: 0,
+                        clips: [
+                            {
+                                clipId: 1,
+                                start: 10,
+                                duration: 30,
+                                color: "#FF3DCB",
+                                audioStartMs: 0,
+                                audioDurationMs: 15000,
+                                audio: {
+                                    audioMetadataId: 1,
+                                    cdnUrl: "https://example.com/dummy.wav",
+                                    originalName: "vocal_take1.wav",
+                                    durationMs: 15000
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        trackId: 2,
+                        name: "드럼 비트",
+                        volume: -5,
+                        type: "AUDIO",
+                        preTrackId: 1,
+                        postTrackId: null,
+                        isMuted: false,
+                        isSoloed: false,
+                        pan: 0,
+                        clips: []
+                    }
+                ]
+            };//테스트 목데이터
 
             if (data) {
                 // 프로젝트 메타데이터 저장

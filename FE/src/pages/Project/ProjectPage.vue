@@ -66,7 +66,7 @@ function handleOpenHistory() {
 
 <template>
   <!--플랙스, 플랙스 콜 -> 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
-  <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+  <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground" >
     <ProjectHeader
       :project-name="`프로젝트 ${projectId}`"
       last-saved-at="13:24"

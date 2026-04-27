@@ -18,7 +18,7 @@ defineProps<{
     
     <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-20 flex shrink-0 cursor-pointer flex-col gap-2 border-r border-border bg-[#1c1c1c] p-3 transition-colors group-hover:bg-white/5"
+      class="sticky left-0 z-20 flex shrink-0 flex-col gap-2 border-r border-border bg-[#1c1c1c] p-3 transition-colors group-hover:bg-white/5"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
@@ -60,8 +60,17 @@ defineProps<{
         <div aria-label="패닝 조절" class="flex items-center gap-2">
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">PAN</span>
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60">
-            <div class="absolute inset-y-0 left-0 rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" style="width: 50%"></div>
-            <div class="absolute top-1/2 -mt-2 ml-[50%] h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c]"></div>
+            <div 
+              class="absolute inset-y-0 rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" 
+              :style="{
+                left: (track.pan || 0) < 0 ? `${50 + (track.pan || 0) / 2}%` : '50%',
+                width: `${Math.abs(track.pan || 0) / 2}%`
+              }"
+            ></div>
+            <div 
+              class="absolute top-1/2 -mt-2 h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c]"
+              :style="{ left: `${50 + (track.pan || 0) / 2}%` }"
+            ></div>
           </div>
           <div aria-label="현재 패닝 수치" class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
             <span class="font-mono text-[10px] tabular-nums text-white">

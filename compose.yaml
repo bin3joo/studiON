@@ -1,23 +1,14 @@
 services:
   nginx:
-    image: nginx:alpine
-    volumes:
-      - ./FE/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - certbot_certs:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-      - fe_dist:/usr/share/nginx/html:ro
-    depends_on:
-      frontend:
-        condition: service_completed_successfully
-      backend:
-        condition: service_started
-
-  frontend:
     build:
       context: ./FE
-      target: exporter
+      target: runtime
     volumes:
-      - fe_dist:/dist
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    depends_on:
+      backend:
+        condition: service_started
 
   certbot: 
     image: certbot/certbot
@@ -41,4 +32,3 @@ volumes:
   certbot_certs:
   certbot_www:
   redis_data:
-  fe_dist:

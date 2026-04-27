@@ -1,5 +1,6 @@
 package com.salmon.studion.domain.auth.entity;
 
+import com.salmon.studion.global.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
@@ -12,7 +13,7 @@ import java.io.Serializable;
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class UserPosition {
+public class UserPosition extends BaseEntity {
 
     @EmbeddedId
     private UserPositionId id;

@@ -1,5 +1,6 @@
 package com.salmon.studion.domain.auth.entity;
 
+import com.salmon.studion.global.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -9,7 +10,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class PositionDetail {
+public class PositionDetail extends BaseEntity {
 
     @Id
     private Integer code;

@@ -25,6 +25,7 @@ from app.persistence.projections import (
     build_runtime_projections,
     build_workflow_projections,
 )
+from app.services.workflow_snapshots import build_snapshot_runtime_context
 
 PYPPETEER_HOME = Path.cwd() / ".pyppeteer"
 os.environ["PYPPETEER_HOME"] = str(PYPPETEER_HOME)
@@ -39,8 +40,8 @@ BROWSER_CANDIDATES = (
 ENTRY_PATH_MAP = {
     "init_state": "init_state",
     "fail_workflow": "fail_workflow",
-    "wait_user_mix_intent": "wait_user_mix_intent",
-    "resume_after_mix_intent": "resume_after_mix_intent",
+    "wait_user_plan_input": "wait_user_plan_input",
+    "resume_after_plan_input": "resume_after_plan_input",
     "wait_user_selection": "wait_user_selection",
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
     "wait_user_confirm": "wait_user_confirm",
@@ -51,25 +52,30 @@ CLAP_GATE_PATH_MAP = {
     "detect_sibilance": "detect_sibilance",
 }
 
-RANKING_PATH_MAP = {
-    "wait_user_mix_intent": "wait_user_mix_intent",
-    "generate_suggestions": "generate_suggestions",
+DSP_SCAN_PATH_MAP = {
+    "detect_band_overlap": "detect_band_overlap",
+    "fail_workflow": "fail_workflow",
 }
 
-MIX_INTENT_PATH_MAP = {
-    "retrieval_policy_rag": "retrieval_policy_rag",
-    "generate_suggestions": "generate_suggestions",
+RANKING_PATH_MAP = {
+    "wait_user_plan_input": "wait_user_plan_input",
+    "build_rule_candidates": "build_rule_candidates",
+    "materialize_execution_plan": "materialize_execution_plan",
+}
+
+PLAN_INPUT_PATH_MAP = {
+    "build_rule_candidates": "build_rule_candidates",
 }
 
 VALIDATOR_PATH_MAP = {
-    "semantic_critic": "semantic_critic",
-    "generate_suggestions": "generate_suggestions",
+    "plan_critic": "plan_critic",
+    "planning_agent": "planning_agent",
     "fail_workflow": "fail_workflow",
 }
 
 CRITIC_PATH_MAP = {
-    "group_suggestions": "group_suggestions",
-    "generate_suggestions": "generate_suggestions",
+    "approve_plan": "approve_plan",
+    "planning_agent": "planning_agent",
     "fail_workflow": "fail_workflow",
 }
 
@@ -101,13 +107,14 @@ WORKFLOW_NODE_LABELS = {
     "detect_sibilance": "detect_sibilance / 치찰음 탐지",
     "merge_analysis": "merge_analysis / 분석 결과 병합",
     "candidate_ranking": "candidate_ranking / 후보 랭킹",
-    "wait_user_mix_intent": "wait_user_mix_intent / 메인 트랙 선택 대기",
-    "resume_after_mix_intent": "resume_after_mix_intent / 메인 트랙 선택 반영",
-    "retrieval_policy_rag": "retrieval_policy_rag / 정책 RAG 조회",
-    "generate_suggestions": "generate_suggestions / 수정 제안 생성",
-    "hard_rule_validator": "hard_rule_validator / 규칙 검증",
-    "semantic_critic": "semantic_critic / 의미 검증",
-    "group_suggestions": "group_suggestions / 제안 그룹핑",
+    "wait_user_plan_input": "wait_user_plan_input / 계획 입력 대기",
+    "resume_after_plan_input": "resume_after_plan_input / 계획 입력 반영",
+    "build_rule_candidates": "build_rule_candidates / 규칙 후보 생성",
+    "planning_agent": "planning_agent / 계획 생성기",
+    "plan_rule_validator": "plan_rule_validator / 계획 규칙 검증",
+    "plan_critic": "plan_critic / 계획 비평",
+    "approve_plan": "approve_plan / 계획 승인",
+    "materialize_execution_plan": "materialize_execution_plan / 실행 계획 구체화",
     "auto_fix_clipping": "auto_fix_clipping / 클리핑 자동 보정",
     "log_clipping_fix": "log_clipping_fix / 보정 로그 기록",
     "persist_analysis_result": "persist_analysis_result / 분석 결과 저장",
@@ -123,7 +130,10 @@ WORKFLOW_NODE_LABELS = {
     "__end__": "__end__ / 종료",
 }
 
-
+# 워크플로우 그래프는 구조가 고정돼 있으므로
+# 매 호출마다 다시 compile하지 않고 한 번 만든 결과를 재사용한다.
+# maxsize=1은 최근 결과 하나만 유지하겠다는 뜻으로,
+# 사실상 앱 프로세스 동안 단일 compiled graph를 캐시한다.
 @lru_cache(maxsize=1)
 def build_workflow_graph():
     graph = StateGraph(WorkflowState)
@@ -142,13 +152,14 @@ def build_workflow_graph():
     graph.add_node("detect_sibilance", nodes.detect_sibilance)
     graph.add_node("merge_analysis", nodes.merge_analysis)
     graph.add_node("candidate_ranking", nodes.candidate_ranking)
-    graph.add_node("wait_user_mix_intent", nodes.wait_user_mix_intent)
-    graph.add_node("resume_after_mix_intent", nodes.resume_after_mix_intent)
-    graph.add_node("retrieval_policy_rag", nodes.retrieval_policy_rag)
-    graph.add_node("generate_suggestions", nodes.generate_suggestions)
-    graph.add_node("hard_rule_validator", nodes.hard_rule_validator)
-    graph.add_node("semantic_critic", nodes.semantic_critic)
-    graph.add_node("group_suggestions", nodes.group_suggestions)
+    graph.add_node("wait_user_plan_input", nodes.wait_user_plan_input)
+    graph.add_node("resume_after_plan_input", nodes.resume_after_plan_input)
+    graph.add_node("build_rule_candidates", nodes.build_rule_candidates)
+    graph.add_node("planning_agent", nodes.planning_agent)
+    graph.add_node("plan_rule_validator", nodes.plan_rule_validator)
+    graph.add_node("plan_critic", nodes.plan_critic)
+    graph.add_node("approve_plan", nodes.approve_plan)
+    graph.add_node("materialize_execution_plan", nodes.materialize_execution_plan)
     graph.add_node("auto_fix_clipping", nodes.auto_fix_clipping)
     graph.add_node("log_clipping_fix", nodes.log_clipping_fix)
     graph.add_node("persist_analysis_result", nodes.persist_analysis_result)
@@ -167,7 +178,11 @@ def build_workflow_graph():
     graph.add_edge("init_state", "load_project_snapshot")
     graph.add_edge("load_project_snapshot", "sample_track_clips")
     graph.add_edge("sample_track_clips", "cheap_dsp_scan")
-    graph.add_edge("cheap_dsp_scan", "detect_band_overlap")
+    graph.add_conditional_edges(
+        "cheap_dsp_scan",
+        edges.route_after_dsp_scan,
+        DSP_SCAN_PATH_MAP,
+    )
     graph.add_edge("detect_band_overlap", "detect_clipping")
     graph.add_edge("detect_clipping", "detect_high_band_harshness")
     graph.add_edge("detect_high_band_harshness", "select_role_candidates")
@@ -181,25 +196,26 @@ def build_workflow_graph():
         edges.route_after_candidate_ranking,
         RANKING_PATH_MAP,
     )
-    graph.add_edge("wait_user_mix_intent", END)
+    graph.add_edge("wait_user_plan_input", END)
     graph.add_conditional_edges(
-        "resume_after_mix_intent",
-        edges.route_after_mix_intent,
-        MIX_INTENT_PATH_MAP,
+        "resume_after_plan_input",
+        edges.route_after_plan_input,
+        PLAN_INPUT_PATH_MAP,
     )
-    graph.add_edge("retrieval_policy_rag", "generate_suggestions")
-    graph.add_edge("generate_suggestions", "hard_rule_validator")
+    graph.add_edge("build_rule_candidates", "planning_agent")
+    graph.add_edge("planning_agent", "plan_rule_validator")
     graph.add_conditional_edges(
-        "hard_rule_validator",
+        "plan_rule_validator",
         edges.route_after_validator,
         VALIDATOR_PATH_MAP,
     )
     graph.add_conditional_edges(
-        "semantic_critic",
+        "plan_critic",
         edges.route_after_critic,
         CRITIC_PATH_MAP,
     )
-    graph.add_edge("group_suggestions", "auto_fix_clipping")
+    graph.add_edge("approve_plan", "materialize_execution_plan")
+    graph.add_edge("materialize_execution_plan", "auto_fix_clipping")
     graph.add_edge("auto_fix_clipping", "log_clipping_fix")
     graph.add_edge("log_clipping_fix", "persist_analysis_result")
     graph.add_edge("persist_analysis_result", "user_action_gate")
@@ -234,11 +250,26 @@ def build_apply_graph():
     return build_workflow_graph()
 
 
+# worker가 넘긴 상태를 LangGraph 입력 상태로 정규화한 뒤 실제 workflow graph를 실행하는 진입점이다.
+# start dispatch의 경우
+# load_entry_context -> init_state -> load_project_snapshot 순서로 노드를 타기 시작한다.
 def run_workflow_graph(state: WorkflowState | dict) -> WorkflowState:
+    raw_state = dict(state)
+    project_snapshot = raw_state.pop("project_snapshot", None)
+    if project_snapshot is not None:
+        # 동기 실행 테스트나 graph 직접 호출도 start API와 같은 snapshot 파생 메타를 쓰게 맞춘다.
+        context = build_snapshot_runtime_context(project_snapshot)
+        raw_state.setdefault("project_duration_ms", context.duration_ms)
+        raw_state.setdefault("track_ids", context.track_ids)
+        raw_state.setdefault("bpm", context.bpm)
+        raw_state.setdefault("numerator", context.numerator)
+        raw_state.setdefault("denominator", context.denominator)
+        raw_state.setdefault("bar_mapping", context.bar_mapping)
+        raw_state.setdefault("clip_index", context.clip_index)
     initial = build_workflow_initial_state(
-        job_id=state["job_id"],
-        project_id=state["project_id"],
-        **{key: value for key, value in dict(state).items() if key not in {"job_id", "project_id"}},
+        job_id=raw_state["job_id"],
+        project_id=raw_state["project_id"],
+        **{key: value for key, value in raw_state.items() if key not in {"job_id", "project_id"}},
     )
     return build_workflow_graph().invoke(initial, config={"recursion_limit": 100})
 
@@ -368,13 +399,17 @@ async def _render_mermaid_png_async(
     browser = await launch(
         executablePath=_resolve_browser_executable(),
         headless=True,
-        userDataDir=str(PYPPETEER_HOME / ".profile"),
-        autoClose=False,
-        args=["--no-sandbox"],
+        autoClose=True,
+        args=[
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-software-rasterizer",
+        ],
     )
     try:
         page = await browser.newPage()
-        await page.setViewport({"width": 1800, "height": 3200, "deviceScaleFactor": 2})
+        await page.setViewport({"width": 3200, "height": 5600, "deviceScaleFactor": 3})
         await page.setContent(_mermaid_html(mermaid_source))
         await page.waitForSelector("svg")
         container = await page.querySelector("#graph")

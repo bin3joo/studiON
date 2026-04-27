@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.graph.state import ApplyState, RuntimeState, WorkflowState
 
 
+# 런타임 진행 상태를 프론트 polling 응답과 저장 projection에서 공통으로 쓰는 형태로 정리한다.
 class RuntimeStatusProjection(BaseModel):
     job_id: str
     phase: str
@@ -16,6 +17,7 @@ class RuntimeStatusProjection(BaseModel):
     heartbeat_at: str | None = None
 
 
+# 분석 job 자체의 메타데이터를 외부 응답용 projection으로 표현한다.
 class AnalysisJobProjection(BaseModel):
     id: str
     project_id: str
@@ -31,19 +33,32 @@ class AnalysisJobProjection(BaseModel):
     completed_at: str | None = None
 
 
+# 개별 분석 region을 프론트/저장 계층이 바로 쓰기 좋은 형태로 정규화한다.
 class AnalysisRegionProjection(BaseModel):
     id: str
     job_id: str
     region_type: str = "ISSUE_REGION"
+    issue_type: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
+    measure_start: int | None = None
+    measure_end: int | None = None
     severity: str = "MEDIUM"
     analysis_summary: str | None = None
     evidence_doc_id: str | None = None
     ranking_score: float | None = None
     requires_user_action: bool = True
+    track_id: int | None = None
+    secondary_track_id: int | None = None
+    band_low_hz: int | None = None
+    band_high_hz: int | None = None
+    detector_score: float | None = None
+    involved_track_ids: list[int] = Field(default_factory=list)
+    # 프론트 잠금은 트랙 단위가 아니라 실제로 겹치는 clip id 집합 기준으로 판단한다.
+    affected_clip_ids: list[str] = Field(default_factory=list)
 
 
+# 보컬 추론 결과를 별도 projection으로 노출한다.
 class TrackVocalPredictionProjection(BaseModel):
     id: str
     track_id: int
@@ -53,15 +68,19 @@ class TrackVocalPredictionProjection(BaseModel):
     confidence: float | None = None
 
 
-class RagRetrievalProjection(BaseModel):
-    id: str
-    job_id: str
-    query_text: str
-    top_k: int
-    quality_score: float | None = None
-    document_ids: list[str] = Field(default_factory=list)
+# 정책 retrieval 결과를 요약해서 외부로 노출한다.
+class PlanStateProjection(BaseModel):
+    selected_region_id: str | None = None
+    preserve_clip_id: str | None = None
+    user_feedback_message: str | None = None
+    status: str | None = None
+    validator_result: str | None = None
+    critic_result: str | None = None
+    revise_count: int = 0
+    revision_notes: list[str] = Field(default_factory=list)
 
 
+# suggestion 내부의 단일 action을 응답용 스키마로 변환한다.
 class SuggestionActionProjection(BaseModel):
     id: str
     suggestion_id: str
@@ -80,6 +99,7 @@ class SuggestionActionProjection(BaseModel):
     source_clip_id: int | None = None
 
 
+# suggestion 한 개와 그 action 목록을 묶는 projection이다.
 class SuggestionProjection(BaseModel):
     id: str
     group_id: str
@@ -91,17 +111,21 @@ class SuggestionProjection(BaseModel):
     actions: list[SuggestionActionProjection] = Field(default_factory=list)
 
 
+# suggestion group은 선택된 region 문맥과 suggestion 묶음을 함께 담는다.
 class SuggestionGroupProjection(BaseModel):
     id: str
     job_id: str
     region_id: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
+    measure_start: int | None = None
+    measure_end: int | None = None
     title: str
     summary: str | None = None
     suggestions: list[SuggestionProjection] = Field(default_factory=list)
 
 
+# preview render 진행 상태를 외부 응답용으로 평평하게 표현한다.
 class PreviewRenderProjection(BaseModel):
     id: str
     job_id: str
@@ -119,6 +143,7 @@ class PreviewRenderProjection(BaseModel):
     error_message: str | None = None
 
 
+# 실제 적용 결과를 외부 projection으로 표현한다.
 class AppliedSuggestionProjection(BaseModel):
     id: str
     job_id: str
@@ -129,6 +154,7 @@ class AppliedSuggestionProjection(BaseModel):
     status: str
 
 
+# 최종 사용자 의사결정 이벤트를 projection으로 정리한다.
 class FeedbackEventProjection(BaseModel):
     id: str
     job_id: str
@@ -136,12 +162,13 @@ class FeedbackEventProjection(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+# workflow 전체에서 노출할 projection 묶음의 최상위 컨테이너다.
 class WorkflowGraphProjections(BaseModel):
     runtime_status: RuntimeStatusProjection
     analysis_job: AnalysisJobProjection
     analysis_regions: list[AnalysisRegionProjection] = Field(default_factory=list)
     track_vocal_predictions: list[TrackVocalPredictionProjection] = Field(default_factory=list)
-    rag_retrievals: list[RagRetrievalProjection] = Field(default_factory=list)
+    plan_state: PlanStateProjection | None = None
     suggestion_group: SuggestionGroupProjection | None = None
     preview_render: PreviewRenderProjection | None = None
     applied_suggestion: AppliedSuggestionProjection | None = None
@@ -152,6 +179,7 @@ RuntimeGraphProjections = WorkflowGraphProjections
 ApplyGraphProjections = WorkflowGraphProjections
 
 
+# workflow state를 API 응답/저장 projection 세트로 한 번에 바꾸는 메인 진입점이다.
 def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections:
     suggestion_group = _build_suggestion_group(state)
     return WorkflowGraphProjections(
@@ -179,7 +207,7 @@ def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections
         ),
         analysis_regions=_build_analysis_regions(state),
         track_vocal_predictions=_build_track_vocal_predictions(state),
-        rag_retrievals=_build_rag_retrievals(state),
+        plan_state=_build_plan_state(state),
         suggestion_group=suggestion_group,
         preview_render=_build_preview_render(state, suggestion_group),
         applied_suggestion=_build_applied_suggestion(state, suggestion_group),
@@ -187,32 +215,49 @@ def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections
     )
 
 
+# runtime graph도 현재는 workflow와 같은 projection 포맷을 공유한다.
 def build_runtime_projections(state: RuntimeState) -> RuntimeGraphProjections:
     return build_workflow_projections(state)
 
 
+# apply graph도 workflow projection 빌더를 그대로 재사용한다.
 def build_apply_projections(state: ApplyState) -> ApplyGraphProjections:
     return build_workflow_projections(state)
 
 
+# 내부 analysis_regions state를 응답용 region projection 목록으로 변환한다.
+# 마디 범위와 affected clip id를 외부 포맷으로 고정하는 책임도 여기 있다.
 def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjection]:
     ranking_scores = state.get("ranking_scores", {})
     return [
         AnalysisRegionProjection(
             id=region["id"],
             job_id=state["job_id"],
+            issue_type=region.get("issue_type"),
             start_ms=region.get("start_ms"),
             end_ms=region.get("end_ms"),
+            measure_start=region.get("measure_start"),
+            measure_end=region.get("measure_end"),
             severity=region.get("severity", "MEDIUM"),
             analysis_summary=region.get("summary"),
             evidence_doc_id=region.get("evidence_doc_id"),
             ranking_score=ranking_scores.get(region["id"]),
             requires_user_action=bool(region.get("requires_user_action", True)),
+            track_id=region.get("track_id"),
+            secondary_track_id=region.get("secondary_track_id"),
+            band_low_hz=region.get("band_low_hz"),
+            band_high_hz=region.get("band_high_hz"),
+            detector_score=region.get("score"),
+            involved_track_ids=[
+                int(track_id) for track_id in region.get("involved_track_ids", [])
+            ],
+            affected_clip_ids=[str(clip_id) for clip_id in region.get("affected_clip_ids", [])],
         )
         for region in state.get("analysis_regions", [])
     ]
 
 
+# inferred_roles를 track vocal prediction projection으로 옮긴다.
 def _build_track_vocal_predictions(state: WorkflowState) -> list[TrackVocalPredictionProjection]:
     predictions: list[TrackVocalPredictionProjection] = []
     inferred_roles = state.get("inferred_roles", {})
@@ -231,22 +276,34 @@ def _build_track_vocal_predictions(state: WorkflowState) -> list[TrackVocalPredi
     return predictions
 
 
-def _build_rag_retrievals(state: WorkflowState) -> list[RagRetrievalProjection]:
-    if not state.get("retrieval_context_ids"):
-        return []
-    query_text = "|".join(state.get("detected_issues", []))
-    return [
-        RagRetrievalProjection(
-            id=f"{state['job_id']}-retrieval-1",
-            job_id=state["job_id"],
-            query_text=query_text,
-            top_k=len(state.get("retrieval_context_ids", [])),
-            quality_score=0.84,
-            document_ids=state.get("retrieval_context_ids", []),
-        )
-    ]
+# retrieval 문맥 id가 있으면 이를 retrieval projection으로 노출한다.
+def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
+    if not any(
+        [
+            state.get("selected_region_id"),
+            state.get("preserve_clip_id"),
+            state.get("user_feedback_message"),
+            state.get("plan_status"),
+            state.get("validator_result"),
+            state.get("critic_result"),
+            state.get("plan_revision_notes"),
+        ]
+    ):
+        return None
+    return PlanStateProjection(
+        selected_region_id=state.get("selected_region_id"),
+        preserve_clip_id=state.get("preserve_clip_id"),
+        user_feedback_message=state.get("user_feedback_message"),
+        status=state.get("plan_status"),
+        validator_result=state.get("validator_result"),
+        critic_result=state.get("critic_result"),
+        revise_count=state.get("revise_count", 0),
+        revision_notes=state.get("plan_revision_notes", []),
+    )
 
 
+# suggestion payload를 suggestion group projection으로 정리한다.
+# action 파라미터와 선택된 region 문맥을 외부 응답 스키마로 매핑한다.
 def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection | None:
     payload = state.get("suggestion_payload") or {}
     if not payload:
@@ -288,19 +345,32 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
                 actions=actions,
             )
         )
-    first_region_id = next(iter(state.get("analysis_region_ids", [])), None)
+
+    ranked_region_ids = state.get("ranked_candidate_ids", [])
+    # suggestion group은 선택된 region의 시간/마디 문맥을 같이 들고 있어야
+    # 프론트가 어떤 구간에 대한 제안인지 자연스럽게 표현할 수 있다.
+    selected_region_id = (
+        state.get("selected_region_id")
+        or next(iter(ranked_region_ids), None)
+        or next(iter(state.get("analysis_region_ids", [])), None)
+    )
+    region_map = {region["id"]: region for region in state.get("analysis_regions", [])}
+    selected_region = region_map.get(selected_region_id) if selected_region_id else None
     return SuggestionGroupProjection(
         id=group_id,
         job_id=state["job_id"],
-        region_id=first_region_id,
-        start_ms=1000 if first_region_id else None,
-        end_ms=4000 if first_region_id else None,
+        region_id=selected_region_id,
+        start_ms=selected_region.get("start_ms") if selected_region else None,
+        end_ms=selected_region.get("end_ms") if selected_region else None,
+        measure_start=selected_region.get("measure_start") if selected_region else None,
+        measure_end=selected_region.get("measure_end") if selected_region else None,
         title=payload.get("groupTitle", "Workflow suggestion group"),
         summary=payload.get("groupSummary"),
         suggestions=suggestions,
     )
 
 
+# preview id가 생긴 경우에만 preview projection을 만든다.
 def _build_preview_render(
     state: WorkflowState,
     suggestion_group: SuggestionGroupProjection | None,
@@ -326,6 +396,7 @@ def _build_preview_render(
     )
 
 
+# apply 결과가 있거나 workflow가 종료 상태에 도달했을 때 적용 projection을 만든다.
 def _build_applied_suggestion(
     state: WorkflowState,
     suggestion_group: SuggestionGroupProjection | None,
@@ -351,6 +422,7 @@ def _build_applied_suggestion(
     )
 
 
+# 최종 사용자 의사결정을 feedback event projection으로 노출한다.
 def _build_feedback_event(state: WorkflowState) -> FeedbackEventProjection | None:
     feedback_event_id = state.get("feedback_event_id")
     if not feedback_event_id:

@@ -7,7 +7,6 @@ services:
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
-      - frontend
       - backend
 
   certbot:
@@ -17,10 +16,10 @@ services:
       --email dev.seoliee49@gmail.com
       --agree-tos
       --no-eff-email
-      -d k14a205.p.ssafy.io
-
-  frontend:
-    restart: on-failure:2
+      -d studion.ai.kr
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
 
   backend:
     env_file:

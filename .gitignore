@@ -21,3 +21,6 @@ pnpm-debug.log*
 # Local override files
 *.local.yaml
 *.local.yml
+
+# Codex local instructions
+**/AGENTS.md

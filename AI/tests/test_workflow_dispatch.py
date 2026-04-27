@@ -140,7 +140,7 @@ def test_worker_resume_plan_input_dispatch_reaches_selection_wait(
             job_id="job-async-resume",
             project_id="project-async-resume",
             project_snapshot=build_project_snapshot(track_ids=[8]),
-            issue_types=["sibilance"],
+            issue_types=["clipping"],
         )
     )
     resumed = run_workflow_dispatch(
@@ -151,8 +151,37 @@ def test_worker_resume_plan_input_dispatch_reaches_selection_wait(
         )
     )
 
-    assert resumed["current_node"] == "wait_user_selection"
-    assert resumed["preview_action_ids"] == ["job-async-resume-action-1"]
+    assert resumed["current_node"] == "wait_user_plan_input"
+    assert resumed["ranked_candidate_ids"]
+
+
+def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id="job-async-sibilance",
+            project_id="project-async-sibilance",
+            project_snapshot=build_project_snapshot(track_ids=[8]),
+            issue_types=["sibilance"],
+        )
+    )
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id="job-async-sibilance",
+            project_id="project-async-sibilance",
+            dispatch_type="start",
+        )
+    )
+
+    assert result["current_node"] == "finalize_output"
+    assert result["sibilance_fix_applied"] is True
+    assert result["sibilance_fix_log_id"] is not None
 
 
 def test_worker_rejects_stale_resume_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -320,3 +349,13 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     assert body["projections"]["analysis_job"]["id"] == "job-status-api"
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert body["projections"]["suggestion_group"] is None
+
+
+def test_workflow_start_payload_defaults_include_clipping() -> None:
+    payload = WorkflowStartPayload(
+        job_id="job-default-issues",
+        project_id="project-default-issues",
+        project_snapshot=build_project_snapshot(track_ids=[1]),
+    )
+
+    assert payload.issue_types == ["band_overlap", "clipping"]

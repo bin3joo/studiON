@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import gettempdir
 
 import numpy as np
+import pytest
 import soundfile as sf
 from scipy.signal import resample_poly
 
@@ -118,7 +119,7 @@ def test_workflow_waits_for_user_mix_intent_before_suggestions() -> None:
             "job_id": "job-selection",
             "project_id": "project-selection",
             "project_snapshot": build_project_snapshot(track_ids=[12, 18]),
-            "issue_types": ["band_overlap", "sibilance"],
+            "issue_types": ["band_overlap", "clipping"],
         }
     )
 
@@ -144,13 +145,13 @@ def test_workflow_finalize_without_user_action_when_no_suggestions_exist() -> No
     assert result["durable_status"] == "COMPLETED"
 
 
-def test_workflow_plan_loop_runs_for_band_overlap_and_sibilance() -> None:
+def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     waiting = run_workflow_graph(
         {
             "job_id": "job-rag",
             "project_id": "project-rag",
             "project_snapshot": build_project_snapshot(track_ids=[3, 4]),
-            "issue_types": ["band_overlap", "sibilance"],
+            "issue_types": ["band_overlap", "clipping"],
         }
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
@@ -175,16 +176,17 @@ def test_workflow_skips_clap_when_not_needed() -> None:
 
 
 def test_workflow_revises_once_then_passes() -> None:
-    result = run_workflow_graph(
+    waiting = run_workflow_graph(
         {
             "job_id": "job-revise",
             "project_id": "project-revise",
             "project_snapshot": build_project_snapshot(track_ids=[7]),
-            "issue_types": ["sibilance"],
+            "issue_types": ["clipping"],
             "validator_mode": "REVISE_ONCE",
             "critic_mode": "PASS",
         }
     )
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
     assert result["current_node"] == "wait_user_selection"
     assert result["transition_log"].count("planning_agent") == 2
@@ -212,7 +214,7 @@ def test_workflow_fails_when_validator_rejects() -> None:
     assert result["durable_status"] == "FAILED"
 
 
-def test_workflow_auto_progresses_sibilance_to_selection_wait() -> None:
+def test_workflow_autofixes_sibilance_without_preview() -> None:
     result = run_workflow_graph(
         {
             "job_id": "job-preview",
@@ -222,20 +224,24 @@ def test_workflow_auto_progresses_sibilance_to_selection_wait() -> None:
         }
     )
 
-    assert result["current_node"] == "wait_user_selection"
-    assert result["runtime_status"] == "waiting_for_user"
-    assert result["preview_action_ids"] == ["job-preview-action-1"]
+    assert result["current_node"] == "finalize_output"
+    assert result["runtime_status"] == "completed"
+    assert result["preview_action_ids"] == []
+    assert result["sibilance_fix_applied"] is True
+    assert result["sibilance_fix_log_id"] is not None
+    assert result["auto_fix_recipe_artifact_id"] is not None
 
 
 def test_workflow_resume_from_selection_to_preview_confirm_wait() -> None:
-    selected = run_workflow_graph(
+    waiting = run_workflow_graph(
         {
             "job_id": "job-preview-2",
             "project_id": "project-preview-2",
             "project_snapshot": build_project_snapshot(track_ids=[8]),
-            "issue_types": ["sibilance"],
+            "issue_types": ["clipping"],
         }
     )
+    selected = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
     resumed = run_workflow_graph(
         {
@@ -285,9 +291,10 @@ def test_workflow_retry_and_cancel_paths_return_to_expected_nodes() -> None:
             "job_id": "job-retry",
             "project_id": "project-retry",
             "project_snapshot": build_project_snapshot(track_ids=[6]),
-            "issue_types": ["sibilance"],
+            "issue_types": ["clipping"],
         }
     )
+    mix_resolved = run_workflow_graph({**mix_resolved, **build_plan_input(mix_resolved)})
     preview_wait = run_workflow_graph(
         {
             **mix_resolved,
@@ -345,7 +352,7 @@ def test_workflow_response_contains_unified_projections() -> None:
     assert response["projections"]["analysis_regions"][0]["affected_clip_ids"]
 
 
-def test_workflow_clipping_only_autofixes_without_preview() -> None:
+def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
     result = run_workflow_graph(
         {
             "job_id": "job-clipping-only",
@@ -355,8 +362,8 @@ def test_workflow_clipping_only_autofixes_without_preview() -> None:
         }
     )
 
-    assert result["current_node"] == "finalize_output"
-    assert result["clipping_fix_applied"] is True
+    assert result["current_node"] == "wait_user_plan_input"
+    assert result["clipping_fix_applied"] is False
     assert result["preview_id"] is None
     assert result["preview_action_ids"] == []
     assert result["detected_issues"] == ["clipping"]
@@ -387,8 +394,9 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert overlap["measure_end"] in {1, 2}
     assert "clip-30-1" in overlap["affected_clip_ids"]
     assert "clip-31-2" in overlap["affected_clip_ids"]
-    assert clipping["requires_user_action"] is False
+    assert clipping["requires_user_action"] is True
     assert sibilance["track_id"] == 30
+    assert result["sibilance_fix_applied"] is True
     assert result["ranking_scores"][overlap["id"]] > 0
 
 

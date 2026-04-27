@@ -53,13 +53,14 @@ def build_action(
     *,
     index: int,
     action_type: str,
-    track_id: int,
+    track_id: int | None,
     start_ms: int,
     end_ms: int,
     band_low_hz: int | None = None,
     band_high_hz: int | None = None,
     gain_delta_db: float | None = None,
     params: dict | None = None,
+    target_scope: str = "TRACK",
 ) -> dict:
     return {
         "actionType": action_type,
@@ -71,5 +72,6 @@ def build_action(
         "bandHighHz": band_high_hz,
         "gainDeltaDb": gain_delta_db,
         "params": params or {},
+        "targetScope": target_scope,
         "actionId": f"{state['job_id']}-action-{index}",
     }

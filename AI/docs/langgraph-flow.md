@@ -28,7 +28,7 @@ The workflow graph follows this product-oriented order:
 20. plan critic
 21. plan approval
 22. execution plan materialization
-23. clipping auto-fix and logging
+23. sibilance auto-fix and logging
 24. analysis persistence
 25. user action gate
 26. user selection wait
@@ -43,13 +43,19 @@ The workflow graph follows this product-oriented order:
 - The graph ends in one of five stable states: waiting for plan input, waiting for selection, waiting for confirmation, completed, failed.
 - `POST /workflow/jobs/start` accepts the full project snapshot and persists it before worker dispatch. Frontend polling uses `GET /workflow/jobs/{job_id}` as the single lookup API.
 - `load_project_snapshot` restores only the persisted snapshot reference plus derived BPM and clip metadata needed for later projection.
+- `sample_track_clips` no longer picks a single representative clip id per track. It now builds per-track representative sample specs by selecting a small set of longer clips and excerpt ranges under a fixed duration budget.
 - `cheap_dsp_scan` restores every clip on the project timeline, resolves clip audio through `audio_path`, direct `objectKey`, or `audio_root/objectKey`, and may enrich clip metadata from `audio_metadata.objectKey` when only `audio_metadata_id` is present.
 - `cheap_dsp_scan` runs full STFT over the reconstructed track timelines, stores frame-level summaries behind MongoDB artifact references, and keeps only compact summary plus artifact id in runtime state.
 - unresolved audio paths are a workflow failure, not a mock fallback path.
 - `detect_band_overlap` now detects congested low-mid time regions first, then attaches the involved track ids and overlapping clip ids for that region before user plan input.
+- `detect_clipping` uses oversampled `true_peak_dbfs` as the primary clipping signal, then uses sample-peak proximity and `clip_ratio` only as severity helpers.
 - `detect_clipping` and `detect_sibilance` create one or more analysis regions with ms range, measure range, affected clip ids, target track metadata, severity, and evidence references.
-- `clipping` keeps a deterministic auto-fix branch and also participates in persisted analysis results.
-- `band_overlap` stays on the user plan input path, while `sibilance` skips plan input and enters the automatic planning path directly.
+- `select_role_candidates` uses cheap DSP `vocal_like_score` as a threshold-based prefilter with a capped candidate count instead of the old fixed top-2 rule.
+- `infer_track_roles` now builds WAV excerpts from each candidate track's representative sample spec and sends them to an external CLAP inference service.
+- If CLAP inference fails, returns incomplete track predictions, or cannot build excerpts, the workflow fails explicitly. DSP fallback is not allowed on this path.
+- CLAP raw response details stay in a MongoDB artifact document, while runtime state keeps only role labels, score/confidence summaries, and artifact references.
+- `clipping` stays on the user plan input path and materializes user-facing suggestion and preview actions.
+- `sibilance` skips plan input, generates deterministic de-esser recipes, and closes without preview.
 - `build_rule_candidates`, `planning_agent`, `plan_rule_validator`, and `plan_critic` form the current plan loop. The graph shape is agent-like, but the planner and critic internals are still deterministic rule-based implementations.
 - validator and critic can force regeneration of the plan.
 - The MVP exposes a single representative solution, so there is no preview-time reselect loop back to suggestion selection.

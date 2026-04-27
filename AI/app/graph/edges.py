@@ -31,8 +31,6 @@ def route_after_dsp_scan(state: WorkflowState) -> str:
 def route_after_candidate_ranking(state: WorkflowState) -> str:
     if state.get("ranked_candidate_ids"):
         return "wait_user_plan_input"
-    if state.get("analysis_regions"):
-        return "build_rule_candidates"
     return "materialize_execution_plan"
 
 

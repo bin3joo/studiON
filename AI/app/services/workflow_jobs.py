@@ -14,12 +14,16 @@ from app.core.config import get_settings
 from app.graph.state import UserDecision, WorkflowDispatchType, WorkflowState
 
 
+# API와 worker 사이에서 오가는 최소 실행 지시서다.
+# 큰 상태 전체를 큐에 싣지 않고, 어떤 job을 어떤 dispatch_type으로 실행/재개할지만 담아서 전달한다.
 class WorkflowDispatchMessage(BaseModel):
     job_id: str
     project_id: str
     dispatch_type: WorkflowDispatchType
     requested_by: int | None = None
-    main_track_id: int | None = None
+    selected_region_id: str | None = None
+    preserve_clip_id: str | None = None
+    user_feedback_message: str | None = None
     selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
@@ -219,7 +223,7 @@ def _build_record(state: WorkflowState) -> WorkflowJobRecord:
         error_message=state.get("failure_message"),
         # 현재 resume에 필요한 오케스트레이션 상태만 저장하며, 큰 artifact 본문은
         # MySQL에 넣지 않고 기존 ID/참조만 상태 안에 남긴다.
-        state_snapshot=deepcopy(dict(state)),
+        state_snapshot=_sanitize_state_snapshot(state),
     )
 
 
@@ -268,10 +272,19 @@ def _row_to_record(row: dict) -> WorkflowJobRecord:
     )
 
 
+def _sanitize_state_snapshot(state: WorkflowState) -> dict:
+    snapshot = deepcopy(dict(state))
+    # 큰 snapshot 원문은 Mongo에만 두고, MySQL에는 복구용 요약 상태만 남긴다.
+    snapshot.pop("project_snapshot", None)
+    return snapshot
+
+
 _memory_store = InMemoryWorkflowJobStore()
 _mysql_store: MySQLWorkflowJobStore | None = None
 
 
+# worker나 orchestration 코드가 저장소 구현을 직접 고르지 않게 해주는 접근 함수다.
+# MySQL 설정이 있으면 영속 저장소를, 없으면 개발용 in-memory 저장소를 반환한다.
 def get_workflow_job_store() -> WorkflowJobStore:
     global _mysql_store
     mysql_url = get_settings().resolved_mysql_url

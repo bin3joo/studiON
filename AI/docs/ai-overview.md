@@ -1,5 +1,13 @@
 # AI Overview
 
+## Actual DSP Path
+- Frontend project snapshots may include `audio_metadata_id`, `object_key`, `audio_path`, `audio_start_ms`, and `audio_duration_ms` on each clip.
+- The preferred backend lookup path is `clip.audio_metadata_id -> MySQL audio_metadata.objectKey`.
+- `cheap_dsp_scan` restores the whole project timeline, builds per-track full-length signals, and runs full STFT-based analysis over the complete timeline.
+- `cheap_dsp_scan` uses real waveform analysis when a clip audio path can be resolved from `audio_path`, direct `objectKey`, or `audio_root/objectKey`.
+- The graph keeps only compact frame statistics and artifact references in state. Raw waveform, full STFT matrices, and other large DSP blobs must not be stored in MySQL or Redis.
+- If any clip audio source cannot be resolved, the workflow now fails with an explicit audio failure code instead of falling back to mock DSP.
+
 ## 목적
 이 문서는 현재 AI 시스템의 상위 구조와 고정된 경계를 요약한다.
 세부 구현 설명이 아니라 작업 시 지켜야 할 기준만 정리한다.
@@ -23,6 +31,7 @@
 - runtime graph와 offline evaluation graph는 분리한다.
 - worker는 사용자 입력을 기다리며 붙잡혀 있지 않는다.
 - interrupt가 발생하면 상태를 저장하고 suspend/resume 방식으로 처리한다.
+- 프론트 잠금 정보는 ms 원본 계산을 유지하되, 응답 projection에서는 마디 범위와 affected clip id로 노출한다.
 
 ## 저장소 경계
 ### MySQL
@@ -42,7 +51,6 @@
 - 프로젝트 단위 락
 - 사용자 인터럽트 상태
 - preview 진행 상태
-- RAG 캐시
 
 Redis는 휘발성 운영 상태 저장소다.
 Redis 값이 없어져도 MySQL 기준으로 복구 가능해야 한다.
@@ -51,19 +59,14 @@ Redis 값이 없어져도 MySQL 기준으로 복구 가능해야 한다.
 아래 성격의 데이터를 저장한다.
 
 - timeline snapshot 전문
+- start API로 받은 프로젝트 snapshot 원문과 clip/BPM 파생 메타데이터
 - region evidence 전문
 - track vocal artifact 전문
 - suggestion artifact 전문
 - runtime critic 상세
 - offline evaluation 상세
-- 내부 policy / RAG 문서
 
 MongoDB는 큰 JSON 아티팩트 저장소다.
-
-## 현재 retrieval 원칙
-- 내부 curated policy 문서만 retrieval
-- retrieval은 분석 자체가 아니라 suggestion generation 보조 역할
-- 동일 조건 retrieval은 cache 가능
 
 ## 현재 모델 역할
 - DSP: 전체 분석과 문제 후보 탐지

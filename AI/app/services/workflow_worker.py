@@ -8,6 +8,9 @@ from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job
 logger = logging.getLogger(__name__)
 
 
+# 큐에 들어온 dispatch 메시지를 worker가 받아 실제 LangGraph 실행으로 넘기는 단계다.
+# start 요청이면 여기서 run_workflow_graph가 호출되고,
+# 이후 그래프 내부에서 load_project_snapshot 같은 노드가 순서대로 실행된다.
 def run_workflow_dispatch(message: WorkflowDispatchMessage):
     store = get_workflow_job_store()
     logger.info(
@@ -15,13 +18,17 @@ def run_workflow_dispatch(message: WorkflowDispatchMessage):
         message.job_id,
         message.dispatch_type,
     )
+    # worker는 큐 payload만 받고,
+    # 실제 상태 복원은 graph entry에서 durable snapshot 기준으로 수행한다.
     result = run_workflow_graph(
         {
             "job_id": message.job_id,
             "project_id": message.project_id,
             "dispatch_type": message.dispatch_type,
             "requested_by": message.requested_by,
-            "main_track_id": message.main_track_id,
+            "selected_region_id": message.selected_region_id,
+            "preserve_clip_id": message.preserve_clip_id,
+            "user_feedback_message": message.user_feedback_message,
             "selected_action_ids": message.selected_action_ids,
             "user_decision": message.user_decision,
         }

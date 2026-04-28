@@ -7,6 +7,8 @@ import com.salmon.studion.domain.project.repository.ProjectMemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 public class ProjectMemberService {
@@ -15,5 +17,16 @@ public class ProjectMemberService {
 
     public void createProjectMember(Project project, User user) {
         projectMemberRepository.save(ProjectMember.create(project, user));
+    }
+
+    public List<Integer> getProjectIdsByUserId(Integer userId) {
+        return projectMemberRepository.findProjectIdsByUserId(userId);
+    }
+
+    public List<ProjectMember> getMembersWithUserByProjectIds(List<Integer> projectIds) {
+        if (projectIds.isEmpty())
+            return List.of();
+
+        return projectMemberRepository.findAllWithUserByProjectIdIn(projectIds);
     }
 }

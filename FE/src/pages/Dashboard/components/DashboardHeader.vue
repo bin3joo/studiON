@@ -4,7 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { Plus } from 'lucide-vue-next'
 import { Button } from '@/shared/ui/button'
 import ThemeToggle from '@/shared/ui/theme/ThemeToggle.vue'
-import { createProject } from '@/pages/Project/api/project.api'
+import { buildCreateProjectPayload, createProject } from '@/pages/Project/api/project.api'
 import type { CreateProjectResponse, ProjectId } from '@/pages/Project/types/project.types'
 import InviteCodeInputButton from './InviteCodeInputButton.vue'
 import logoLight from '@/assets/logo_light.png'
@@ -14,16 +14,22 @@ const router = useRouter()
 const isCreating = ref(false)
 const errorMessage = ref('')
 
+const props = withDefaults(defineProps<{
+  existingProjectNames?: string[]
+}>(), {
+  existingProjectNames: () => [],
+})
+
 const navItems = [
   { label: '내 프로젝트', to: '/dashboard', active: true },
 ]
 
 function extractProjectId(response: CreateProjectResponse): ProjectId | null {
-  return response.data?.id
-    ?? response.data?.projectId
-    ?? response.id
-    ?? response.projectId
-    ?? null
+  return response.data.project.projectId ?? null
+}
+
+function extractProjectName(response: CreateProjectResponse): string {
+  return response.data?.project?.name ?? '새 프로젝트'
 }
 
 async function handleCreateProjectClick() {
@@ -31,14 +37,19 @@ async function handleCreateProjectClick() {
   errorMessage.value = ''
 
   try {
-    const response = await createProject({ name: '새 프로젝트' })
+    const payload = buildCreateProjectPayload(props.existingProjectNames)
+    const response = await createProject(payload)
     const projectId = extractProjectId(response)
+    const projectName = extractProjectName(response)
 
     if (!projectId) {
       throw new Error('생성된 프로젝트 ID를 확인할 수 없습니다.')
     }
 
-    await router.push(`/project/${projectId}`)
+    await router.push({
+      path: `/project/${projectId}`,
+      query: { name: projectName },
+    })
   }
   catch (error) {
     errorMessage.value = error instanceof Error

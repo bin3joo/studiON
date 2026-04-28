@@ -200,7 +200,7 @@ function handleResolveComment(payload: {
        <TrackList />
       </div>
 
-    <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
+    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
 
     <section class="px-6 py-4">
       <div class="relative">
@@ -221,7 +221,7 @@ function handleResolveComment(payload: {
       </div>
     </section>
 
-    <ProjectAiSection />
+    <ProjectAiSection /> -->
     </main>
 
 

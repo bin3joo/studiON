@@ -105,6 +105,15 @@ const trackStore = useTrackStore();
         class="relative h-full border-y border-r border-white/5 bg-card shadow-inner"
         :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       >
+
+      <div 
+          class="pointer-events-none absolute inset-y-0 z-40 w-px bg-primary"
+          :style="{ 
+            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
+            transform: 'translateX(-50%)',
+            boxShadow: '0 0 8px hsl(var(--primary) / 0.6)'
+          }"
+        ></div>
         
         <div aria-hidden="true" class="pointer-events-none absolute inset-0">
           <div 

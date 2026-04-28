@@ -34,4 +34,16 @@ public class MasterTrack extends BaseEntity {
     @Column(name = "pan", nullable = false)
     private Integer pan = 0;
 
+    public static MasterTrack create(
+            Project project
+    ) {
+        MasterTrack masterTrack = new MasterTrack();
+        masterTrack.project = project;
+        masterTrack.isSoloed = false;
+        masterTrack.isMuted = false;
+        masterTrack.volume = 0.0;
+        masterTrack.pan = 0;
+        return masterTrack;
+    }
+
 }

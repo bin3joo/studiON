@@ -31,4 +31,14 @@ public class ProjectMember extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    public static ProjectMember create(
+            Project project,
+            User user
+    ) {
+        ProjectMember projectMember = new ProjectMember();
+        projectMember.project = project;
+        projectMember.user = user;
+        return projectMember;
+    }
 }

@@ -27,7 +27,7 @@ public class Project extends BaseEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "root_note", nullable = false, length = 2)
+    @Column(name = "root_note", nullable = false, length = 10)
     private RootNote rootNote = RootNote.C;
 
     @Enumerated(EnumType.STRING)
@@ -55,4 +55,24 @@ public class Project extends BaseEntity {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    public static Project create(
+            String name,
+            RootNote rootNote,
+            ProjectMode mode,
+            Double tempo,
+            Integer timeSigNumerator,
+            Integer timeSigDenominator
+    ) {
+        Project project = new Project();
+        project.name = name;
+        project.rootNote = rootNote;
+        project.mode = mode;
+        project.tempo = tempo;
+        project.timeSigNumerator = timeSigNumerator;
+        project.timeSigDenominator = timeSigDenominator;
+        project.totalBarCount = 0;
+        project.totalPlayTimeMs = 0;
+        project.trackCount = 0;
+        return project;
+    }
 }

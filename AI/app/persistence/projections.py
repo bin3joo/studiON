@@ -261,6 +261,8 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
 def _build_track_vocal_predictions(state: WorkflowState) -> list[TrackVocalPredictionProjection]:
     predictions: list[TrackVocalPredictionProjection] = []
     inferred_roles = state.get("inferred_roles", {})
+    role_scores = state.get("track_role_scores", {})
+    role_confidences = state.get("track_role_confidences", {})
     for index, (track_id, role) in enumerate(inferred_roles.items(), start=1):
         is_vocal = role == "vocal-like"
         predictions.append(
@@ -268,9 +270,13 @@ def _build_track_vocal_predictions(state: WorkflowState) -> list[TrackVocalPredi
                 id=f"{state['job_id']}-vocal-prediction-{index}",
                 track_id=track_id,
                 job_id=state["job_id"],
-                vocal_score=0.92 if is_vocal else 0.36,
+                vocal_score=float(role_scores.get(track_id, 0.0)),
                 is_vocal=is_vocal,
-                confidence=0.88 if is_vocal else 0.64,
+                confidence=(
+                    float(role_confidences[track_id])
+                    if track_id in role_confidences
+                    else None
+                ),
             )
         )
     return predictions
@@ -327,6 +333,7 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
                 gain_delta_db=action.get("gainDeltaDb"),
                 move_delta_ms=action.get("moveDeltaMs"),
                 params_json=action.get("params") or {},
+                target_scope=action.get("targetScope", "TRACK"),
                 target_track_id=action.get("targetTrackId"),
                 source_track_id=action.get("sourceTrackId"),
                 source_clip_id=action.get("sourceClipId"),

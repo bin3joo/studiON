@@ -57,8 +57,11 @@ class WorkflowState(TypedDict, total=False):
     clip_index: list[dict]
     track_ids: list[int]
     sampled_clip_ids: list[str]
+    track_representative_specs: list[dict]
     role_candidate_track_ids: list[int]
     inferred_roles: dict[int, str]
+    track_role_scores: dict[int, float]
+    track_role_confidences: dict[int, float]
     issue_types: list[IssueType]
     detected_issues: list[IssueType]
     analysis_region_ids: list[str]
@@ -72,6 +75,7 @@ class WorkflowState(TypedDict, total=False):
     dsp_scan_summary: dict[str, object]
     vocal_detected: bool
     clap_required: bool
+    clap_artifact_id: str | None
     clipping_fix_applied: bool
     clipping_fix_log_id: str | None
     sibilance_fix_applied: bool

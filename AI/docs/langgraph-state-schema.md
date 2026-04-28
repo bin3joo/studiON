@@ -5,6 +5,7 @@
 - These fields exist only to resolve waveform input for `cheap_dsp_scan`.
 - Raw audio, waveform arrays, STFT, or other large DSP intermediates must still stay out of runtime state.
 - Runtime state keeps only compact DSP summary fields such as frame size, hop size, track stats, and `clip_feature_artifact_id`.
+- Runtime state keeps only compact CLAP summary fields such as `inferred_roles`, `track_role_scores`, `track_role_confidences`, and `clap_artifact_id`.
 - Full frame summaries produced by full STFT live behind MongoDB artifact documents, not in MySQL state snapshots.
 - Plan loop state keeps only `selected_region_id`, `preserve_clip_id`, `user_feedback_message`, `rule_candidate_payload`, `plan_payload`, and plan verdict fields. Raw LLM transcripts or large planning artifacts are not required in runtime state.
 
@@ -32,6 +33,7 @@ state는 orchestration을 위한 최소 정보만 담는다.
 - raw audio binary
 - waveform/STFT/mel 전체 데이터
 - CLAP raw window 전체 결과
+- external CLAP raw response payload
 - LLM raw output 전문
 - preview 본문 전체
 - 큰 evidence JSON

@@ -22,7 +22,7 @@
 - `load_project_snapshot`
   - persisted snapshot에서 BPM, bar mapping, clip index를 복원한다.
 - `sample_track_clips`
-  - track별 대표 clip id를 샘플링한다.
+  - track별로 CLAP 역할 판정에 사용할 원본 오디오 파일 1개를 고른다.
 - `cheap_dsp_scan`
   - 프로젝트 전체 timeline을 복원해 full STFT를 수행하고 frame 요약 artifact를 저장한다.
 - `detect_band_overlap`
@@ -31,10 +31,22 @@
   - mix frame summary에서 clipping region을 생성한다.
 - `detect_high_band_harshness`
   - high-band harshness region을 생성한다.
+- `select_role_candidates`
+  - `sibilance`가 요청된 경우에만 동작한다.
+  - 먼저 `high_band_harshness` region의 track을 재사용하고, 없으면 같은 고역 threshold로 내부 candidate track을 추출한다.
 - `detect_sibilance`
-  - sibilance region을 생성한다.
+  - `infer_track_roles`가 남긴 `inferred_roles`와 `vocal_detected`를 읽는다.
+  - `vocal-like`로 분류된 track만 순회해서 sibilance region을 생성한다.
+  - CLAP가 생략된 경로에서는 DSP fallback 없이 빈 결과를 유지한다.
 - `merge_analysis`
+  - 최종 `analysis_regions` 목록은 `start_ms`, `issue_type`, detector `score` 내림차순 기준으로 정렬해 후속 노드가 안정된 순서를 보게 한다.
+  - detector들이 만든 `analysis_regions`를 최종 목록으로 안정화한다.
+  - 동일 issue/track/band/time key의 중복 region이 있으면 더 높은 score 하나만 남긴다.
+  - `detected_issues`, `analysis_region_ids`를 최종 region 기준으로 다시 계산한다.
 - `candidate_ranking`
+  - 모든 final region에 대해 `ranking_scores`를 계산하지만, `requires_user_action=True`인 region만 `ranked_candidate_ids`에 포함한다.
+  - 사용자 후보 우선순위는 issue type 기본 우선순위, severity, detector score, duration을 함께 반영한다.
+  - 기본 issue 우선순위는 `clipping > band_overlap > high_band_harshness`다.
   - 사용자 입력이 필요한 region만 ranking한다.
 - `wait_user_plan_input`
   - 선택 region, preserve clip, 사용자 요구 입력을 기다린다.

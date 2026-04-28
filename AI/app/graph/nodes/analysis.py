@@ -13,6 +13,11 @@ from scipy.signal import resample_poly
 from app.core.config import get_settings
 from app.graph.nodes.common import artifact_id, workflow_update
 from app.graph.state import WorkflowState, utc_now
+from app.services.clap_inference import (
+    CLAPExcerptPayload,
+    CLAPInferenceError,
+    get_clap_inference_client,
+)
 from app.services.workflow_artifacts import (
     WorkflowArtifactDocument,
     get_workflow_artifact_store,
@@ -98,27 +103,41 @@ def load_project_snapshot(state: WorkflowState) -> WorkflowState:
 
 
 # 각 트랙에서 대표 clip id 하나씩을 뽑아 이후 응답과 디버깅에 쓴다.
+# 트랙마다 여기서 고른 원본 wav/mp3 파일을 CLAP에 보냄.
 def sample_track_clips(state: WorkflowState) -> WorkflowState:
-    track_ids = set(state.get("track_ids") or [])
-    sampled_clip_ids: list[str] = []
-    seen_tracks: set[int] = set()
-    for clip in state.get("clip_index", []):
-        track_id = int(clip["track_id"])
-        if track_id not in track_ids or track_id in seen_tracks:
-            continue
-        sampled_clip_ids.append(str(clip["clip_id"]))
-        seen_tracks.add(track_id)
+    """
+    representative_specs
+    {
+      "track_id": 10,
+      "clip_id": "clip-10-1",
+      "resolved_audio_path": ".../track-10.wav",
+      "source_format": ".wav",
+    }
+    """
+    representative_specs = _build_track_representative_specs(state)     # 트랙별 CLAP 판정에 들어갈 원본 파일 중간 데이터
+    sampled_clip_ids = [
+        str(spec["clip_id"])
+        for spec in representative_specs
+    ]
     return workflow_update(
         state,
         node="sample_track_clips",
         phase="track_clips_sampled",
         progress=12,
-        extra={"sampled_clip_ids": sampled_clip_ids},
+        extra={
+            "sampled_clip_ids": sampled_clip_ids,
+            "track_representative_specs": representative_specs,
+        },
     )
 
 
 # 프로젝트 전체 타임라인 signal을 복원한 뒤 track별 full STFT를 계산한다.
 # 결과는 frame 요약 artifact로 저장하고, state에는 작은 summary만 남긴다.
+"""
+- analysis_regions : 최종적으로 workflow state에 저장되는 분석 구간 목록, 하나의 원소는 region 하나를 뜻함
+- detected_issues : 이번 job에서 실제로 발견된 이슈 타입들의 목록 (예시 : ["clipping", "sibilance"])
+- materialized_regions : state에 넣기 직전의 완성된 region 리스트
+"""
 def cheap_dsp_scan(state: WorkflowState) -> WorkflowState:
     current_artifact_id = artifact_id(state, "cheap-dsp")
     try:
@@ -195,18 +214,8 @@ def detect_high_band_harshness(state: WorkflowState) -> WorkflowState:
 
 
 def select_role_candidates(state: WorkflowState) -> WorkflowState:
-    track_stats = state.get("dsp_scan_summary", {}).get("track_stats", {})
-    role_candidates = [
-        track_id
-        for track_id, _ in sorted(
-            track_stats.items(),
-            key=lambda item: item[1].get("vocal_like_score", 0.0),
-            reverse=True,
-        )[:2]
-    ]
-    clap_required = bool(role_candidates) and any(
-        issue in {"sibilance", "high_band_harshness"} for issue in state.get("issue_types", [])
-    )
+    role_candidates = _find_role_candidate_track_ids(state)
+    clap_required = bool(role_candidates) and "sibilance" in state.get("issue_types", [])
     return workflow_update(
         state,
         node="select_role_candidates",
@@ -219,6 +228,34 @@ def select_role_candidates(state: WorkflowState) -> WorkflowState:
     )
 
 
+def _find_role_candidate_track_ids(state: WorkflowState) -> list[int]:
+    if "sibilance" not in state.get("issue_types", []):
+        return []
+
+    candidate_track_ids = {
+        int(region["track_id"])
+        for region in state.get("analysis_regions", [])
+        if region.get("issue_type") == "high_band_harshness" and region.get("track_id") is not None
+    }
+    if candidate_track_ids:
+        return sorted(candidate_track_ids)
+
+    artifact = _load_dsp_feature_artifact(state)
+    track_frames_by_id = {
+        int(track_id): frames for track_id, frames in artifact.get("track_frames", {}).items()
+    }
+    for track_id, windows in track_frames_by_id.items():
+        for window in windows:
+            if (
+                window["high_band_ratio"] >= 0.34
+                and window["presence_energy"] >= 0.06
+                and window["spectral_centroid_hz"] >= 3200
+            ):
+                candidate_track_ids.add(track_id)
+                break
+    return sorted(candidate_track_ids)
+
+
 def clap_gate(state: WorkflowState) -> WorkflowState:
     return workflow_update(
         state,
@@ -227,21 +264,114 @@ def clap_gate(state: WorkflowState) -> WorkflowState:
         progress=38,
     )
 
-
+# sample_track_clips를 읽어서 실제 파일 bytes를 만들고 CLAP 요청 payload 생성
 def infer_track_roles(state: WorkflowState) -> WorkflowState:
-    track_stats = state.get("dsp_scan_summary", {}).get("track_stats", {})
-    inferred_roles = {}
-    for track_id in state.get("role_candidate_track_ids", []):
-        vocal_score = track_stats.get(track_id, {}).get("vocal_like_score", 0.0)
-        inferred_roles[track_id] = "vocal-like" if vocal_score >= 0.58 else "supporting"
+    current_artifact_id = artifact_id(state, "clap-track-roles")
+    notes = [*state.get("notes", [])]
+    try:
+        excerpt_payloads, excerpt_metadata = _build_clap_track_payloads(state)
+        threshold = float(get_settings().clap_vocal_threshold)
+        predictions = get_clap_inference_client().infer_track_roles(
+            job_id=state["job_id"],
+            excerpts=excerpt_payloads,
+        )
+    except (DSPBuildError, CLAPInferenceError) as exc:
+        return workflow_update(
+            state,
+            node="infer_track_roles",
+            phase="failed",
+            progress=44,
+            runtime_status="failed",
+            durable_status="FAILED",
+            extra={
+                "completed_at": utc_now(),
+                "failure_code": exc.code,
+                "failure_message": exc.message,
+            },
+        )
+
+    prediction_by_track_id = {prediction.track_id: prediction for prediction in predictions}
+    candidate_track_ids = [int(track_id) for track_id in state.get("role_candidate_track_ids", [])]
+    missing_track_ids = [
+        track_id for track_id in candidate_track_ids if track_id not in prediction_by_track_id
+    ]
+    if missing_track_ids:
+        return workflow_update(
+            state,
+            node="infer_track_roles",
+            phase="failed",
+            progress=44,
+            runtime_status="failed",
+            durable_status="FAILED",
+            extra={
+                "completed_at": utc_now(),
+                "failure_code": "CLAP_INFERENCE_INCOMPLETE",
+                "failure_message": (
+                    "CLAP inference did not return predictions for candidate tracks: "
+                    + ", ".join(str(track_id) for track_id in missing_track_ids)
+                ),
+            },
+        )
+
+    inferred_roles: dict[int, str] = {}
+    track_role_scores: dict[int, float] = {}
+    track_role_confidences: dict[int, float] = {}
+    artifact_predictions: list[dict[str, object]] = []
+    for track_id in candidate_track_ids:
+        prediction = prediction_by_track_id[track_id]
+        track_role_scores[track_id] = round(float(prediction.vocal_score), 4)
+        if prediction.confidence is not None:
+            track_role_confidences[track_id] = round(float(prediction.confidence), 4)
+        inferred_roles[track_id] = (
+            "vocal-like"
+            if float(prediction.vocal_score) >= threshold
+            else "supporting"
+        )
+        artifact_predictions.append(
+            {
+                "track_id": track_id,
+                "vocal_score": float(prediction.vocal_score),
+                "confidence": prediction.confidence,
+                "predicted_role": prediction.predicted_role,
+                "excerpt_scores": prediction.excerpt_scores,
+            }
+        )
+        track_excerpt_count = sum(
+            1 for item in excerpt_metadata if int(item["track_id"]) == track_id
+        )
+        notes.append(
+            f"CLAP track role inference completed for track {track_id} "
+            f"with {track_excerpt_count} track files."
+        )
+
+    get_workflow_artifact_store().upsert_artifact(
+        WorkflowArtifactDocument(
+            id=current_artifact_id,
+            job_id=state["job_id"],
+            artifact_type="clap_track_role_inference",
+            payload={
+                "threshold": threshold,
+                "candidate_track_ids": candidate_track_ids,
+                "excerpt_count": len(excerpt_metadata),
+                "excerpts": excerpt_metadata,
+                "predictions": artifact_predictions,
+            },
+        )
+    )
     return workflow_update(
         state,
         node="infer_track_roles",
         phase="track_roles_inferred",
         progress=44,
         extra={
+            "clap_artifact_id": current_artifact_id,
             "inferred_roles": inferred_roles,
+            "track_role_scores": track_role_scores,
+            "track_role_confidences": track_role_confidences,
             "vocal_detected": any(role == "vocal-like" for role in inferred_roles.values()),
+            "mongo_artifact_ids": [*state.get("mongo_artifact_ids", []), current_artifact_id],
+            "latest_artifact_id": current_artifact_id,
+            "notes": notes,
         },
     )
 
@@ -275,16 +405,16 @@ def merge_analysis(state: WorkflowState) -> WorkflowState:
 
 
 def candidate_ranking(state: WorkflowState) -> WorkflowState:
-    ranking_scores = {}
-    ranked_candidates: list[tuple[str, float]] = []
+    ranking_scores: dict[str, float] = {}
+    ranked_candidates: list[dict[str, object]] = []
     for region in state.get("analysis_regions", []):
         score = ranking_score(region)
         ranking_scores[region["id"]] = score
         if region.get("requires_user_action", True):
-            ranked_candidates.append((region["id"], score))
+            ranked_candidates.append(region)
     ranked_candidate_ids = [
-        region_id
-        for region_id, _ in sorted(ranked_candidates, key=lambda item: item[1], reverse=True)
+        str(region["id"])
+        for region in sorted(ranked_candidates, key=_candidate_ranking_sort_key)
     ]
     return workflow_update(
         state,
@@ -304,6 +434,12 @@ def build_compact_dsp_summary(state: WorkflowState) -> dict[str, object]:
 
 
 def ranking_score(region: dict[str, object]) -> float:
+    issue_priority_weight = {
+        "clipping": 0.42,
+        "band_overlap": 0.3,
+        "high_band_harshness": 0.14,
+        "sibilance": 0.08,
+    }
     severity_weight = {
         "CRITICAL": 1.25,
         "HIGH": 1.1,
@@ -314,7 +450,55 @@ def ranking_score(region: dict[str, object]) -> float:
     duration_weight = min(duration_ms / 1000, 1.0) * 0.18
     base = float(region.get("score", 0.0))
     weighted = base * severity_weight.get(region.get("severity", "MEDIUM"), 1.0)
-    return round(weighted + duration_weight, 3)
+    issue_weight = issue_priority_weight.get(str(region.get("issue_type", "")), 0.0)
+    return round(weighted + duration_weight + issue_weight, 3)
+
+
+def _candidate_ranking_sort_key(region: dict[str, object]) -> tuple[float, float, int]:
+    return (
+        -_issue_priority(region.get("issue_type")),
+        -ranking_score(region),
+        -_severity_priority(region.get("severity")),
+        int(region.get("start_ms", 0)),
+    )
+
+
+def _build_track_representative_specs(
+    state: WorkflowState,
+) -> list[dict[str, object]]:
+    clip_index = state.get("clip_index", [])
+    clips_by_track: dict[int, list[dict[str, object]]] = {}
+    for clip in clip_index:
+        track_id = int(clip["track_id"])
+        clips_by_track.setdefault(track_id, []).append(clip)
+
+    representative_specs: list[dict[str, object]] = []
+    for track_id in sorted(clips_by_track):
+        ranked_clips = sorted(
+            clips_by_track[track_id],
+            key=lambda clip: (
+                int(clip.get("start_ms") or 0),
+                str(clip.get("clip_id") or ""),
+            ),
+        )
+        selected_clip: dict[str, object] | None = None
+        for clip in ranked_clips:
+            resolved_audio_path = _resolve_audio_path(clip)
+            if resolved_audio_path is None:
+                continue
+            selected_clip = {**clip, "resolved_audio_path": resolved_audio_path}
+            break
+        if selected_clip is None:
+            continue
+        representative_specs.append(
+            {
+                "track_id": track_id,
+                "clip_id": str(selected_clip["clip_id"]),
+                "resolved_audio_path": str(selected_clip["resolved_audio_path"]),
+                "source_format": Path(str(selected_clip["resolved_audio_path"])).suffix or ".wav",
+            }
+        )
+    return representative_specs
 
 
 def _detect_issue_regions(
@@ -326,10 +510,16 @@ def _detect_issue_regions(
     issue: str,
     detector,
 ) -> WorkflowState:
+    # state에서 analysis_regions, detected_issues 복사
     analysis_regions = deepcopy(state.get("analysis_regions", []))
     detected_issues = [*state.get("detected_issues", [])]
+
+    # 파라미터로 입력받은 detector로 raw_regions 목록을 받음
     raw_regions = detector(state)
+    # raw_regions -> analysis_regions로 변환
     materialized_regions = _materialize_regions(state, issue=issue, raw_regions=raw_regions)
+
+
     if materialized_regions and issue not in detected_issues:
         detected_issues.append(issue)
     analysis_regions.extend(materialized_regions)
@@ -448,6 +638,44 @@ def _resolve_all_clip_audio(clip_index: list[dict[str, object]]) -> list[dict[st
     return resolved_clips
 
 
+def _build_clap_track_payloads(
+    state: WorkflowState,
+) -> tuple[list[CLAPExcerptPayload], list[dict[str, object]]]:
+    role_candidate_track_ids = [
+        int(track_id) for track_id in state.get("role_candidate_track_ids", [])
+    ]
+    if not role_candidate_track_ids:
+        return [], []
+
+    representative_specs = {
+        int(spec["track_id"]): spec for spec in state.get("track_representative_specs", [])
+    }
+    excerpt_payloads: list[CLAPExcerptPayload] = []
+    excerpt_metadata: list[dict[str, object]] = []
+    for track_id in role_candidate_track_ids:
+        spec = representative_specs.get(track_id)
+        if spec is None:
+            raise DSPBuildError(
+                "CLAP_SAMPLE_MISSING",
+                f"Missing representative source audio for CLAP candidate track {track_id}.",
+            )
+        clip_id = str(spec["clip_id"])
+        resolved_audio_path = str(spec["resolved_audio_path"])
+        metadata = {
+            "track_id": track_id,
+            "clip_id": clip_id,
+        }
+        excerpt_payloads.append(
+            CLAPExcerptPayload(
+                filename=f"track-{track_id}{Path(resolved_audio_path).suffix or '.wav'}",
+                audio_bytes=_read_audio_file_bytes(resolved_audio_path),
+                metadata=metadata,
+            )
+        )
+        excerpt_metadata.append(metadata)
+    return excerpt_payloads, excerpt_metadata
+
+
 def _resolve_audio_path(clip: dict[str, object]) -> str | None:
     direct_path = clip.get("audio_path")
     if isinstance(direct_path, str) and direct_path.strip():
@@ -483,6 +711,16 @@ def _load_audio_clip(path: str) -> tuple[np.ndarray, int]:
         waveform = librosa.resample(waveform, orig_sr=sample_rate, target_sr=DSP_TARGET_SR)
         sample_rate = DSP_TARGET_SR
     return waveform, sample_rate
+
+
+def _read_audio_file_bytes(path: str) -> bytes:
+    try:
+        return Path(path).read_bytes()
+    except OSError as exc:
+        raise DSPBuildError(
+            "AUDIO_SOURCE_READ_FAILED",
+            f"Failed to read audio file bytes for CLAP inference: {path}",
+        ) from exc
 
 
 def _build_track_timeline_signal(
@@ -873,7 +1111,9 @@ def _find_high_band_harshness_regions(state: WorkflowState) -> list[dict[str, ob
 def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
     if "sibilance" not in state.get("issue_types", []):
         return []
-    if not state.get("vocal_detected"):
+    inferred_roles = state.get("inferred_roles", {})
+    # 치찰음은 보컬 계열 트랙에서만 의미가 있으므로 CLAP이 보컬 track을 확정하지 못하면 탐지를 진행하지 않는다.
+    if not state.get("vocal_detected") or not inferred_roles:
         return []
     artifact = _load_dsp_feature_artifact(state)
     track_frames_by_id = {
@@ -881,12 +1121,17 @@ def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
     }
     vocal_tracks = [
         track_id
-        for track_id, role in state.get("inferred_roles", {}).items()
+        for track_id, role in inferred_roles.items()
         if role == "vocal-like"
     ]
+    if not vocal_tracks:
+        return []
     candidates = []
     for track_id in vocal_tracks:
         for window in track_frames_by_id.get(track_id, []):
+            # sibilance_ratio는 치찰 대역 집중도를, high_band_ratio는 전반적 고역 치우침을,
+            # spectral_centroid는 소리가 실제로 밝은 쪽에 몰려 있는지를 본다.
+            # 셋을 함께 써서 단순 고역 harshness와 보컬 치찰음을 구분한다.
             if (
                 window["sibilance_ratio"] >= 0.18
                 and window["high_band_ratio"] >= 0.18
@@ -1022,20 +1267,31 @@ def _finalize_analysis_regions(regions: list[dict[str, object]]) -> list[dict[st
         return []
     deduped: dict[tuple, dict[str, object]] = {}
     for region in regions:
-        key = (
-            region["issue_type"],
-            region.get("track_id"),
-            region.get("secondary_track_id"),
-            tuple(region.get("involved_track_ids", [])),
-            region["start_ms"],
-            region["end_ms"],
-            region.get("band_low_hz"),
-            region.get("band_high_hz"),
-        )
+        key = _analysis_region_dedup_key(region)
         current = deduped.get(key)
         if current is None or region.get("score", 0.0) > current.get("score", 0.0):
             deduped[key] = region
-    return sorted(deduped.values(), key=lambda region: (region["start_ms"], region["issue_type"]))
+    return sorted(
+        deduped.values(),
+        key=lambda region: (
+            int(region["start_ms"]),
+            str(region["issue_type"]),
+            -float(region.get("score", 0.0)),
+        ),
+    )
+
+
+def _analysis_region_dedup_key(region: dict[str, object]) -> tuple[object, ...]:
+    return (
+        region["issue_type"],
+        region.get("track_id"),
+        region.get("secondary_track_id"),
+        tuple(region.get("involved_track_ids", [])),
+        region.get("band_low_hz"),
+        region.get("band_high_hz"),
+        region["start_ms"],
+        region["end_ms"],
+    )
 
 
 def _severity_from_score(*, issue: str, score: float) -> str:
@@ -1050,6 +1306,26 @@ def _severity_from_score(*, issue: str, score: float) -> str:
     if score >= 0.48:
         return "MEDIUM"
     return "LOW"
+
+
+def _severity_priority(severity: object) -> int:
+    ranking = {
+        "CRITICAL": 4,
+        "HIGH": 3,
+        "MEDIUM": 2,
+        "LOW": 1,
+    }
+    return ranking.get(str(severity), 0)
+
+
+def _issue_priority(issue_type: object) -> int:
+    ranking = {
+        "clipping": 4,
+        "band_overlap": 3,
+        "high_band_harshness": 2,
+        "sibilance": 1,
+    }
+    return ranking.get(str(issue_type), 0)
 
 
 def _project_region_timeline(

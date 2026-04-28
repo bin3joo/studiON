@@ -106,8 +106,8 @@ const trackStore = useTrackStore();
         :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       >
 
-      <div 
-          class="pointer-events-none absolute inset-y-0 z-40 w-px bg-primary"
+   <div 
+          class="pointer-events-none absolute -top-4 -bottom-4 z-40 w-[1px] bg-primary"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',

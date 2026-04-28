@@ -33,6 +33,12 @@ const updatePlayhead = (clientX: number) => {
 }
 
 //마우스 조작 이벤트 헨들러
+
+//눈금을 더블클릭 했을때 해당 위치로 이동하도록 하는 함수
+const onDoubleClick = (e: MouseEvent) => {
+  updatePlayhead(e.clientX);
+};
+
 //마우스 왼쪽 버튼을 누르는 순간 단 한번 발생
 const onPointerDown = (e: PointerEvent) => {
   //마우스 좌클릭(버튼 번호 0)일때만 작동하도록 방어
@@ -87,11 +93,8 @@ const onPointerUp = (e:PointerEvent) => {
 
     <div 
       aria-label="시간 축 탐색 영역"
-      class="relative flex-1 cursor-pointer overflow-hidden touch-none"
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
+      class="relative flex-1 cursor-pointer touch-none"
+      @dblclick="onDoubleClick"
     >
       
       <div
@@ -115,16 +118,20 @@ const onPointerUp = (e:PointerEvent) => {
 
         <div 
           aria-label="현재 재생 위치 표시 바"
-          class="absolute top-0 bottom-0 z-50 w-3.5 pointer-events-none"
+          class="absolute top-0 bottom-0 z-50 w-3.5 cursor-pointer pointer-events-auto"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
-            transform: 'translateX(-50%)' 
+            transform: 'translateX(-50%)'
           }"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerUp"
+          @pointercancel="onPointerUp"
         >
-          <div class="absolute top-0 bottom-[10px] left-1/2 -translate-x-1/2 w-1px bg-white/20"></div>
+          <div class="absolute top-0 bottom-[10px] left-1/2 -translate-x-1/2 w-1px bg-white/20 pointer-events-none"></div>
 
-          <div 
-            class="absolute bottom-0 left-0 w-full h-2.5 bg-primary"
+          <div
+            class="absolute -bottom-px left-0 w-full h-2.5 bg-primary pointer-events-none"
             style="
               clip-path: polygon(0% 0%, 100% 0%, 50% 100%); 
               filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.8));

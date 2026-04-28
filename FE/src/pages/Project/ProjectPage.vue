@@ -10,6 +10,7 @@ import ProjectPlaybar from './components/ProjectPlaybar.vue'
 import ProjectEditSection from './components/ProjectEditSection.vue'
 import ProjectAiSection from './components/ProjectAiSection.vue'
 import ProjectSidePanel from './components/ProjectSidePanel.vue'
+import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금자
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -201,9 +202,11 @@ function handleResolveComment(payload: {
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
       <!-- flex-1 -> 남은 공간 차지, overflow-auto -> 넘치는 부분 스크롤 -->
-      <div class="flex-1 overflow-auto">
-       <!--트랙리스트-->
-       <TrackList />
+      <div class="flex-1 overflow-auto relative flex flex-col">
+        <!--눈금자 컴포넌트 추가 -->
+        <TimelineRuler />
+        <!--트랙리스트-->
+        <TrackList />
       </div>
 
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />

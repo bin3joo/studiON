@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import type { TrackUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
+import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 defineProps<{
   track: TrackUIState
 }>();
+
+//스토어 사용
+const trackStore = useTrackStore();
+
 </script>
 
 <template>
@@ -91,21 +96,33 @@ defineProps<{
         </div>
 
       </div>
-    </div> <div 
+    </div> 
+    <div 
       aria-label="오디오 클립 작업 영역" 
-      class="relative flex flex-1 select-none bg-transparent py-1.5 touch-none"
+      class="relative flex-1 select-none bg-transparent py-1.5 touch-none overflow-hidden"
     >
-      <div class="relative flex-1 overflow-hidden border-y border-r border-white/5 bg-[#141414] shadow-inner">
+      <div 
+        class="relative h-full border-y border-r border-white/5 bg-card shadow-inner"
+        :style="{ width: `${trackStore.totalTimelineWidth}px` }"
+      >
+
+   <div 
+          class="pointer-events-none absolute -top-4 -bottom-4 z-40 w-[1px] bg-primary"
+          :style="{ 
+            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
+            transform: 'translateX(-50%)',
+            boxShadow: '0 0 8px hsl(var(--primary) / 0.6)'
+          }"
+        ></div>
         
-        <div aria-hidden="true" class="pointer-events-none absolute inset-0 flex">
+        <div aria-hidden="true" class="pointer-events-none absolute inset-0">
           <div 
-            v-for="i in 32" 
-            :key="i" 
-            class="flex-1"
+            v-for="bar in trackStore.projectInfo.totalBarCount" 
+            :key="bar"
+            class="absolute top-0 bottom-0 border-l"
             :style="{
-              borderRightWidth: i % 4 === 0 ? '1.5px' : '1px',
-              borderRightStyle: 'solid',
-              borderRightColor: i % 4 === 0 ? 'hsl(225 15% 45% / 0.3)' : 'hsl(228 12% 32% / 0.15)'
+              left: `${(bar - 1) * trackStore.pixelPerBar}px`, // 픽셀 기반 절대 좌표
+              borderColor: (bar - 1) % 4 === 0 ? 'hsl(225 15% 45% / 0.4)' : 'hsl(228 12% 32% / 0.15)',
             }"
           ></div>
         </div>
@@ -116,8 +133,8 @@ defineProps<{
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 cursor-grab rounded-md border-2 transition active:cursor-grabbing"
           :style="{ 
-            left: `${clip.start}%`, 
-            width: `${clip.duration}%`,
+            left: `${clip.start * trackStore.pixelPerBar}px`, // % 대신 픽셀 곱하기
+            width: `${clip.duration * trackStore.pixelPerBar}px`, // % 대신 픽셀 곱하기
             borderColor: `${clip.color}80`, 
             backgroundColor: `${clip.color}33`, 
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)'

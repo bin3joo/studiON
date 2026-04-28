@@ -107,7 +107,7 @@ const trackStore = useTrackStore();
       >
 
    <div 
-          class="pointer-events-none absolute -top-4 -bottom-4 z-40 w-[1px] bg-primary"
+          class="pointer-events-none absolute -top-4 -bottom-4 z-40 w-1px bg-primary"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',
@@ -122,7 +122,8 @@ const trackStore = useTrackStore();
             class="absolute top-0 bottom-0 border-l"
             :style="{
               left: `${(bar - 1) * trackStore.pixelPerBar}px`, // 픽셀 기반 절대 좌표
-              borderColor: (bar - 1) % 4 === 0 ? 'hsl(225 15% 45% / 0.4)' : 'hsl(228 12% 32% / 0.15)',
+              //진한마디는 진한 회색 작은마디는 옅은회색 적용
+              borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45',
             }"
           ></div>
         </div>

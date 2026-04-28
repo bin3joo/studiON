@@ -25,11 +25,8 @@ const trackStore = useTrackStore();
    <!--border-border 테두리를 보더에 지정된 색으로 칠해라-->
   <div 
     :aria-label="`트랙: ${track.name}`" 
-    
     class="flex border-b border-border group" 
   >
-
-    
     <div 
       :aria-label="`${track.name} 컨트롤 패널`"
       class="sticky left-0 z-20 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-white/5"
@@ -59,7 +56,6 @@ const trackStore = useTrackStore();
       </div>
 
       <div class="mt-auto flex flex-col gap-2">
-        
         <div aria-label="볼륨 조절" class="flex items-center gap-2">
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">VOL</span>
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60">
@@ -94,9 +90,9 @@ const trackStore = useTrackStore();
             </span>
           </div>
         </div>
-
       </div>
     </div> 
+
     <div 
       aria-label="오디오 클립 작업 영역" 
       class="relative flex-1 select-none bg-transparent py-1.5 touch-none overflow-hidden"
@@ -105,24 +101,14 @@ const trackStore = useTrackStore();
         class="relative h-full border-y border-r border-white/5 bg-card shadow-inner"
         :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       >
-
-   <div 
-          class="pointer-events-none absolute -top-4 -bottom-4 z-40 w-1px bg-primary"
-          :style="{ 
-            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
-            transform: 'translateX(-50%)',
-            boxShadow: '0 0 8px hsl(var(--primary) / 0.6)'
-          }"
-        ></div>
         
-        <div aria-hidden="true" class="pointer-events-none absolute inset-0">
+        <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">
           <div 
             v-for="bar in trackStore.projectInfo.totalBarCount" 
             :key="bar"
             class="absolute top-0 bottom-0 border-l"
             :style="{
-              left: `${(bar - 1) * trackStore.pixelPerBar}px`, // 픽셀 기반 절대 좌표
-              //진한마디는 진한 회색 작은마디는 옅은회색 적용
+              left: `${(bar - 1) * trackStore.pixelPerBar}px`,
               borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45',
             }"
           ></div>
@@ -132,10 +118,10 @@ const trackStore = useTrackStore();
           v-for="clip in track.clips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
-          class="absolute inset-y-1 cursor-grab rounded-md border-2 transition active:cursor-grabbing"
+          class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 transition active:cursor-grabbing"
           :style="{ 
-            left: `${clip.start * trackStore.pixelPerBar}px`, // % 대신 픽셀 곱하기
-            width: `${clip.duration * trackStore.pixelPerBar}px`, // % 대신 픽셀 곱하기
+            left: `${clip.start * trackStore.pixelPerBar}px`,
+            width: `${clip.duration * trackStore.pixelPerBar}px`,
             borderColor: `${clip.color}80`, 
             backgroundColor: `${clip.color}33`, 
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
@@ -150,11 +136,20 @@ const trackStore = useTrackStore();
           </div>
         </div>
 
+        <div 
+          class="pointer-events-none absolute -top-4 -bottom-4 z-50 w-px bg-primary"
+          :style="{ 
+            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
+            transform: 'translateX(-50%)',
+            /* 눈금자 손잡이와 동일한 그림자 효과를 주어 일체감을 높입니다 */
+            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)'
+          }"
+        ></div>
+
       </div>
     </div>
 
   </div>
 </template>
-
 <style scoped>
 </style>

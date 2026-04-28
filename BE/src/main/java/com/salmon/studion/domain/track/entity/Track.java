@@ -4,9 +4,7 @@ import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.global.common.entity.BaseEntity;
 import com.salmon.studion.global.common.enums.TrackType;
 import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 @Getter
 @Entity
@@ -22,10 +20,10 @@ public class Track extends BaseEntity {
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
 
-    @Column(name = "pre_track_id", nullable = false)
+    @Column(name = "pre_track_id")
     private Integer preTrackId;
 
-    @Column(name = "post_track_id", nullable = false)
+    @Column(name = "post_track_id")
     private Integer postTrackId;
 
     @Enumerated(EnumType.STRING)
@@ -46,4 +44,21 @@ public class Track extends BaseEntity {
 
     @Column(name = "pan", nullable = false)
     private Integer pan = 0;
+
+    @Builder
+    private Track(Project project, Integer preTrackId, Integer postTrackId, TrackType trackType, String name) {
+        this.project = project;
+        this.preTrackId = preTrackId;
+        this.postTrackId = postTrackId;
+        this.trackType = trackType != null ? trackType : TrackType.AUDIO;
+        this.name = name;
+    }
+
+    public void updatePostTrackId(Integer postTrackId) {
+        this.postTrackId = postTrackId;
+    }
+
+    public void updatePreTrackId(Integer preTrackId) {
+        this.preTrackId = preTrackId;
+    }
 }

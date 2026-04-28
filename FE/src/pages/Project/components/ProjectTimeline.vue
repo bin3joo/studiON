@@ -216,7 +216,7 @@ onBeforeUnmount(() => {
               <!-- 확장 댓글 영역 -->
               <div
                 v-if="isExpanded(track.id, measure)"
-                class="absolute left-1/2 z-[100] w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
+                class="absolute left-1/2 z-100 w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
                 :class="expandedPlacement === 'top'
                   ? 'bottom-[calc(100%-8px)]'
                   : 'top-[calc(100%-8px)]'"

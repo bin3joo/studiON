@@ -1,0 +1,170 @@
+package com.salmon.studion.domain.track.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.project.repository.ProjectRepository;
+import com.salmon.studion.domain.track.dto.TrackState;
+import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
+import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
+import com.salmon.studion.domain.track.entity.TrackEventDocument;
+import com.salmon.studion.domain.track.repository.TrackEventRepository;
+import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.global.exception.BusinessException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Map;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class TrackService {
+
+    private static final String TRACKS_KEY = "project:%d:tracks";
+    private static final String TRACK_ID_SEQ_KEY = "project:%d:track:id_seq";
+    private static final String EVENT_SEQ_KEY = "project:%d:event:seq";
+
+    private final ProjectRepository projectRepository;
+    private final TrackEventRepository trackEventRepository;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper objectMapper;
+
+    public TrackAddResponse addTrack(TrackAddRequest request, Integer userId) {
+        projectRepository.findById(request.getProjectId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_NOT_FOUND));
+
+        Integer newTrackId = redisTemplate.opsForValue()
+                .increment(String.format(TRACK_ID_SEQ_KEY, request.getProjectId())).intValue();
+
+        Integer lastTrackId = findLastTrackId(request.getProjectId());
+        if (lastTrackId != null) {
+            updatePostTrackId(request.getProjectId(), lastTrackId, newTrackId);
+        }
+
+        TrackState newTrack = TrackState.builder()
+                .trackId(newTrackId)
+                .name(request.getName())
+                .type(request.getType().toLowerCase())
+                .preTrackId(lastTrackId)
+                .postTrackId(null)
+                .isMuted(false)
+                .isSoloed(false)
+                .volume(0.0)
+                .pan(0)
+                .build();
+
+        saveTrackToRedis(request.getProjectId(), newTrack);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
+
+        // 저장 실패 시에도 브로드캐스트는 진행하기 위한 처리
+        try {
+            saveTrackAddOrDeleteEvent(
+                    "TRACK_ADD",
+                    request.getProjectId(),
+                    newTrackId,
+                    userId,
+                    sequenceNo,
+                    lastTrackId,
+                    null);
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=TRACK_ADD, trackId={}", newTrackId, e);
+        }
+
+        return TrackAddResponse.builder()
+                .trackId(newTrackId)
+                .name(newTrack.getName())
+                .type(newTrack.getType())
+                .preTrackId(lastTrackId)
+                .postTrackId(null)
+                .isMuted(false)
+                .isSoloed(false)
+                .volume(0.0)
+                .pan(0)
+                .build();
+    }
+
+    /*
+        Redis에서 마지막 트랙의 id를 조회한다.
+     */
+    private Integer findLastTrackId(Integer projectId) {
+        String key = String.format(TRACKS_KEY, projectId);
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
+
+        for (Map.Entry<Object, Object> entry : entries.entrySet()) {
+            try {
+                TrackState track = objectMapper.readValue((String) entry.getValue(), TrackState.class);
+                if (track.getPostTrackId() == null) {
+                    return track.getTrackId();
+                }
+            } catch (JsonProcessingException ignored) {
+            }
+        }
+        return null;
+    }
+
+    /*
+        Redis에 Track을 저장한다.
+     */
+    private void saveTrackToRedis(Integer projectId, TrackState track) {
+        try {
+            String key = String.format(TRACKS_KEY, projectId);
+            String value = objectMapper.writeValueAsString(track);
+            redisTemplate.opsForHash().put(key, String.valueOf(track.getTrackId()), value);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /*
+        PostTrackId를 갱신한다.
+     */
+    private void updatePostTrackId(Integer projectId, Integer trackId, Integer postTrackId) {
+        String key = String.format(TRACKS_KEY, projectId);
+        String trackJson = (String) redisTemplate.opsForHash().get(key, String.valueOf(trackId));
+        if (trackJson == null) return;
+
+        try {
+            TrackState track = objectMapper.readValue(trackJson, TrackState.class);
+            TrackState updated = TrackState.builder()
+                    .trackId(track.getTrackId())
+                    .name(track.getName())
+                    .type(track.getType())
+                    .preTrackId(track.getPreTrackId())
+                    .postTrackId(postTrackId)
+                    .isMuted(track.getIsMuted())
+                    .isSoloed(track.getIsSoloed())
+                    .volume(track.getVolume())
+                    .pan(track.getPan())
+                    .build();
+            redisTemplate.opsForHash().put(key, String.valueOf(trackId), objectMapper.writeValueAsString(updated));
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /*
+        ADD 또는 DELETE 이벤트 전용 MongoDB 저장하는 내부 메서드
+     */
+    private void saveTrackAddOrDeleteEvent(
+            String eventType, Integer projectId, Integer newTrackId, Integer userId, Long sequenceNo,
+            Integer preTrackId, Integer postTrackId){
+        trackEventRepository.save(TrackEventDocument.builder()
+                .event(eventType)
+                .projectId(projectId)
+                .trackId(newTrackId)
+                .userId(userId)
+                .sequenceNo(sequenceNo)
+                .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                .preTrackId(preTrackId)
+                .postTrackId(postTrackId)
+                .undoable(true)
+                .undone(false)
+                .build());
+    }
+}

@@ -199,6 +199,25 @@ def _build_region_action(
             band_high_hz=region.get("band_high_hz"),
             params={"threshold": -18, "ratio": 2.4},
         )
+    if issue == "clipping":
+        recommended_trim_db = _recommended_clipping_trim_db(region)
+        return build_action(
+            state,
+            index=index,
+            action_type="TRUE_PEAK_LIMITER",
+            track_id=None,
+            target_scope="MASTER",
+            start_ms=region["start_ms"],
+            end_ms=region["end_ms"],
+            gain_delta_db=round(-recommended_trim_db, 2),
+            params={
+                "preGainDb": round(-recommended_trim_db, 2),
+                "ceilingDbfs": -1.0,
+                "attackMs": 2,
+                "releaseMs": 80,
+                "lookaheadMs": 3,
+            },
+        )
     if issue == "high_band_harshness":
         return build_action(
             state,
@@ -319,3 +338,15 @@ def _resolve_clip_track_id(state: WorkflowState, clip_id: str) -> int | None:
         if str(clip.get("clip_id")) == str(clip_id):
             return int(clip["track_id"])
     return None
+
+
+def _recommended_clipping_trim_db(region: dict[str, object]) -> float:
+    score = float(region.get("score", 0.0))
+    severity = str(region.get("severity", "MEDIUM"))
+    base_by_severity = {
+        "CRITICAL": 3.2,
+        "HIGH": 2.4,
+        "MEDIUM": 1.6,
+        "LOW": 1.2,
+    }
+    return min(max(base_by_severity.get(severity, 1.6) + (score * 1.25), 1.0), 5.5)

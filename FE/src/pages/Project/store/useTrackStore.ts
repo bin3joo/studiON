@@ -2,9 +2,9 @@
 //데이터 창고 피니아
 import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 //백엔드 통신 담당
-//import { projectApi } from '../api/project.api';
+// import { projectApi } from '../api/project.api';
 //트랙과 클립의 타입
 import type { TrackUIState, ClipUIState } from '../types';
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
@@ -12,6 +12,8 @@ export const useTrackStore = defineStore('track', () => {
     // ==========================================
     // 1. 상태(State) 선언
     // ==========================================
+
+    //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들ㅇ르 담을 배열
     //<trackUIstate[]>로 UI용 트랙데이터만 들어올수 있음을 선언 ref이므로 추가 삭제시 화면이 반응함 
 
@@ -25,17 +27,42 @@ export const useTrackStore = defineStore('track', () => {
         totalBarCount: 32
     });
 
+    //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
+    const isPlaying = ref(false); //재생중인지 아닌지
+    const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
+    const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
+
     // ==========================================
-    // 2. 액션(Action) 선언(데이터 패칭 및 가공)
+    // 2. 계산된 상태(Getters) - 타임라인 픽셀 계산기
     // ==========================================
+
+    //1마디당 픽셀 너비 (기본 120px * 줌 배율)
+
+    //화면에서 클립 길이나 재생바 위치를 px로 바꿀때 사용
+    const pixelPerBar = computed(() => 120 * zoomlevel.value);
+
+    //전체 타임라인의 가로 픽셀 길이(총 마디 수 * 1마디 픽셀)
+    const totalTimelineWidth = computed(() => projectInfo.value.totalBarCount * pixelPerBar.value);
+
+
+
+    // ==========================================
+    // 3. 액션(Action) 선언(데이터 패칭 및 가공)
+    // ==========================================
+
+    //재생 상태 토글 함수
+    const togglePlay = () => {
+        isPlaying.value = !isPlaying.value;
+    };
+
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
         // 통신 중 인터넷이 끊기거나 에러가 나더라도 앱이 터지지 않게 안저망을 치는 구문
         try {
             // 백엔드에서 프로젝트 정보를 가져옴 await 백엔드의 db에서 가져올때까지 기다림
-            //const data = await projectApi.getProjectDetail(projectId); 실제 연결 주석 처리
+            // const data = await projectApi.getProjectDetail(projectId);
 
-            // 1. 임시 가짜 데이터 (타입스크립트 완벽 호환)
+            // 1. 임시 가짜 데이터(타입스크립트 완벽 호환)
             const data = {
                 projectId: projectId, // 파라미터로 받은 id 재사용 (에러 8, 9번 해결용)
                 tempo: 120,
@@ -43,7 +70,7 @@ export const useTrackStore = defineStore('track', () => {
                 mode: 'MAJOR',
                 timeSigNumerator: 4,
                 timeSigDenominator: 4,
-                totalBarCount: 100,
+                totalBarCount: 100, //타임라인 길이 100마디 
                 tracks: [
                     {
                         trackId: 1,
@@ -120,5 +147,20 @@ export const useTrackStore = defineStore('track', () => {
     // ==========================================
     // 3. 내보내기 (Return)
     // ==========================================
-    return { trackList, projectInfo, fetchProject };
+    return {
+        // State
+        trackList,
+        projectInfo,
+        isPlaying,
+        playheadPosition,
+        zoomlevel,
+
+        // Getters
+        pixelPerBar,
+        totalTimelineWidth,
+
+        // Actions
+        fetchProject,
+        togglePlay
+    };
 });

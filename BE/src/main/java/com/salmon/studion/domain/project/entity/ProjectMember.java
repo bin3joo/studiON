@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uk_project_member_project_user",
-                        columnNames = {"project_id", "project_member_id"}
+                        columnNames = {"project_id", "user_id"}
                 )
         })
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -26,9 +26,19 @@ public class ProjectMember extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id", nullable = false)
-    private Project projectId;
+    private Project project;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
-    private User userId;
+    private User user;
+
+    public static ProjectMember create(
+            Project project,
+            User user
+    ) {
+        ProjectMember projectMember = new ProjectMember();
+        projectMember.project = project;
+        projectMember.user = user;
+        return projectMember;
+    }
 }

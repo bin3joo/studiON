@@ -27,7 +27,7 @@ public class Project extends BaseEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "root_note", nullable = false, length = 2)
+    @Column(name = "root_note", nullable = false, length = 10)
     private RootNote rootNote = RootNote.C;
 
     @Enumerated(EnumType.STRING)
@@ -52,7 +52,35 @@ public class Project extends BaseEntity {
     @Column(name = "track_count", nullable = false)
     private Integer trackCount = 0;
 
+    @Column(name = "total_audio_size_byte", nullable = false)
+    private Long totalAudioSizeByte = 0L;
+
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    @Column(name = "last_update_at")
+    private LocalDateTime lastUpdateAt;
+
+    public static Project create(
+            String name,
+            RootNote rootNote,
+            ProjectMode mode,
+            Double tempo,
+            Integer timeSigNumerator,
+            Integer timeSigDenominator
+    ) {
+        Project project = new Project();
+        project.name = name;
+        project.rootNote = rootNote;
+        project.mode = mode;
+        project.tempo = tempo;
+        project.timeSigNumerator = timeSigNumerator;
+        project.timeSigDenominator = timeSigDenominator;
+        project.totalBarCount = 0;
+        project.totalPlayTimeMs = 0;
+        project.trackCount = 0;
+        project.totalAudioSizeByte = 0L;
+        project.lastUpdateAt = LocalDateTime.now();
+        return project;
+    }
 }

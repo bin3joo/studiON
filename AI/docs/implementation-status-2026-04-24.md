@@ -29,7 +29,7 @@
 
 ## Detection 파이프라인
 - [x] `detect_band_overlap`가 frame 요약 artifact를 읽어 region을 만든다.
-- [x] `detect_clipping`가 mix frame 요약을 읽어 region을 만든다.
+- [x] `detect_clipping`가 mix frame 요약을 읽고 oversampled `true_peak_dbfs`를 주판정으로 사용해 region을 만든다.
 - [x] `detect_high_band_harshness`가 high-band frame 요약을 읽어 region을 만든다.
 - [x] `detect_sibilance`가 vocal-like track frame 요약을 읽어 region을 만든다.
 - [x] detect 결과는 연속 frame 병합 후 region으로 materialize된다.
@@ -42,9 +42,10 @@
 - [x] large JSON artifact를 MySQL state snapshot에 직접 저장하지 않는다.
 
 ## Suggestion/Preview 흐름
-- [x] `band_overlap`와 `sibilance`가 있으면 main track 선택 대기로 진입한다.
+- [x] `band_overlap`와 `clipping`이 있으면 main track 선택 대기로 진입한다.
 - [x] retrieval context는 `band_overlap -> sibilance` 순서로 정렬된다.
-- [x] clipping만 있는 경우 preview 없이 auto-fix 경로로 마무리된다.
+- [x] clipping만 있는 경우 사용자 plan 입력 대기로 진입하고 preview/confirm 경로를 탄다.
+- [x] sibilance만 있는 경우 preview 없이 auto-fix recipe/log를 남기고 완료된다.
 - [x] selection/confirm resume 흐름이 기존과 같은 phase 계약을 유지한다.
 
 ## 자동 검증

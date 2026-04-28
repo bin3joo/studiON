@@ -17,14 +17,14 @@ from app.graph.nodes.analysis import (
 from app.graph.nodes.review import plan_critic, plan_rule_validator
 from app.graph.nodes.runtime import (
     apply_selected_edit_recipe,
-    auto_fix_clipping,
+    auto_fix_sibilance,
     commit_selected_edit_recipe,
     emit_feedback_event,
     fail_workflow,
     finalize_output,
     init_state,
     load_entry_context,
-    log_clipping_fix,
+    log_sibilance_fix,
     persist_analysis_result,
     render_preview,
     resume_after_plan_input,
@@ -42,7 +42,7 @@ from app.graph.nodes.suggestion import (
 
 __all__ = [
     "apply_selected_edit_recipe",
-    "auto_fix_clipping",
+    "auto_fix_sibilance",
     "candidate_ranking",
     "cheap_dsp_scan",
     "clap_gate",
@@ -60,7 +60,7 @@ __all__ = [
     "init_state",
     "load_entry_context",
     "load_project_snapshot",
-    "log_clipping_fix",
+    "log_sibilance_fix",
     "materialize_execution_plan",
     "merge_analysis",
     "plan_critic",

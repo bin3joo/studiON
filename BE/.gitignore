@@ -11,8 +11,8 @@ application-secret*.yaml
 application-secret*.properties
 
 ### Prompt ###
-prompt.md
-result.md
+prompt/
+result/
 
 build/
 !gradle/wrapper/gradle-wrapper.jar

@@ -38,7 +38,7 @@ class WorkflowRunRequest(BaseModel):
     project_id: str
     track_ids: list[int] = Field(default_factory=list)
     project_snapshot: ProjectSnapshot | None = None
-    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap"])
+    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
     selected_region_id: str | None = None
@@ -53,7 +53,7 @@ class RuntimeRunRequest(BaseModel):
     project_id: str
     track_ids: list[int] = Field(default_factory=list)
     project_snapshot: ProjectSnapshot | None = None
-    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap"])
+    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
 

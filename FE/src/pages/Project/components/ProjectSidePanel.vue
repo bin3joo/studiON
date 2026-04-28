@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type PanelType = 'comments' | 'history'
+type PanelType = 'comments' | 'history' | 'ai'
 
 defineProps<{
   open: boolean
@@ -13,6 +13,7 @@ const emit = defineEmits<{
 const panelTitleMap: Record<PanelType, string> = {
   comments: '댓글 목록',
   history: '버전 기록',
+  ai: 'AI 기능',
 }
 </script>
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowUp, Check, X } from 'lucide-vue-next'
+import { ArrowUp, X } from 'lucide-vue-next'
 import type { TimelineComment } from '../types/comment.types'
 
 const props = defineProps<{

@@ -6,6 +6,8 @@ import com.salmon.studion.domain.project.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 public class ProjectService {
@@ -23,5 +25,12 @@ public class ProjectService {
         );
 
         return projectRepository.save(project);
+    }
+
+    public List<Project> getProjectsByIds(List<Integer> projectIds) {
+        if (projectIds.isEmpty())
+            return List.of();
+
+        return projectRepository.findByIdInOrderByLastUpdateAtDesc(projectIds);
     }
 }

@@ -3,6 +3,7 @@ import type {
   CreateInviteCodeResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  FetchProjectsResponse,
   JoinProjectRequest,
   JoinProjectResponse,
   Mode,
@@ -60,6 +61,7 @@ export const projectApi = {
 
 
 const MOCK_PROJECT_CREATE_DELAY_MS = 400;
+const MOCK_PROJECT_LIST_DELAY_MS = 300;
 const DEFAULT_PROJECT_NAME = '새 프로젝트';
 const DEFAULT_ROOT_NOTE: RootNote = 'C';
 const DEFAULT_MODE: Mode = 'Major';
@@ -161,6 +163,71 @@ export async function createProject(
   // }
   //
   // return await response.json() as CreateProjectResponse
+}
+
+export async function fetchProjects(): Promise<FetchProjectsResponse> {
+  // =========================
+  // mock implementation
+  // =========================
+  await wait(MOCK_PROJECT_LIST_DELAY_MS)
+
+  return {
+    code: 200,
+    message: '요청에 성공하였습니다.',
+    isSuccess: true,
+    data: {
+      projects: [
+        {
+          projectId: 1,
+          projectName: '새 프로젝트',
+          totalBarCount: 0,
+          totalPlayTime: 0,
+          totalAudioSize: 0,
+          lastUpdateAt: '2026-04-20T12:30:44',
+          members: [
+            {
+              userId: 1,
+              profileImgUrl: 'https://example.com/profile-1.png',
+            },
+          ],
+        },
+        {
+          projectId: 2,
+          projectName: '새 프로젝트1',
+          totalBarCount: 8,
+          totalPlayTime: 180000,
+          totalAudioSize: 314572800,
+          lastUpdateAt: '2026-04-21T10:00:00',
+          members: [
+            {
+              userId: 1,
+              profileImgUrl: 'https://example.com/profile-1.png',
+            },
+            {
+              userId: 2,
+              profileImgUrl: 'https://example.com/profile-2.png',
+            },
+          ],
+        },
+      ],
+    },
+  }
+
+  // =========================
+  // real API implementation
+  // =========================
+  // const response = await fetch('/api/v1/projects', {
+  //   method: 'GET',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //   },
+  // })
+  //
+  // if (!response.ok) {
+  //   throw new Error('프로젝트 목록 조회에 실패했습니다.')
+  // }
+  //
+  // return await response.json() as FetchProjectsResponse
 }
 
 /**

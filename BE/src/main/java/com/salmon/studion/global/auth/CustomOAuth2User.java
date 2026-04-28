@@ -1,5 +1,7 @@
 package com.salmon.studion.global.auth;
 
+import com.salmon.studion.domain.auth.entity.User;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
@@ -7,12 +9,20 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-// TODO: 임시 생성 (수정 필요)
+@RequiredArgsConstructor
 public class CustomOAuth2User implements OAuth2User {
+
+    private final User user;
+    private final Map<String, Object> attributes;
+    private final boolean isNewUser;
+
+    public boolean isNewUser() {
+        return isNewUser;
+    }
 
     @Override
     public Map<String, Object> getAttributes() {
-        return Map.of();
+        return attributes;
     }
 
     @Override
@@ -20,12 +30,9 @@ public class CustomOAuth2User implements OAuth2User {
         return List.of();
     }
 
+    // Spring Security가 principal 식별할 때 쓰는 이름 => userId로 사용자 식별
     @Override
     public String getName() {
-        return "";
-    }
-
-    public Integer getUserId() {
-        return 0;
+        return String.valueOf(user.getId());
     }
 }

@@ -1,0 +1,1087 @@
+from __future__ import annotations
+
+import math
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+import librosa
+import numpy as np
+import soundfile as sf
+from scipy.signal import resample_poly
+
+from app.core.config import get_settings
+from app.graph.nodes.common import artifact_id, workflow_update
+from app.graph.state import WorkflowState, utc_now
+from app.services.workflow_artifacts import (
+    WorkflowArtifactDocument,
+    get_workflow_artifact_store,
+)
+from app.services.workflow_snapshots import get_workflow_snapshot_store
+
+# 실제 DSP는 프로젝트 전체 타임라인을 기준으로 STFT를 계산한다.
+# state에는 전체 행렬을 남기지 않고, frame 단위 요약은 Mongo/in-memory artifact에 저장한다.
+# DSP_TARGET_SR: 분석용 공통 샘플레이트
+# STFT_N_FFT: 한 frame의 FFT 크기
+# STFT_WIN_LENGTH: 실제 분석 window 길이
+# STFT_HOP_LENGTH: frame 이동 간격
+# STFT_WINDOW: STFT 창 함수
+# MERGE_GAP_MS: region 병합 허용 간격
+
+DSP_TARGET_SR = 16000
+STFT_N_FFT = 1024
+STFT_WIN_LENGTH = 1024
+STFT_HOP_LENGTH = 256
+STFT_WINDOW = "hann"
+MERGE_GAP_MS = 96
+TRUE_PEAK_OVERSAMPLE_FACTOR = 4
+
+BAND_RANGES = {
+    "low_mid": (180, 420),
+    "body": (250, 1200),
+    "presence": (2500, 5000),
+    "harshness": (4500, 9000),
+    "sibilance": (6000, 8500),
+}
+# LangGraph
+ISSUE_MIN_DURATION_MS = {
+    "band_overlap": 180,
+    "clipping": 80,
+    "sibilance": 96,
+    "high_band_harshness": 96,
+}
+BAND_OVERLAP_FRAME_MIN_WINDOW_ENERGY = 0.01
+BAND_OVERLAP_FRAME_MIN_BODY_ENERGY = 0.18
+BAND_OVERLAP_FRAME_MIN_LOW_MID_ENERGY = 0.04
+BAND_OVERLAP_FRAME_MIN_ACTIVE_TRACKS = 2
+BAND_OVERLAP_FRAME_MIN_BODY_SUM = 1.05
+BAND_OVERLAP_FRAME_MIN_LOW_MID_SUM = 0.12
+
+
+class DSPBuildError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+# start API에서 저장한 timeline snapshot 기준선을 다시 읽어 state에 복원한다.
+def load_project_snapshot(state: WorkflowState) -> WorkflowState:
+    current_artifact_id = artifact_id(state, "snapshot")
+    snapshot_id = state.get("timeline_snapshot_id") or f"{state['job_id']}-timeline-snapshot"
+    snapshot_document = get_workflow_snapshot_store().get_snapshot(snapshot_id)
+    extra: dict[str, object] = {
+        "timeline_snapshot_id": snapshot_id,
+        "mongo_artifact_ids": [*state.get("mongo_artifact_ids", []), current_artifact_id],
+        "latest_artifact_id": current_artifact_id,
+    }
+    if snapshot_document is not None:
+        extra.update(
+            {
+                "project_duration_ms": state.get("project_duration_ms")
+                or snapshot_document.duration_ms,
+                "track_ids": state.get("track_ids") or snapshot_document.track_ids,
+                "bpm": state.get("bpm") or snapshot_document.bpm,
+                "numerator": state.get("numerator") or snapshot_document.numerator,
+                "denominator": state.get("denominator") or snapshot_document.denominator,
+                "bar_mapping": state.get("bar_mapping") or snapshot_document.bar_mapping,
+                "clip_index": state.get("clip_index") or snapshot_document.clip_index,
+            }
+        )
+    return workflow_update(
+        state,
+        node="load_project_snapshot",
+        phase="project_snapshot_loaded",
+        progress=8,
+        extra=extra,
+    )
+
+
+# 각 트랙에서 대표 clip id 하나씩을 뽑아 이후 응답과 디버깅에 쓴다.
+def sample_track_clips(state: WorkflowState) -> WorkflowState:
+    track_ids = set(state.get("track_ids") or [])
+    sampled_clip_ids: list[str] = []
+    seen_tracks: set[int] = set()
+    for clip in state.get("clip_index", []):
+        track_id = int(clip["track_id"])
+        if track_id not in track_ids or track_id in seen_tracks:
+            continue
+        sampled_clip_ids.append(str(clip["clip_id"]))
+        seen_tracks.add(track_id)
+    return workflow_update(
+        state,
+        node="sample_track_clips",
+        phase="track_clips_sampled",
+        progress=12,
+        extra={"sampled_clip_ids": sampled_clip_ids},
+    )
+
+
+# 프로젝트 전체 타임라인 signal을 복원한 뒤 track별 full STFT를 계산한다.
+# 결과는 frame 요약 artifact로 저장하고, state에는 작은 summary만 남긴다.
+def cheap_dsp_scan(state: WorkflowState) -> WorkflowState:
+    current_artifact_id = artifact_id(state, "cheap-dsp")
+    try:
+        summary, artifact_payload = _build_compact_dsp_summary(state)
+    except DSPBuildError as exc:
+        return workflow_update(
+            state,
+            node="cheap_dsp_scan",
+            phase="failed",
+            progress=18,
+            runtime_status="failed",
+            durable_status="FAILED",
+            extra={
+                "completed_at": utc_now(),
+                "failure_code": exc.code,
+                "failure_message": exc.message,
+            },
+        )
+
+    get_workflow_artifact_store().upsert_artifact(
+        WorkflowArtifactDocument(
+            id=current_artifact_id,
+            job_id=state["job_id"],
+            artifact_type="full_stft_frame_summary",
+            payload=artifact_payload,
+        )
+    )
+    return workflow_update(
+        state,
+        node="cheap_dsp_scan",
+        phase="cheap_dsp_scanned",
+        progress=18,
+        extra={
+            "analysis_regions": deepcopy(state.get("analysis_regions", [])),
+            "clip_feature_artifact_id": current_artifact_id,
+            "dsp_scan_summary": summary,
+            "mongo_artifact_ids": [*state.get("mongo_artifact_ids", []), current_artifact_id],
+            "latest_artifact_id": current_artifact_id,
+        },
+    )
+
+
+def detect_band_overlap(state: WorkflowState) -> WorkflowState:
+    return _detect_issue_regions(
+        state,
+        node="detect_band_overlap",
+        phase="band_overlap_detected",
+        progress=24,
+        issue="band_overlap",
+        detector=_find_band_overlap_regions,
+    )
+
+
+def detect_clipping(state: WorkflowState) -> WorkflowState:
+    return _detect_issue_regions(
+        state,
+        node="detect_clipping",
+        phase="clipping_detected",
+        progress=28,
+        issue="clipping",
+        detector=_find_clipping_regions,
+    )
+
+
+def detect_high_band_harshness(state: WorkflowState) -> WorkflowState:
+    return _detect_issue_regions(
+        state,
+        node="detect_high_band_harshness",
+        phase="high_band_harshness_detected",
+        progress=32,
+        issue="high_band_harshness",
+        detector=_find_high_band_harshness_regions,
+    )
+
+
+def select_role_candidates(state: WorkflowState) -> WorkflowState:
+    track_stats = state.get("dsp_scan_summary", {}).get("track_stats", {})
+    role_candidates = [
+        track_id
+        for track_id, _ in sorted(
+            track_stats.items(),
+            key=lambda item: item[1].get("vocal_like_score", 0.0),
+            reverse=True,
+        )[:2]
+    ]
+    clap_required = bool(role_candidates) and any(
+        issue in {"sibilance", "high_band_harshness"} for issue in state.get("issue_types", [])
+    )
+    return workflow_update(
+        state,
+        node="select_role_candidates",
+        phase="role_candidates_selected",
+        progress=36,
+        extra={
+            "role_candidate_track_ids": role_candidates,
+            "clap_required": clap_required,
+        },
+    )
+
+
+def clap_gate(state: WorkflowState) -> WorkflowState:
+    return workflow_update(
+        state,
+        node="clap_gate",
+        phase="clap_need_decided",
+        progress=38,
+    )
+
+
+def infer_track_roles(state: WorkflowState) -> WorkflowState:
+    track_stats = state.get("dsp_scan_summary", {}).get("track_stats", {})
+    inferred_roles = {}
+    for track_id in state.get("role_candidate_track_ids", []):
+        vocal_score = track_stats.get(track_id, {}).get("vocal_like_score", 0.0)
+        inferred_roles[track_id] = "vocal-like" if vocal_score >= 0.58 else "supporting"
+    return workflow_update(
+        state,
+        node="infer_track_roles",
+        phase="track_roles_inferred",
+        progress=44,
+        extra={
+            "inferred_roles": inferred_roles,
+            "vocal_detected": any(role == "vocal-like" for role in inferred_roles.values()),
+        },
+    )
+
+
+def detect_sibilance(state: WorkflowState) -> WorkflowState:
+    return _detect_issue_regions(
+        state,
+        node="detect_sibilance",
+        phase="sibilance_detected",
+        progress=48,
+        issue="sibilance",
+        detector=_find_sibilance_regions,
+    )
+
+
+def merge_analysis(state: WorkflowState) -> WorkflowState:
+    regions = _finalize_analysis_regions(state.get("analysis_regions", []))
+    detected_issues = list(dict.fromkeys(region["issue_type"] for region in regions))
+    region_ids = [region["id"] for region in regions]
+    return workflow_update(
+        state,
+        node="merge_analysis",
+        phase="analysis_merged",
+        progress=54,
+        extra={
+            "analysis_regions": regions,
+            "detected_issues": detected_issues,
+            "analysis_region_ids": region_ids,
+        },
+    )
+
+
+def candidate_ranking(state: WorkflowState) -> WorkflowState:
+    ranking_scores = {}
+    ranked_candidates: list[tuple[str, float]] = []
+    for region in state.get("analysis_regions", []):
+        score = ranking_score(region)
+        ranking_scores[region["id"]] = score
+        if region.get("requires_user_action", True):
+            ranked_candidates.append((region["id"], score))
+    ranked_candidate_ids = [
+        region_id
+        for region_id, _ in sorted(ranked_candidates, key=lambda item: item[1], reverse=True)
+    ]
+    return workflow_update(
+        state,
+        node="candidate_ranking",
+        phase="candidates_ranked",
+        progress=60,
+        extra={
+            "ranking_scores": ranking_scores,
+            "ranked_candidate_ids": ranked_candidate_ids,
+        },
+    )
+
+
+def build_compact_dsp_summary(state: WorkflowState) -> dict[str, object]:
+    summary, _ = _build_compact_dsp_summary(state)
+    return summary
+
+
+def ranking_score(region: dict[str, object]) -> float:
+    severity_weight = {
+        "CRITICAL": 1.25,
+        "HIGH": 1.1,
+        "MEDIUM": 0.92,
+        "LOW": 0.8,
+    }
+    duration_ms = max(int(region["end_ms"]) - int(region["start_ms"]), 1)
+    duration_weight = min(duration_ms / 1000, 1.0) * 0.18
+    base = float(region.get("score", 0.0))
+    weighted = base * severity_weight.get(region.get("severity", "MEDIUM"), 1.0)
+    return round(weighted + duration_weight, 3)
+
+
+def _detect_issue_regions(
+    state: WorkflowState,
+    *,
+    node: str,
+    phase: str,
+    progress: int,
+    issue: str,
+    detector,
+) -> WorkflowState:
+    analysis_regions = deepcopy(state.get("analysis_regions", []))
+    detected_issues = [*state.get("detected_issues", [])]
+    raw_regions = detector(state)
+    materialized_regions = _materialize_regions(state, issue=issue, raw_regions=raw_regions)
+    if materialized_regions and issue not in detected_issues:
+        detected_issues.append(issue)
+    analysis_regions.extend(materialized_regions)
+    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
+    latest_artifact_id = state.get("latest_artifact_id")
+    for region in materialized_regions:
+        current_artifact_id = region["evidence_doc_id"]
+        mongo_artifact_ids.append(current_artifact_id)
+        latest_artifact_id = current_artifact_id
+    return workflow_update(
+        state,
+        node=node,
+        phase=phase,
+        progress=progress,
+        extra={
+            "detected_issues": detected_issues,
+            "analysis_regions": analysis_regions,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
+        },
+    )
+
+
+# 전체 타임라인 signal을 트랙별로 복원하고 full STFT를 계산한다.
+def _build_compact_dsp_summary(state: WorkflowState) -> tuple[dict[str, object], dict[str, object]]:
+    clip_index = state.get("clip_index", [])
+    if not clip_index:
+        raise DSPBuildError(
+            "AUDIO_SOURCE_MISSING",
+            "The project snapshot did not include any clips for DSP analysis.",
+        )
+
+    duration_ms = int(state.get("project_duration_ms") or 0)
+    if duration_ms <= 0:
+        raise DSPBuildError(
+            "AUDIO_TIMELINE_RENDER_FAILED",
+            "The project duration is required before running full STFT analysis.",
+        )
+
+    track_ids = state.get("track_ids") or sorted({int(clip["track_id"]) for clip in clip_index})
+    track_sample_count = _ms_to_samples(duration_ms)
+    resolved_clips = _resolve_all_clip_audio(clip_index)
+
+    audio_cache = {
+        path: _load_audio_clip(path)
+        for path in sorted({str(clip["resolved_audio_path"]) for clip in resolved_clips})
+    }
+    track_signals: dict[int, np.ndarray] = {}
+    mix_signal = np.zeros(track_sample_count, dtype=np.float32)
+    for track_id in track_ids:
+        # 각 트랙마다 "프로젝트 전체 길이" 기준의 연속 파형을 하나씩 복원한다.
+        signal = _build_track_timeline_signal(
+            resolved_clips=resolved_clips,
+            audio_cache=audio_cache,
+            track_id=int(track_id),
+            total_samples=track_sample_count,
+        )
+        # 복원된 트랙 파형은 이후 트랙 단위 STFT 분석에 사용한다.
+        track_signals[int(track_id)] = signal
+        # 모든 트랙 파형을 더해 mix 파형도 함께 만든다.
+        mix_signal += signal
+
+    track_frames: dict[int, list[dict[str, object]]] = {}
+    for track_id, signal in track_signals.items():
+        track_frames[track_id] = _compute_track_frames(signal)
+    mix_frames = _compute_mix_frames(mix_signal, target_track_id=int(track_ids[0]))
+    track_stats = {
+        track_id: _compute_track_stats(track_frames[track_id]) for track_id in track_ids
+    }
+
+    summary = {
+        "analysis_source": "full_stft",
+        "sample_rate": DSP_TARGET_SR,
+        "n_fft": STFT_N_FFT,
+        "win_length": STFT_WIN_LENGTH,
+        "hop_length": STFT_HOP_LENGTH,
+        "frame_ms": _samples_to_ms(STFT_WIN_LENGTH),
+        "hop_ms": _samples_to_ms(STFT_HOP_LENGTH),
+        "analysis_start_ms": 0,
+        "duration_ms": duration_ms,
+        "frame_count": len(mix_frames),
+        "track_stats": track_stats,
+        "track_windows_preview": {
+            str(track_id): frames[:4] for track_id, frames in track_frames.items()
+        },
+        "mix_windows_preview": mix_frames[:4],
+    }
+    artifact_payload = {
+        "analysis_source": "full_stft",
+        "sample_rate": DSP_TARGET_SR,
+        "n_fft": STFT_N_FFT,
+        "win_length": STFT_WIN_LENGTH,
+        "hop_length": STFT_HOP_LENGTH,
+        "duration_ms": duration_ms,
+        "frame_count": len(mix_frames),
+        "track_frames": {str(track_id): frames for track_id, frames in track_frames.items()},
+        "mix_frames": mix_frames,
+    }
+    return summary, artifact_payload
+
+
+def _resolve_all_clip_audio(clip_index: list[dict[str, object]]) -> list[dict[str, object]]:
+    resolved_clips: list[dict[str, object]] = []
+    missing_clip_ids: list[str] = []
+    for clip in clip_index:
+        audio_path = _resolve_audio_path(clip)
+        if audio_path is None:
+            missing_clip_ids.append(str(clip["clip_id"]))
+            continue
+        resolved_clips.append({**clip, "resolved_audio_path": audio_path})
+    if missing_clip_ids:
+        raise DSPBuildError(
+            "AUDIO_SOURCE_MISSING",
+            "Missing resolvable audio source for clips: " + ", ".join(missing_clip_ids),
+        )
+    return resolved_clips
+
+
+def _resolve_audio_path(clip: dict[str, object]) -> str | None:
+    direct_path = clip.get("audio_path")
+    if isinstance(direct_path, str) and direct_path.strip():
+        path = Path(direct_path).expanduser()
+        if path.exists():
+            return str(path)
+
+    object_key = clip.get("object_key")
+    if not isinstance(object_key, str) or not object_key.strip():
+        return None
+
+    object_key_path = Path(object_key)
+    if object_key_path.exists():
+        return str(object_key_path)
+
+    audio_root = get_settings().audio_root
+    if audio_root:
+        rooted_path = Path(audio_root) / object_key
+        if rooted_path.exists():
+            return str(rooted_path)
+    return None
+
+
+def _load_audio_clip(path: str) -> tuple[np.ndarray, int]:
+    try:
+        waveform, sample_rate = sf.read(path, always_2d=False)
+    except Exception as exc:  # noqa: BLE001
+        raise DSPBuildError("AUDIO_DECODE_FAILED", f"Failed to decode audio file: {path}") from exc
+    if waveform.ndim > 1:
+        waveform = waveform.mean(axis=1)
+    waveform = waveform.astype(np.float32)
+    if sample_rate != DSP_TARGET_SR:
+        waveform = librosa.resample(waveform, orig_sr=sample_rate, target_sr=DSP_TARGET_SR)
+        sample_rate = DSP_TARGET_SR
+    return waveform, sample_rate
+
+
+def _build_track_timeline_signal(
+    *,
+    resolved_clips: list[dict[str, object]],
+    audio_cache: dict[str, tuple[np.ndarray, int]],
+    track_id: int,
+    total_samples: int,
+) -> np.ndarray:
+    # 이 함수의 반환값은 특정 트랙 하나를 프로젝트 타임라인 길이로 펼친 연속 파형이다.
+    signal = np.zeros(total_samples, dtype=np.float32)
+    # 모든 clip을 돌면서 현재 track_id에 속한 clip만 골라 타임라인 위에 다시 배치한다.
+    for clip in resolved_clips:
+        # 다른 트랙 clip이면 현재 트랙 파형에는 반영하지 않는다.
+        if int(clip["track_id"]) != track_id:
+            continue
+        # 프로젝트 타임라인에서 clip이 시작하는 지점을 샘플 단위로 변환한다.
+        clip_start_sample = _ms_to_samples(int(clip["start_ms"]))
+        # 프로젝트 타임라인에서 clip이 끝나는 지점을 샘플 단위로 변환한다.
+        # total_samples를 넘지 않도록 잘라 프로젝트 전체 길이 안에 맞춘다.
+        clip_end_sample = min(_ms_to_samples(int(clip["end_ms"])), total_samples)
+        # start/end가 뒤집히거나 길이가 0 이하인 clip은 무시한다.
+        if clip_end_sample <= clip_start_sample:
+            continue
+
+        # 미리 로드해 둔 원본 오디오 파형과 샘플레이트를 가져온다.
+        waveform, sample_rate = audio_cache[str(clip["resolved_audio_path"])]
+        # 원본 오디오에서 실제로 읽기 시작할 위치를 샘플 단위로 변환한다.
+        source_start_sample = _ms_to_samples(int(clip.get("audio_start_ms") or 0))
+        # 원본 오디오에서 얼마만큼 사용할지 길이를 계산한다.
+        # audio_duration_ms가 없으면 타임라인에 놓인 clip 길이를 기본값으로 사용한다.
+        available_duration_ms = int(
+            clip.get("audio_duration_ms") or max(int(clip["end_ms"]) - int(clip["start_ms"]), 1)
+        )
+        # 원본 오디오에서 읽을 끝 지점을 계산하되 실제 waveform 길이를 넘지 않게 자른다.
+        source_end_sample = min(
+            source_start_sample + _ms_to_samples(available_duration_ms),
+            waveform.size,
+        )
+        # 타임라인에 놓을 수 있는 길이와 원본에서 실제로 읽을 수 있는 길이 중 더 짧은 쪽을 택한다.
+        timeline_length = min(
+            clip_end_sample - clip_start_sample,
+            source_end_sample - source_start_sample,
+        )
+        # 실제로 붙일 수 있는 샘플이 없으면 건너뛴다.
+        if timeline_length <= 0:
+            continue
+        # 원본 오디오의 일부 구간을 잘라 현재 트랙의 타임라인 위치에 더한다.
+        # 같은 트랙 내에서 clip이 겹치면 이 덧셈으로 자연스럽게 합쳐진다.
+        signal[clip_start_sample : clip_start_sample + timeline_length] += waveform[
+            source_start_sample : source_start_sample + timeline_length
+        ]
+    # 이렇게 만들어진 signal은 "해당 트랙의 전체 타임라인 복원 파형"이다.
+    return signal
+
+
+def _compute_track_frames(signal: np.ndarray) -> list[dict[str, object]]:
+    if signal.size < STFT_WIN_LENGTH:
+        padded = np.zeros(STFT_WIN_LENGTH, dtype=np.float32)
+        padded[: signal.size] = signal
+        signal = padded
+
+    stft = librosa.stft(
+        signal,
+        n_fft=STFT_N_FFT,
+        hop_length=STFT_HOP_LENGTH,
+        win_length=STFT_WIN_LENGTH,
+        window=STFT_WINDOW,
+        center=False,
+    )
+    power = np.abs(stft) ** 2
+    freqs = librosa.fft_frequencies(sr=DSP_TARGET_SR, n_fft=STFT_N_FFT)
+    frames: list[dict[str, object]] = []
+    for frame_index in range(power.shape[1]):
+        start_sample = frame_index * STFT_HOP_LENGTH
+        end_sample = min(start_sample + STFT_WIN_LENGTH, signal.size)
+        time_slice = signal[start_sample:end_sample]
+        frame_power = power[:, frame_index]
+        total_energy = float(np.sum(frame_power) + 1e-9)
+        frames.append(
+            {
+                "index": frame_index,
+                "start_ms": _samples_to_ms(start_sample),
+                "end_ms": _samples_to_ms(end_sample),
+                "low_mid_energy": round(
+                    _band_ratio(frame_power, freqs, *BAND_RANGES["low_mid"], total_energy),
+                    3,
+                ),
+                "body_energy": round(
+                    _band_ratio(frame_power, freqs, *BAND_RANGES["body"], total_energy),
+                    3,
+                ),
+                "presence_energy": round(
+                    _band_ratio(frame_power, freqs, *BAND_RANGES["presence"], total_energy),
+                    3,
+                ),
+                "high_band_ratio": round(
+                    _band_ratio(frame_power, freqs, *BAND_RANGES["harshness"], total_energy),
+                    3,
+                ),
+                "sibilance_ratio": round(
+                    _band_ratio(frame_power, freqs, *BAND_RANGES["sibilance"], total_energy),
+                    3,
+                ),
+                "peak_dbfs": round(
+                    _to_dbfs(float(np.max(np.abs(time_slice))) if time_slice.size else 0.0),
+                    3,
+                ),
+                "spectral_centroid_hz": round(_spectral_centroid(frame_power, freqs), 1),
+                "window_energy": round(
+                    float(np.sqrt(np.mean(time_slice**2))) if time_slice.size else 0.0,
+                    3,
+                ),
+            }
+        )
+    return frames
+
+
+def _compute_mix_frames(signal: np.ndarray, *, target_track_id: int) -> list[dict[str, object]]:
+    if signal.size < STFT_WIN_LENGTH:
+        padded = np.zeros(STFT_WIN_LENGTH, dtype=np.float32)
+        padded[: signal.size] = signal
+        signal = padded
+
+    frame_count = 1 + max((signal.size - STFT_WIN_LENGTH) // STFT_HOP_LENGTH, 0)
+    frames: list[dict[str, object]] = []
+    for frame_index in range(frame_count):
+        start_sample = frame_index * STFT_HOP_LENGTH
+        end_sample = min(start_sample + STFT_WIN_LENGTH, signal.size)
+        time_slice = signal[start_sample:end_sample]
+        peak = float(np.max(np.abs(time_slice))) if time_slice.size else 0.0
+        true_peak = _oversampled_true_peak(time_slice)
+        rms = float(np.sqrt(np.mean(time_slice**2))) if time_slice.size else 0.0
+        frames.append(
+            {
+                "index": frame_index,
+                "start_ms": _samples_to_ms(start_sample),
+                "end_ms": _samples_to_ms(end_sample),
+                "peak_dbfs": round(_to_dbfs(peak), 3),
+                "true_peak_dbfs": round(_to_dbfs(true_peak), 3),
+                "clip_ratio": round(
+                    float(np.mean(np.abs(time_slice) >= 0.999)) if time_slice.size else 0.0,
+                    4,
+                ),
+                "crest_factor": round(max(_to_dbfs(peak) - _to_dbfs(rms), 0.0), 3),
+                "target_track_id": target_track_id,
+            }
+        )
+    return frames
+
+
+def _oversampled_true_peak(time_slice: np.ndarray) -> float:
+    if time_slice.size == 0:
+        return 0.0
+    if time_slice.size == 1:
+        return float(np.max(np.abs(time_slice)))
+    # 실제 true peak에 더 가깝게 보기 위해 frame 파형을 4배 업샘플링한 뒤 최대 진폭을 잰다.
+    oversampled = resample_poly(time_slice, up=TRUE_PEAK_OVERSAMPLE_FACTOR, down=1)
+    return float(np.max(np.abs(oversampled)))
+
+
+def _compute_track_stats(track_frames: list[dict[str, object]]) -> dict[str, float]:
+    if not track_frames:
+        return {
+            "vocal_like_score": 0.0,
+            "dominant_low_mid": 0.0,
+            "dominant_presence": 0.0,
+        }
+    active_frames = [frame for frame in track_frames if frame["window_energy"] >= 0.01]
+    frames_for_stats = active_frames or track_frames
+    low_mid = float(np.mean([frame["low_mid_energy"] for frame in frames_for_stats]))
+    presence = float(np.mean([frame["presence_energy"] for frame in frames_for_stats]))
+    sibilance = float(np.mean([frame["sibilance_ratio"] for frame in frames_for_stats]))
+    high_band = float(np.mean([frame["high_band_ratio"] for frame in frames_for_stats]))
+    centroid = float(np.mean([frame["spectral_centroid_hz"] for frame in frames_for_stats]))
+    vocal_like_score = min(
+        1.0,
+        max(
+            0.0,
+            (presence * 0.8)
+            + (sibilance * 1.8)
+            + (high_band * 1.1)
+            + (min(centroid / 5000.0, 1.0) * 0.4),
+        ),
+    )
+    return {
+        "vocal_like_score": round(vocal_like_score, 3),
+        "dominant_low_mid": round(low_mid, 3),
+        "dominant_presence": round(presence, 3),
+    }
+
+
+def _band_ratio(
+    frame_power: np.ndarray,
+    freqs: np.ndarray,
+    low_hz: int,
+    high_hz: int,
+    total_energy: float,
+) -> float:
+    mask = (freqs >= low_hz) & (freqs < high_hz)
+    if not np.any(mask):
+        return 0.0
+    return float(np.sum(frame_power[mask]) / total_energy)
+
+
+def _spectral_centroid(frame_power: np.ndarray, freqs: np.ndarray) -> float:
+    magnitude_sum = float(np.sum(frame_power))
+    if magnitude_sum <= 1e-9:
+        return 0.0
+    return float(np.sum(freqs * frame_power) / magnitude_sum)
+
+
+def _to_dbfs(amplitude: float) -> float:
+    return 20.0 * math.log10(max(amplitude, 1e-6))
+
+
+def _samples_to_ms(sample_index: int) -> int:
+    return int(round((sample_index / DSP_TARGET_SR) * 1000))
+
+
+def _ms_to_samples(duration_ms: int) -> int:
+    return max(int(round((duration_ms / 1000) * DSP_TARGET_SR)), 1)
+
+
+def _load_dsp_feature_artifact(state: WorkflowState) -> dict[str, Any]:
+    artifact_id_value = state.get("clip_feature_artifact_id")
+    if not artifact_id_value:
+        return {}
+    artifact = get_workflow_artifact_store().get_artifact(artifact_id_value)
+    return artifact.payload if artifact is not None else {}
+
+
+def _find_band_overlap_regions(state: WorkflowState) -> list[dict[str, object]]:
+    if "band_overlap" not in state.get("issue_types", []):
+        return []
+    artifact = _load_dsp_feature_artifact(state)
+    track_frames_by_id = {
+        int(track_id): frames for track_id, frames in artifact.get("track_frames", {}).items()
+    }
+    track_ids = sorted(track_frames_by_id)
+    if len(track_ids) < 2:
+        return []
+
+    candidates: list[dict[str, object]] = []
+    frame_count = min(len(track_frames_by_id[track_id]) for track_id in track_ids)
+    # band overlap은 두 트랙 pair를 전부 비교하기보다, 먼저 "과밀한 시간 프레임"을 찾고
+    # 그 프레임에 실제로 body/low-mid 대역을 차지하는 트랙 묶음을 region으로 승격한다.
+    for frame_index in range(frame_count):
+        active_tracks: list[tuple[int, dict[str, object]]] = []
+        for track_id in track_ids:
+            window = track_frames_by_id[track_id][frame_index]
+            if (
+                window["window_energy"] < BAND_OVERLAP_FRAME_MIN_WINDOW_ENERGY
+                or window["body_energy"] < BAND_OVERLAP_FRAME_MIN_BODY_ENERGY
+                or window["low_mid_energy"] < BAND_OVERLAP_FRAME_MIN_LOW_MID_ENERGY
+            ):
+                continue
+            active_tracks.append((track_id, window))
+
+        if len(active_tracks) < BAND_OVERLAP_FRAME_MIN_ACTIVE_TRACKS:
+            continue
+
+        body_sum = sum(float(window["body_energy"]) for _, window in active_tracks)
+        low_mid_sum = sum(float(window["low_mid_energy"]) for _, window in active_tracks)
+        if (
+            body_sum < BAND_OVERLAP_FRAME_MIN_BODY_SUM
+            or low_mid_sum < BAND_OVERLAP_FRAME_MIN_LOW_MID_SUM
+        ):
+            continue
+
+        sorted_tracks = sorted(
+            active_tracks,
+            key=lambda item: (float(item[1]["body_energy"]), float(item[1]["low_mid_energy"])),
+            reverse=True,
+        )
+        primary_track_id = sorted_tracks[0][0]
+        involved_track_ids = [track_id for track_id, _ in sorted_tracks]
+        track_body_contributions = {
+            str(track_id): round(float(window["body_energy"]), 3)
+            for track_id, window in sorted_tracks
+        }
+        reference_window = sorted_tracks[0][1]
+        score = round(
+            (body_sum * 0.45)
+            + (low_mid_sum * 0.2)
+            + (min(len(involved_track_ids) / 4.0, 1.0) * 0.35),
+            3,
+        )
+        candidates.append(
+            {
+                "track_id": primary_track_id,
+                "secondary_track_id": None,
+                "involved_track_ids": involved_track_ids,
+                "track_body_contributions": track_body_contributions,
+                "start_ms": reference_window["start_ms"],
+                "end_ms": reference_window["end_ms"],
+                "band_low_hz": BAND_RANGES["body"][0],
+                "band_high_hz": BAND_RANGES["body"][1],
+                "score": score,
+                "summary": "Detected congested low-mid body region across overlapping tracks.",
+            }
+        )
+    return _merge_candidate_windows("band_overlap", candidates)
+
+
+def _find_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
+    if "clipping" not in state.get("issue_types", []):
+        return []
+    artifact = _load_dsp_feature_artifact(state)
+    mix_frames = artifact.get("mix_frames", [])
+    candidates = []
+    for window in mix_frames:
+        # peak_dbfs >= -0.1:
+        # 현재 frame의 최대 샘플 피크가 0dBFS 바로 아래까지 올라온 상태다.
+        # 아직 완전히 넘치지 않았더라도 헤드룸이 사실상 거의 없는 위험 구간으로 본다.
+        #
+        # true_peak_dbfs > 0.0:
+        # frame 파형을 4배 업샘플링했을 때 실제 복원 파형의 최대치가 0dBFS를 넘는 상태다.
+        # 샘플 피크는 안전해 보여도 inter-sample peak 때문에
+        # 재생/인코딩 단계에서 클리핑이 날 수 있다.
+        #
+        # clip_ratio >= 0.002:
+        # frame 안에서 절대값이 거의 최대치(0.999 이상)에 붙어 있는
+        # 샘플 비율이 0.2% 이상이라는 뜻이다.
+        # 즉 순간 피크 한 번이 아니라, 파형 일부가 실제로 눌리거나 잘렸을 가능성을 본다.
+        true_peak_dbfs = float(window["true_peak_dbfs"])
+        if true_peak_dbfs <= 0.0:
+            continue
+
+        # true peak가 0dBFS를 넘은 경우만 clipping region으로 승격한다.
+        # sample peak 근접도와 clip_ratio는 심각도 보정용 보조 신호로만 사용한다.
+        peak_near_ceiling = max(float(window["peak_dbfs"]) + 0.1, 0.0)
+        score = round(
+            (true_peak_dbfs * 0.75)
+            + (peak_near_ceiling * 0.25)
+            + (float(window["clip_ratio"]) * 12),
+            3,
+        )
+        candidates.append(
+            {
+                "track_id": window["target_track_id"],
+                "start_ms": window["start_ms"],
+                "end_ms": window["end_ms"],
+                "score": score,
+                "summary": "Detected clipping candidate from oversampled true-peak overflow.",
+            }
+        )
+    return _merge_candidate_windows("clipping", candidates)
+
+
+def _find_high_band_harshness_regions(state: WorkflowState) -> list[dict[str, object]]:
+    if "high_band_harshness" not in state.get("issue_types", []):
+        return []
+    artifact = _load_dsp_feature_artifact(state)
+    track_frames_by_id = {
+        int(track_id): frames for track_id, frames in artifact.get("track_frames", {}).items()
+    }
+    candidates = []
+    for track_id, windows in track_frames_by_id.items():
+        for window in windows:
+            if (
+                window["high_band_ratio"] >= 0.34
+                and window["presence_energy"] >= 0.06
+                and window["spectral_centroid_hz"] >= 3200
+            ):
+                score = round(
+                    (window["high_band_ratio"] * 0.48)
+                    + (window["presence_energy"] * 0.22)
+                    + (min(window["spectral_centroid_hz"] / 8000.0, 1.0) * 0.3),
+                    3,
+                )
+                candidates.append(
+                    {
+                        "track_id": track_id,
+                        "start_ms": window["start_ms"],
+                        "end_ms": window["end_ms"],
+                        "band_low_hz": BAND_RANGES["harshness"][0],
+                        "band_high_hz": BAND_RANGES["harshness"][1],
+                        "score": score,
+                    "summary": (
+                        "Detected harsh high-band region that may require role-aware refinement."
+                    ),
+                    }
+                )
+    return _merge_candidate_windows("high_band_harshness", candidates)
+
+
+def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
+    if "sibilance" not in state.get("issue_types", []):
+        return []
+    if not state.get("vocal_detected"):
+        return []
+    artifact = _load_dsp_feature_artifact(state)
+    track_frames_by_id = {
+        int(track_id): frames for track_id, frames in artifact.get("track_frames", {}).items()
+    }
+    vocal_tracks = [
+        track_id
+        for track_id, role in state.get("inferred_roles", {}).items()
+        if role == "vocal-like"
+    ]
+    candidates = []
+    for track_id in vocal_tracks:
+        for window in track_frames_by_id.get(track_id, []):
+            if (
+                window["sibilance_ratio"] >= 0.18
+                and window["high_band_ratio"] >= 0.18
+                and window["spectral_centroid_hz"] >= 1400
+            ):
+                score = round(
+                    (window["sibilance_ratio"] * 0.45)
+                    + (window["high_band_ratio"] * 0.25)
+                    + (min(window["spectral_centroid_hz"] / 8000.0, 1.0) * 0.3),
+                    3,
+                )
+                candidates.append(
+                    {
+                        "track_id": track_id,
+                        "start_ms": window["start_ms"],
+                        "end_ms": window["end_ms"],
+                        "band_low_hz": BAND_RANGES["sibilance"][0],
+                        "band_high_hz": BAND_RANGES["sibilance"][1],
+                        "score": score,
+                        "summary": "Detected sibilance candidate after role-aware high-band pass.",
+                    }
+                )
+    return _merge_candidate_windows("sibilance", candidates)
+
+
+def _merge_candidate_windows(
+    issue: str,
+    candidates: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not candidates:
+        return []
+    candidates = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate["track_id"],
+            candidate.get("secondary_track_id"),
+            tuple(candidate.get("involved_track_ids", [])),
+            candidate.get("band_low_hz"),
+            candidate["start_ms"],
+        ),
+    )
+    merged = [deepcopy(candidates[0])]
+    merged[0]["window_count"] = 1
+    merged[0]["_score_total"] = merged[0]["score"]
+    for candidate in candidates[1:]:
+        previous = merged[-1]
+        same_group = (
+            previous["track_id"] == candidate["track_id"]
+            and previous.get("secondary_track_id") == candidate.get("secondary_track_id")
+            and previous.get("involved_track_ids") == candidate.get("involved_track_ids")
+            and previous.get("band_low_hz") == candidate.get("band_low_hz")
+            and previous.get("band_high_hz") == candidate.get("band_high_hz")
+        )
+        if same_group and candidate["start_ms"] - previous["end_ms"] <= MERGE_GAP_MS:
+            previous["end_ms"] = candidate["end_ms"]
+            previous["window_count"] += 1
+            previous["_score_total"] += candidate["score"]
+            if "track_body_contributions" in previous and "track_body_contributions" in candidate:
+                for track_id, value in candidate["track_body_contributions"].items():
+                    previous["track_body_contributions"][track_id] = round(
+                        previous["track_body_contributions"].get(track_id, 0.0) + value,
+                        3,
+                    )
+        else:
+            item = deepcopy(candidate)
+            item["window_count"] = 1
+            item["_score_total"] = item["score"]
+            merged.append(item)
+    min_duration_ms = ISSUE_MIN_DURATION_MS[issue]
+    finalized = []
+    for candidate in merged:
+        duration_ms = candidate["end_ms"] - candidate["start_ms"]
+        if duration_ms < min_duration_ms:
+            continue
+        candidate["score"] = round(candidate["_score_total"] / candidate["window_count"], 3)
+        candidate.pop("_score_total", None)
+        if "track_body_contributions" in candidate:
+            candidate["track_body_contributions"] = {
+                track_id: round(value / candidate["window_count"], 3)
+                for track_id, value in candidate["track_body_contributions"].items()
+            }
+        finalized.append(candidate)
+    return finalized
+
+
+def _materialize_regions(
+    state: WorkflowState,
+    *,
+    issue: str,
+    raw_regions: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not raw_regions:
+        return []
+    existing_count = sum(
+        1 for region in state.get("analysis_regions", []) if region.get("issue_type") == issue
+    )
+    materialized = []
+    for offset, region in enumerate(raw_regions, start=1):
+        evidence_doc_id = artifact_id(state, f"{issue}-evidence-{existing_count + offset}")
+        materialized.append(
+            {
+                "id": f"{state['job_id']}-{issue}-region-{existing_count + offset}",
+                "issue_type": issue,
+                "summary": region["summary"],
+                "start_ms": region["start_ms"],
+                "end_ms": region["end_ms"],
+                "severity": _severity_from_score(issue=issue, score=region["score"]),
+                # clipping과 다른 user-facing 이슈는 사용자가 구간을 보고 선택한다.
+                # sibilance만 자동 보정 경로로 넘긴다.
+                "requires_user_action": issue != "sibilance",
+                "evidence_doc_id": evidence_doc_id,
+                "track_id": region.get("track_id"),
+                "secondary_track_id": region.get("secondary_track_id"),
+                "involved_track_ids": region.get("involved_track_ids", []),
+                "track_body_contributions": region.get("track_body_contributions", {}),
+                "band_low_hz": region.get("band_low_hz"),
+                "band_high_hz": region.get("band_high_hz"),
+                "score": region["score"],
+                "window_count": region.get("window_count", 1),
+                **_project_region_timeline(
+                    state,
+                    start_ms=int(region["start_ms"]),
+                    end_ms=int(region["end_ms"]),
+                    involved_track_ids=region.get("involved_track_ids"),
+                ),
+            }
+        )
+    return materialized
+
+
+def _finalize_analysis_regions(regions: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not regions:
+        return []
+    deduped: dict[tuple, dict[str, object]] = {}
+    for region in regions:
+        key = (
+            region["issue_type"],
+            region.get("track_id"),
+            region.get("secondary_track_id"),
+            tuple(region.get("involved_track_ids", [])),
+            region["start_ms"],
+            region["end_ms"],
+            region.get("band_low_hz"),
+            region.get("band_high_hz"),
+        )
+        current = deduped.get(key)
+        if current is None or region.get("score", 0.0) > current.get("score", 0.0):
+            deduped[key] = region
+    return sorted(deduped.values(), key=lambda region: (region["start_ms"], region["issue_type"]))
+
+
+def _severity_from_score(*, issue: str, score: float) -> str:
+    if issue == "clipping":
+        if score >= 0.16:
+            return "CRITICAL"
+        if score >= 0.08:
+            return "HIGH"
+        return "MEDIUM"
+    if score >= 0.72:
+        return "HIGH"
+    if score >= 0.48:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _project_region_timeline(
+    state: WorkflowState,
+    *,
+    start_ms: int,
+    end_ms: int,
+    involved_track_ids: list[int] | None = None,
+) -> dict[str, object]:
+    involved_track_ids_set = {int(track_id) for track_id in involved_track_ids or []}
+    overlapped_measures = [
+        bar
+        for bar in state.get("bar_mapping", [])
+        if int(bar["start_ms"]) < end_ms and int(bar["end_ms"]) > start_ms
+    ]
+    affected_clip_ids = [
+        str(clip["clip_id"])
+        for clip in state.get("clip_index", [])
+        if int(clip["start_ms"]) < end_ms and int(clip["end_ms"]) > start_ms
+        and (
+            not involved_track_ids_set
+            or int(clip["track_id"]) in involved_track_ids_set
+        )
+    ]
+    if not overlapped_measures:
+        return {
+            "measure_start": None,
+            "measure_end": None,
+            "affected_clip_ids": affected_clip_ids,
+        }
+    return {
+        "measure_start": int(overlapped_measures[0]["measure_no"]),
+        "measure_end": int(overlapped_measures[-1]["measure_no"]),
+        "affected_clip_ids": affected_clip_ids,
+    }

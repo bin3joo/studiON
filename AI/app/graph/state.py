@@ -9,9 +9,11 @@ from typing_extensions import TypedDict
 IssueType = Literal["band_overlap", "clipping", "sibilance", "high_band_harshness"]
 ValidatorOutcome = Literal["PASS", "REVISE", "REJECT"]
 CriticOutcome = Literal["PASS", "REVISE", "REJECT"]
+# worker dispatch 메시지가 이번 실행을 어떤 종류로 처리해야 하는지 나타내는 제어 값이다.
+# start는 최초 실행이고, 나머지는 사용자 입력 이후 특정 대기 지점부터 재개하는 흐름이다.
 WorkflowDispatchType = Literal[
     "start",
-    "resume_mix_intent",
+    "resume_plan_input",
     "resume_selection",
     "resume_confirm",
 ]
@@ -46,6 +48,13 @@ class WorkflowState(TypedDict, total=False):
     durable_status: DurableJobStatus
     langgraph_thread_id: str
     timeline_snapshot_id: str | None
+    # snapshot 원문 대신 region 투영 계산에 필요한 파생 메타만 state에 유지한다.
+    project_duration_ms: int | None
+    bpm: float | None
+    numerator: int | None
+    denominator: int | None
+    bar_mapping: list[dict]
+    clip_index: list[dict]
     track_ids: list[int]
     sampled_clip_ids: list[str]
     role_candidate_track_ids: list[int]
@@ -56,14 +65,22 @@ class WorkflowState(TypedDict, total=False):
     analysis_regions: list[dict]
     ranked_candidate_ids: list[str]
     ranking_scores: dict[str, float]
-    main_track_id: int | None
+    selected_region_id: str | None
+    preserve_clip_id: str | None
+    user_feedback_message: str | None
     clip_feature_artifact_id: str | None
-    retrieval_needed: bool
-    retrieval_context_ids: list[str]
+    dsp_scan_summary: dict[str, object]
     vocal_detected: bool
     clap_required: bool
     clipping_fix_applied: bool
     clipping_fix_log_id: str | None
+    sibilance_fix_applied: bool
+    sibilance_fix_log_id: str | None
+    auto_fix_recipe_artifact_id: str | None
+    rule_candidate_payload: dict
+    plan_payload: dict
+    plan_status: str | None
+    plan_revision_notes: list[str]
     suggestion_payload: dict
     suggestion_group_id: str | None
     preview_id: str | None
@@ -119,24 +136,42 @@ def build_workflow_initial_state(
         "durable_status": "PENDING",
         "langgraph_thread_id": f"lg-thread:{job_id}",
         "timeline_snapshot_id": None,
+        "project_duration_ms": None,
+        "bpm": None,
+        "numerator": None,
+        "denominator": None,
+        "bar_mapping": [],
+        "clip_index": [],
         "track_ids": [],
         "sampled_clip_ids": [],
+        "track_representative_specs": [],
         "role_candidate_track_ids": [],
         "inferred_roles": {},
-        "issue_types": ["band_overlap"],
+        "track_role_scores": {},
+        "track_role_confidences": {},
+        "issue_types": ["band_overlap", "clipping"],
         "detected_issues": [],
         "analysis_region_ids": [],
         "analysis_regions": [],
         "ranked_candidate_ids": [],
         "ranking_scores": {},
-        "main_track_id": None,
+        "selected_region_id": None,
+        "preserve_clip_id": None,
+        "user_feedback_message": None,
         "clip_feature_artifact_id": None,
-        "retrieval_needed": False,
-        "retrieval_context_ids": [],
+        "dsp_scan_summary": {},
         "vocal_detected": False,
         "clap_required": False,
+        "clap_artifact_id": None,
         "clipping_fix_applied": False,
         "clipping_fix_log_id": None,
+        "sibilance_fix_applied": False,
+        "sibilance_fix_log_id": None,
+        "auto_fix_recipe_artifact_id": None,
+        "rule_candidate_payload": {},
+        "plan_payload": {},
+        "plan_status": None,
+        "plan_revision_notes": [],
         "suggestion_payload": {},
         "suggestion_group_id": None,
         "preview_id": None,

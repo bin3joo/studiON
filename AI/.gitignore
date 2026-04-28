@@ -44,3 +44,6 @@ shelf/
 .idea_modules/
 
 AI/.pyppeteer/
+
+.png
+.pyppeteer

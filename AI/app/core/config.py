@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     mysql_database: str | None = None
     mysql_user: str | None = None
     mysql_password: str | None = None
+    # timeline snapshot은 Mongo에 보관하므로 별도 연결 설정을 둔다.
+    mongo_url: str | None = None
+    mongo_database: str = "studion_ai"
+    mongo_snapshot_collection: str = "timeline_snapshots"
+    mongo_artifact_collection: str = "workflow_artifacts"
+    audio_root: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="STUDION_AI_", extra="ignore")
 
@@ -38,6 +44,8 @@ class Settings(BaseSettings):
         )
 
 
+# 설정 객체도 매번 새로 만들 필요가 없어서 한 번 생성한 뒤 프로세스 동안 재사용한다.
+# 환경변수/.env를 반복해서 다시 읽지 않게 하려는 캐시다.
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()

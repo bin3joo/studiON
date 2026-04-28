@@ -26,11 +26,13 @@ const projects = [
     collaborators: 3,
   },
 ]
+
+const existingProjectNames = projects.map(project => project.title)
 </script>
 
 <template>
   <main class="min-h-screen bg-background text-foreground font-grotesk">
-    <DashboardHeader />
+    <DashboardHeader :existing-project-names="existingProjectNames" />
 
     <section class="relative overflow-hidden px-6 py-12 md:px-10 md:py-16">
       <div class="pointer-events-none absolute -left-24 top-0 -z-10 h-[40vh] w-[40vh] rounded-full bg-primary/20 blur-[120px]" />

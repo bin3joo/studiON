@@ -5,7 +5,9 @@ import type {
   CreateProjectResponse,
   JoinProjectRequest,
   JoinProjectResponse,
+  Mode,
   ProjectId,
+  RootNote,
 } from '../types/project.types'
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
@@ -58,9 +60,42 @@ export const projectApi = {
 
 
 const MOCK_PROJECT_CREATE_DELAY_MS = 400;
+const DEFAULT_PROJECT_NAME = '새 프로젝트';
+const DEFAULT_ROOT_NOTE: RootNote = 'C';
+const DEFAULT_MODE: Mode = 'Major';
+const DEFAULT_TEMPO = 120.0;
+const DEFAULT_TIME_SIG_NUMERATOR = 4;
+const DEFAULT_TIME_SIG_DENOMINATOR = 4;
 
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+export function getNextDefaultProjectName(existingProjectNames: string[]): string {
+  const nameSet = new Set(existingProjectNames)
+
+  if (!nameSet.has(DEFAULT_PROJECT_NAME)) {
+    return DEFAULT_PROJECT_NAME
+  }
+
+  let suffix = 1
+
+  while (nameSet.has(`${DEFAULT_PROJECT_NAME}${suffix}`)) {
+    suffix += 1
+  }
+
+  return `${DEFAULT_PROJECT_NAME}${suffix}`
+}
+
+export function buildCreateProjectPayload(existingProjectNames: string[] = []): CreateProjectRequest {
+  return {
+    name: getNextDefaultProjectName(existingProjectNames),
+    rootNote: DEFAULT_ROOT_NOTE,
+    mode: DEFAULT_MODE,
+    tempo: DEFAULT_TEMPO,
+    timeSigNumerator: DEFAULT_TIME_SIG_NUMERATOR,
+    timeSigDenominator: DEFAULT_TIME_SIG_DENOMINATOR,
+  }
 }
 
 /**
@@ -69,21 +104,38 @@ function wait(ms: number) {
  * 백엔드 연결 시 아래 real API 코드를 주석 해제하고 mock 부분을 제거하면 된다.
  */
 export async function createProject(
-  payload: CreateProjectRequest = { name: '새 프로젝트' },
+  payload: CreateProjectRequest = buildCreateProjectPayload(),
 ): Promise<CreateProjectResponse> {
   // =========================
   // mock implementation
   // =========================
   await wait(MOCK_PROJECT_CREATE_DELAY_MS)
 
-  const normalizedName = payload.name.trim().replace(/\s+/g, '-').toLowerCase()
-  const fakeProjectId = normalizedName.length > 0
-    ? `mock-${normalizedName}`
-    : 'mock-project-id'
+  const fakeProjectId = Date.now()
 
   return {
+    code: 200,
+    message: '프로젝트가 생성되었습니다.',
+    isSuccess: true,
     data: {
-      projectId: fakeProjectId,
+      project: {
+        projectId: fakeProjectId,
+        name: payload.name,
+        rootNote: payload.rootNote,
+        mode: payload.mode,
+        tempo: payload.tempo,
+        timeSigNumerator: payload.timeSigNumerator,
+        timeSigDenominator: payload.timeSigDenominator,
+        totalBarCount: 0,
+        totalPlayTime: 0,
+      },
+      masterTrack: {
+        masterTrackId: fakeProjectId,
+        isSoloed: false,
+        isMuted: false,
+        volume: 1,
+        pan: 0,
+      },
     },
   }
 

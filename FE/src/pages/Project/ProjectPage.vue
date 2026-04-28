@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -16,6 +16,12 @@ type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 const route = useRoute()
 const projectId = route.params.projectId as string
+const projectName = computed(() => {
+  const name = route.query.name
+  return typeof name === 'string' && name.trim().length > 0
+    ? name
+    : '프로젝트'
+})
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 
 // 프로젝트 시작 시 트랙 정보 불러오기
@@ -180,7 +186,7 @@ function handleResolveComment(payload: {
   <!--플랙스, 플랙스 콜 -> 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
   <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground" >
     <ProjectHeader
-      :project-name="`프로젝트 ${projectId}`"
+      :project-name="projectName"
       last-saved-at="13:24"
       @rename="handleRename"
       @export="handleExport"

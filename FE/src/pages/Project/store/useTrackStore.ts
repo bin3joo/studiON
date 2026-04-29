@@ -94,6 +94,21 @@ export const useTrackStore = defineStore('track', () => {
     //전체 타임라인의 가로 픽셀 길이(총 마디 수 * 1마디 픽셀)
     const totalTimelineWidth = computed(() => projectInfo.value.totalBarCount * pixelPerBar.value);
 
+    //스크롤 축소 할때 숫자를 표시할 마디 간격 계산 (1,4,8)
+    const barNumberStep = computed(() => {
+        if (zoomlevel.value <= 0.5) return 8; //많이 축소할때 1, 9 ,17 ...
+        if (zoomlevel.value < 1.0) return 4; //약간 축소할때 1, 5, 9 ...
+        return 1; //기본 1칸씩
+    })
+
+    //스크롤 확대 할떄 : 1마디를 몇 칸으로 쪼갤 것인가 (4분 8분 16분 음표)
+    const subDivision = computed(() => {
+        if (zoomlevel.value >= 2.5) return 16; //아주 많이 확대 : 16분음표 단위
+        if (zoomlevel.value >= 1.5) return 8; //많이 확대 : 8분음표 단위
+        if (zoomlevel.value >= 1.0) return 4; //기본 4분음표 단위
+        return 1; //안쪼갬
+    })
+
 
 
     // ==========================================
@@ -105,7 +120,18 @@ export const useTrackStore = defineStore('track', () => {
         isPlaying.value = !isPlaying.value;
     };
 
-    //마
+    //마우스 휠 방향에 따라 줌 배율을 조절하는 함수
+    const updateZoom = (deltaY: number) => {
+        const zoomStep = 0.1; //한 번 휠을 굴릴 때 변하는 배율(10%)
+
+        if (deltaY > 0) {
+            //휠을 아래루 굴림: 축소(최소 0.5배)
+            zoomlevel.value = Math.max(0.5, zoomlevel.value - zoomStep);
+        } else {
+            //휠을 위로 굴림: 확대(최대 3배)
+            zoomlevel.value = Math.min(3, zoomlevel.value + zoomStep);
+        }
+    }
 
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
@@ -210,9 +236,12 @@ export const useTrackStore = defineStore('track', () => {
         // Getters
         pixelPerBar,
         totalTimelineWidth,
+        subDivision,
+        barNumberStep,
 
         // Actions
         fetchProject,
-        togglePlay
+        togglePlay,
+        updateZoom,
     };
 });

@@ -109,17 +109,28 @@ const onPointerUp = (e:PointerEvent) => {
           :style="{ left: `${(bar - 1) * trackStore.pixelPerBar}px` }"
         >
           <span 
-            v-if="(bar - 1) % 4 === 0" 
+            v-if="(bar - 1) % trackStore.barNumberStep === 0" 
             class="absolute left-1.5 bottom-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
           >
-            {{ bar - 1 }}
+            {{ bar }}
           </span>
+
+      <template v-if="trackStore.subDivision > 1">
+            <div
+              v-for="sub in trackStore.subDivision - 1"
+              :key="sub"
+              class="absolute bottom-0 border-l border-white/5"
+              :style="{ 
+                left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px`,
+                height: sub % (trackStore.subDivision / 4) === 0 ? '40%' : '20%' // 정박자 눈금은 조금 더 길게
+              }"
+            ></div>
+          </template>
         </div>
 
         <div 
           aria-label="현재 재생 위치 표시 바"
           class="absolute top-0 bottom-0 z-50 w-3.5 cursor-pointer pointer-events-auto"
-          :class="{ 'transition-[left] duration-150 ease-out': !trackStore.isPlaying}"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)'

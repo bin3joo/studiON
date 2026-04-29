@@ -109,11 +109,19 @@ const trackStore = useTrackStore();
             class="absolute top-0 bottom-0 border-l"
             :style="{
               left: `${(bar - 1) * trackStore.pixelPerBar}px`,
-              borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45',
+              borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45', // 4마디 단위 밝은 선 유지
             }"
-          ></div>
+          >
+            <template v-if="trackStore.subDivision > 1">
+              <div
+                v-for="sub in trackStore.subDivision - 1"
+                :key="sub"
+                class="absolute top-0 bottom-0 border-l border-white/5"
+                :style="{ left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px` }"
+              ></div>
+            </template>
+          </div>
         </div>
-
         <div 
           v-for="clip in track.clips" 
           :key="clip.clipId"
@@ -138,7 +146,6 @@ const trackStore = useTrackStore();
 
         <div 
           class="pointer-events-none absolute -top-4 -bottom-4 z-50 w-px bg-primary"
-          :class="{ 'transition-[left] duration-150 ease-out': !trackStore.isPlaying}"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',

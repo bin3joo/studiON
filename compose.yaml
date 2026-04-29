@@ -1,27 +1,4 @@
 services:
-  nginx:
-    build:
-      context: ./FE
-      target: runtime
-    volumes:
-      - certbot_certs:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-    depends_on:
-      backend:
-        condition: service_started
-
-  certbot: 
-    image: certbot/certbot
-    volumes:
-      - certbot_certs:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-
-  backend:
-    build: ./BE
-
-  ai:
-    build: ./AI
-
   redis:
     image: redis:7
     container_name: redis
@@ -29,6 +6,4 @@ services:
       - redis_data:/data
 
 volumes:
-  certbot_certs:
-  certbot_www:
   redis_data:

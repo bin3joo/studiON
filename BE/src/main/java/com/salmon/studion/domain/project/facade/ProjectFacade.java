@@ -1,8 +1,13 @@
 package com.salmon.studion.domain.project.facade;
 
+import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.auth.entity.User;
+import com.salmon.studion.domain.auth.service.UserService;
+import com.salmon.studion.domain.clip.entity.Clip;
+import com.salmon.studion.domain.clip.service.ClipService;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
+import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectListResponse;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.entity.ProjectMember;
@@ -10,6 +15,8 @@ import com.salmon.studion.domain.project.service.MasterTrackService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.entity.MasterTrack;
+import com.salmon.studion.domain.track.entity.Track;
+import com.salmon.studion.domain.track.service.TrackService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,9 +32,40 @@ public class ProjectFacade {
     private final ProjectService projectService;
     private final ProjectMemberService projectMemberService;
     private final MasterTrackService masterTrackService;
-    // TODO: UserService 구현되면 주석 해제하기
-//    private final UserService userService;
+    private final UserService userService;
+    private final TrackService trackService;
+    private final ClipService clipService;
 
+    @Transactional(readOnly = true)
+    public ProjectDetailResponse getProjectDetail(Integer projectId, Integer userId) {
+        /*
+            1. 프로젝트 정보 조회 (+존재 여부 확인)
+            2. 프로젝트 멤버 검증
+            3. 프로젝트 상세 정보 조회
+                3-1. 마스터 트랙 조회
+                3-2. 트랙 일괄 조회
+                3-3. (트랙이 있는 경우에만) 클립 + 오디오 메타데이터 일괄 조회
+            4. DTO 조립
+         */
+        Project project = projectService.getProjectOrThrow(projectId);
+
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        MasterTrack masterTrack = masterTrackService.getMasterTrackOrThrow(projectId);
+
+        List<Track> tracks = trackService.getTracksByProjectId(projectId);
+
+        List<Clip> clips = List.of();
+
+        if (!tracks.isEmpty()) {
+            List<Integer> trackIds = tracks.stream().map(Track::getId).toList();
+            clips = clipService.getClipsWithAudioMetadataByTrackIds(trackIds);
+        }
+
+        return toProjectDetailResponse(project, masterTrack, tracks, clips);
+    }
+
+    @Transactional(readOnly = true)
     public ProjectListResponse getProjectList(Integer userId) {
         /*
             1. userId로 내가 참여한 projectId 목록 조회
@@ -75,10 +113,7 @@ public class ProjectFacade {
         Project project = projectService.createProject(projectCreateRequest);
         MasterTrack masterTrack = masterTrackService.createMasterTrack(project);
 
-        //TODO: User 구현되면 교체하기
-        User user = null;
-        //User user = userService.getUserByUserId(userId);
-
+        User user = userService.getUserByUserId(userId);
         projectMemberService.createProjectMember(project, user);
 
         return ProjectCreateResponse.builder()
@@ -103,4 +138,77 @@ public class ProjectFacade {
                 .build();
     }
 
+    private ProjectDetailResponse toProjectDetailResponse(
+            Project project,
+            MasterTrack masterTrack,
+            List<Track> tracks,
+            List<Clip> clips
+    ) {
+        Map<Integer, List<Clip>> clipsByTrackId = clips.stream()
+                .collect(Collectors.groupingBy(clip -> clip.getTrack().getId()));
+
+        ProjectDetailResponse.MasterTrackResponse masterTrackResponse = toMasterTrackResponse(masterTrack);
+
+        List<ProjectDetailResponse.TrackResponse> trackResponses = tracks.stream()
+                .map(track -> toTrackResponse(track, clipsByTrackId.getOrDefault(track.getId(), List.of())
+                ))
+                .toList();
+        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses);
+    }
+
+    private ProjectDetailResponse.MasterTrackResponse toMasterTrackResponse(MasterTrack masterTrack) {
+        return new ProjectDetailResponse.MasterTrackResponse(
+                masterTrack.getId(),
+                masterTrack.getIsSoloed(),
+                masterTrack.getIsMuted(),
+                masterTrack.getVolume(),
+                masterTrack.getPan()
+        );
+    }
+
+    private ProjectDetailResponse.TrackResponse toTrackResponse(Track track, List<Clip> clips) {
+        List<ProjectDetailResponse.ClipResponse> clipResponses = clips.stream()
+                .map(this::toClipResponse)
+                .toList();
+        return new ProjectDetailResponse.TrackResponse(
+                track.getId(),
+                track.getName(),
+                track.getTrackType(),
+                track.getPreTrackId(),
+                track.getPostTrackId(),
+                track.getIsMuted(),
+                track.getIsSoloed(),
+                track.getVolume(),
+                track.getPan(),
+                clipResponses
+        );
+    }
+
+    private ProjectDetailResponse.ClipResponse toClipResponse(Clip clip) {
+        AudioMetadata audioMetadata = clip.getAudioMetadata();
+
+        return new ProjectDetailResponse.ClipResponse(
+                clip.getId(),
+                clip.getStart(),
+                clip.getDuration(),
+                clip.getAudioStartMs(),
+                clip.getAudioDurationMs(),
+                clip.getColor(),
+                toAudioResponse(audioMetadata)
+        );
+    }
+
+    private ProjectDetailResponse.AudioResponse toAudioResponse(AudioMetadata audioMetadata) {
+        return new ProjectDetailResponse.AudioResponse(
+                audioMetadata.getId(),
+                createCdnUrl(audioMetadata.getObjectKey()),
+                audioMetadata.getOriginalName(),
+                audioMetadata.getDurationMs()
+        );
+    }
+
+    // TODO: 임시 생성 메서드. CDN 관련 로직 구현 후 삭제 필요.
+    private String createCdnUrl(String objectKey) {
+        return "https://cdn.tmpdomain.com/" + objectKey;
+    }
 }

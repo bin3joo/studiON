@@ -4,6 +4,8 @@ import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.entity.ProjectMember;
 import com.salmon.studion.domain.project.repository.ProjectMemberRepository;
+import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -28,5 +30,11 @@ public class ProjectMemberService {
             return List.of();
 
         return projectMemberRepository.findAllWithUserByProjectIdIn(projectIds);
+    }
+
+    public void validateProjectMember(Integer projectId, Integer userId) {
+        if (!projectMemberRepository.existsByProject_IdAndUser_Id(projectId, userId)) {
+            throw new BusinessException(ErrorCode.PROJECT_ACCESS_DENIED);
+        }
     }
 }

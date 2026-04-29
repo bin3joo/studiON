@@ -39,5 +39,5 @@ public class Clip extends BaseEntity {
     private Integer audioStartMs = 0;
 
     @Column(name = "audio_duration_ms", nullable = false)
-    private Integer audioDurationMs;
+    private Integer audioDurationMs = 0;
 }

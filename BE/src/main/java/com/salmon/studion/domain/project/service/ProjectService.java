@@ -3,6 +3,8 @@ package com.salmon.studion.domain.project.service;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.repository.ProjectRepository;
+import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -32,5 +34,10 @@ public class ProjectService {
             return List.of();
 
         return projectRepository.findByIdInOrderByLastUpdateAtDesc(projectIds);
+    }
+
+    public Project getProjectOrThrow(Integer projectId) {
+        return projectRepository.findById(projectId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_NOT_FOUND));
     }
 }

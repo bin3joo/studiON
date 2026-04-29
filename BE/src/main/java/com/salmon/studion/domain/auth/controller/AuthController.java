@@ -3,15 +3,18 @@ package com.salmon.studion.domain.auth.controller;
 import com.salmon.studion.domain.auth.dto.response.TokenResponse;
 import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.common.response.ApiResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequestMapping("/api/v1/auth")
 public class AuthController {
 
-    @GetMapping("/api/v1/auth/login/google")
-    public ApiResponse<TokenResponse> oauth2Success(Authentication authentication) {
+    @GetMapping("/login/google")
+    public ResponseEntity<ApiResponse<TokenResponse>> oauth2Success(Authentication authentication) {
         // principal: 인증된 사용자 객체
         CustomOAuth2User principal = (CustomOAuth2User) authentication.getPrincipal();
 
@@ -33,6 +36,6 @@ public class AuthController {
                     .build();
         }
 
-        return ApiResponse.success(tokenResponse);
+        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
     }
 }

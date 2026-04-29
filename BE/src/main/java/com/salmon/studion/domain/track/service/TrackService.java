@@ -10,9 +10,11 @@ import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
+import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
 import com.salmon.studion.domain.track.entity.TrackReorderEventDocument;
 import com.salmon.studion.domain.track.repository.TrackEventRepository;
+import com.salmon.studion.domain.track.repository.TrackRepository;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -37,6 +40,7 @@ public class TrackService {
     private final TrackEventRepository trackEventRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final TrackRepository trackRepository;
 
     /*
         트랙을 추가하는 메서드
@@ -344,5 +348,9 @@ public class TrackService {
                 .undoable(true)
                 .undone(false)
                 .build());
+    }
+
+    public List<Track> getTracksByProjectId(Integer projectId) {
+        return trackRepository.findByProject_Id(projectId);
     }
 }

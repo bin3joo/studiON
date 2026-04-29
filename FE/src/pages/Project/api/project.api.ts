@@ -25,7 +25,7 @@ export interface ProjectDetailResponse {
   data: {
     projectId: number;
     rootNote: string;
-    mode: string;
+    projectMode: string;
     tempo: number;
     timeSigNumerator: number;
     timeSigDenominator: number;
@@ -93,7 +93,7 @@ export function buildCreateProjectPayload(existingProjectNames: string[] = []): 
   return {
     name: getNextDefaultProjectName(existingProjectNames),
     rootNote: DEFAULT_ROOT_NOTE,
-    mode: DEFAULT_MODE,
+    projectMode: DEFAULT_MODE,
     tempo: DEFAULT_TEMPO,
     timeSigNumerator: DEFAULT_TIME_SIG_NUMERATOR,
     timeSigDenominator: DEFAULT_TIME_SIG_DENOMINATOR,
@@ -111,58 +111,58 @@ export async function createProject(
   // =========================
   // mock implementation
   // =========================
-  await wait(MOCK_PROJECT_CREATE_DELAY_MS)
+  // await wait(MOCK_PROJECT_CREATE_DELAY_MS)
 
-  const fakeProjectId = Date.now()
+  // const fakeProjectId = Date.now()
 
-  return {
-    code: 200,
-    message: '프로젝트가 생성되었습니다.',
-    isSuccess: true,
-    data: {
-      project: {
-        projectId: fakeProjectId,
-        name: payload.name,
-        rootNote: payload.rootNote,
-        mode: payload.mode,
-        tempo: payload.tempo,
-        timeSigNumerator: payload.timeSigNumerator,
-        timeSigDenominator: payload.timeSigDenominator,
-        totalBarCount: 0,
-        totalPlayTime: 0,
-      },
-      masterTrack: {
-        masterTrackId: fakeProjectId,
-        isSoloed: false,
-        isMuted: false,
-        volume: 1,
-        pan: 0,
-      },
-    },
-  }
+  // return {
+  //   code: 200,
+  //   message: '프로젝트가 생성되었습니다.',
+  //   isSuccess: true,
+  //   data: {
+  //     project: {
+  //       projectId: fakeProjectId,
+  //       name: payload.name,
+  //       rootNote: payload.rootNote,
+  //       mode: payload.mode,
+  //       tempo: payload.tempo,
+  //       timeSigNumerator: payload.timeSigNumerator,
+  //       timeSigDenominator: payload.timeSigDenominator,
+  //       totalBarCount: 0,
+  //       totalPlayTime: 0,
+  //     },
+  //     masterTrack: {
+  //       masterTrackId: fakeProjectId,
+  //       isSoloed: false,
+  //       isMuted: false,
+  //       volume: 1,
+  //       pan: 0,
+  //     },
+  //   },
+  // }
 
   // =========================
   // real API implementation
   // =========================
-  // const response = await fetch('/api/v1/projects', {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //   },
-  //   body: JSON.stringify(payload),
-  // })
-  //
-  // if (!response.ok) {
-  //   throw new Error('프로젝트 생성에 실패했습니다.')
-  // }
-  //
-  // const contentType = response.headers.get('content-type') ?? ''
-  //
-  // if (!contentType.includes('application/json')) {
-  //   return {}
-  // }
-  //
-  // return await response.json() as CreateProjectResponse
+  const response = await fetch('/api/v1/projects', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  
+  if (!response.ok) {
+    throw new Error('프로젝트 생성에 실패했습니다.')
+  }
+  
+  const contentType = response.headers.get('content-type') ?? ''
+  
+  if (!contentType.includes('application/json')) {
+  throw new Error('서버 응답이 JSON 형식이 아닙니다.')
+}
+
+  return await response.json() as CreateProjectResponse
 }
 
 export async function fetchProjects(): Promise<FetchProjectsResponse> {

@@ -25,7 +25,7 @@ const trackStore = useTrackStore();
    <!--border-border 테두리를 보더에 지정된 색으로 칠해라-->
   <div 
     :aria-label="`트랙: ${track.name}`" 
-    class="flex border-b border-border group" 
+    class="flex border-b border-border group w-max min-w-full" 
   >
     <div 
       :aria-label="`${track.name} 컨트롤 패널`"
@@ -95,11 +95,11 @@ const trackStore = useTrackStore();
 
     <div 
       aria-label="오디오 클립 작업 영역" 
-      class="relative flex-1 select-none bg-transparent py-1.5 touch-none overflow-hidden"
+      class="relative  shrink-0 select-none bg-transparent py-1.5 touch-none"
+      :style="{ width: `${trackStore.totalTimelineWidth}px` }"
     >
       <div 
         class="relative h-full border-y border-r border-white/5 bg-card shadow-inner"
-        :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       >
         
         <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">

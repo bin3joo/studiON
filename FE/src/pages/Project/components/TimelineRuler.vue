@@ -84,7 +84,7 @@ const onPointerUp = (e:PointerEvent) => {
 <template>
   <div 
     aria-label="타임라인 눈금자 및 재생 바 영역"
-    class="sticky top-0 z-40 flex h-7 border-b border-border bg-card select-none"
+    class="sticky top-0 z-40 flex h-7 border-b border-border bg-card select-none w-max min-w-full"
   >
     <div 
       aria-label="트랙 헤더 정렬 공간"
@@ -93,14 +93,14 @@ const onPointerUp = (e:PointerEvent) => {
 
     <div 
       aria-label="시간 축 탐색 영역"
-      class="relative flex-1 cursor-pointer touch-none"
+      class="relative shrink-0 cursor-pointer touch-none"
+      :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       @dblclick="onDoubleClick"
     >
       
       <div
         ref="timelineCanvasRef"
-        class="relative h-full"
-        :style="{ width: `${trackStore.totalTimelineWidth}px` }"
+        class="relative h-full w-full"
       >
         <div 
           v-for="bar in trackStore.projectInfo.totalBarCount" 

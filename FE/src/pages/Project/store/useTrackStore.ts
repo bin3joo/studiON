@@ -2,7 +2,7 @@
 //데이터 창고 피니아
 import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 //백엔드 통신 담당
 // import { projectApi } from '../api/project.api';
 //트랙과 클립의 타입
@@ -33,6 +33,56 @@ export const useTrackStore = defineStore('track', () => {
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
 
     // ==========================================
+    //  재생 애니메이션 엔진 (RequestAnimationFrame)
+    // ==========================================
+    //리퀘스트에니메이션 프레임 아이디
+    let rafId: number | null = null;
+    let lastTimestamp = 0;
+
+    const animate = (timestamp: number) => {
+        if (!isPlaying.value) return;
+
+        //1. 프레임 간 시간 간격 계산(초단위)
+        if (!lastTimestamp) lastTimestamp = timestamp;
+        const dt = (timestamp - lastTimestamp) / 1000; //초 단위로 변환
+        lastTimestamp = timestamp;
+
+        //2. 초당 흐르는 마디 계산
+        //(BPM / 60초) / 1마디 당 박자수
+        const beatsPerSecond = projectInfo.value.tempo / 60;
+        const barsPerSecond = beatsPerSecond / projectInfo.value.timeSigNumerator;
+
+        //3. 현재 위치 업데이트
+        const nextPosition = playheadPosition.value + (barsPerSecond * dt);
+
+        //4. 프로젝트 끝에 도달하면 정지
+        if (nextPosition >= projectInfo.value.totalBarCount) {
+            isPlaying.value = false;
+            playheadPosition.value = projectInfo.value.totalBarCount; //마지막에 딱 맞춘다.
+            return;
+        }
+        //5. 위치 업데이트
+        playheadPosition.value = nextPosition;
+        //6. 화면에 그리기 요청
+        rafId = requestAnimationFrame(animate);
+    }
+
+    //isPlaying 상태를 감시하여 애니메이션의 시작과 정지를 제어
+    watch(isPlaying, (playing) => {
+        if (playing) {
+            // 재생 시작: 타이밍 초기화 후 루프 시작
+            lastTimestamp = 0;
+            rafId = requestAnimationFrame(animate);
+        } else {
+            // 재생 정지: 루프 종료 (rafId가 있으면 캔슬)
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        }
+    })
+
+    // ==========================================
     // 2. 계산된 상태(Getters) - 타임라인 픽셀 계산기
     // ==========================================
 
@@ -44,16 +94,62 @@ export const useTrackStore = defineStore('track', () => {
     //전체 타임라인의 가로 픽셀 길이(총 마디 수 * 1마디 픽셀)
     const totalTimelineWidth = computed(() => projectInfo.value.totalBarCount * pixelPerBar.value);
 
+    //스크롤 축소 할때 숫자를 표시할 마디 간격 계산 (1,4,8)
+    const barNumberStep = computed(() => {
+        if (zoomlevel.value <= 0.5) return 8; //많이 축소할때 1, 9 ,17 ...
+        if (zoomlevel.value < 1.0) return 4; //약간 축소할때 1, 5, 9 ...
+        return 1; //기본 1칸씩
+    })
+
+    //스크롤 확대 할떄 : 1마디를 몇 칸으로 쪼갤 것인가 (4분 8분 16분 음표)
+    const subDivision = computed(() => {
+        if (zoomlevel.value >= 2.5) return 16; //아주 많이 확대 : 16분음표 단위
+        if (zoomlevel.value >= 1.5) return 8; //많이 확대 : 8분음표 단위
+        if (zoomlevel.value >= 1.0) return 4; //기본 4분음표 단위
+        return 1; //안쪼갬
+    })
+
 
 
     // ==========================================
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
 
+    //클립을 다른 트랙으로 이동시키는 함수
+    const moveClipToTrack = (clipId: number, fromTrackId: number, toTrackId: number) => {
+        if (fromTrackId === toTrackId) return; //같은 트랙이면 취소
+
+        const fromTrack = trackList.value.find(t => t.trackId === fromTrackId);
+        const toTrack = trackList.value.find(t => t.trackId === toTrackId);
+
+        if (!fromTrack || !toTrack) return;
+
+        // 기존 트랙에서 클립을 찾아내 빼낸다.
+        const clipIndex = fromTrack.clips.findIndex(c => c.clipId === clipId);
+        if (clipIndex !== -1) {
+            const [clip] = fromTrack.clips.splice(clipIndex, 1);
+            //vue의 반응성으로 즉시 이동
+            toTrack.clips.push(clip);
+        }
+    };
+
     //재생 상태 토글 함수
     const togglePlay = () => {
         isPlaying.value = !isPlaying.value;
     };
+
+    //마우스 휠 방향에 따라 줌 배율을 조절하는 함수
+    const updateZoom = (deltaY: number) => {
+        const zoomStep = 0.1; //한 번 휠을 굴릴 때 변하는 배율(10%)
+
+        if (deltaY > 0) {
+            //휠을 아래루 굴림: 축소(최소 0.5배)
+            zoomlevel.value = Math.max(0.5, zoomlevel.value - zoomStep);
+        } else {
+            //휠을 위로 굴림: 확대(최대 3배)
+            zoomlevel.value = Math.min(3, zoomlevel.value + zoomStep);
+        }
+    }
 
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
@@ -158,9 +254,13 @@ export const useTrackStore = defineStore('track', () => {
         // Getters
         pixelPerBar,
         totalTimelineWidth,
+        subDivision,
+        barNumberStep,
 
         // Actions
         fetchProject,
-        togglePlay
+        togglePlay,
+        updateZoom,
+        moveClipToTrack,
     };
 });

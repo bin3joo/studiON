@@ -115,6 +115,24 @@ export const useTrackStore = defineStore('track', () => {
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
 
+    //클립을 다른 트랙으로 이동시키는 함수
+    const moveClipToTrack = (clipId: number, fromTrackId: number, toTrackId: number) => {
+        if (fromTrackId === toTrackId) return; //같은 트랙이면 취소
+
+        const fromTrack = trackList.value.find(t => t.trackId === fromTrackId);
+        const toTrack = trackList.value.find(t => t.trackId === toTrackId);
+
+        if (!fromTrack || !toTrack) return;
+
+        // 기존 트랙에서 클립을 찾아내 빼낸다.
+        const clipIndex = fromTrack.clips.findIndex(c => c.clipId === clipId);
+        if (clipIndex !== -1) {
+            const [clip] = fromTrack.clips.splice(clipIndex, 1);
+            //vue의 반응성으로 즉시 이동
+            toTrack.clips.push(clip);
+        }
+    };
+
     //재생 상태 토글 함수
     const togglePlay = () => {
         isPlaying.value = !isPlaying.value;
@@ -243,5 +261,6 @@ export const useTrackStore = defineStore('track', () => {
         fetchProject,
         togglePlay,
         updateZoom,
+        moveClipToTrack,
     };
 });

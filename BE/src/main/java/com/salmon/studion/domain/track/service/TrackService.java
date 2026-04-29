@@ -48,6 +48,9 @@ public class TrackService {
         추후 변경 가능하도록 구현
      */
     public TrackAddResponse addTrack(TrackAddRequest request, Integer userId) {
+        if(request.getType() == null)
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+
         findProject(request.getProjectId());
 
         Integer newTrackId = redisTemplate.opsForValue()
@@ -105,6 +108,7 @@ public class TrackService {
     /*
         트랙을 삭제하는 메서드
      */
+
     public TrackRemoveResponse removeTrack(TrackRemoveRequest request, Integer userId) {
         findProject(request.getProjectId());
 
@@ -147,6 +151,7 @@ public class TrackService {
     /*
         트랙의 순서를 변경하는 메서드
      */
+
     public TrackReorderResponse reorderTrack(TrackReorderRequest request, Integer userId) {
         findProject(request.getProjectId());
 

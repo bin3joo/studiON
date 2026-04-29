@@ -6,7 +6,7 @@ import vue from '@vitejs/plugin-vue'
 //tailwind css 번역 능력 부여
 import tailwindcss from '@tailwindcss/vite'
 //npm다운 말고 노드제이에스 원래 부품을 가져오기
-import path from 'node:path'
+import { fileURLToPath, URL } from 'node:url'
 
 // https://vite.dev/config/
 //지침을 내보낸다.
@@ -16,7 +16,7 @@ export default defineConfig({
   resolve: {
     //dirname 설정파일이 있는 FE폴더, @는 src폴더를 가리킴
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
 })

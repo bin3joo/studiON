@@ -27,7 +27,7 @@ public abstract class TrackBaseEventDocument {
     @Field("user_id")
     private Integer userId;
 
-    @Field("sequenceNo")
+    @Field("sequence_no")
     private Long sequenceNo;
 
     private String timestamp;

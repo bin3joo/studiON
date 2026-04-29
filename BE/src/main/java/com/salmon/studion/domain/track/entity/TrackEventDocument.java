@@ -8,7 +8,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 @Getter
 @Builder
-@Document(collection = "clip_edit_events")
+@Document(collection = "track_edit_events")
 public class TrackEventDocument {
 
     @Id

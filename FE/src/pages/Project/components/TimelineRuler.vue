@@ -35,7 +35,7 @@ const updatePlayhead = (clientX: number) => {
 //마우스 조작 이벤트 헨들러
 
 //눈금을 더블클릭 했을때 해당 위치로 이동하도록 하는 함수
-const onDoubleClick = (e: MouseEvent) => {
+const onClick = (e: MouseEvent) => {
   updatePlayhead(e.clientX);
 };
 
@@ -95,7 +95,7 @@ const onPointerUp = (e:PointerEvent) => {
       aria-label="시간 축 탐색 영역"
       class="relative shrink-0 cursor-pointer touch-none"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
-      @dblclick="onDoubleClick"
+      @click="onClick"
     >
       
       <div

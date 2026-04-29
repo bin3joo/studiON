@@ -226,7 +226,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
-          :class="[clip.isDragging? 'opacity-80 scale-[1.01] z-50!': 'transition-all duration-200']"
+          :class="[clip.isDragging? 'opacity-80 scale-[1.01] z-50!': 'transition duration-200']"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,

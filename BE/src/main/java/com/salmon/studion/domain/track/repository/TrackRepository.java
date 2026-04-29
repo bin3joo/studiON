@@ -14,4 +14,6 @@ public interface TrackRepository extends JpaRepository<Track, Integer> {
 
     // SELECT * FROM TRACK WHERE project_id = ? AND post_track_id IS NULL;
     Optional<Track> findByProjectAndPostTrackIdIsNull(Project project);
+
+    List<Track> findByProject_Id(Integer projectId);
 }

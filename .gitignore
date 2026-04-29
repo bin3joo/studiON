@@ -25,6 +25,10 @@ pnpm-debug.log*
 # Codex local instructions
 **/AGENTS.md
 
+# AI
+.claude/
+.codex/
+
 
 .wav
 .mp3

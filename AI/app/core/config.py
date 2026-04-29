@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     environment: str = "local"
+    log_level: str = "INFO"
     workflow_queue_name: str = "workflow"
     dramatiq_broker_url: str | None = None
     mysql_url: str | None = None

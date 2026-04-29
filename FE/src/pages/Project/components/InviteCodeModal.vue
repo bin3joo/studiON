@@ -8,6 +8,14 @@ interface Props {
   projectId: string
 }
 
+// ✅ 수정 포인트 1: data와 inviteCode 모두에 'null'이 들어올 수 있음을 명시합니다.
+interface InviteResponse {
+  data?: {
+    inviteCode?: string | null;
+  } | null;
+  inviteCode?: string | null;
+}
+
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
@@ -39,10 +47,8 @@ function resetState() {
   errorMessage.value = ''
 }
 
-function extractInviteCode(response: any): string {
-  return response?.data?.inviteCode
-    ?? response?.inviteCode
-    ?? ''
+function extractInviteCode(response: InviteResponse): string {
+  return response?.data?.inviteCode ?? response?.inviteCode ?? '';
 }
 
 async function generateInviteCode() {
@@ -51,7 +57,8 @@ async function generateInviteCode() {
   isCopied.value = false
 
   try {
-    const response = await createProjectInviteCode(props.projectId)
+    // ✅ 수정 포인트 2: projectId(문자열)를 Number()로 감싸서 숫자로 변환해 줍니다.
+    const response = await createProjectInviteCode(Number(props.projectId))
     const nextInviteCode = extractInviteCode(response)
 
     if (!nextInviteCode) {

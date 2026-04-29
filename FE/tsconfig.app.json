@@ -13,16 +13,11 @@
       "vite/client"
     ],
     //경로 별칭 설정
-    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./src/*"
       ]
     },
-    //코드 품질 검사(안전장치)
-    /* Linting */
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },

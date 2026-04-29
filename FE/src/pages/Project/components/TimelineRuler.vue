@@ -119,6 +119,7 @@ const onPointerUp = (e:PointerEvent) => {
         <div 
           aria-label="현재 재생 위치 표시 바"
           class="absolute top-0 bottom-0 z-50 w-3.5 cursor-pointer pointer-events-auto"
+          :class="{ 'transition-[left] duration-150 ease-out': !trackStore.isPlaying}"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)'

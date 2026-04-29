@@ -2,7 +2,7 @@
 //데이터 창고 피니아
 import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 //백엔드 통신 담당
 // import { projectApi } from '../api/project.api';
 //트랙과 클립의 타입
@@ -33,6 +33,56 @@ export const useTrackStore = defineStore('track', () => {
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
 
     // ==========================================
+    //  재생 애니메이션 엔진 (RequestAnimationFrame)
+    // ==========================================
+    //리퀘스트에니메이션 프레임 아이디
+    let rafId: number | null = null;
+    let lastTimestamp = 0;
+
+    const animate = (timestamp: number) => {
+        if (!isPlaying.value) return;
+
+        //1. 프레임 간 시간 간격 계산(초단위)
+        if (!lastTimestamp) lastTimestamp = timestamp;
+        const dt = (timestamp - lastTimestamp) / 1000; //초 단위로 변환
+        lastTimestamp = timestamp;
+
+        //2. 초당 흐르는 마디 계산
+        //(BPM / 60초) / 1마디 당 박자수
+        const beatsPerSecond = projectInfo.value.tempo / 60;
+        const barsPerSecond = beatsPerSecond / projectInfo.value.timeSigNumerator;
+
+        //3. 현재 위치 업데이트
+        const nextPosition = playheadPosition.value + (barsPerSecond * dt);
+
+        //4. 프로젝트 끝에 도달하면 정지
+        if (nextPosition >= projectInfo.value.totalBarCount) {
+            isPlaying.value = false;
+            playheadPosition.value = projectInfo.value.totalBarCount; //마지막에 딱 맞춘다.
+            return;
+        }
+        //5. 위치 업데이트
+        playheadPosition.value = nextPosition;
+        //6. 화면에 그리기 요청
+        rafId = requestAnimationFrame(animate);
+    }
+
+    //isPlaying 상태를 감시하여 애니메이션의 시작과 정지를 제어
+    watch(isPlaying, (playing) => {
+        if (playing) {
+            // 재생 시작: 타이밍 초기화 후 루프 시작
+            lastTimestamp = 0;
+            rafId = requestAnimationFrame(animate);
+        } else {
+            // 재생 정지: 루프 종료 (rafId가 있으면 캔슬)
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        }
+    })
+
+    // ==========================================
     // 2. 계산된 상태(Getters) - 타임라인 픽셀 계산기
     // ==========================================
 
@@ -54,6 +104,8 @@ export const useTrackStore = defineStore('track', () => {
     const togglePlay = () => {
         isPlaying.value = !isPlaying.value;
     };
+
+    //마
 
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {

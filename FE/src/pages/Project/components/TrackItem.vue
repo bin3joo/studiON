@@ -138,6 +138,7 @@ const trackStore = useTrackStore();
 
         <div 
           class="pointer-events-none absolute -top-4 -bottom-4 z-50 w-px bg-primary"
+          :class="{ 'transition-[left] duration-150 ease-out': !trackStore.isPlaying}"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',

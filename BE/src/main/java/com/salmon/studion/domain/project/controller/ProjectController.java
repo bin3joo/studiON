@@ -38,9 +38,7 @@ public class ProjectController {
             @RequestBody @Valid ProjectCreateRequest projectCreateRequest,
             @AuthenticationPrincipal CustomOAuth2User user
     ) {
-        // TODO: OAuth 구현 후 교체 예정
-        Integer userId = 1;
-//        Integer userId = user.getUserId();
+        Integer userId = user.getUserId();
         return ResponseEntity.ok(ApiResponse.success(projectFacade.createProject(projectCreateRequest, userId)));
     }
 }

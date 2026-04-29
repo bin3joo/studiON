@@ -10,6 +10,7 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.services.clap_inference import CLAPTrackPrediction
 from app.services.workflow_artifacts import get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 from app.services.workflow_orchestration import (
@@ -44,11 +45,37 @@ def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
     return str(audio_path)
 
 
+class _FakeCLAPInferenceClient:
+    def infer_track_roles(self, *, job_id: str, excerpts: list) -> list[CLAPTrackPrediction]:
+        predictions: list[CLAPTrackPrediction] = []
+        ordered_track_ids: list[int] = []
+        for excerpt in excerpts:
+            track_id = int(excerpt.metadata["track_id"])
+            if track_id not in ordered_track_ids:
+                ordered_track_ids.append(track_id)
+        for index, track_id in enumerate(ordered_track_ids):
+            is_vocal = index == 0
+            predictions.append(
+                CLAPTrackPrediction(
+                    track_id=track_id,
+                    vocal_score=0.91 if is_vocal else 0.24,
+                    confidence=0.87 if is_vocal else 0.69,
+                    predicted_role="vocal-like" if is_vocal else "supporting",
+                    excerpt_scores=[],
+                )
+            )
+        return predictions
+
+
 @pytest.fixture(autouse=True)
 def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.workflow_jobs.get_settings",
         lambda: SimpleNamespace(resolved_mysql_url=None),
+    )
+    monkeypatch.setattr(
+        "app.graph.nodes.analysis.get_clap_inference_client",
+        lambda: _FakeCLAPInferenceClient(),
     )
     monkeypatch.setattr("app.services.workflow_jobs._mysql_store", None)
     store = get_workflow_job_store()
@@ -128,7 +155,7 @@ def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.Monkey
     assert stored.status == "WAITING_USER"
 
 
-def test_worker_resume_plan_input_dispatch_reaches_selection_wait(
+def test_worker_start_dispatch_for_clipping_waits_for_plan_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -140,7 +167,7 @@ def test_worker_resume_plan_input_dispatch_reaches_selection_wait(
             job_id="job-async-resume",
             project_id="project-async-resume",
             project_snapshot=build_project_snapshot(track_ids=[8]),
-            issue_types=["sibilance"],
+            issue_types=["clipping"],
         )
     )
     resumed = run_workflow_dispatch(
@@ -151,8 +178,72 @@ def test_worker_resume_plan_input_dispatch_reaches_selection_wait(
         )
     )
 
-    assert resumed["current_node"] == "wait_user_selection"
-    assert resumed["preview_action_ids"] == ["job-async-resume-action-1"]
+    assert resumed["current_node"] == "wait_user_plan_input"
+    assert resumed["ranked_candidate_ids"]
+
+
+def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "dispatch-sibilance-autofix.wav"
+    sf.write(audio_path, vocal_like, sample_rate)
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id="job-async-sibilance",
+            project_id="project-async-sibilance",
+            project_snapshot={
+                "duration_ms": 4800,
+                "bpm": 120,
+                "numerator": 4,
+                "denominator": 4,
+                "tracks": [{"track_id": 8, "name": "Track 8"}],
+                "clips": [
+                    {
+                        "clip_id": "clip-8-1",
+                        "track_id": 8,
+                        "start_ms": 0,
+                        "end_ms": 4800,
+                        "audio_path": str(audio_path),
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 4800,
+                    }
+                ],
+            },
+            issue_types=["sibilance"],
+        )
+    )
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id="job-async-sibilance",
+            project_id="project-async-sibilance",
+            dispatch_type="start",
+        )
+    )
+
+    assert result["current_node"] == "finalize_output"
+    assert result["sibilance_fix_applied"] is True
+    assert result["sibilance_fix_log_id"] is not None
 
 
 def test_worker_rejects_stale_resume_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -320,3 +411,13 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     assert body["projections"]["analysis_job"]["id"] == "job-status-api"
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert body["projections"]["suggestion_group"] is None
+
+
+def test_workflow_start_payload_defaults_include_clipping() -> None:
+    payload = WorkflowStartPayload(
+        job_id="job-default-issues",
+        project_id="project-default-issues",
+        project_snapshot=build_project_snapshot(track_ids=[1]),
+    )
+
+    assert payload.issue_types == ["band_overlap", "clipping"]

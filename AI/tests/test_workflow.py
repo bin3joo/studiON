@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import gettempdir
 
 import numpy as np
+import pytest
 import soundfile as sf
 from scipy.signal import resample_poly
 
@@ -10,6 +11,7 @@ from app.graph.nodes import analysis as analysis_nodes
 from app.graph.nodes import suggestion as suggestion_nodes
 from app.graph.state import build_workflow_initial_state
 from app.graph.workflow import build_workflow_response, run_workflow_graph
+from app.services.clap_inference import CLAPInferenceError, CLAPTrackPrediction
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
 
@@ -36,6 +38,36 @@ def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
     if not audio_path.exists():
         sf.write(audio_path, signal, sample_rate)
     return str(audio_path)
+
+
+class _FakeCLAPInferenceClient:
+    def infer_track_roles(self, *, job_id: str, excerpts: list) -> list[CLAPTrackPrediction]:
+        predictions: list[CLAPTrackPrediction] = []
+        ordered_track_ids: list[int] = []
+        for excerpt in excerpts:
+            track_id = int(excerpt.metadata["track_id"])
+            if track_id not in ordered_track_ids:
+                ordered_track_ids.append(track_id)
+        for index, track_id in enumerate(ordered_track_ids):
+            is_vocal = index == 0
+            predictions.append(
+                CLAPTrackPrediction(
+                    track_id=track_id,
+                    vocal_score=0.93 if is_vocal else 0.22,
+                    confidence=0.89 if is_vocal else 0.71,
+                    predicted_role="vocal-like" if is_vocal else "supporting",
+                    excerpt_scores=[],
+                )
+            )
+        return predictions
+
+
+@pytest.fixture(autouse=True)
+def patch_clap_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.graph.nodes.analysis.get_clap_inference_client",
+        lambda: _FakeCLAPInferenceClient(),
+    )
 
 
 def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
@@ -118,7 +150,7 @@ def test_workflow_waits_for_user_mix_intent_before_suggestions() -> None:
             "job_id": "job-selection",
             "project_id": "project-selection",
             "project_snapshot": build_project_snapshot(track_ids=[12, 18]),
-            "issue_types": ["band_overlap", "sibilance"],
+            "issue_types": ["band_overlap", "clipping"],
         }
     )
 
@@ -144,13 +176,13 @@ def test_workflow_finalize_without_user_action_when_no_suggestions_exist() -> No
     assert result["durable_status"] == "COMPLETED"
 
 
-def test_workflow_plan_loop_runs_for_band_overlap_and_sibilance() -> None:
+def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     waiting = run_workflow_graph(
         {
             "job_id": "job-rag",
             "project_id": "project-rag",
             "project_snapshot": build_project_snapshot(track_ids=[3, 4]),
-            "issue_types": ["band_overlap", "sibilance"],
+            "issue_types": ["band_overlap", "clipping"],
         }
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
@@ -175,16 +207,17 @@ def test_workflow_skips_clap_when_not_needed() -> None:
 
 
 def test_workflow_revises_once_then_passes() -> None:
-    result = run_workflow_graph(
+    waiting = run_workflow_graph(
         {
             "job_id": "job-revise",
             "project_id": "project-revise",
             "project_snapshot": build_project_snapshot(track_ids=[7]),
-            "issue_types": ["sibilance"],
+            "issue_types": ["clipping"],
             "validator_mode": "REVISE_ONCE",
             "critic_mode": "PASS",
         }
     )
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
     assert result["current_node"] == "wait_user_selection"
     assert result["transition_log"].count("planning_agent") == 2
@@ -212,30 +245,55 @@ def test_workflow_fails_when_validator_rejects() -> None:
     assert result["durable_status"] == "FAILED"
 
 
-def test_workflow_auto_progresses_sibilance_to_selection_wait() -> None:
+def test_workflow_autofixes_sibilance_without_preview() -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "workflow-sibilance-autofix.wav"
+    sf.write(audio_path, vocal_like, sample_rate)
+
     result = run_workflow_graph(
         {
             "job_id": "job-preview",
             "project_id": "project-preview",
-            "project_snapshot": build_project_snapshot(track_ids=[8]),
+            "project_snapshot": build_project_snapshot_with_audio(
+                track_audio_paths={8: str(audio_path)}
+            ),
             "issue_types": ["sibilance"],
         }
     )
 
-    assert result["current_node"] == "wait_user_selection"
-    assert result["runtime_status"] == "waiting_for_user"
-    assert result["preview_action_ids"] == ["job-preview-action-1"]
+    assert result["current_node"] == "finalize_output"
+    assert result["runtime_status"] == "completed"
+    assert result["preview_action_ids"] == []
+    assert result["sibilance_fix_applied"] is True
+    assert result["sibilance_fix_log_id"] is not None
+    assert result["auto_fix_recipe_artifact_id"] is not None
 
 
 def test_workflow_resume_from_selection_to_preview_confirm_wait() -> None:
-    selected = run_workflow_graph(
+    waiting = run_workflow_graph(
         {
             "job_id": "job-preview-2",
             "project_id": "project-preview-2",
             "project_snapshot": build_project_snapshot(track_ids=[8]),
-            "issue_types": ["sibilance"],
+            "issue_types": ["clipping"],
         }
     )
+    selected = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
     resumed = run_workflow_graph(
         {
@@ -285,9 +343,10 @@ def test_workflow_retry_and_cancel_paths_return_to_expected_nodes() -> None:
             "job_id": "job-retry",
             "project_id": "project-retry",
             "project_snapshot": build_project_snapshot(track_ids=[6]),
-            "issue_types": ["sibilance"],
+            "issue_types": ["clipping"],
         }
     )
+    mix_resolved = run_workflow_graph({**mix_resolved, **build_plan_input(mix_resolved)})
     preview_wait = run_workflow_graph(
         {
             **mix_resolved,
@@ -345,7 +404,7 @@ def test_workflow_response_contains_unified_projections() -> None:
     assert response["projections"]["analysis_regions"][0]["affected_clip_ids"]
 
 
-def test_workflow_clipping_only_autofixes_without_preview() -> None:
+def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
     result = run_workflow_graph(
         {
             "job_id": "job-clipping-only",
@@ -355,15 +414,38 @@ def test_workflow_clipping_only_autofixes_without_preview() -> None:
         }
     )
 
-    assert result["current_node"] == "finalize_output"
-    assert result["clipping_fix_applied"] is True
+    assert result["current_node"] == "wait_user_plan_input"
+    assert result["clipping_fix_applied"] is False
     assert result["preview_id"] is None
     assert result["preview_action_ids"] == []
     assert result["detected_issues"] == ["clipping"]
 
 
 def test_workflow_analysis_regions_include_detector_metadata() -> None:
-    snapshot = build_project_snapshot(track_ids=[30, 31])
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    supporting = (0.28 * np.sin(2 * np.pi * 330 * time_axis)).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    first_path = audio_dir / "workflow-region-shape-vocal.wav"
+    second_path = audio_dir / "workflow-region-shape-support.wav"
+    sf.write(first_path, vocal_like, sample_rate)
+    sf.write(second_path, supporting, sample_rate)
+    snapshot = build_project_snapshot_with_audio(
+        track_audio_paths={30: str(first_path), 31: str(second_path)}
+    )
     waiting = run_workflow_graph(
         {
             "job_id": "job-region-shape",
@@ -384,11 +466,12 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert overlap["band_low_hz"] == 250
     assert overlap["band_high_hz"] == 1200
     assert overlap["measure_start"] == 1
-    assert overlap["measure_end"] in {1, 2}
+    assert overlap["measure_end"] in {1, 2, 3}
     assert "clip-30-1" in overlap["affected_clip_ids"]
-    assert "clip-31-2" in overlap["affected_clip_ids"]
-    assert clipping["requires_user_action"] is False
+    assert "clip-31-1" in overlap["affected_clip_ids"]
+    assert clipping["requires_user_action"] is True
     assert sibilance["track_id"] == 30
+    assert result["sibilance_fix_applied"] is True
     assert result["ranking_scores"][overlap["id"]] > 0
 
 
@@ -426,6 +509,400 @@ def test_merge_analysis_keeps_all_regions_without_issue_cap() -> None:
     assert len(result["analysis_regions"]) == 5
     assert [region["id"] for region in result["analysis_regions"]] == [
         f"job-all-regions-band-overlap-region-{index}" for index in range(5)
+    ]
+
+
+def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
+    initial = build_workflow_initial_state(
+        job_id="job-merge-dedup",
+        project_id=51,
+        issue_types=["clipping", "band_overlap"],
+    )
+    initial["analysis_regions"] = [
+        {
+            "id": "job-merge-dedup-clipping-region-1",
+            "issue_type": "clipping",
+            "summary": "Lower score clipping region.",
+            "start_ms": 1200,
+            "end_ms": 1440,
+            "severity": "MEDIUM",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-dedup:clipping-evidence-1",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.18,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-a"],
+        },
+        {
+            "id": "job-merge-dedup-clipping-region-2",
+            "issue_type": "clipping",
+            "summary": "Higher score clipping region.",
+            "start_ms": 1200,
+            "end_ms": 1440,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-dedup:clipping-evidence-2",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.32,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-b"],
+        },
+        {
+            "id": "job-merge-dedup-band-overlap-region-1",
+            "issue_type": "band_overlap",
+            "summary": "Separate issue should remain.",
+            "start_ms": 1800,
+            "end_ms": 2160,
+            "severity": "MEDIUM",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-dedup:band-overlap-evidence-1",
+            "track_id": 2,
+            "secondary_track_id": None,
+            "involved_track_ids": [2, 3],
+            "band_low_hz": 250,
+            "band_high_hz": 1200,
+            "score": 0.61,
+            "window_count": 2,
+            "measure_start": 1,
+            "measure_end": 2,
+            "affected_clip_ids": ["clip-c", "clip-d"],
+        },
+    ]
+
+    result = nodes.merge_analysis(initial)
+
+    assert [region["id"] for region in result["analysis_regions"]] == [
+        "job-merge-dedup-clipping-region-2",
+        "job-merge-dedup-band-overlap-region-1",
+    ]
+    assert result["detected_issues"] == ["clipping", "band_overlap"]
+    assert result["analysis_region_ids"] == [
+        "job-merge-dedup-clipping-region-2",
+        "job-merge-dedup-band-overlap-region-1",
+    ]
+    assert result["analysis_regions"][0]["affected_clip_ids"] == ["clip-b"]
+
+
+def test_merge_analysis_keeps_distinct_time_ranges() -> None:
+    initial = build_workflow_initial_state(
+        job_id="job-merge-time",
+        project_id=52,
+        issue_types=["clipping"],
+    )
+    initial["analysis_regions"] = [
+        {
+            "id": "job-merge-time-clipping-region-1",
+            "issue_type": "clipping",
+            "summary": "Earlier clipping region.",
+            "start_ms": 500,
+            "end_ms": 740,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-time:clipping-evidence-1",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.22,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-1"],
+        },
+        {
+            "id": "job-merge-time-clipping-region-2",
+            "issue_type": "clipping",
+            "summary": "Later clipping region.",
+            "start_ms": 900,
+            "end_ms": 1140,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-time:clipping-evidence-2",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.21,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-2"],
+        },
+    ]
+
+    result = nodes.merge_analysis(initial)
+
+    assert [region["id"] for region in result["analysis_regions"]] == [
+        "job-merge-time-clipping-region-1",
+        "job-merge-time-clipping-region-2",
+    ]
+    assert result["analysis_region_ids"] == [
+        "job-merge-time-clipping-region-1",
+        "job-merge-time-clipping-region-2",
+    ]
+
+
+def test_merge_analysis_uses_score_as_third_sort_key() -> None:
+    initial = build_workflow_initial_state(
+        job_id="job-merge-sort",
+        project_id=53,
+        issue_types=["clipping"],
+    )
+    initial["analysis_regions"] = [
+        {
+            "id": "job-merge-sort-clipping-region-1",
+            "issue_type": "clipping",
+            "summary": "Lower score duplicate ordering candidate.",
+            "start_ms": 800,
+            "end_ms": 1040,
+            "severity": "MEDIUM",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-sort:clipping-evidence-1",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.14,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-1"],
+        },
+        {
+            "id": "job-merge-sort-clipping-region-2",
+            "issue_type": "clipping",
+            "summary": "Higher score duplicate ordering candidate.",
+            "start_ms": 800,
+            "end_ms": 1040,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-merge-sort:clipping-evidence-2",
+            "track_id": 2,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.28,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-2"],
+        },
+    ]
+
+    result = nodes.merge_analysis(initial)
+
+    assert [region["id"] for region in result["analysis_regions"]] == [
+        "job-merge-sort-clipping-region-2",
+        "job-merge-sort-clipping-region-1",
+    ]
+
+
+def test_candidate_ranking_ignores_auto_fix_only_regions_for_user_candidates() -> None:
+    initial = build_workflow_initial_state(
+        job_id="job-ranking-autofix",
+        project_id=61,
+        issue_types=["sibilance", "band_overlap"],
+    )
+    initial["analysis_regions"] = [
+        {
+            "id": "job-ranking-autofix-sibilance-region-1",
+            "issue_type": "sibilance",
+            "summary": "Auto-fix only sibilance region.",
+            "start_ms": 900,
+            "end_ms": 1280,
+            "severity": "HIGH",
+            "requires_user_action": False,
+            "evidence_doc_id": "job-ranking-autofix:sibilance-evidence-1",
+            "track_id": 10,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": 5000,
+            "band_high_hz": 9000,
+            "score": 0.82,
+            "window_count": 2,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-a"],
+        },
+        {
+            "id": "job-ranking-autofix-band-overlap-region-1",
+            "issue_type": "band_overlap",
+            "summary": "User-facing overlap region.",
+            "start_ms": 1000,
+            "end_ms": 1480,
+            "severity": "MEDIUM",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-ranking-autofix:band-overlap-evidence-1",
+            "track_id": 20,
+            "secondary_track_id": None,
+            "involved_track_ids": [20, 21],
+            "band_low_hz": 250,
+            "band_high_hz": 1200,
+            "score": 0.58,
+            "window_count": 2,
+            "measure_start": 1,
+            "measure_end": 2,
+            "affected_clip_ids": ["clip-b", "clip-c"],
+        },
+    ]
+
+    result = nodes.candidate_ranking(initial)
+
+    assert result["ranking_scores"]["job-ranking-autofix-sibilance-region-1"] > 0
+    assert result["ranked_candidate_ids"] == [
+        "job-ranking-autofix-band-overlap-region-1"
+    ]
+
+
+def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
+    initial = build_workflow_initial_state(
+        job_id="job-ranking-priority",
+        project_id=62,
+        issue_types=["clipping", "band_overlap"],
+    )
+    initial["analysis_regions"] = [
+        {
+            "id": "job-ranking-priority-band-overlap-region-1",
+            "issue_type": "band_overlap",
+            "summary": "Strong overlap region.",
+            "start_ms": 1400,
+            "end_ms": 1960,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-ranking-priority:band-overlap-evidence-1",
+            "track_id": 2,
+            "secondary_track_id": None,
+            "involved_track_ids": [2, 3],
+            "band_low_hz": 250,
+            "band_high_hz": 1200,
+            "score": 0.74,
+            "window_count": 3,
+            "measure_start": 1,
+            "measure_end": 2,
+            "affected_clip_ids": ["clip-c", "clip-d"],
+        },
+        {
+            "id": "job-ranking-priority-clipping-region-1",
+            "issue_type": "clipping",
+            "summary": "Critical clipping should outrank overlap.",
+            "start_ms": 1600,
+            "end_ms": 1760,
+            "severity": "CRITICAL",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-ranking-priority:clipping-evidence-1",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": None,
+            "band_high_hz": None,
+            "score": 0.26,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-a"],
+        },
+    ]
+
+    result = nodes.candidate_ranking(initial)
+
+    assert result["ranking_scores"]["job-ranking-priority-clipping-region-1"] > 0
+    assert result["ranked_candidate_ids"] == [
+        "job-ranking-priority-clipping-region-1",
+        "job-ranking-priority-band-overlap-region-1",
+    ]
+
+
+def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> None:
+    initial = build_workflow_initial_state(
+        job_id="job-ranking-tie",
+        project_id=63,
+        issue_types=["high_band_harshness"],
+    )
+    initial["analysis_regions"] = [
+        {
+            "id": "job-ranking-tie-high-band-region-1",
+            "issue_type": "high_band_harshness",
+            "summary": "Earlier high-band region.",
+            "start_ms": 900,
+            "end_ms": 1100,
+            "severity": "MEDIUM",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-ranking-tie:high-band-evidence-1",
+            "track_id": 1,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": 5000,
+            "band_high_hz": 9000,
+            "score": 0.42,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-a"],
+        },
+        {
+            "id": "job-ranking-tie-high-band-region-2",
+            "issue_type": "high_band_harshness",
+            "summary": "Later but more severe high-band region.",
+            "start_ms": 1200,
+            "end_ms": 1400,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-ranking-tie:high-band-evidence-2",
+            "track_id": 2,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": 5000,
+            "band_high_hz": 9000,
+            "score": 0.382,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-b"],
+        },
+        {
+            "id": "job-ranking-tie-high-band-region-3",
+            "issue_type": "high_band_harshness",
+            "summary": "Same weighted score but earlier start.",
+            "start_ms": 600,
+            "end_ms": 800,
+            "severity": "HIGH",
+            "requires_user_action": True,
+            "evidence_doc_id": "job-ranking-tie:high-band-evidence-3",
+            "track_id": 3,
+            "secondary_track_id": None,
+            "involved_track_ids": [],
+            "band_low_hz": 5000,
+            "band_high_hz": 9000,
+            "score": 0.382,
+            "window_count": 1,
+            "measure_start": 1,
+            "measure_end": 1,
+            "affected_clip_ids": ["clip-c"],
+        },
+    ]
+
+    result = nodes.candidate_ranking(initial)
+
+    assert result["ranked_candidate_ids"] == [
+        "job-ranking-tie-high-band-region-3",
+        "job-ranking-tie-high-band-region-2",
+        "job-ranking-tie-high-band-region-1",
     ]
 
 
@@ -483,6 +960,231 @@ def test_workflow_uses_full_stft_summary_when_audio_paths_exist(tmp_path) -> Non
     assert result["dsp_scan_summary"]["track_windows_preview"]["10"][0]["spectral_centroid_hz"] > 0
     assert result["clip_feature_artifact_id"] is not None
     assert result["sampled_clip_ids"] == ["clip-10-1", "clip-20-1"]
+    assert result["track_representative_specs"] == [
+        {
+            "track_id": 10,
+            "clip_id": "clip-10-1",
+            "resolved_audio_path": str(first_path),
+            "source_format": ".wav",
+        },
+        {
+            "track_id": 20,
+            "clip_id": "clip-20-1",
+            "resolved_audio_path": str(second_path),
+            "source_format": ".wav",
+        },
+    ]
+
+
+def test_sample_track_clips_builds_track_representative_specs_across_multiple_clips() -> None:
+    state = build_workflow_initial_state(job_id="job-repr", project_id="project-repr")
+    state["track_ids"] = [10]
+    state["clip_index"] = [
+        {
+            "clip_id": "clip-a",
+            "track_id": 10,
+            "start_ms": 0,
+            "end_ms": 5000,
+            "audio_path": _ensure_test_audio_file(10, vocal_like=True),
+            "audio_start_ms": 0,
+            "audio_duration_ms": 5000,
+        },
+        {
+            "clip_id": "clip-b",
+            "track_id": 10,
+            "start_ms": 6000,
+            "end_ms": 11000,
+            "audio_path": _ensure_test_audio_file(10, vocal_like=True),
+            "audio_start_ms": 1000,
+            "audio_duration_ms": 5000,
+        },
+        {
+            "clip_id": "clip-c",
+            "track_id": 10,
+            "start_ms": 12000,
+            "end_ms": 18000,
+            "audio_path": _ensure_test_audio_file(10, vocal_like=True),
+            "audio_start_ms": 200,
+            "audio_duration_ms": 6000,
+        },
+        {
+            "clip_id": "clip-d",
+            "track_id": 10,
+            "start_ms": 19000,
+            "end_ms": 23000,
+            "audio_path": _ensure_test_audio_file(10, vocal_like=True),
+            "audio_start_ms": 0,
+            "audio_duration_ms": 4000,
+        },
+    ]
+
+    result = analysis_nodes.sample_track_clips(state)
+
+    assert result["sampled_clip_ids"] == ["clip-a"]
+    assert result["track_representative_specs"] == [
+        {
+            "track_id": 10,
+            "clip_id": "clip-a",
+            "resolved_audio_path": _ensure_test_audio_file(10, vocal_like=True),
+            "source_format": ".wav",
+        }
+    ]
+
+
+def test_select_role_candidates_uses_high_band_issue_tracks() -> None:
+    state = build_workflow_initial_state(
+        job_id="job-role-candidates",
+        project_id="project-role-candidates",
+    )
+    state["issue_types"] = ["sibilance"]
+    state["analysis_regions"] = [
+        {"issue_type": "high_band_harshness", "track_id": 3},
+        {"issue_type": "high_band_harshness", "track_id": 1},
+        {"issue_type": "clipping", "track_id": 8},
+        {"issue_type": "high_band_harshness", "track_id": 3},
+    ]
+
+    result = analysis_nodes.select_role_candidates(state)
+
+    assert result["role_candidate_track_ids"] == [1, 3]
+    assert result["clap_required"] is True
+
+
+def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-role-candidates",
+            job_id="job-role-candidates-fallback",
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "track_frames": {
+                    "2": [
+                        {
+                            "high_band_ratio": 0.36,
+                            "presence_energy": 0.08,
+                            "spectral_centroid_hz": 3600,
+                        }
+                    ],
+                    "7": [
+                        {
+                            "high_band_ratio": 0.2,
+                            "presence_energy": 0.04,
+                            "spectral_centroid_hz": 2500,
+                        }
+                    ],
+                }
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id="job-role-candidates-fallback",
+        project_id="project-role-candidates-fallback",
+        issue_types=["sibilance"],
+        clip_feature_artifact_id="artifact-role-candidates",
+    )
+
+    result = analysis_nodes.select_role_candidates(state)
+
+    assert result["role_candidate_track_ids"] == [2]
+    assert result["clap_required"] is True
+
+
+def test_infer_track_roles_calls_clap_and_persists_summary_artifact() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    state = build_workflow_initial_state(job_id="job-clap", project_id="project-clap")
+    state["clip_index"] = [
+        {
+            "clip_id": "clip-1",
+            "track_id": 1,
+            "start_ms": 0,
+            "end_ms": 4800,
+            "audio_path": _ensure_test_audio_file(1, vocal_like=True),
+            "audio_start_ms": 0,
+            "audio_duration_ms": 4800,
+        },
+        {
+            "clip_id": "clip-2",
+            "track_id": 2,
+            "start_ms": 0,
+            "end_ms": 4800,
+            "audio_path": _ensure_test_audio_file(2, vocal_like=False),
+            "audio_start_ms": 0,
+            "audio_duration_ms": 4800,
+        },
+    ]
+    state["role_candidate_track_ids"] = [1, 2]
+    state["track_representative_specs"] = analysis_nodes._build_track_representative_specs(
+        state
+    )
+
+    result = analysis_nodes.infer_track_roles(state)
+    response = build_workflow_response({**state, **result})
+    artifact = artifact_store.get_artifact(result["clap_artifact_id"])
+
+    assert result["inferred_roles"] == {1: "vocal-like", 2: "supporting"}
+    assert result["track_role_scores"] == {1: 0.93, 2: 0.22}
+    assert result["track_role_confidences"] == {1: 0.89, 2: 0.71}
+    assert result["vocal_detected"] is True
+    assert result["clap_artifact_id"] is not None
+    assert artifact is not None
+    assert artifact.artifact_type == "clap_track_role_inference"
+    assert response["projections"]["track_vocal_predictions"] == [
+        {
+            "id": "job-clap-vocal-prediction-1",
+            "track_id": 1,
+            "job_id": "job-clap",
+            "vocal_score": 0.93,
+            "is_vocal": True,
+            "confidence": 0.89,
+        },
+        {
+            "id": "job-clap-vocal-prediction-2",
+            "track_id": 2,
+            "job_id": "job-clap",
+            "vocal_score": 0.22,
+            "is_vocal": False,
+            "confidence": 0.71,
+        },
+    ]
+
+
+def test_infer_track_roles_fails_without_fallback_when_clap_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RaisingCLAPClient:
+        def infer_track_roles(self, *, job_id: str, excerpts: list) -> list[CLAPTrackPrediction]:
+            raise CLAPInferenceError("CLAP_INFERENCE_TIMEOUT", "timeout")
+
+    monkeypatch.setattr(
+        "app.graph.nodes.analysis.get_clap_inference_client",
+        lambda: _RaisingCLAPClient(),
+    )
+    state = build_workflow_initial_state(job_id="job-clap-fail", project_id="project-clap-fail")
+    state["clip_index"] = [
+        {
+            "clip_id": "clip-1",
+            "track_id": 1,
+            "start_ms": 0,
+            "end_ms": 4800,
+            "audio_path": _ensure_test_audio_file(1, vocal_like=True),
+            "audio_start_ms": 0,
+            "audio_duration_ms": 4800,
+        }
+    ]
+    state["role_candidate_track_ids"] = [1]
+    state["track_representative_specs"] = analysis_nodes._build_track_representative_specs(
+        state
+    )
+
+    result = analysis_nodes.infer_track_roles(state)
+
+    assert result["current_node"] == "infer_track_roles"
+    assert result["runtime_status"] == "failed"
+    assert result["durable_status"] == "FAILED"
+    assert result["failure_code"] == "CLAP_INFERENCE_TIMEOUT"
 
 
 def test_workflow_fails_when_audio_source_is_missing() -> None:
@@ -689,3 +1391,167 @@ def test_detect_clipping_can_trigger_on_oversampled_true_peak() -> None:
     assert mix_frames[0]["true_peak_dbfs"] > 0.0
     assert len(regions) == 1
     assert regions[0]["issue_type"] == "clipping"
+
+
+def test_detect_clipping_ignores_near_ceiling_without_true_peak_overflow() -> None:
+    signal = (0.995 * np.sin(2 * np.pi * 0.25 * np.arange(1536))).astype(np.float32)
+    mix_frames = analysis_nodes._compute_mix_frames(signal, target_track_id=11)
+    state = build_workflow_initial_state(
+        job_id="job-near-ceiling",
+        project_id="project-near-ceiling",
+        issue_types=["clipping"],
+        clip_feature_artifact_id="artifact-near-ceiling",
+    )
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-near-ceiling",
+            job_id="job-near-ceiling",
+            artifact_type="full_stft_frame_summary",
+            payload={"mix_frames": mix_frames},
+        )
+    )
+
+    regions = nodes.detect_clipping(state)["analysis_regions"]
+
+    assert mix_frames[0]["peak_dbfs"] >= -0.1
+    assert mix_frames[0]["true_peak_dbfs"] <= 0.0
+    assert regions == []
+
+
+def test_workflow_defaults_include_clipping_detection() -> None:
+    sample_rate = 16000
+    signal = (0.98 * np.sin(2 * np.pi * 0.1875 * np.arange(sample_rate * 2))).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "workflow-default-clipping.wav"
+    sf.write(audio_path, signal, sample_rate)
+
+    result = run_workflow_graph(
+        {
+            "job_id": "job-default-clipping",
+            "project_id": "project-default-clipping",
+            "project_snapshot": build_project_snapshot_with_audio(
+                track_audio_paths={10: str(audio_path)}
+            ),
+        }
+    )
+
+    assert result["current_node"] == "wait_user_plan_input"
+    assert "clipping" in result["detected_issues"]
+    assert result["clipping_fix_applied"] is False
+
+
+def test_workflow_skips_sibilance_when_clap_candidate_is_absent() -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    supporting = (0.24 * np.sin(2 * np.pi * 220 * time_axis)).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "workflow-no-sibilance-candidate.wav"
+    sf.write(audio_path, supporting, sample_rate)
+
+    result = run_workflow_graph(
+        {
+            "job_id": "job-no-sibilance-candidate",
+            "project_id": "project-no-sibilance-candidate",
+            "project_snapshot": build_project_snapshot_with_audio(
+                track_audio_paths={10: str(audio_path)}
+            ),
+            "issue_types": ["sibilance"],
+        }
+    )
+
+    assert result["clap_required"] is False
+    assert result["inferred_roles"] == {}
+    assert result["vocal_detected"] is False
+    assert "sibilance" not in result["detected_issues"]
+    assert result["current_node"] == "finalize_output"
+
+
+def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-sibilance-role-aware",
+            job_id="job-sibilance-role-aware",
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "sibilance_ratio": 0.24,
+                            "high_band_ratio": 0.26,
+                            "spectral_centroid_hz": 4200,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "sibilance_ratio": 0.23,
+                            "high_band_ratio": 0.25,
+                            "spectral_centroid_hz": 4100,
+                        },
+                    ],
+                    "20": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "sibilance_ratio": 0.28,
+                            "high_band_ratio": 0.29,
+                            "spectral_centroid_hz": 4300,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "sibilance_ratio": 0.27,
+                            "high_band_ratio": 0.28,
+                            "spectral_centroid_hz": 4250,
+                        },
+                    ],
+                }
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id="job-sibilance-role-aware",
+        project_id="project-sibilance-role-aware",
+        issue_types=["sibilance"],
+        clip_feature_artifact_id="artifact-sibilance-role-aware",
+        inferred_roles={10: "vocal-like", 20: "supporting"},
+        vocal_detected=True,
+    )
+
+    regions = nodes.detect_sibilance(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["track_id"] == 10
+    assert regions[0]["issue_type"] == "sibilance"
+
+
+def test_clipping_plan_materializes_master_true_peak_limiter_action() -> None:
+    waiting = run_workflow_graph(
+        {
+            "job_id": "job-clipping-action",
+            "project_id": "project-clipping-action",
+            "project_snapshot": build_project_snapshot(track_ids=[14]),
+            "issue_types": ["clipping"],
+        }
+    )
+    resumed = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+
+    action = resumed["suggestion_payload"]["suggestions"][0]["actions"][0]
+
+    assert action["actionType"] == "TRUE_PEAK_LIMITER"
+    assert action["targetScope"] == "MASTER"
+    assert action["targetTrackId"] is None
+    assert action["params"]["ceilingDbfs"] == -1.0

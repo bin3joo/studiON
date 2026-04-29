@@ -1,47 +1,108 @@
 <script setup lang="ts">
-import { RouterLink } from 'vue-router';
-import { AudioLines, Disc3, Mic, Play, Plus } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+import { AudioLines, Disc3, Mic, Play } from 'lucide-vue-next'
 import DashboardHeader from './components/DashboardHeader.vue'
+import { fetchProjects } from '@/pages/Project/api/project.api'
+import type { ProjectListItem } from '@/pages/Project/types/project.types'
 
-const projects = [
-  {
-    title: 'Neon Genesis EP',
-    meta: 'SYNTHWAVE / 120 BPM',
-    edited: 'EDITED 2H AGO',
-    icon: Disc3,
-    collaborators: 2,
-  },
-  {
-    title: 'Midnight Run V2',
-    meta: 'TECHNO / 135 BPM',
-    edited: 'EDITED 1D AGO',
-    icon: AudioLines,
-    collaborators: 1,
-  },
-  {
-    title: 'Vocals — Track 4',
-    meta: 'POP / 95 BPM',
-    edited: 'EDITED 3D AGO',
-    icon: Mic,
-    collaborators: 3,
-  },
-]
+const projects = ref<ProjectListItem[]>([])
+const isLoading = ref(false)
+const errorMessage = ref('')
+
+const existingProjectNames = computed(() =>
+  projects.value.map(project => project.projectName),
+)
+
+function getProjectIcon(index: number) {
+  const icons = [Disc3, AudioLines, Mic]
+  return icons[index % icons.length]
+}
+
+function formatPlayTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return '0:00'
+  }
+
+  const totalSeconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function formatAudioSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 MB'
+  }
+
+  const mb = bytes / (1024 * 1024)
+
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(1)} GB`
+  }
+
+  return `${Math.round(mb)} MB`
+}
+
+function formatEditedText(lastUpdateAt: string): string {
+  const updatedAt = new Date(lastUpdateAt)
+
+  if (Number.isNaN(updatedAt.getTime())) {
+    return 'UPDATED RECENTLY'
+  }
+
+  const diffMs = Date.now() - updatedAt.getTime()
+  const diffMinutes = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffMinutes < 60) {
+    return `EDITED ${Math.max(diffMinutes, 1)}M AGO`
+  }
+
+  if (diffHours < 24) {
+    return `EDITED ${diffHours}H AGO`
+  }
+
+  return `EDITED ${diffDays}D AGO`
+}
+
+async function loadProjects() {
+  isLoading.value = true
+  errorMessage.value = ''
+
+  try {
+    const response = await fetchProjects()
+    projects.value = response.data?.projects ?? []
+  }
+  catch (error) {
+    errorMessage.value = error instanceof Error
+      ? error.message
+      : '프로젝트 목록을 불러오는 중 오류가 발생했습니다.'
+  }
+  finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadProjects()
+})
 </script>
 
 <template>
   <main class="min-h-screen bg-background text-foreground font-grotesk">
-    <DashboardHeader />
+    <DashboardHeader :existing-project-names="existingProjectNames" />
 
     <section class="relative overflow-hidden px-6 py-12 md:px-10 md:py-16">
       <div class="pointer-events-none absolute -left-24 top-0 -z-10 h-[40vh] w-[40vh] rounded-full bg-primary/20 blur-[120px]" />
       <div class="absolute inset-0 -z-10 bg-grain opacity-30" />
 
       <div class="flex flex-col items-start gap-4">
-
         <h1 class="font-display text-[clamp(3rem,9vw,6rem)] leading-none text-foreground">
           <span class="text-neon-magenta">내 프로젝트</span>
         </h1>
-
       </div>
     </section>
 
@@ -52,31 +113,61 @@ const projects = [
         </div>
       </div>
 
-      <div class="space-y-3">
+      <p
+        v-if="isLoading"
+        class="mb-4 text-sm text-muted-foreground"
+      >
+        프로젝트 불러오는 중...
+      </p>
+
+      <p
+        v-else-if="errorMessage"
+        class="mb-4 text-sm text-destructive"
+      >
+        {{ errorMessage }}
+      </p>
+
+      <div
+        v-else-if="projects.length === 0"
+        class="rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground"
+      >
+        프로젝트가 없습니다.
+      </div>
+
+      <div
+        v-else
+        class="space-y-3"
+      >
         <RouterLink
           v-for="(project, idx) in projects"
-          :key="project.title"
-          :to="`/project/${idx + 1}`"
+          :key="project.projectId"
+          :to="{
+            path: `/project/${project.projectId}`,
+            query: { name: project.projectName },
+          }"
           class="group relative grid grid-cols-1 gap-4 overflow-hidden rounded-xl border border-border bg-card px-6 py-6 transition hover:border-primary hover:shadow-neon md:grid-cols-[auto_minmax(0,1.4fr)_auto_minmax(0,1fr)_auto] md:items-center md:gap-8 md:px-8 md:py-7"
         >
           <div class="flex min-w-0 items-center gap-5">
             <span class="font-mono-tight text-[10px] uppercase tracking-widest text-muted-foreground">
-              0{{ idx + 1 }}
+              {{ String(idx + 1).padStart(2, '0') }}
             </span>
 
             <div class="grid h-12 w-12 place-items-center rounded-lg bg-secondary text-primary transition group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-neon">
-              <component :is="project.icon" class="h-5 w-5" />
+              <component
+                :is="getProjectIcon(idx)"
+                class="h-5 w-5"
+              />
             </div>
 
             <div class="min-w-0">
               <h3 class="truncate font-display text-xl leading-tight tracking-wide text-foreground md:text-2xl">
-                {{ project.title }}
+                {{ project.projectName }}
               </h3>
 
               <div class="mt-1.5 flex items-center gap-2 text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
-                <span>{{ project.meta.split(' / ')[0] }}</span>
+                <span>{{ project.totalBarCount }} BARS</span>
                 <span class="h-1 w-1 rounded-full bg-muted-foreground/50" />
-                <span class="text-primary/80">{{ project.meta.split(' / ')[1] }}</span>
+                <span class="text-primary/80">{{ formatPlayTime(project.totalPlayTime) }}</span>
               </div>
             </div>
           </div>
@@ -89,7 +180,7 @@ const projects = [
                 Tracks
               </span>
               <span class="mt-1 font-display text-lg leading-none text-foreground">
-                37
+                -
               </span>
             </div>
 
@@ -98,7 +189,7 @@ const projects = [
                 Length
               </span>
               <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
-                3:24
+                {{ formatPlayTime(project.totalPlayTime) }}
               </span>
             </div>
 
@@ -107,23 +198,24 @@ const projects = [
                 Size
               </span>
               <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
-                120<span class="ml-0.5 text-xs text-muted-foreground">MB</span>
+                {{ formatAudioSize(project.totalAudioSize) }}
               </span>
             </div>
           </div>
 
           <div class="flex items-center justify-self-end gap-5">
             <div class="flex -space-x-2">
-              <div
-                v-for="i in Math.min(project.collaborators, 3)"
-                :key="i"
-                class="h-7 w-7 rounded-full border-2 border-card"
-                :style="{ backgroundColor: `hsl(${300 - (i - 1) * 40} 60% ${45 + (i - 1) * 8}%)` }"
-              />
+              <img
+                v-for="member in project.members.slice(0, 3)"
+                :key="member.userId"
+                :src="member.profileImgUrl"
+                :alt="`member-${member.userId}`"
+                class="h-7 w-7 rounded-full border-2 border-card object-cover"
+              >
             </div>
 
             <span class="hidden font-mono-tight text-[9px] uppercase tracking-widest text-muted-foreground lg:inline">
-              {{ project.edited }}
+              {{ formatEditedText(project.lastUpdateAt) }}
             </span>
 
             <div class="grid h-10 w-10 place-items-center rounded-full border border-border text-primary transition group-hover:border-primary group-hover:bg-primary/10 group-hover:shadow-neon">

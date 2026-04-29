@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     mongo_snapshot_collection: str = "timeline_snapshots"
     mongo_artifact_collection: str = "workflow_artifacts"
     audio_root: str | None = None
+    clap_enabled: bool = True
+    clap_inference_url: str | None = None
+    clap_timeout_seconds: float = 20.0
+    clap_connect_timeout_seconds: float = 5.0
+    clap_vocal_threshold: float = 0.58
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="STUDION_AI_", extra="ignore")
 

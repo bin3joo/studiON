@@ -2,6 +2,7 @@ package com.salmon.studion.domain.comment.entity;
 
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.track.entity.Track;
+import com.salmon.studion.global.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -18,7 +19,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @SQLDelete(sql = "update comment set deleted_at = now() where id = ?")
 @SQLRestriction("deleted_at is null")
-public class Comment {
+public class Comment extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

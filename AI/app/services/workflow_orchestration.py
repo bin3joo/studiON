@@ -31,7 +31,7 @@ class WorkflowStartPayload(BaseModel):
     job_id: str
     project_id: str
     project_snapshot: ProjectSnapshot
-    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap"])
+    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
     requested_by: int | None = None

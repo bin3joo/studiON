@@ -3,9 +3,12 @@ import type {
   CreateInviteCodeResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  FetchProjectsResponse,
   JoinProjectRequest,
   JoinProjectResponse,
+  Mode,
   ProjectId,
+  RootNote,
 } from '../types/project.types'
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
@@ -58,9 +61,43 @@ export const projectApi = {
 
 
 const MOCK_PROJECT_CREATE_DELAY_MS = 400;
+const MOCK_PROJECT_LIST_DELAY_MS = 300;
+const DEFAULT_PROJECT_NAME = '새 프로젝트';
+const DEFAULT_ROOT_NOTE: RootNote = 'C';
+const DEFAULT_MODE: Mode = 'Major';
+const DEFAULT_TEMPO = 120.0;
+const DEFAULT_TIME_SIG_NUMERATOR = 4;
+const DEFAULT_TIME_SIG_DENOMINATOR = 4;
 
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+export function getNextDefaultProjectName(existingProjectNames: string[]): string {
+  const nameSet = new Set(existingProjectNames)
+
+  if (!nameSet.has(DEFAULT_PROJECT_NAME)) {
+    return DEFAULT_PROJECT_NAME
+  }
+
+  let suffix = 1
+
+  while (nameSet.has(`${DEFAULT_PROJECT_NAME}${suffix}`)) {
+    suffix += 1
+  }
+
+  return `${DEFAULT_PROJECT_NAME}${suffix}`
+}
+
+export function buildCreateProjectPayload(existingProjectNames: string[] = []): CreateProjectRequest {
+  return {
+    name: getNextDefaultProjectName(existingProjectNames),
+    rootNote: DEFAULT_ROOT_NOTE,
+    mode: DEFAULT_MODE,
+    tempo: DEFAULT_TEMPO,
+    timeSigNumerator: DEFAULT_TIME_SIG_NUMERATOR,
+    timeSigDenominator: DEFAULT_TIME_SIG_DENOMINATOR,
+  }
 }
 
 /**
@@ -69,21 +106,38 @@ function wait(ms: number) {
  * 백엔드 연결 시 아래 real API 코드를 주석 해제하고 mock 부분을 제거하면 된다.
  */
 export async function createProject(
-  payload: CreateProjectRequest = { name: '새 프로젝트' },
+  payload: CreateProjectRequest = buildCreateProjectPayload(),
 ): Promise<CreateProjectResponse> {
   // =========================
   // mock implementation
   // =========================
   await wait(MOCK_PROJECT_CREATE_DELAY_MS)
 
-  const normalizedName = payload.name.trim().replace(/\s+/g, '-').toLowerCase()
-  const fakeProjectId = normalizedName.length > 0
-    ? `mock-${normalizedName}`
-    : 'mock-project-id'
+  const fakeProjectId = Date.now()
 
   return {
+    code: 200,
+    message: '프로젝트가 생성되었습니다.',
+    isSuccess: true,
     data: {
-      projectId: fakeProjectId,
+      project: {
+        projectId: fakeProjectId,
+        name: payload.name,
+        rootNote: payload.rootNote,
+        mode: payload.mode,
+        tempo: payload.tempo,
+        timeSigNumerator: payload.timeSigNumerator,
+        timeSigDenominator: payload.timeSigDenominator,
+        totalBarCount: 0,
+        totalPlayTime: 0,
+      },
+      masterTrack: {
+        masterTrackId: fakeProjectId,
+        isSoloed: false,
+        isMuted: false,
+        volume: 1,
+        pan: 0,
+      },
     },
   }
 
@@ -109,6 +163,71 @@ export async function createProject(
   // }
   //
   // return await response.json() as CreateProjectResponse
+}
+
+export async function fetchProjects(): Promise<FetchProjectsResponse> {
+  // =========================
+  // mock implementation
+  // =========================
+  await wait(MOCK_PROJECT_LIST_DELAY_MS)
+
+  return {
+    code: 200,
+    message: '요청에 성공하였습니다.',
+    isSuccess: true,
+    data: {
+      projects: [
+        {
+          projectId: 1,
+          projectName: '새 프로젝트',
+          totalBarCount: 0,
+          totalPlayTime: 0,
+          totalAudioSize: 0,
+          lastUpdateAt: '2026-04-20T12:30:44',
+          members: [
+            {
+              userId: 1,
+              profileImgUrl: 'https://example.com/profile-1.png',
+            },
+          ],
+        },
+        {
+          projectId: 2,
+          projectName: '새 프로젝트1',
+          totalBarCount: 8,
+          totalPlayTime: 180000,
+          totalAudioSize: 314572800,
+          lastUpdateAt: '2026-04-21T10:00:00',
+          members: [
+            {
+              userId: 1,
+              profileImgUrl: 'https://example.com/profile-1.png',
+            },
+            {
+              userId: 2,
+              profileImgUrl: 'https://example.com/profile-2.png',
+            },
+          ],
+        },
+      ],
+    },
+  }
+
+  // =========================
+  // real API implementation
+  // =========================
+  // const response = await fetch('/api/v1/projects', {
+  //   method: 'GET',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //   },
+  // })
+  //
+  // if (!response.ok) {
+  //   throw new Error('프로젝트 목록 조회에 실패했습니다.')
+  // }
+  //
+  // return await response.json() as FetchProjectsResponse
 }
 
 /**

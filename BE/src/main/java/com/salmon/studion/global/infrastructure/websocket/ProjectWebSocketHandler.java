@@ -40,7 +40,6 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
         } catch (BusinessException e) {
             sendError(session, e.getErrorCode().getStatus().value(), e.getMessage());
         } catch (Exception e) {
-            log.error("[WS 처리 오류]: event={}", event, e);
             sendError(session, 500, "서버 오류가 발생했습니다.");
         }
     }

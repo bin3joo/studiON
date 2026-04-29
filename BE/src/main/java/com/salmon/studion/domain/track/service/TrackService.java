@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.project.repository.ProjectRepository;
 import com.salmon.studion.domain.track.dto.TrackState;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
+import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
+import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
 import com.salmon.studion.domain.track.repository.TrackEventRepository;
 import com.salmon.studion.global.common.response.ErrorCode;
@@ -33,6 +35,11 @@ public class TrackService {
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
+    /*
+        트랙을 추가하는 메서드
+        현재는 가장 하단에 추가하는 것으로 고정
+        추후 변경 가능하도록 구현
+     */
     public TrackAddResponse addTrack(TrackAddRequest request, Integer userId) {
         projectRepository.findById(request.getProjectId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_NOT_FOUND));
@@ -90,9 +97,65 @@ public class TrackService {
     }
 
     /*
+        트랙을 삭제하는 메서드
+     */
+    public TrackRemoveResponse removeTrack(TrackRemoveRequest request, Integer userId) {
+        projectRepository.findById(request.getProjectId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_NOT_FOUND));
+
+        String key = String.format(TRACKS_KEY, request.getProjectId());
+        String trackJson = (String) redisTemplate.opsForHash()
+                .get(key, String.valueOf(request.getTrackId()));
+        if(trackJson == null){
+            throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
+        }
+
+        TrackState track = null;
+
+        try {
+            track = objectMapper.readValue(trackJson, TrackState.class);
+            if(track.getPreTrackId() != null) {
+                updatePostTrackId(request.getProjectId(), track.getPreTrackId(), track.getPostTrackId());
+            }
+
+            if(track.getPostTrackId() != null) {
+                updatePreTrackId(request.getProjectId(), track.getPostTrackId(), track.getPreTrackId());
+            }
+
+            removeTrackToRedis(request.getProjectId(), track);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
+
+        // 저장 실패 시에도 브로드캐스트는 진행하기 위한 처리
+        try {
+            saveTrackAddOrDeleteEvent(
+                    "TRACK_DELETE",
+                    request.getProjectId(),
+                    request.getTrackId(),
+                    userId,
+                    sequenceNo,
+                    track.getPreTrackId(),
+                    track.getPostTrackId()
+            );
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=TRACK_DELETE, trackId={}", track.getTrackId(), e);
+        }
+
+        return TrackRemoveResponse.builder()
+                .trackId(track.getTrackId())
+                .preTrackId(track.getPreTrackId())
+                .postTrackId(track.getPostTrackId())
+                .build();
+    }
+
+    /*
         Redis에서 마지막 트랙의 id를 조회한다.
      */
-    private Integer findLastTrackId(Integer projectId) {
+    private Integer     findLastTrackId(Integer projectId) {
         String key = String.format(TRACKS_KEY, projectId);
         Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
 
@@ -122,12 +185,49 @@ public class TrackService {
     }
 
     /*
+        Redis에서 Track을 삭제한다.
+     */
+    private void removeTrackToRedis(Integer projectId, TrackState track) {
+        String key = String.format(TRACKS_KEY, projectId);
+        redisTemplate.opsForHash().delete(key, String.valueOf(track.getTrackId()));
+    }
+
+    /*
+        PreTrackId를 갱신한다.
+     */
+    private void updatePreTrackId(Integer projectId, Integer trackId, Integer preTrackId) {
+        String key = String.format(TRACKS_KEY, projectId);
+        String trackJson = (String) redisTemplate.opsForHash().get(key, String.valueOf(trackId));
+        if(trackJson == null)
+            throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
+
+        try {
+            TrackState track = objectMapper.readValue(trackJson, TrackState.class);
+            TrackState updated = TrackState.builder()
+                    .trackId(track.getTrackId())
+                    .name(track.getName())
+                    .type(track.getType())
+                    .preTrackId(preTrackId)
+                    .postTrackId(track.getPostTrackId())
+                    .isMuted(track.getIsMuted())
+                    .isSoloed(track.getIsSoloed())
+                    .volume(track.getVolume())
+                    .pan(track.getPan())
+                    .build();
+            redisTemplate.opsForHash().put(key, String.valueOf(trackId), objectMapper.writeValueAsString(updated));
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /*
         PostTrackId를 갱신한다.
      */
     private void updatePostTrackId(Integer projectId, Integer trackId, Integer postTrackId) {
         String key = String.format(TRACKS_KEY, projectId);
         String trackJson = (String) redisTemplate.opsForHash().get(key, String.valueOf(trackId));
-        if (trackJson == null) return;
+        if (trackJson == null)
+            throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
 
         try {
             TrackState track = objectMapper.readValue(trackJson, TrackState.class);

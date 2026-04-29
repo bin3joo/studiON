@@ -45,5 +45,7 @@ shelf/
 
 AI/.pyppeteer/
 
+.wav
+.mp3
 .png
 .pyppeteer

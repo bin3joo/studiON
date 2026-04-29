@@ -5,11 +5,12 @@ import json
 from typing import Any
 
 from app.graph.workflow import build_workflow_response, run_workflow_graph
+from app.utils.logger import configure_logging
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Mock DSP 분석 결과를 콘솔에서 직접 확인하는 로컬 점검 스크립트",
+        description="Mock DSP 워크플로우를 직접 실행하고 핵심 상태를 출력합니다.",
     )
     parser.add_argument("--job-id", default="inspect-job")
     parser.add_argument("--project-id", default="inspect-project")
@@ -17,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--audio-paths",
         default="",
-        help="track_ids 순서와 맞는 로컬 WAV 경로 CSV. 넣으면 실제 DSP 경로를 시도한다",
+        help="track_ids 순서와 맞는 WAV 경로 CSV입니다.",
     )
     parser.add_argument("--issue-types", default="band_overlap,sibilance,clipping")
     parser.add_argument("--duration-ms", type=int, default=4800)
@@ -29,17 +30,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--auto-resume-mix-intent",
         action="store_true",
-        help="main_track_id가 있으면 wait_user_mix_intent 이후 재개까지 자동으로 한 번 더 실행한다",
+        help="main_track_id가 있으면 waiting 상태를 자동으로 한 번 더 진행합니다.",
     )
     parser.add_argument(
         "--json-only",
         action="store_true",
-        help="사람이 읽는 요약 없이 JSON만 출력한다",
+        help="사람이 읽는 요약 없이 JSON만 출력합니다.",
     )
     parser.add_argument(
         "--full-response",
         action="store_true",
-        help="graph_state와 projections 전체를 그대로 출력한다",
+        help="graph_state와 projections 전체를 그대로 출력합니다.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="노드 전이, 랭킹 점수, 메모까지 함께 출력합니다.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="애플리케이션 로그 레벨을 지정합니다.",
     )
     return parser.parse_args()
 
@@ -114,7 +126,12 @@ def run_request(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def build_preview_payload(result: dict[str, Any], *, full_response: bool) -> dict[str, Any]:
+def build_preview_payload(
+    result: dict[str, Any],
+    *,
+    full_response: bool,
+    debug: bool,
+) -> dict[str, Any]:
     response = build_workflow_response(result)
     if full_response:
         return response
@@ -130,7 +147,7 @@ def build_preview_payload(result: dict[str, Any], *, full_response: bool) -> dic
         "mix_windows_preview": dsp_summary.get("mix_windows_preview", []),
         "track_windows_preview": dsp_summary.get("track_windows_preview", {}),
     }
-    return {
+    payload = {
         "request": {
             "job_id": result.get("job_id"),
             "project_id": result.get("project_id"),
@@ -152,6 +169,17 @@ def build_preview_payload(result: dict[str, Any], *, full_response: bool) -> dic
         "suggestion_group": response["projections"]["suggestion_group"],
         "preview_render": response["projections"]["preview_render"],
     }
+    if debug:
+        payload["debug"] = {
+            "transition_log": result.get("transition_log", []),
+            "ranking_scores": result.get("ranking_scores", {}),
+            "notes": result.get("notes", []),
+            "failure": {
+                "failure_code": result.get("failure_code"),
+                "failure_message": result.get("failure_message"),
+            },
+        }
+    return payload
 
 
 def print_human_summary(payload: dict[str, Any]) -> None:
@@ -160,6 +188,7 @@ def print_human_summary(payload: dict[str, Any]) -> None:
     regions = payload.get("analysis_regions", [])
     suggestion_group = payload.get("suggestion_group")
     preview_render = payload.get("preview_render")
+    debug_payload = payload.get("debug", {})
 
     print("=== Request ===")
     print(f"job_id: {request.get('job_id')}")
@@ -236,11 +265,29 @@ def print_human_summary(payload: dict[str, Any]) -> None:
         print(f"status: {preview_render.get('status')}")
     print()
 
+    if debug_payload:
+        print("=== Debug ===")
+        print(f"transition_log: {debug_payload.get('transition_log')}")
+        print(f"ranking_scores: {debug_payload.get('ranking_scores')}")
+        print(f"notes: {debug_payload.get('notes')}")
+        failure = debug_payload.get("failure", {})
+        if failure.get("failure_code") or failure.get("failure_message"):
+            print(
+                "failure: "
+                f"{failure.get('failure_code')} | {failure.get('failure_message')}"
+            )
+        print()
+
 
 def main() -> None:
     args = parse_args()
+    configure_logging(level="DEBUG" if args.debug else args.log_level)
     result = run_request(args)
-    preview_payload = build_preview_payload(result, full_response=args.full_response)
+    preview_payload = build_preview_payload(
+        result,
+        full_response=args.full_response,
+        debug=args.debug,
+    )
     if not args.json_only and not args.full_response:
         print_human_summary(preview_payload)
         print("=== JSON ===")

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from app.graph.state import WorkflowState, utc_now
+
+logger = logging.getLogger(__name__)
 
 
 def append_transition(state: WorkflowState, name: str) -> list[str]:
@@ -30,6 +34,7 @@ def workflow_update(
         payload["durable_status"] = durable_status
     if extra:
         payload.update(extra)
+    _log_workflow_update(state, payload)
     return payload
 
 
@@ -75,3 +80,42 @@ def build_action(
         "targetScope": target_scope,
         "actionId": f"{state['job_id']}-action-{index}",
     }
+
+
+def _log_workflow_update(previous: WorkflowState, current: WorkflowState) -> None:
+    log_level = _decide_log_level(current)
+    summary = (
+        "workflow node update | "
+        f"job_id={current.get('job_id', previous.get('job_id'))} "
+        f"node={current.get('current_node')} "
+        f"phase={current.get('phase')} "
+        f"progress={current.get('progress')} "
+        f"runtime_status={current.get('runtime_status', previous.get('runtime_status'))} "
+        f"durable_status={current.get('durable_status', previous.get('durable_status'))}"
+    )
+    logger.log(log_level, summary)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "workflow node debug | "
+            f"job_id={current.get('job_id', previous.get('job_id'))} "
+            f"transition_count={len(current.get('transition_log', []))} "
+            f"track_count={len(current.get('track_ids', previous.get('track_ids', [])))} "
+            f"sampled_clip_count={len(current.get('sampled_clip_ids', previous.get('sampled_clip_ids', [])))} "
+            f"analysis_region_count={len(current.get('analysis_regions', previous.get('analysis_regions', [])))} "
+            f"detected_issue_count={len(current.get('detected_issues', previous.get('detected_issues', [])))} "
+            f"ranked_candidate_count={len(current.get('ranked_candidate_ids', previous.get('ranked_candidate_ids', [])))} "
+            f"latest_artifact_id={current.get('latest_artifact_id', previous.get('latest_artifact_id'))} "
+            f"failure_code={current.get('failure_code', previous.get('failure_code'))}"
+        )
+
+
+def _decide_log_level(current: WorkflowState) -> int:
+    runtime_status = current.get("runtime_status")
+    phase = current.get("phase", "")
+    if runtime_status == "failed" or current.get("current_node") == "fail_workflow":
+        return logging.ERROR
+    if runtime_status == "waiting_for_user" or phase.startswith("waiting_for_user"):
+        return logging.WARNING
+    if runtime_status == "completed" or phase == "completed":
+        return logging.INFO
+    return logging.INFO

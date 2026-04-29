@@ -29,12 +29,15 @@ const trackStore = useTrackStore();
   >
     <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-20 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-white/5"
+      class="sticky left-0 z-20 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-[#282828]"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
       }"
     >
+    <!--빈틈 막는거-->
+    <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
+      <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 flex-1 items-center gap-1.5">
           <span class="truncate text-sm font-bold tracking-wide text-white">
@@ -95,12 +98,10 @@ const trackStore = useTrackStore();
 
     <div 
       aria-label="오디오 클립 작업 영역" 
-      class="relative  shrink-0 select-none bg-transparent py-1.5 touch-none"
+      class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
     >
-      <div 
-        class="relative h-full border-y border-r border-white/5 bg-card shadow-inner"
-      >
+      <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
         
         <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">
           <div 
@@ -122,6 +123,7 @@ const trackStore = useTrackStore();
             </template>
           </div>
         </div>
+        
         <div 
           v-for="clip in track.clips" 
           :key="clip.clipId"
@@ -144,20 +146,22 @@ const trackStore = useTrackStore();
           </div>
         </div>
 
-        <div 
-          class="pointer-events-none absolute -top-4 -bottom-4 z-50 w-px bg-primary"
-          :style="{ 
+      </div> 
+      <div 
+        class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
+        :class="[
+            { 'transition-[left] duration-150 ease-out': !trackStore.isPlaying }
+        ]"
+        :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',
-            /* 눈금자 손잡이와 동일한 그림자 효과를 주어 일체감을 높입니다 */
             boxShadow: '0 0 8px hsl(var(--primary) / 0.8)'
-          }"
-        ></div>
+        }"
+      ></div>
 
-      </div>
+    </div>
     </div>
 
-  </div>
 </template>
 <style scoped>
 </style>

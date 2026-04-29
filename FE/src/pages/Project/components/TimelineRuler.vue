@@ -88,7 +88,7 @@ const onPointerUp = (e:PointerEvent) => {
   >
     <div 
       aria-label="트랙 헤더 정렬 공간"
-      class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"
+      class="sticky left-0 z-50 w-[224px] shrink-0 border-r border-border bg-card"
     ></div>
 
     <div 
@@ -130,7 +130,7 @@ const onPointerUp = (e:PointerEvent) => {
 
         <div 
           aria-label="현재 재생 위치 표시 바"
-          class="absolute top-0 bottom-0 z-50 w-3.5 cursor-pointer pointer-events-auto"
+          class="absolute top-0 bottom-0 z-40 w-3.5 cursor-pointer pointer-events-auto"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)'
@@ -143,7 +143,7 @@ const onPointerUp = (e:PointerEvent) => {
           <div class="absolute top-0 bottom-[10px] left-1/2 -translate-x-1/2 w-1px bg-white/20 pointer-events-none"></div>
 
           <div
-            class="absolute -bottom-px left-0 w-full h-2.5 bg-primary pointer-events-none"
+            class="absolute bottom-0 left-0 w-full h-2.5 bg-primary pointer-events-none"
             style="
               clip-path: polygon(0% 0%, 100% 0%, 50% 100%); 
               filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.8));

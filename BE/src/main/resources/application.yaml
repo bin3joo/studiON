@@ -5,7 +5,7 @@ spring:
     name: studion
 
   datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:3306/studion
+    url: jdbc:mysql://${DB_HOST:localhost}:3307/studion?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -14,6 +14,11 @@ spring:
     hibernate:
       ddl-auto: update
     defer-datasource-initialization: true
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQL8Dialect
   sql:
     init:
       mode: always
@@ -21,11 +26,26 @@ spring:
   data:
     redis:
       host: ${REDIS_HOST:localhost}
-      port: 6379
+      port: ${REDIS_PORT:6379}
     mongodb:
       host: ${MONGODB_HOST:localhost}
-      port: 27017
-      database: studion
+      port: ${MONGODB_PORT:27017}
+      database: ${MONGODB_DB:studion}
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope: email, profile
+        provider:
+          google:
+            authorization-uri: https://accounts.google.com/o/oauth2/auth
+            token-uri: https://oauth2.googleapis.com/token
+            user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
+            user-name-attribute: sub
 
 cloud:
   aws:
@@ -42,3 +62,10 @@ websocket:
   allowed-origins:
     - http://localhost:3000
     - http://localhost:5173
+
+logging:
+  level:
+    root: INFO
+    com.salmon.studion: DEBUG
+    org.springframework.web.socket: DEBUG
+    org.springframework.security: DEBUG

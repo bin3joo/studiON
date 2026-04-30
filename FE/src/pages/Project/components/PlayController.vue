@@ -47,6 +47,15 @@ const handlePause = () => {
 const handleStop = () => {
   trackStore.stopPlay();
 };
+
+// 4. ai 분석 버튼 상태 전달
+const props = defineProps<{
+  aiAnalyzing: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'run-ai-analysis'): void
+}>()
 </script>
 
 <template>
@@ -107,12 +116,19 @@ const handleStop = () => {
 
     <div class="flex items-center gap-2">
       <button 
-        aria-label="AI 믹스 분석 실행"
-        class="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-transparent px-3.5 text-[10px] font-medium uppercase tracking-[0.2em] text-white transition hover:border-white/30 hover:bg-white/5"
-      >
-        <Sparkles class="h-3.5 w-3.5" aria-hidden="true" />
-        <span>AI 분석</span>
-      </button>
+  type="button"
+  aria-label="AI 믹스 분석 실행"
+  :disabled="props.aiAnalyzing"
+  class="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-transparent px-3.5 text-[10px] font-medium uppercase tracking-[0.2em] text-white transition hover:border-white/30 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+  @click="emit('run-ai-analysis')"
+>
+  <Sparkles
+    class="h-3.5 w-3.5"
+    :class="props.aiAnalyzing ? 'animate-pulse' : ''"
+    aria-hidden="true"
+  />
+  <span>{{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}</span>
+</button>
 
       <div 
         :aria-label="`현재 템포: ${trackStore.projectInfo.tempo.toFixed(2)} BPM`"

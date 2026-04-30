@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -64,18 +64,36 @@ const handleWheel = (e: WheelEvent) => {
   }
 };
 
+//스페이스바 단축키 핸들러
+const handleKeyDown = (e: KeyboardEvent) => {
+  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+    return;
+  }
+  if(e.code === 'Space'){
+    e.preventDefault();
+    trackStore.togglePlay();
+  }
+}
+
 // 프로젝트 시작 시 트랙 정보 불러오기
 onMounted(async () => {
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
   }
+  //키보드 이벤트 리스너 등록
+  window.addEventListener('keydown', handleKeyDown);
+
 //브라우저 기본 줌을 막기 위해 수동으로 이벤트 리스너 등록
 if(timelineContainerRef.value) {
   timelineContainerRef.value.addEventListener('wheel', handleWheel, {passive: false}) 
   }
 })
 
+onUnmounted(()=>{
+  //키보드 이벤트 제거
+  window.removeEventListener('keydown',handleKeyDown);
+})
 
 const isInviteModalOpen = ref(false)
 const activeSidePanel = ref<SidePanelType>(null)

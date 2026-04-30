@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {ref} from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
+import * as Tone from 'tone';
 
 // 트랙 스토어에서 타임라인 상태와 픽셀 계산 사용
 const trackStore = useTrackStore();
@@ -29,6 +30,10 @@ const updatePlayhead = (clientX: number) => {
 
   //반응형으로 인해 재생바 UI가 즉시 이동 (스토어 업데이트)
   trackStore.playheadPosition = newPositionBar;
+
+  //오디오 엔진 시간 동기화
+  const secondsPerBar = (4*60) / trackStore.bpm;
+  Tone.getTransport().seconds = newPositionBar * secondsPerBar;
 
 }
 

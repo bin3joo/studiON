@@ -2,7 +2,7 @@ package com.salmon.studion.domain.track.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.salmon.studion.domain.project.repository.ProjectRepository;
+import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
@@ -23,7 +23,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -36,11 +35,11 @@ public class TrackService {
     private static final String TRACK_ID_SEQ_KEY = "project:%d:track:id_seq";
     private static final String EVENT_SEQ_KEY = "project:%d:event:seq";
 
-    private final ProjectRepository projectRepository;
+    private final ProjectService projectService;
+    private final TrackRepository trackRepository;
     private final TrackEventRepository trackEventRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
-    private final TrackRepository trackRepository;
 
     /*
         트랙을 추가하는 메서드
@@ -52,7 +51,7 @@ public class TrackService {
         request.validate();
 
         // 프로젝트 존재여부 확인
-        findProject(request.getProjectId());
+        projectService.getProjectOrThrow(request.getProjectId());
 
         Integer newTrackId = redisTemplate.opsForValue()
                 .increment(String.format(TRACK_ID_SEQ_KEY, request.getProjectId())).intValue();
@@ -112,7 +111,7 @@ public class TrackService {
     public TrackRemoveResponse removeTrack(TrackRemoveRequest request, Integer userId) {
         request.validate();
 
-        findProject(request.getProjectId());
+        projectService.getProjectOrThrow(request.getProjectId());
 
         TrackState track = findTrack(request.getProjectId(), request.getTrackId());
 
@@ -156,7 +155,7 @@ public class TrackService {
     public TrackReorderResponse reorderTrack(TrackReorderRequest request, Integer userId) {
         request.validate();
 
-        findProject(request.getProjectId());
+        projectService.getProjectOrThrow(request.getProjectId());
 
         TrackState track = findTrack(request.getProjectId(), request.getTrackId());
 
@@ -194,7 +193,7 @@ public class TrackService {
                     .trackId(request.getTrackId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                    .timestamp(LocalDateTime.now())
                     .before(TrackReorderEventDocument.TrackPosition.builder()
                             .preTrackId(beforePreTrackId)
                             .postTrackId(beforePostTrackId)
@@ -216,14 +215,6 @@ public class TrackService {
                 .preTrackId(request.getTargetPreTrackId())
                 .postTrackId(request.getTargetPostTrackId())
                 .build();
-    }
-
-    /*
-        Project 존재 여부 확인.
-     */
-    private void findProject(Integer projectId) {
-        projectRepository.findById(projectId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_NOT_FOUND));
     }
 
     /*
@@ -350,7 +341,7 @@ public class TrackService {
                 .trackId(newTrackId)
                 .userId(userId)
                 .sequenceNo(sequenceNo)
-                .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                .timestamp(LocalDateTime.now())
                 .preTrackId(preTrackId)
                 .postTrackId(postTrackId)
                 .undoable(true)

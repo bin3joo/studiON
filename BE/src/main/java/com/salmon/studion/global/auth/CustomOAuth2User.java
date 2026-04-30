@@ -20,6 +20,11 @@ public class CustomOAuth2User implements OAuth2User {
         return isNewUser;
     }
 
+    // 이게 진짜 userId 받아오는거
+    public Integer getUserId() {
+        return user.getId();
+    }
+
     @Override
     public Map<String, Object> getAttributes() {
         return attributes;
@@ -35,4 +40,5 @@ public class CustomOAuth2User implements OAuth2User {
     public String getName() {
         return String.valueOf(user.getId());
     }
+
 }

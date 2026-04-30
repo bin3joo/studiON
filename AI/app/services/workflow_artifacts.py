@@ -8,6 +8,7 @@ from pymongo import MongoClient
 
 from app.core.config import get_settings
 from app.graph.state import utc_now
+from app.services.mongo_documents import normalize_mongo_document_keys
 
 
 class WorkflowArtifactDocument(BaseModel):
@@ -62,7 +63,7 @@ class MongoWorkflowArtifactStore:
         self,
         document: WorkflowArtifactDocument,
     ) -> WorkflowArtifactDocument:
-        payload = document.model_dump(mode="python")
+        payload = normalize_mongo_document_keys(document.model_dump(mode="python"))
         payload["_id"] = payload.pop("id")
         self._collection.replace_one({"_id": payload["_id"]}, payload, upsert=True)
         return document

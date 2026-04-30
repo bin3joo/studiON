@@ -6,16 +6,13 @@ import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
 import ProjectHeader from './components/ProjectHeader.vue'
 import TrackList from './components/TrackList.vue' //트랙 리스트 컴포넌트
 import InviteCodeModal from './components/InviteCodeModal.vue'
-import ProjectPlaybar from './components/ProjectPlaybar.vue'
-import ProjectEditSection from './components/ProjectEditSection.vue'
 import ProjectAiSection from './components/ProjectAiSection.vue'
 import ProjectSidePanel from './components/ProjectSidePanel.vue'
 import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금자
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
 import * as Tone from 'tone' //오디오 엔진
-
+import AiConflictOverlay from './components/AiConflictOverlay.vue'
 type SidePanelType = 'comments' | 'history' | 'ai' | null
-
 
 const route = useRoute()
 const projectId = route.params.projectId as string
@@ -264,6 +261,42 @@ function handleResolveComment(payload: {
   }
 }
 
+const aiAnalyzing = ref(false)
+
+const aiConflict = ref<null | {
+  startPercent: number
+  endPercent: number
+  barStart: number
+  barEnd: number
+  title: string
+  summary: string
+  bullets: string[]
+}>(null)
+
+const runAiAnalysis = () => {
+  if (aiAnalyzing.value) return
+
+  aiAnalyzing.value = true
+  aiConflict.value = null
+
+  setTimeout(() => {
+    aiConflict.value = {
+      startPercent: 18.3,
+      endPercent: 23.3,
+      barStart: 12,
+      barEnd: 14,
+      title: '12마디에서 14마디 사이',
+      summary: '중음역대에서 충돌이 발생해요.',
+      bullets: [
+        '트랙을 선택해 충돌 구간을 확인해보세요.',
+        '리드 신스 1과 리듬 기타 L의 200Hz~800Hz 대역이 겹쳐요.',
+        '각 트랙 EQ에서 -3dB 정도 컷을 제안합니다.',
+      ],
+    }
+
+    aiAnalyzing.value = false
+  }, 1200)
+}
 
 //브라우저 오디오 제한 강제 해제
 const unlockAudioEngine = async () => {
@@ -296,13 +329,20 @@ const unlockAudioEngine = async () => {
       @open-history="handleOpenHistory"
     />
     <!-- 재생 컨트롤러 컴포넌트 추가 -->
-    <PlayController />
+    <PlayController
+  :ai-analyzing="aiAnalyzing"
+  @run-ai-analysis="runAiAnalysis"
+/>
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
       <!-- flex-1 -> 남은 공간 차지, overflow-auto -> 넘치는 부분 스크롤 -->
       <div ref="timelineContainerRef" class="flex-1 overflow-auto relative flex flex-col">
         <!--눈금자 컴포넌트 추가 -->
         <TimelineRuler />
+        <AiConflictOverlay
+    v-if="aiConflict"
+    :conflict="aiConflict"
+  />
         <!--트랙리스트-->
         <TrackList />
       </div>

@@ -56,6 +56,9 @@ class AnalysisRegionProjection(BaseModel):
     involved_track_ids: list[int] = Field(default_factory=list)
     # 프론트 잠금은 트랙 단위가 아니라 실제로 겹치는 clip id 집합 기준으로 판단한다.
     affected_clip_ids: list[int] = Field(default_factory=list)
+    contributing_track_ids: list[int] = Field(default_factory=list)
+    track_contribution_scores: dict[str, float] = Field(default_factory=dict)
+    contributor_band_hints: dict[str, list[str]] = Field(default_factory=dict)
 
 
 # 보컬 추론 결과를 별도 projection으로 노출한다.
@@ -238,7 +241,8 @@ def _to_validation_status(result: str | None) -> str:
 def _to_issue_code(issue_type: object) -> str | None:
     mapping = {
         "band_overlap": "BAND_OVERLAP",
-        "clipping": "CLIPPING",
+        "track_clipping": "TRACK_CLIPPING",
+        "master_clipping": "MASTER_CLIPPING",
         "sibilance": "SIBILANCE",
         "high_band_harshness": "HIGH_BAND_HARSHNESS",
     }
@@ -274,6 +278,17 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
                 int(track_id) for track_id in region.get("involved_track_ids", [])
             ],
             affected_clip_ids=[int(clip_id) for clip_id in region.get("affected_clip_ids", [])],
+            contributing_track_ids=[
+                int(track_id) for track_id in region.get("contributing_track_ids", [])
+            ],
+            track_contribution_scores={
+                str(track_id): float(score)
+                for track_id, score in region.get("track_contribution_scores", {}).items()
+            },
+            contributor_band_hints={
+                str(track_id): [str(hint) for hint in hints]
+                for track_id, hints in region.get("contributor_band_hints", {}).items()
+            },
         )
         for region in state.get("analysis_regions", [])
     ]
@@ -464,6 +479,5 @@ def _build_feedback_event(state: WorkflowState) -> FeedbackEventProjection | Non
         event_type="AI_EDIT_CONFIRMATION",
         payload={
             "decision": state.get("user_decision", "confirm"),
-            "selectedActionIds": state.get("selected_action_ids", []),
         },
     )

@@ -42,7 +42,6 @@ ENTRY_PATH_MAP = {
     "init_state": "init_state",
     "fail_workflow": "fail_workflow",
     "wait_user_plan_input": "wait_user_plan_input",
-    "wait_user_selection": "wait_user_selection",
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
     "wait_user_confirm": "wait_user_confirm",
 }
@@ -80,72 +79,90 @@ CRITIC_PATH_MAP = {
 
 USER_ACTION_GATE_PATH_MAP = {
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
-    "wait_user_selection": "wait_user_selection",
     "finalize_output": "finalize_output",
 }
 
 WAIT_CONFIRM_PATH_MAP = {
     "commit_selected_edit_recipe": "commit_selected_edit_recipe",
-    "render_preview": "render_preview",
     "finalize_output": "finalize_output",
     "END": END,
 }
 
 WORKFLOW_NODE_LABELS = {
     "__start__": "__start__ / 시작",
-    "load_entry_context": "load_entry_context / 진입 컨텍스트 적재",
-    "init_state": "init_state / 초기 상태 설정",
-    "load_project_snapshot": "load_project_snapshot / 프로젝트 스냅샷 적재",
-    "sample_track_clips": "sample_track_clips / 대표 구간 샘플링",
-    "cheap_dsp_scan": "cheap_dsp_scan / 경량 DSP 스캔",
-    "detect_band_overlap": "detect_band_overlap / 대역 중첩 탐지",
-    "detect_clipping": "detect_clipping / 클리핑 탐지",
-    "detect_high_band_harshness": "detect_high_band_harshness / 고역 harshness 탐지",
-    "select_role_candidates": "select_role_candidates / 후보 트랙 선택",
-    "clap_gate": "clap_gate / CLAP 필요 여부",
+    "load_entry_context": "load_entry_context / 진입 문맥 복원",
+    "resume_after_plan_input": "resume_after_plan_input / 사용자 plan 입력 반영",
+    "init_state": "init_state / 상태 초기화",
+    "load_project_snapshot": "load_project_snapshot / 프로젝트 스냅샷 복원",
+    "sample_track_clips": "sample_track_clips / 트랙 대표 클립 샘플링",
+    "cheap_dsp_scan": "cheap_dsp_scan / 전체 DSP 스캔",
+    "detect_band_overlap": "detect_band_overlap / 대역 중복 탐지",
+    "detect_track_clipping": "detect_track_clipping / 트랙 클리핑 탐지",
+    "detect_master_clipping_candidates": (
+        "detect_master_clipping_candidates / 마스터 클리핑 후보 수집"
+    ),
+    "analyze_master_clipping_contributors": (
+        "analyze_master_clipping_contributors / 마스터 기여 트랙 분석"
+    ),
+    "detect_residual_master_clipping": (
+        "detect_residual_master_clipping / 잔여 마스터 클리핑 탐지"
+    ),
+    "detect_high_band_harshness": (
+        "detect_high_band_harshness / 고역 harshness 탐지"
+    ),
+    "select_role_candidates": "select_role_candidates / 역할 추론 후보 선택",
+    "clap_gate": "clap_gate / CLAP 실행 여부 판단",
     "infer_track_roles": "infer_track_roles / 트랙 역할 추론",
     "detect_sibilance": "detect_sibilance / 치찰음 탐지",
     "merge_analysis": "merge_analysis / 분석 결과 병합",
-    "candidate_ranking": "candidate_ranking / 후보 랭킹",
-    "wait_user_plan_input": "wait_user_plan_input / 계획 입력 대기",
-    "resume_after_plan_input": "resume_after_plan_input / 계획 입력 반영",
-    "planning_agent": "planning_agent / 계획 생성기",
+    "candidate_ranking": "candidate_ranking / 사용자 후보 정렬",
+    "wait_user_plan_input": "wait_user_plan_input / 사용자 입력 대기",
+    "planning_agent": "planning_agent / band overlap 계획 생성",
     "plan_rule_validator": "plan_rule_validator / 계획 규칙 검증",
-    "plan_critic": "plan_critic / 계획 비평",
+    "plan_critic": "plan_critic / 계획 2차 검토",
     "approve_plan": "approve_plan / 계획 승인",
     "materialize_execution_plan": "materialize_execution_plan / 실행 계획 구체화",
-    "auto_fix_sibilance": "auto_fix_sibilance / 치찰음 자동 보정",
-    "log_sibilance_fix": "log_sibilance_fix / 치찰음 보정 로그 기록",
+    "auto_fix_non_user_issues": "auto_fix_non_user_issues / 자동 수정 recipe 생성",
+    "log_non_user_issue_fixes": "log_non_user_issue_fixes / 자동 수정 로그 기록",
     "persist_analysis_result": "persist_analysis_result / 분석 결과 저장",
-    "user_action_gate": "user_action_gate / 사용자 승인 필요 여부",
-    "wait_user_selection": "wait_user_selection / 사용자 선택 대기",
-    "apply_selected_edit_recipe": "apply_selected_edit_recipe / 선택 레시피 적용",
+    "user_action_gate": "user_action_gate / 사용자 액션 필요 여부 판단",
+    "apply_selected_edit_recipe": "apply_selected_edit_recipe / 선택 액션 적용",
     "render_preview": "render_preview / 프리뷰 렌더링",
-    "wait_user_confirm": "wait_user_confirm / 사용자 최종 확인 대기",
-    "commit_selected_edit_recipe": "commit_selected_edit_recipe / 선택 레시피 확정",
+    "wait_user_confirm": "wait_user_confirm / 사용자 확인 대기",
+    "commit_selected_edit_recipe": "commit_selected_edit_recipe / 선택 액션 확정",
     "emit_feedback_event": "emit_feedback_event / 피드백 이벤트 기록",
-    "finalize_output": "finalize_output / 결과 완료 처리",
-    "fail_workflow": "fail_workflow / 워크플로 실패 처리",
+    "finalize_output": "finalize_output / 결과 마무리",
+    "fail_workflow": "fail_workflow / 실패 종료",
     "__end__": "__end__ / 종료",
 }
 
+
 # 워크플로우 그래프는 구조가 고정돼 있으므로
 # 매 호출마다 다시 compile하지 않고 한 번 만든 결과를 재사용한다.
-# maxsize=1은 최근 결과 하나만 유지하겠다는 뜻으로,
-# 사실상 앱 프로세스 동안 단일 compiled graph를 캐시한다.
 @lru_cache(maxsize=1)
 def build_workflow_graph():
     graph = StateGraph(WorkflowState)
 
     graph.add_node("load_entry_context", nodes.load_entry_context)
-    # Mermaid 렌더링에서 resume 진입 분기가 먼저 배치되도록 등록 순서를 앞당긴다.
     graph.add_node("resume_after_plan_input", nodes.resume_after_plan_input)
     graph.add_node("init_state", nodes.init_state)
     graph.add_node("load_project_snapshot", nodes.load_project_snapshot)
     graph.add_node("sample_track_clips", nodes.sample_track_clips)
     graph.add_node("cheap_dsp_scan", nodes.cheap_dsp_scan)
     graph.add_node("detect_band_overlap", nodes.detect_band_overlap)
-    graph.add_node("detect_clipping", nodes.detect_clipping)
+    graph.add_node("detect_track_clipping", nodes.detect_track_clipping)
+    graph.add_node(
+        "detect_master_clipping_candidates",
+        nodes.detect_master_clipping_candidates,
+    )
+    graph.add_node(
+        "analyze_master_clipping_contributors",
+        nodes.analyze_master_clipping_contributors,
+    )
+    graph.add_node(
+        "detect_residual_master_clipping",
+        nodes.detect_residual_master_clipping,
+    )
     graph.add_node("detect_high_band_harshness", nodes.detect_high_band_harshness)
     graph.add_node("select_role_candidates", nodes.select_role_candidates)
     graph.add_node("clap_gate", nodes.clap_gate)
@@ -159,11 +176,10 @@ def build_workflow_graph():
     graph.add_node("plan_critic", nodes.plan_critic)
     graph.add_node("approve_plan", nodes.approve_plan)
     graph.add_node("materialize_execution_plan", nodes.materialize_execution_plan)
-    graph.add_node("auto_fix_sibilance", nodes.auto_fix_sibilance)
-    graph.add_node("log_sibilance_fix", nodes.log_sibilance_fix)
+    graph.add_node("auto_fix_non_user_issues", nodes.auto_fix_non_user_issues)
+    graph.add_node("log_non_user_issue_fixes", nodes.log_non_user_issue_fixes)
     graph.add_node("persist_analysis_result", nodes.persist_analysis_result)
     graph.add_node("user_action_gate", nodes.user_action_gate)
-    graph.add_node("wait_user_selection", nodes.wait_user_selection)
     graph.add_node("apply_selected_edit_recipe", nodes.apply_selected_edit_recipe)
     graph.add_node("render_preview", nodes.render_preview)
     graph.add_node("wait_user_confirm", nodes.wait_user_confirm)
@@ -182,8 +198,17 @@ def build_workflow_graph():
         edges.route_after_dsp_scan,
         DSP_SCAN_PATH_MAP,
     )
-    graph.add_edge("detect_band_overlap", "detect_clipping")
-    graph.add_edge("detect_clipping", "detect_high_band_harshness")
+    graph.add_edge("detect_band_overlap", "detect_track_clipping")
+    graph.add_edge("detect_track_clipping", "detect_master_clipping_candidates")
+    graph.add_edge(
+        "detect_master_clipping_candidates",
+        "analyze_master_clipping_contributors",
+    )
+    graph.add_edge(
+        "analyze_master_clipping_contributors",
+        "detect_residual_master_clipping",
+    )
+    graph.add_edge("detect_residual_master_clipping", "detect_high_band_harshness")
     graph.add_edge("detect_high_band_harshness", "select_role_candidates")
     graph.add_edge("select_role_candidates", "clap_gate")
     graph.add_conditional_edges("clap_gate", edges.route_after_clap_gate, CLAP_GATE_PATH_MAP)
@@ -213,16 +238,15 @@ def build_workflow_graph():
         CRITIC_PATH_MAP,
     )
     graph.add_edge("approve_plan", "materialize_execution_plan")
-    graph.add_edge("materialize_execution_plan", "auto_fix_sibilance")
-    graph.add_edge("auto_fix_sibilance", "log_sibilance_fix")
-    graph.add_edge("log_sibilance_fix", "persist_analysis_result")
+    graph.add_edge("materialize_execution_plan", "auto_fix_non_user_issues")
+    graph.add_edge("auto_fix_non_user_issues", "log_non_user_issue_fixes")
+    graph.add_edge("log_non_user_issue_fixes", "persist_analysis_result")
     graph.add_edge("persist_analysis_result", "user_action_gate")
     graph.add_conditional_edges(
         "user_action_gate",
         edges.route_after_user_action_gate,
         USER_ACTION_GATE_PATH_MAP,
     )
-    graph.add_edge("wait_user_selection", END)
     graph.add_edge("apply_selected_edit_recipe", "render_preview")
     graph.add_edge("render_preview", "wait_user_confirm")
     graph.add_conditional_edges(
@@ -248,9 +272,6 @@ def build_apply_graph():
     return build_workflow_graph()
 
 
-# worker가 넘긴 상태를 LangGraph 입력 상태로 정규화한 뒤 실제 workflow graph를 실행하는 진입점이다.
-# start dispatch의 경우
-# load_entry_context -> init_state -> load_project_snapshot 순서로 노드를 타기 시작한다.
 def run_workflow_graph(state: WorkflowState | dict) -> WorkflowState:
     raw_state = dict(state)
     project_snapshot = raw_state.pop("project_snapshot", None)

@@ -12,10 +12,6 @@ def route_after_entry(state: WorkflowState) -> str:
         ):
             return "resume_after_plan_input"
         return "wait_user_plan_input"
-    if state.get("phase") == "waiting_for_user_selection":
-        if state.get("selected_action_ids"):
-            return "apply_selected_edit_recipe"
-        return "wait_user_selection"
     if state.get("phase") == "waiting_for_user_confirm":
         return "wait_user_confirm"
     return "init_state"
@@ -65,11 +61,7 @@ def route_after_critic(state: WorkflowState) -> str:
 
 # 사용자 선택이 필요한 suggestion/action이 있으면 selection wait로, 없으면 결과를 바로 종료한다.
 def route_after_user_action_gate(state: WorkflowState) -> str:
-    if not state.get("user_action_required"):
-        return "finalize_output"
-    if state.get("selected_action_ids"):
-        return "apply_selected_edit_recipe"
-    return "wait_user_selection"
+    return "apply_selected_edit_recipe" if state.get("user_action_required") else "finalize_output"
 
 
 # preview 이후에는 confirm/retry/cancel만 허용하고, 그 외 값은 안전하게 END로 끊는다.
@@ -77,8 +69,6 @@ def route_after_wait_user_confirm(state: WorkflowState) -> str:
     decision = state.get("user_decision")
     if decision == "confirm":
         return "commit_selected_edit_recipe"
-    if decision == "retry":
-        return "render_preview"
     if decision == "cancel":
         return "finalize_output"
     return "END"

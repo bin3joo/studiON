@@ -3,7 +3,7 @@ package com.salmon.studion.domain.track.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.project.entity.Project;
-import com.salmon.studion.domain.project.repository.ProjectRepository;
+import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
@@ -28,7 +28,6 @@ import org.springframework.data.redis.core.ValueOperations;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -37,7 +36,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class TrackServiceTest {
 
-    @Mock private ProjectRepository projectRepository;
+    @Mock private ProjectService projectService;
     @Mock private TrackEventRepository trackEventRepository;
     @Mock private RedisTemplate<String, String> redisTemplate;
     @Mock private TrackRepository trackRepository;
@@ -61,7 +60,7 @@ class TrackServiceTest {
 
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);
-        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(mock(Project.class)));
+        when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mock(Project.class));
 
         lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
                 .when(hashOperations).get(eq(TRACKS_KEY), any());

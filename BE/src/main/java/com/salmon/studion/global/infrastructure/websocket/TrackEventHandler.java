@@ -22,11 +22,7 @@ public class TrackEventHandler {
     private final ObjectMapper objectMapper;
     private final TrackService trackService;
 
-    public void handleTrackEvent(WebSocketSession session, String payload, Integer projectId) throws IOException {
-        WsMessage<Map> raw = objectMapper.readValue(payload, objectMapper.getTypeFactory()
-                .constructParametricType(WsMessage.class, Map.class));
-        String event = raw.getEvent();
-
+    public void handleTrackEvent(WebSocketSession session, Integer projectId, String event, WsMessage<Map> raw) throws IOException {
         // TODO: 인증 구현 후 SecurityContext에서 userId 추출
         Integer userId = 0;
 

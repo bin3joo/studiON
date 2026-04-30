@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.graph.nodes.common import build_action, workflow_update
+from app.graph.nodes.common import artifact_id, build_action, workflow_update
 from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
 from app.services.planning_llm import PlanningLLMError, get_planning_llm_client
+from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 
 
 def planning_agent(state: WorkflowState) -> WorkflowState:
@@ -80,7 +81,7 @@ def approve_plan(state: WorkflowState) -> WorkflowState:
     return workflow_update(
         state,
         node="approve_plan",
-        phase="plan_approved",
+        phase="internal_plan_approved",
         progress=82,
         extra={
             "plan_status": "APPROVED",
@@ -92,7 +93,14 @@ def approve_plan(state: WorkflowState) -> WorkflowState:
 def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     plan_payload = state.get("plan_payload") or {}
     candidate = plan_payload.get("candidate") or {}
+    selected_region = _resolve_selected_region(state)
+    notes = [*state.get("notes", [])]
+    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
+    latest_artifact_id = state.get("latest_artifact_id")
+
     if not candidate:
+        if selected_region is not None and selected_region.get("issue_type") == "sibilance":
+            notes.append("치찰음 이슈는 suggestion 없이 자동 보정 전용 경로로 유지했다.")
         return workflow_update(
             state,
             node="materialize_execution_plan",
@@ -103,10 +111,33 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
                 "suggestion_group_id": None,
                 "preview_action_ids": [],
                 "user_action_required": False,
+                "notes": notes,
             },
         )
 
+    # approved 되지 않은 계획은 바로 실패 처리함.
+    if state.get("plan_status") != "APPROVED":
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "PLAN_NOT_APPROVED",
+                "failure_message": "The execution plan could not be materialized before internal approval.",
+            }
+        )
+    if selected_region is None:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "MATERIALIZE_REGION_NOT_FOUND",
+                "failure_message": "The selected analysis region could not be restored for execution plan materialization.",
+            }
+        )
+
+    # 수정 계획에 있는 action 1개를 꺼냄.
+    # 현재는 사실상 action이 1개지만 확장성을 위해 배열로 만들어둠
+    # 확장한 후에는 여러 계획안에 여러 action을 만들어서 사용자에게 줄 예정.
     action = candidate["action"]
+    suggestion_group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
     payload = {
         "groupTitle": plan_payload.get("strategyTitle") or "Workflow suggestion group",
         "groupSummary": plan_payload.get("strategySummary"),
@@ -120,6 +151,27 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         ],
     }
     preview_action_ids = [action["actionId"]]
+    execution_plan_artifact_id = artifact_id(state, "execution-plan")
+    get_workflow_artifact_store().upsert_artifact(
+        WorkflowArtifactDocument(
+            id=execution_plan_artifact_id,
+            job_id=state["job_id"],
+            artifact_type="execution_plan",
+            payload={
+                "selectedRegionId": str(selected_region["id"]),
+                "issueType": selected_region.get("issue_type"),
+                "preserveClipId": state.get("preserve_clip_id"),
+                "planPayload": deepcopy(plan_payload),
+                "suggestionPayload": deepcopy(payload),
+                "previewActionIds": preview_action_ids,
+            },
+        )
+    )
+    mongo_artifact_ids.append(execution_plan_artifact_id)
+    latest_artifact_id = execution_plan_artifact_id
+    notes.append(
+        f"승인된 실행 계획을 suggestion group {suggestion_group_id}과 preview action {preview_action_ids[0]}으로 구체화했다."
+    )
     return workflow_update(
         state,
         node="materialize_execution_plan",
@@ -127,9 +179,12 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         progress=84,
         extra={
             "suggestion_payload": payload,
-            "suggestion_group_id": state.get("suggestion_group_id") or f"{state['job_id']}-group",
+            "suggestion_group_id": suggestion_group_id,
             "preview_action_ids": preview_action_ids,
             "user_action_required": True,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
+            "notes": notes,
         },
     )
 

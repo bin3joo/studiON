@@ -9,17 +9,32 @@ import pytest
 import soundfile as sf
 from fastapi.testclient import TestClient
 
+from app.graph.state import build_workflow_initial_state
 from app.main import create_app
 from app.services.clap_inference import CLAPTrackPrediction
+from app.services.mongo_documents import normalize_mongo_document_keys
 from app.services.plan_critic_llm import PlanCriticLLMResponse
 from app.services.planning_llm import PlanningLLMResponse
-from app.services.workflow_artifacts import get_workflow_artifact_store
-from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
+from app.services.workflow_artifacts import (
+    MongoWorkflowArtifactStore,
+    WorkflowArtifactDocument,
+    get_workflow_artifact_store,
+)
+from app.services.workflow_jobs import (
+    WorkflowDispatchMessage,
+    _build_record,
+    _row_to_record,
+    get_workflow_job_store,
+)
 from app.services.workflow_orchestration import (
     WorkflowStartPayload,
     start_workflow_job,
 )
-from app.services.workflow_snapshots import get_workflow_snapshot_store
+from app.services.workflow_snapshots import (
+    MongoWorkflowSnapshotStore,
+    TimelineSnapshotDocument,
+    get_workflow_snapshot_store,
+)
 from app.services.workflow_worker import run_workflow_dispatch
 
 
@@ -73,6 +88,18 @@ class _FakeCLAPInferenceClient:
         return predictions
 
 
+class _CaptureCollection:
+    def __init__(self) -> None:
+        self.filter: dict | None = None
+        self.payload: dict | None = None
+        self.upsert: bool | None = None
+
+    def replace_one(self, filter_query: dict, payload: dict, *, upsert: bool) -> None:
+        self.filter = filter_query
+        self.payload = payload
+        self.upsert = upsert
+
+
 @pytest.fixture(autouse=True)
 def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -109,6 +136,25 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
             clip_context: list[dict[str, object]],
             revision_notes: list[str],
         ) -> PlanningLLMResponse:
+            preserve_track_id = None
+            for clip in clip_context:
+                if int(clip.get("clip_id") or 0) == preserve_clip_id:
+                    preserve_track_id = int(clip.get("track_id") or 0)
+                    break
+            target_track_ids = (
+                region.get("target_track_ids")
+                or region.get("involved_track_ids")
+                or ([region["track_id"]] if region.get("track_id") is not None else [])
+            )
+            target_track_id = None
+            if isinstance(target_track_ids, list) and target_track_ids:
+                for candidate_track_id in target_track_ids:
+                    candidate_value = int(candidate_track_id)
+                    if preserve_track_id is None or candidate_value != preserve_track_id:
+                        target_track_id = candidate_value
+                        break
+                if target_track_id is None:
+                    target_track_id = int(target_track_ids[0])
             return PlanningLLMResponse(
                 plan_payload={
                     "strategyTitle": "dispatch test plan",
@@ -117,16 +163,16 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
                     "explanation": "dispatch test explanation",
                     "candidate": {
                         "action": {
-                            "actionType": "TRUE_PEAK_LIMITER",
-                            "targetScope": "MASTER",
-                            "targetTrackId": None,
-                            "targetClipId": None,
+                            "actionType": "DYNAMIC_EQ",
+                            "targetScope": "TRACK",
+                            "targetTrackId": target_track_id,
+                            "targetClipId": preserve_clip_id,
                             "startMs": int(region["start_ms"]),
                             "endMs": int(region["end_ms"]),
-                            "bandLowHz": None,
-                            "bandHighHz": None,
-                            "gainDeltaDb": None,
-                            "params": {"ceilingDbTP": -1.0, "releaseMs": 60},
+                            "bandLowHz": 180,
+                            "bandHighHz": 420,
+                            "gainDeltaDb": -2.5,
+                            "params": {"q": 1.1, "attackMs": 10, "releaseMs": 80},
                         }
                     },
                 }
@@ -190,6 +236,76 @@ def build_plan_input(state: dict) -> dict[str, object]:
     }
 
 
+def test_normalize_mongo_document_keys_recursively_stringifies_numeric_keys() -> None:
+    payload = {
+        10: {"scores": {20: 0.91}, "windows": [{30: "value"}]},
+        "track_frames": {40: [{"frame": 1}]},
+    }
+
+    normalized = normalize_mongo_document_keys(payload)
+
+    assert "10" in normalized
+    assert normalized["10"]["scores"]["20"] == 0.91
+    assert normalized["10"]["windows"][0]["30"] == "value"
+    assert normalized["track_frames"]["40"][0]["frame"] == 1
+
+
+def test_mongo_artifact_store_upsert_normalizes_nested_numeric_keys() -> None:
+    capture = _CaptureCollection()
+    store = MongoWorkflowArtifactStore.__new__(MongoWorkflowArtifactStore)
+    store._collection = capture
+
+    store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-1",
+            job_id=1,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "track_frames": {10: [{"spectral_centroid_hz": 2200.0}]},
+                "track_stats": {20: {"vocal_like_score": 0.91}},
+            },
+        )
+    )
+
+    assert capture.filter == {"_id": "artifact-1"}
+    assert capture.upsert is True
+    assert capture.payload is not None
+    assert capture.payload["payload"]["track_frames"]["10"][0]["spectral_centroid_hz"] == 2200.0
+    assert capture.payload["payload"]["track_stats"]["20"]["vocal_like_score"] == 0.91
+
+
+def test_mongo_snapshot_store_upsert_normalizes_nested_numeric_keys() -> None:
+    capture = _CaptureCollection()
+    store = MongoWorkflowSnapshotStore.__new__(MongoWorkflowSnapshotStore)
+    store._collection = capture
+
+    store.upsert_snapshot(
+        TimelineSnapshotDocument(
+            id="snapshot-1",
+            job_id=1,
+            project_id=2,
+            created_at="2026-04-30T00:00:00+00:00",
+            duration_ms=4800,
+            track_ids=[10, 20],
+            bpm=120.0,
+            numerator=4,
+            denominator=4,
+            bar_mapping=[{"measure_no": 1, "start_ms": 0, "end_ms": 2000}],
+            clip_index=[],
+            snapshot={
+                "tracks": [{10: "Lead Vocal"}],
+                "meta": {"role_by_track": {20: "supporting"}},
+            },
+        )
+    )
+
+    assert capture.filter == {"_id": "snapshot-1"}
+    assert capture.upsert is True
+    assert capture.payload is not None
+    assert capture.payload["snapshot"]["tracks"][0]["10"] == "Lead Vocal"
+    assert capture.payload["snapshot"]["meta"]["role_by_track"]["20"] == "supporting"
+
+
 def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.workflow_orchestration.enqueue_workflow_dispatch",
@@ -220,7 +336,7 @@ def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.Monkey
     assert stored.status == "WAITING_USER"
 
 
-def test_worker_start_dispatch_for_clipping_waits_for_plan_input(
+def test_worker_start_dispatch_for_clipping_autofixes_without_waiting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -243,8 +359,9 @@ def test_worker_start_dispatch_for_clipping_waits_for_plan_input(
         )
     )
 
-    assert resumed["current_node"] == "wait_user_plan_input"
-    assert resumed["ranked_candidate_ids"]
+    assert resumed["current_node"] == "finalize_output"
+    assert resumed["clipping_fix_applied"] is True
+    assert resumed["runtime_status"] == "completed"
 
 
 def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
@@ -305,13 +422,109 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
             dispatch_type="start",
         )
     )
+    artifact_store = get_workflow_artifact_store()
+    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
+    log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
 
     assert result["current_node"] == "finalize_output"
     assert result["sibilance_fix_applied"] is True
     assert result["sibilance_fix_log_id"] is not None
+    assert recipe_artifact is not None
+    assert recipe_artifact.payload["issueType"] == "sibilance"
+    assert log_artifact is not None
+    assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
 
 
-def test_worker_rejects_stale_resume_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "dispatch-mixed-sibilance.wav"
+    sf.write(audio_path, vocal_like, sample_rate)
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20015,
+            project_id=30015,
+            project_snapshot={
+                "duration_ms": 4800,
+                "bpm": 120,
+                "numerator": 4,
+                "denominator": 4,
+                "tracks": [
+                    {"track_id": 8, "name": "Track 8"},
+                    {"track_id": 9, "name": "Track 9"},
+                ],
+                "clips": [
+                    {
+                        "clip_id": _clip_id(8, 1),
+                        "track_id": 8,
+                        "start_ms": 0,
+                        "end_ms": 4800,
+                        "audio_path": str(audio_path),
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 4800,
+                    },
+                    {
+                        "clip_id": _clip_id(9, 2),
+                        "track_id": 9,
+                        "start_ms": 900,
+                        "end_ms": 3100,
+                        "audio_path": _ensure_test_audio_file(9, vocal_like=False),
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 4800,
+                    },
+                ],
+            },
+            issue_types=["band_overlap", "sibilance"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20015,
+            project_id=30015,
+            dispatch_type="start",
+        )
+    )
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20015,
+            project_id=30015,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+    artifact_store = get_workflow_artifact_store()
+    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
+
+    assert result["current_node"] == "wait_user_confirm"
+    assert result["preview_action_ids"] == ["20015-action-1"]
+    assert result["sibilance_fix_applied"] is True
+    assert recipe_artifact is not None
+    assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
+
+
+def test_worker_rejects_confirm_resume_from_plan_input_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "app.services.workflow_orchestration.enqueue_workflow_dispatch",
         lambda message: None,
@@ -336,8 +549,8 @@ def test_worker_rejects_stale_resume_dispatch(monkeypatch: pytest.MonkeyPatch) -
         WorkflowDispatchMessage(
             job_id=20004,
             project_id=30004,
-            dispatch_type="resume_selection",
-            selected_action_ids=["20004-action-1"],
+            dispatch_type="resume_confirm",
+            user_decision="confirm",
         )
     )
 
@@ -426,7 +639,53 @@ def test_worker_rejects_plan_resume_without_preserve_clip(
     assert failed["failure_code"] == "MISSING_PRESERVE_CLIP"
 
 
-def test_worker_rejects_selection_resume_without_selected_actions(
+def test_worker_rejects_plan_resume_for_non_ranked_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20016,
+            project_id=30016,
+            project_snapshot=build_project_snapshot(track_ids=[8, 9]),
+            issue_types=["band_overlap", "master_clipping"],
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20016,
+            project_id=30016,
+            dispatch_type="start",
+        )
+    )
+    stored = get_workflow_job_store().get_job(20016)
+    assert stored is not None
+    non_ranked_region = next(
+        region
+        for region in stored.state_snapshot["analysis_regions"]
+        if region["issue_type"] == "master_clipping"
+    )
+    preserve_clip_id = non_ranked_region["affected_clip_ids"][0]
+
+    failed = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20016,
+            project_id=30016,
+            dispatch_type="resume_plan_input",
+            selected_region_id=non_ranked_region["id"],
+            preserve_clip_id=preserve_clip_id,
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "INVALID_SELECTED_REGION"
+
+
+def test_worker_rejects_confirm_resume_from_non_confirm_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = get_workflow_job_store()
@@ -434,14 +693,13 @@ def test_worker_rejects_selection_resume_without_selected_actions(
         {
             "job_id": 20007,
             "project_id": 30007,
-            "phase": "waiting_for_user_selection",
-            "current_node": "wait_user_selection",
+            "phase": "analysis_result_persisted",
+            "current_node": "persist_analysis_result",
             "progress": 95,
             "runtime_status": "waiting_for_user",
             "durable_status": "WAITING_USER",
             "timeline_snapshot_id": "20007-timeline-snapshot",
             "langgraph_thread_id": "lg-thread:20007",
-            "selected_action_ids": [],
             "preview_action_ids": ["20007-action-1", "20007-action-2"],
         }
     )
@@ -450,13 +708,14 @@ def test_worker_rejects_selection_resume_without_selected_actions(
         WorkflowDispatchMessage(
             job_id=20007,
             project_id=30007,
-            dispatch_type="resume_selection",
+            dispatch_type="resume_confirm",
+            user_decision="confirm",
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "MISSING_SELECTED_ACTIONS"
+    assert failed["failure_code"] == "INVALID_RESUME_PHASE"
 
 
 def test_worker_rejects_confirm_resume_without_user_decision(
@@ -470,8 +729,8 @@ def test_worker_rejects_confirm_resume_without_user_decision(
         WorkflowStartPayload(
             job_id=20008,
             project_id=30008,
-            project_snapshot=build_project_snapshot(track_ids=[11]),
-            issue_types=["clipping"],
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
         )
     )
     waiting = run_workflow_dispatch(
@@ -651,6 +910,54 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     assert body["projections"]["suggestion_group"] is None
 
 
+def test_job_record_spills_large_state_into_artifact_store() -> None:
+    state = build_workflow_initial_state(job_id=20014, project_id=30014)
+    state.update(
+        {
+            "clip_index": [{"clip_id": "clip-1", "track_id": 1}],
+            "bar_mapping": [{"measure_no": 1, "start_ms": 0, "end_ms": 2000}],
+            "analysis_regions": [{"id": "region-1", "issue_type": "clipping"}],
+            "plan_payload": {"summary": "summary"},
+            "suggestion_payload": {"suggestions": [{"rank": 1, "actions": []}]},
+            "plan_revision_notes": ["validator note"],
+        }
+    )
+
+    record = _build_record(state)
+
+    assert "analysis_regions" not in record.state_snapshot
+    assert "plan_payload" not in record.state_snapshot
+    assert record.state_artifact_id == "20014:durable-state"
+
+    artifact = get_workflow_artifact_store().get_artifact(record.state_artifact_id)
+    assert artifact is not None
+    assert artifact.payload["state_fields"]["analysis_regions"][0]["id"] == "region-1"
+    assert artifact.payload["state_fields"]["plan_revision_notes"] == ["validator note"]
+
+    restored = _row_to_record(
+        {
+            "id": record.id,
+            "project_id": record.project_id,
+            "status": record.status,
+            "phase": record.phase,
+            "current_node": record.current_node,
+            "progress": record.progress,
+            "langgraph_thread_id": record.langgraph_thread_id,
+            "timeline_snapshot_id": record.timeline_snapshot_id,
+            "requested_by": record.requested_by,
+            "started_at": record.started_at,
+            "completed_at": record.completed_at,
+            "error_code": record.error_code,
+            "error_message": record.error_message,
+            "state_artifact_id": record.state_artifact_id,
+            "state_json": record.state_snapshot,
+        }
+    )
+    assert restored.state_snapshot["analysis_regions"][0]["id"] == "region-1"
+    assert restored.state_snapshot["plan_payload"]["summary"] == "summary"
+    assert restored.state_snapshot["plan_revision_notes"] == ["validator note"]
+
+
 def test_workflow_start_payload_defaults_include_clipping() -> None:
     payload = WorkflowStartPayload(
         job_id=20013,
@@ -658,4 +965,10 @@ def test_workflow_start_payload_defaults_include_clipping() -> None:
         project_snapshot=build_project_snapshot(track_ids=[1]),
     )
 
-    assert payload.issue_types == ["band_overlap", "clipping"]
+    assert payload.issue_types == [
+        "band_overlap",
+        "track_clipping",
+        "master_clipping",
+        "sibilance",
+        "high_band_harshness",
+    ]

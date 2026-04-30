@@ -89,6 +89,14 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
       }
     }
+
+    console.log(`\n========================================`);
+    console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
+    console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
+    console.log(`========================================`);
+
+    //드래그 끝난 시점의 최종 마디 위치를 스토어에 알려서 오디오를 재배치
+    trackStore.resyncClip(activeClip.value.clipId, activeClip.value.start);
     
 
     activeClip.value.isDragging = false; //드래그 끝

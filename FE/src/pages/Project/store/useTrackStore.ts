@@ -175,16 +175,15 @@ export const useTrackStore = defineStore('track', () => {
             for (const clip of track.clips) {
                 //2. 오디오 플레이어 생성 및 버퍼 다운로드 시작
                 //clip.audio.url을 넣어야 하지만 지금은 샘플 유알엘 사용
-                const player = new Tone.Player(sampleUrl).connect(channel);
+                const player = new Tone.Player().connect(channel);
 
                 //파일이 브라우저 메모리에 완벽히 올라갈 때까지 대기
-                await player.loaded;
+                await player.load(sampleUrl);
                 console.log(`클립${clip.clipId} 로딩 완료`);
 
-                //3. 타임라인의 start 마디에 맞춰 재생 예약
-                //초단위 계산 없이 숫자뒤에 'm'을 붙이면
-                //Tone.js 가 자동으로 BPM에 맞춰 해당 마디에 재생
-                player.sync().start(`${clip.start}m`);
+                //3. 정확한 초 계산
+                const exactStartTimeSec = clip.start * secondsPerBar.value;
+                player.sync().start(exactStartTimeSec);
 
                 //단일 클립 재생/정지용 플레이어 저장
                 clipPlayers.set(clip.clipId, player);
@@ -192,6 +191,35 @@ export const useTrackStore = defineStore('track', () => {
         }
     }
 
+    //클립 위치가 변경되었을 때 오디오 엔진 스케줄을 재설정 하는 함수
+    const resyncClip = (clipId: number, newStartBar: number) => {
+        const player = clipPlayers.get(clipId);
+        if (player) {
+            const wasPlaying = isPlaying.value;
+
+            // 재생 중이라면 잠깐 멈춤
+            if (wasPlaying) {
+                Tone.getTransport().pause();
+            }
+
+            // 기존 예약 완전 해제 및 즉시 정지
+            player.unsync();
+            player.stop();
+
+            // 정확한 초(sec)를 직접 계산! (ex: 8.75마디 * 2초 = 17.5초)
+            const exactStartTimeSec = newStartBar * secondsPerBar.value;
+
+            // 숫자를 그대로 넣으면 Tone.js가 정확한 '초'로 인식.
+            player.sync().start(exactStartTimeSec);
+
+            console.log(` 클립${clipId} 이동 완료: ${newStartBar}마디 (정확한 오디오 시작 시간: ${exactStartTimeSec}초)`);
+
+            // 재생 중이었다면 다시 시계 돌리기
+            if (wasPlaying) {
+                Tone.getTransport().start();
+            }
+        }
+    }
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
         // 통신 중 인터넷이 끊기거나 에러가 나더라도 앱이 터지지 않게 안저망을 치는 구문
@@ -330,6 +358,7 @@ export const useTrackStore = defineStore('track', () => {
         bpm,
         secondsPerBar,
 
+
         // Getters
         pixelPerBar,
         totalTimelineWidth,
@@ -343,5 +372,6 @@ export const useTrackStore = defineStore('track', () => {
         moveClipToTrack,
         stopPlay,
         updatePlayheadLoop,
+        resyncClip,
     };
 });

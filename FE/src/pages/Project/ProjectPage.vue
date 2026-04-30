@@ -12,7 +12,8 @@ import ProjectAiSection from './components/ProjectAiSection.vue'
 import ProjectSidePanel from './components/ProjectSidePanel.vue'
 import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금자
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
- 
+import * as Tone from 'tone' //오디오 엔진
+
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 
@@ -102,11 +103,18 @@ onMounted(async () => {
 if(timelineContainerRef.value) {
   timelineContainerRef.value.addEventListener('wheel', handleWheel, {passive: false}) 
   }
+
+  //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
+  window.addEventListener('pointerdown', unlockAudioEngine);
+  window.addEventListener('keydown', unlockAudioEngine);
 })
 
 onUnmounted(()=>{
   //키보드 이벤트 제거
   window.removeEventListener('keydown',handleKeyDown);
+  //오디오 제한 해제 리스너 제거
+  window.removeEventListener('pointerdown', unlockAudioEngine);
+  window.removeEventListener('keydown', unlockAudioEngine);
 })
 
 const isInviteModalOpen = ref(false)
@@ -256,6 +264,18 @@ function handleResolveComment(payload: {
   }
 }
 
+
+//브라우저 오디오 제한 강제 해제
+const unlockAudioEngine = async () => {
+  if(Tone.getContext().state !== 'running') {
+    await Tone.start();
+    console.log('브라우저 오디오 제한 해제 완료')
+  }
+
+  //한번 풀렸으면 더 이상 이벤트 감지 필요 없으므로 리스너 삭제
+  window.removeEventListener('pointerdown', unlockAudioEngine);
+  window.removeEventListener('keydown', unlockAudioEngine);
+}
 
 </script>
 

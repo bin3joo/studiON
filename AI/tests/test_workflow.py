@@ -8,6 +8,7 @@ from scipy.signal import resample_poly
 
 from app.graph import nodes
 from app.graph.nodes import analysis as analysis_nodes
+from app.graph.nodes import runtime as runtime_nodes
 from app.graph.nodes import suggestion as suggestion_nodes
 from app.graph.state import build_workflow_initial_state
 from app.graph.workflow import build_workflow_response, run_workflow_graph
@@ -292,10 +293,66 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
         }
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+    artifact_store = get_workflow_artifact_store()
+    execution_plan_artifact_id = next(
+        artifact_id
+        for artifact_id in reversed(result["mongo_artifact_ids"])
+        if "execution-plan" in artifact_id
+    )
+    execution_plan_artifact = artifact_store.get_artifact(execution_plan_artifact_id)
 
     assert result["current_node"] == "wait_user_confirm"
     assert result["plan_status"] == "APPROVED"
-    assert result["selected_action_ids"] == ["10003-action-1"]
+    assert result["preview_action_ids"] == ["10003-action-1"]
+    assert execution_plan_artifact is not None
+    assert execution_plan_artifact.artifact_type == "execution_plan"
+    assert execution_plan_artifact.payload["previewActionIds"] == ["10003-action-1"]
+    assert execution_plan_artifact.payload["suggestionPayload"]["suggestions"][0]["actions"][0]["actionId"] == "10003-action-1"
+
+
+def test_materialize_execution_plan_fails_before_internal_approval() -> None:
+    state = build_workflow_initial_state(
+        job_id=10041,
+        project_id=20041,
+        analysis_regions=[
+            {
+                "id": "region-1",
+                "issue_type": "clipping",
+                "start_ms": 0,
+                "end_ms": 400,
+                "affected_clip_ids": [1],
+            }
+        ],
+        selected_region_id="region-1",
+        preserve_clip_id=1,
+        plan_status="DRAFT",
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionId": "10041-action-1",
+                    "actionType": "GAIN_TRIM",
+                    "targetScope": "MASTER",
+                    "targetTrackId": None,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": None,
+                    "bandHighHz": None,
+                    "gainDeltaDb": -2.0,
+                    "params": {"preGainDb": -2.0},
+                }
+            },
+        },
+    )
+
+    result = suggestion_nodes.materialize_execution_plan(state)
+
+    assert result["current_node"] == "fail_workflow"
+    assert result["failure_code"] == "PLAN_NOT_APPROVED"
 
 
 def test_workflow_skips_clap_when_not_needed() -> None:
@@ -318,8 +375,8 @@ def test_workflow_revises_once_then_passes() -> None:
         {
             "job_id": 10005,
             "project_id": 20005,
-            "project_snapshot": build_project_snapshot(track_ids=[7]),
-            "issue_types": ["clipping"],
+            "project_snapshot": build_project_snapshot(track_ids=[7, 8]),
+            "issue_types": ["band_overlap"],
             "validator_mode": "REVISE_ONCE",
             "critic_mode": "PASS",
         }
@@ -413,8 +470,8 @@ def test_workflow_planning_agent_fails_when_llm_call_fails(
         {
             "job_id": 10035,
             "project_id": 20035,
-            "project_snapshot": build_project_snapshot(track_ids=[14]),
-            "issue_types": ["clipping"],
+            "project_snapshot": build_project_snapshot(track_ids=[14, 15]),
+            "issue_types": ["band_overlap"],
         }
     )
 
@@ -469,14 +526,17 @@ def test_workflow_autofixes_sibilance_without_preview() -> None:
 
     result = run_workflow_graph(
         {
-            "job_id": "job-preview",
-            "project_id": "project-preview",
+            "job_id": 10040,
+            "project_id": 20040,
             "project_snapshot": build_project_snapshot_with_audio(
                 track_audio_paths={8: str(audio_path)}
             ),
             "issue_types": ["sibilance"],
         }
     )
+    artifact_store = get_workflow_artifact_store()
+    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
+    log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
 
     assert result["current_node"] == "finalize_output"
     assert result["runtime_status"] == "completed"
@@ -484,15 +544,73 @@ def test_workflow_autofixes_sibilance_without_preview() -> None:
     assert result["sibilance_fix_applied"] is True
     assert result["sibilance_fix_log_id"] is not None
     assert result["auto_fix_recipe_artifact_id"] is not None
+    assert recipe_artifact is not None
+    assert recipe_artifact.payload["issueType"] == "sibilance"
+    assert recipe_artifact.payload["appliedInMixedIssueFlow"] is False
+    assert recipe_artifact.payload["regionIds"]
+    assert recipe_artifact.payload["groups"][0]["issueType"] == "sibilance"
+    assert log_artifact is not None
+    assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
+    assert log_artifact.payload["regionIds"] == recipe_artifact.payload["regionIds"]
 
 
-def test_workflow_resume_from_selection_to_preview_confirm_wait() -> None:
+def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "workflow-mixed-sibilance.wav"
+    sf.write(audio_path, vocal_like, sample_rate)
+
+    waiting = run_workflow_graph(
+        {
+            "job_id": 10042,
+            "project_id": 20042,
+            "project_snapshot": build_project_snapshot_with_audio(
+                track_audio_paths={
+                    8: str(audio_path),
+                    9: _ensure_test_audio_file(9, vocal_like=False),
+                }
+            ),
+            "issue_types": ["band_overlap", "sibilance"],
+        }
+    )
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+    artifact_store = get_workflow_artifact_store()
+    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
+    log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
+
+    assert result["current_node"] == "wait_user_confirm"
+    assert result["preview_action_ids"] == ["10042-action-1"]
+    assert result["sibilance_fix_applied"] is True
+    assert result["auto_fix_recipe_artifact_id"] is not None
+    assert result["sibilance_fix_log_id"] is not None
+    assert recipe_artifact is not None
+    assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
+    assert recipe_artifact.payload["groups"][0]["issueType"] == "sibilance"
+    assert log_artifact is not None
+    assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
+
+
+def test_workflow_auto_applies_representative_preview_action() -> None:
     waiting = run_workflow_graph(
         {
             "job_id": 10037,
             "project_id": 20037,
-            "project_snapshot": build_project_snapshot(track_ids=[8]),
-            "issue_types": ["clipping"],
+            "project_snapshot": build_project_snapshot(track_ids=[8, 9]),
+            "issue_types": ["band_overlap"],
         }
     )
     selected = run_workflow_graph({**waiting, **build_plan_input(waiting)})
@@ -500,7 +618,7 @@ def test_workflow_resume_from_selection_to_preview_confirm_wait() -> None:
     assert selected["current_node"] == "wait_user_confirm"
     assert selected["runtime_status"] == "waiting_for_user"
     assert selected["apply_result_id"] == "10037-apply"
-    assert selected["selected_action_ids"] == ["10037-action-1"]
+    assert selected["preview_action_ids"] == ["10037-action-1"]
 
 
 def test_workflow_confirm_commits_and_finalizes() -> None:
@@ -527,78 +645,75 @@ def test_workflow_confirm_commits_and_finalizes() -> None:
     assert confirmed["feedback_event_id"] == "10038-feedback"
 
 
-def test_workflow_retry_and_cancel_paths_return_to_expected_nodes() -> None:
+def test_workflow_cancel_path_finalizes() -> None:
     mix_resolved = run_workflow_graph(
         {
             "job_id": 10039,
             "project_id": 20039,
-            "project_snapshot": build_project_snapshot(track_ids=[6]),
-            "issue_types": ["clipping"],
+            "project_snapshot": build_project_snapshot(track_ids=[6, 7]),
+            "issue_types": ["band_overlap"],
         }
     )
     mix_resolved = run_workflow_graph({**mix_resolved, **build_plan_input(mix_resolved)})
-    retried = run_workflow_graph({**mix_resolved, "user_decision": "retry"})
     cancelled = run_workflow_graph({**mix_resolved, "user_decision": "cancel"})
 
-    assert retried["current_node"] == "wait_user_confirm"
     assert cancelled["current_node"] == "finalize_output"
 
 
-def test_user_action_gate_keeps_selection_wait_for_multi_action_payload() -> None:
+def test_user_action_gate_routes_directly_to_apply_when_action_is_required() -> None:
     original = build_workflow_initial_state(
-            job_id=10036,
-            project_id=20036,
-            phase="analysis_result_persisted",
-            preview_action_ids=["10036-action-1", "10036-action-2"],
-            selected_action_ids=[],
-            user_action_required=True,
-        )
+        job_id=10036,
+        project_id=20036,
+        phase="analysis_result_persisted",
+        preview_action_ids=["10036-action-1"],
+        user_action_required=True,
+    )
     gated = nodes.user_action_gate(original)
 
-    assert gated["selected_action_ids"] == []
     assert gated["phase"] == "user_action_gate_checked"
     from app.graph.edges import route_after_user_action_gate
 
-    assert route_after_user_action_gate({**original, **gated}) == "wait_user_selection"
+    assert route_after_user_action_gate({**original, **gated}) == "apply_selected_edit_recipe"
 
 
-def test_workflow_fails_when_no_actions_are_selected_for_preview() -> None:
+def test_workflow_fails_when_no_preview_action_exists() -> None:
     failed = nodes.apply_selected_edit_recipe(
         build_workflow_initial_state(
             job_id=10017,
             project_id=20017,
-            phase="waiting_for_user_selection",
-            preview_action_ids=["job-empty-selection-action-1"],
-            selected_action_ids=[],
+            phase="analysis_result_persisted",
+            preview_action_ids=[],
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "EMPTY_SELECTION"
+    assert failed["failure_code"] == "MISSING_PREVIEW_ACTION"
 
 
-def test_workflow_fails_when_selected_actions_are_not_from_preview() -> None:
+def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
     failed = nodes.apply_selected_edit_recipe(
         build_workflow_initial_state(
             job_id=10018,
             project_id=20018,
-            phase="waiting_for_user_selection",
-            preview_action_ids=["job-unknown-selection-action-1"],
-            selected_action_ids=["job-unknown-selection-action-999"],
+            phase="analysis_result_persisted",
+            preview_action_ids=[
+                "job-unknown-selection-action-1",
+                "job-unknown-selection-action-2",
+            ],
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "UNKNOWN_ACTION_SELECTION"
+    assert failed["failure_code"] == "INVALID_PREVIEW_ACTION_COUNT"
 
 
 def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-main-track",
-            "project_id": "project-main-track",
+            "job_id": 10041,
+            "project_id": 20041,
             "project_snapshot": build_project_snapshot(track_ids=[11, 22]),
             "issue_types": ["band_overlap"],
         }
@@ -615,8 +730,8 @@ def test_workflow_response_contains_unified_projections() -> None:
     snapshot = build_project_snapshot(track_ids=[10, 20])
     waiting = run_workflow_graph(
         {
-            "job_id": "job-projection",
-            "project_id": "project-projection",
+            "job_id": 10042,
+            "project_id": 20042,
             "project_snapshot": snapshot,
             "issue_types": ["band_overlap", "sibilance"],
         }
@@ -624,15 +739,15 @@ def test_workflow_response_contains_unified_projections() -> None:
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
     response = build_workflow_response(result)
 
-    assert response["graph_state"]["job_id"] == "job-projection"
-    assert response["projections"]["analysis_job"]["id"] == "job-projection"
-    assert response["projections"]["analysis_regions"][0]["job_id"] == "job-projection"
+    assert response["graph_state"]["job_id"] == 10042
+    assert response["projections"]["analysis_job"]["id"] == 10042
+    assert response["projections"]["analysis_regions"][0]["job_id"] == 10042
     assert response["projections"]["analysis_regions"][0]["issue_type"] in {
-        "band_overlap",
-        "sibilance",
+        "BAND_OVERLAP",
+        "SIBILANCE",
     }
-    assert response["projections"]["suggestion_group"]["id"] == "job-projection-group"
-    assert response["projections"]["preview_render"]["id"] == "job-projection-preview"
+    assert response["projections"]["suggestion_group"]["id"] == "10042-group"
+    assert response["projections"]["preview_render"]["id"] == "10042-preview"
     assert response["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert response["projections"]["analysis_regions"][0]["affected_clip_ids"]
 
@@ -647,11 +762,11 @@ def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
         }
     )
 
-    assert result["current_node"] == "wait_user_plan_input"
-    assert result["clipping_fix_applied"] is False
+    assert result["current_node"] == "finalize_output"
+    assert result["clipping_fix_applied"] is True
     assert result["preview_id"] is None
     assert result["preview_action_ids"] == []
-    assert result["detected_issues"] == ["clipping"]
+    assert "track_clipping" in result["detected_issues"] or "master_clipping" in result["detected_issues"]
 
 
 def test_workflow_analysis_regions_include_detector_metadata() -> None:
@@ -684,14 +799,14 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
             "job_id": 10007,
             "project_id": 20007,
             "project_snapshot": snapshot,
-            "issue_types": ["band_overlap", "sibilance", "clipping"],
+            "issue_types": ["band_overlap", "sibilance", "track_clipping", "master_clipping"],
         }
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
     region_by_issue = {region["issue_type"]: region for region in result["analysis_regions"]}
     overlap = region_by_issue["band_overlap"]
-    clipping = region_by_issue["clipping"]
+    clipping = region_by_issue.get("track_clipping") or region_by_issue.get("master_clipping")
     sibilance = region_by_issue["sibilance"]
 
     assert overlap["secondary_track_id"] is None
@@ -702,7 +817,8 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert overlap["measure_end"] in {1, 2, 3}
     assert _clip_id(30, 1) in overlap["affected_clip_ids"]
     assert _clip_id(31, 1) in overlap["affected_clip_ids"]
-    assert clipping["requires_user_action"] is True
+    assert clipping is not None
+    assert clipping["requires_user_action"] is False
     assert sibilance["track_id"] == 30
     assert result["sibilance_fix_applied"] is True
     assert result["ranking_scores"][overlap["id"]] > 0
@@ -1056,8 +1172,8 @@ def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
 
     assert result["ranking_scores"]["job-ranking-priority-clipping-region-1"] > 0
     assert result["ranked_candidate_ids"] == [
-        "job-ranking-priority-clipping-region-1",
         "job-ranking-priority-band-overlap-region-1",
+        "job-ranking-priority-clipping-region-1",
     ]
 
 
@@ -1604,7 +1720,7 @@ def test_detect_clipping_can_trigger_on_oversampled_true_peak() -> None:
     state = build_workflow_initial_state(
         job_id=10027,
         project_id=20027,
-        issue_types=["clipping"],
+        issue_types=["master_clipping"],
         clip_feature_artifact_id="artifact-true-peak",
     )
     artifact_store = get_workflow_artifact_store()
@@ -1618,12 +1734,12 @@ def test_detect_clipping_can_trigger_on_oversampled_true_peak() -> None:
         )
     )
 
-    regions = nodes.detect_clipping(state)["analysis_regions"]
+    regions = nodes.detect_master_clipping(state)["analysis_regions"]
 
     assert mix_frames[0]["peak_dbfs"] < 0.0
     assert mix_frames[0]["true_peak_dbfs"] > 0.0
     assert len(regions) == 1
-    assert regions[0]["issue_type"] == "clipping"
+    assert regions[0]["issue_type"] == "master_clipping"
 
 
 def test_detect_clipping_ignores_near_ceiling_without_true_peak_overflow() -> None:
@@ -1632,7 +1748,7 @@ def test_detect_clipping_ignores_near_ceiling_without_true_peak_overflow() -> No
     state = build_workflow_initial_state(
         job_id=10028,
         project_id=20028,
-        issue_types=["clipping"],
+        issue_types=["master_clipping"],
         clip_feature_artifact_id="artifact-near-ceiling",
     )
     artifact_store = get_workflow_artifact_store()
@@ -1646,11 +1762,222 @@ def test_detect_clipping_ignores_near_ceiling_without_true_peak_overflow() -> No
         )
     )
 
-    regions = nodes.detect_clipping(state)["analysis_regions"]
+    regions = nodes.detect_master_clipping(state)["analysis_regions"]
 
     assert mix_frames[0]["peak_dbfs"] >= -0.1
     assert mix_frames[0]["true_peak_dbfs"] <= 0.0
     assert regions == []
+
+
+def test_master_clipping_promotes_clear_contributor_to_track_fix() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-master-promote",
+            job_id=10034,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "mix_frames": [
+                    {
+                        "start_ms": 0,
+                        "end_ms": 96,
+                        "peak_dbfs": -0.02,
+                        "true_peak_dbfs": 0.22,
+                        "clip_ratio": 0.02,
+                    },
+                    {
+                        "start_ms": 96,
+                        "end_ms": 192,
+                        "peak_dbfs": -0.01,
+                        "true_peak_dbfs": 0.24,
+                        "clip_ratio": 0.02,
+                    },
+                ],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 96,
+                            "peak_dbfs": 0.18,
+                            "window_energy": 0.92,
+                            "low_mid_energy": 0.08,
+                            "body_energy": 0.11,
+                            "high_band_ratio": 0.14,
+                        },
+                        {
+                            "start_ms": 96,
+                            "end_ms": 192,
+                            "peak_dbfs": 0.16,
+                            "window_energy": 0.9,
+                            "low_mid_energy": 0.07,
+                            "body_energy": 0.1,
+                            "high_band_ratio": 0.13,
+                        },
+                    ],
+                    "20": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 96,
+                            "peak_dbfs": -6.0,
+                            "window_energy": 0.12,
+                            "low_mid_energy": 0.06,
+                            "body_energy": 0.08,
+                            "high_band_ratio": 0.09,
+                        },
+                        {
+                            "start_ms": 96,
+                            "end_ms": 192,
+                            "peak_dbfs": -5.8,
+                            "window_energy": 0.11,
+                            "low_mid_energy": 0.06,
+                            "body_energy": 0.08,
+                            "high_band_ratio": 0.08,
+                        },
+                    ],
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=10034,
+        project_id=20034,
+        issue_types=["master_clipping"],
+        clip_feature_artifact_id="artifact-master-promote",
+    )
+
+    result = nodes.detect_master_clipping(state)
+
+    track_regions = [
+        region for region in result["analysis_regions"] if region["issue_type"] == "track_clipping"
+    ]
+    master_regions = [
+        region for region in result["analysis_regions"] if region["issue_type"] == "master_clipping"
+    ]
+    groups = runtime_nodes._build_non_user_issue_recipe_groups(result)
+
+    assert len(track_regions) == 1
+    assert master_regions == []
+    assert track_regions[0]["track_id"] == 10
+    assert track_regions[0]["auto_fix_source"] == "promoted_master_contributor"
+    assert groups[0]["issueType"] == "track_clipping"
+    assert all(group["issueType"] != "master_clipping" for group in groups)
+    assert groups[0]["recipes"][0]["actionType"] == "GAIN_TRIM"
+
+
+def test_master_clipping_keeps_master_recipe_when_contributors_are_distributed() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-master-distributed",
+            job_id=10035,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "mix_frames": [
+                    {
+                        "start_ms": 0,
+                        "end_ms": 96,
+                        "peak_dbfs": -0.03,
+                        "true_peak_dbfs": 0.18,
+                        "clip_ratio": 0.02,
+                    },
+                    {
+                        "start_ms": 96,
+                        "end_ms": 192,
+                        "peak_dbfs": -0.02,
+                        "true_peak_dbfs": 0.19,
+                        "clip_ratio": 0.02,
+                    },
+                ],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 96,
+                            "peak_dbfs": -0.05,
+                            "window_energy": 0.42,
+                            "low_mid_energy": 0.11,
+                            "body_energy": 0.14,
+                            "high_band_ratio": 0.16,
+                        },
+                        {
+                            "start_ms": 96,
+                            "end_ms": 192,
+                            "peak_dbfs": -0.05,
+                            "window_energy": 0.42,
+                            "low_mid_energy": 0.11,
+                            "body_energy": 0.14,
+                            "high_band_ratio": 0.16,
+                        },
+                    ],
+                    "20": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 96,
+                            "peak_dbfs": -0.04,
+                            "window_energy": 0.41,
+                            "low_mid_energy": 0.11,
+                            "body_energy": 0.14,
+                            "high_band_ratio": 0.16,
+                        },
+                        {
+                            "start_ms": 96,
+                            "end_ms": 192,
+                            "peak_dbfs": -0.04,
+                            "window_energy": 0.41,
+                            "low_mid_energy": 0.11,
+                            "body_energy": 0.14,
+                            "high_band_ratio": 0.16,
+                        },
+                    ],
+                    "30": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 96,
+                            "peak_dbfs": -0.05,
+                            "window_energy": 0.4,
+                            "low_mid_energy": 0.11,
+                            "body_energy": 0.14,
+                            "high_band_ratio": 0.16,
+                        },
+                        {
+                            "start_ms": 96,
+                            "end_ms": 192,
+                            "peak_dbfs": -0.05,
+                            "window_energy": 0.4,
+                            "low_mid_energy": 0.11,
+                            "body_energy": 0.14,
+                            "high_band_ratio": 0.16,
+                        },
+                    ],
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=10035,
+        project_id=20035,
+        issue_types=["master_clipping"],
+        clip_feature_artifact_id="artifact-master-distributed",
+    )
+
+    result = nodes.detect_master_clipping(state)
+
+    master_regions = [
+        region for region in result["analysis_regions"] if region["issue_type"] == "master_clipping"
+    ]
+    track_regions = [
+        region for region in result["analysis_regions"] if region["issue_type"] == "track_clipping"
+    ]
+    groups = runtime_nodes._build_non_user_issue_recipe_groups(result)
+
+    assert track_regions == []
+    assert len(master_regions) == 1
+    assert set(master_regions[0]["contributing_track_ids"]) == {10, 20, 30}
+    assert any(group["issueType"] == "master_clipping" for group in groups)
+    master_group = next(group for group in groups if group["issueType"] == "master_clipping")
+    assert master_group["recipes"][0]["targetScope"] == "MASTER"
 
 
 def test_workflow_defaults_include_clipping_detection() -> None:
@@ -1671,9 +1998,12 @@ def test_workflow_defaults_include_clipping_detection() -> None:
         }
     )
 
-    assert result["current_node"] == "wait_user_plan_input"
-    assert "clipping" in result["detected_issues"]
-    assert result["clipping_fix_applied"] is False
+    assert result["current_node"] == "finalize_output"
+    assert (
+        "track_clipping" in result["detected_issues"]
+        or "master_clipping" in result["detected_issues"]
+    )
+    assert result["clipping_fix_applied"] is True
 
 
 def test_workflow_skips_sibilance_when_clap_candidate_is_absent() -> None:
@@ -1771,21 +2101,25 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
     assert regions[0]["issue_type"] == "sibilance"
 
 
-def test_clipping_plan_materializes_master_true_peak_limiter_action() -> None:
-    waiting = run_workflow_graph(
+def test_clipping_autofix_materializes_master_true_peak_limiter_recipe() -> None:
+    result = run_workflow_graph(
         {
             "job_id": 10030,
             "project_id": 20030,
-            "project_snapshot": build_project_snapshot(track_ids=[14]),
+            "project_snapshot": build_project_snapshot(track_ids=[14, 15]),
             "issue_types": ["clipping"],
         }
     )
-    resumed = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+    artifact_store = get_workflow_artifact_store()
+    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
 
-    action = resumed["suggestion_payload"]["suggestions"][0]["actions"][0]
+    assert recipe_artifact is not None
+    master_group = next(
+        group for group in recipe_artifact.payload["groups"] if group["issueType"] == "master_clipping"
+    )
+    action = master_group["recipes"][0]
 
-    assert action["actionType"] == "GAIN_TRIM"
+    assert action["actionType"] == "TRUE_PEAK_LIMITER"
     assert action["targetScope"] == "MASTER"
     assert action["targetTrackId"] is None
-    assert action["params"]["postAction"] == "TRUE_PEAK_LIMITER"
     assert action["params"]["ceilingDbfs"] == -1.0

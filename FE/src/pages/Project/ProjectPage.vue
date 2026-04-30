@@ -74,9 +74,23 @@ const handleKeyDown = (e: KeyboardEvent) => {
     trackStore.togglePlay();
   }
 }
+//사용자가 기존에 사용하던 테마 임시 저장
+let previousTheme = '';
+
 
 // 프로젝트 시작 시 트랙 정보 불러오기
 onMounted(async () => {
+  //페이지 진입 시 무조건 다크 모드로 강제 전환
+  const rootElement = document.documentElement;
+  // 사용자가 원래 쓰고 있던 테마가 라이트 모드(클래스에 'dark'가 없음)인지 확인
+  if (!rootElement.classList.contains('dark')) {
+      previousTheme = 'light';
+      rootElement.classList.add('dark'); // 강제로 다크 모드 켜기
+  } else {
+      previousTheme = 'dark';
+  }
+  
+
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))

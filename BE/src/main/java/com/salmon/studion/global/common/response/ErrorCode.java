@@ -45,7 +45,11 @@ public enum ErrorCode {
     // 코멘트 C_000
     COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "C_001", "댓글을 찾을 수 없습니다."),
     COMMENT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "C_002", "댓글 접근 권한이 없습니다."),
-    COMMENT_ALREADY_RESOLVED(HttpStatus.CONFLICT, "C_003", "이미 해결된 댓글입니다.");
+    COMMENT_ALREADY_RESOLVED(HttpStatus.CONFLICT, "C_003", "이미 해결된 댓글입니다."),
+
+    // 클립 CL_000
+    CLIP_NOT_FOUND(HttpStatus.NOT_FOUND, "CL_001", "클립을 찾을 수 없습니다."),
+    CLIP_LOCKED(HttpStatus.CONFLICT, "CL_002", "다른 사용자가 편집 중인 클립입니다.");
 
 
     private final HttpStatus status;

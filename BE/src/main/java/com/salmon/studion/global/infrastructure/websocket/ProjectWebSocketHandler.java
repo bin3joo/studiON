@@ -1,5 +1,6 @@
 package com.salmon.studion.global.infrastructure.websocket;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,6 +11,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -17,7 +19,9 @@ import java.io.IOException;
 public class ProjectWebSocketHandler extends TextWebSocketHandler {
 
     private final ProjectSessionManager sessionManager;
+    private final ObjectMapper objectMapper;
     private final TrackEventHandler trackEventHandler;
+    private final ClipEventHandler clipEventHandler;
     private final WebSocketMessageSender webSocketMessageSender;
 
     @Override
@@ -29,9 +33,21 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
+        WsMessage<Map> raw = objectMapper.readValue(message.getPayload(), objectMapper.getTypeFactory()
+                .constructParametricType(WsMessage.class, Map.class));
+        String event = raw.getEvent();
+        Integer projectId = extractProjectId(session);
+
         try {
-            Integer projectId = extractProjectId(session);
-            trackEventHandler.handleTrackEvent(session, message.getPayload(), projectId);
+            if(event.startsWith("TRACK_")){
+                trackEventHandler.handleTrackEvent(session, projectId, event, raw);
+            }
+            else if(event.startsWith("CLIP_")){
+                clipEventHandler.handleClipEvent(session, projectId, event, raw);
+            }
+            else {
+                webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다 : " + event);
+            }
         } catch (BusinessException e) {
             webSocketMessageSender.sendError(session, e.getErrorCode().getStatus().value(), e.getMessage());
         } catch (Exception e) {

@@ -7,6 +7,8 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import java.time.LocalDateTime;
+
 @Getter
 @SuperBuilder
 @NoArgsConstructor
@@ -30,7 +32,7 @@ public abstract class TrackBaseEventDocument {
     @Field("sequence_no")
     private Long sequenceNo;
 
-    private String timestamp;
+    private LocalDateTime timestamp;
 
     private Boolean undoable;
 

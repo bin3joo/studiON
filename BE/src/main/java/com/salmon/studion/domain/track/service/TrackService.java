@@ -23,7 +23,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -194,7 +193,7 @@ public class TrackService {
                     .trackId(request.getTrackId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                    .timestamp(LocalDateTime.now())
                     .before(TrackReorderEventDocument.TrackPosition.builder()
                             .preTrackId(beforePreTrackId)
                             .postTrackId(beforePostTrackId)
@@ -350,7 +349,7 @@ public class TrackService {
                 .trackId(newTrackId)
                 .userId(userId)
                 .sequenceNo(sequenceNo)
-                .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                .timestamp(LocalDateTime.now())
                 .preTrackId(preTrackId)
                 .postTrackId(postTrackId)
                 .undoable(true)

@@ -10,8 +10,8 @@ import ProjectAiSection from './components/ProjectAiSection.vue'
 import ProjectSidePanel from './components/ProjectSidePanel.vue'
 import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금자
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
+import * as Tone from 'tone' //오디오 엔진
 import AiConflictOverlay from './components/AiConflictOverlay.vue'
- 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 const route = useRoute()
@@ -72,9 +72,23 @@ const handleKeyDown = (e: KeyboardEvent) => {
     trackStore.togglePlay();
   }
 }
+//사용자가 기존에 사용하던 테마 임시 저장
+let previousTheme = '';
+
 
 // 프로젝트 시작 시 트랙 정보 불러오기
 onMounted(async () => {
+  //페이지 진입 시 무조건 다크 모드로 강제 전환
+  const rootElement = document.documentElement;
+  // 사용자가 원래 쓰고 있던 테마가 라이트 모드(클래스에 'dark'가 없음)인지 확인
+  if (!rootElement.classList.contains('dark')) {
+      previousTheme = 'light';
+      rootElement.classList.add('dark'); // 강제로 다크 모드 켜기
+  } else {
+      previousTheme = 'dark';
+  }
+  
+
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
@@ -86,11 +100,18 @@ onMounted(async () => {
 if(timelineContainerRef.value) {
   timelineContainerRef.value.addEventListener('wheel', handleWheel, {passive: false}) 
   }
+
+  //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
+  window.addEventListener('pointerdown', unlockAudioEngine);
+  window.addEventListener('keydown', unlockAudioEngine);
 })
 
 onUnmounted(()=>{
   //키보드 이벤트 제거
   window.removeEventListener('keydown',handleKeyDown);
+  //오디오 제한 해제 리스너 제거
+  window.removeEventListener('pointerdown', unlockAudioEngine);
+  window.removeEventListener('keydown', unlockAudioEngine);
 })
 
 const isInviteModalOpen = ref(false)
@@ -275,6 +296,18 @@ const runAiAnalysis = () => {
 
     aiAnalyzing.value = false
   }, 1200)
+}
+
+//브라우저 오디오 제한 강제 해제
+const unlockAudioEngine = async () => {
+  if(Tone.getContext().state !== 'running') {
+    await Tone.start();
+    console.log('브라우저 오디오 제한 해제 완료')
+  }
+
+  //한번 풀렸으면 더 이상 이벤트 감지 필요 없으므로 리스너 삭제
+  window.removeEventListener('pointerdown', unlockAudioEngine);
+  window.removeEventListener('keydown', unlockAudioEngine);
 }
 
 </script>

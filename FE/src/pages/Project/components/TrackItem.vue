@@ -23,6 +23,70 @@ const startClipBar = ref(0); //클립 드래그를 시작했을때 클립의 시
 const startMouseY = ref(0); //클립을 잡기 직전 마우스 y 좌표
 const dragoffsetY = ref(0); //클립을 잡고 움직이기 시작한 지점으로부터 현재 마우스가 얼마나 아래/위에 있는지를 픽셀로 저장한 값
 
+//오토스크롤 위한 추가 변수들
+const startScrollLeft = ref(0); //드래그 시작 시점의 스크롤 위치
+let scrollContainer: HTMLElement | null = null; //스크롤되는 부모 요소
+let currentClientX = 0; //현재 마우스 X 좌표 (루프에서 감시용)
+let autoScrollRafId: number | null = null; // 오토스크롤 애니메이션 ID
+
+//클립 위치 계산 함수(마우스 이동 + 스크롤 이동 동시 반영)
+const updateClipPosition = () => {
+  if(!activeClip.value || !scrollContainer) return;
+
+  const currentScrollLeft = (scrollContainer as HTMLElement).scrollLeft; //현재 스크롤량 가져오기
+
+  const deltaX = (currentClientX - startMouseX.value) + (currentScrollLeft - startScrollLeft.value); //이동거리 계산(드래그 거리 + 스크롤 거리)
+  const deltaBar = deltaX / trackStore.pixelPerBar; //이동 거리를 마디 단위로 변환
+  let newStart = startClipBar.value + deltaBar; //새로운 시작점 계산
+
+  //0마디 이전으로 뚫고 나가지 못하게 막기
+  newStart = Math.max(0, newStart);
+
+  const snapResolution = trackStore.subDivision; //현재 확대/축소 배율에 따라 적용할 분할 단위(1,4,8,16)
+  newStart = Math.round(newStart * snapResolution) / snapResolution; //스냅 적용 (정확한 박자에 붙도록)
+  
+  activeClip.value.start = newStart; //계산된 새 위치로 클립의 시작점 업데이트(화면 즉시 반영)
+  
+  //드래그가 끝나도 화면이 잘리지 않도록 필요하면 트랙을 늘리는 로직
+  const clipEnd = newStart + activeClip.value.duration; // 현재 클립의 끝나는 지점 계산
+  const currentTotalBars = trackStore.projectInfo.totalBarCount; // 현재 전체 마디 수 확인
+  
+  if(clipEnd > currentTotalBars * 0.9) { //클립의 끝이 전체 길의 90%를 넘으면
+    trackStore.projectInfo.totalBarCount += 50; //전체 마디 수를 50마디 늘린다.
+  };
+  
+  //마우스를 누르고 있을때 백 그라운드에서 돌아가는 오토 스크롤 엔진
+  const autoScrollLoop = () => {
+    if(!activeClip.value || !scrollContainer) return;//조건이 맞지 않으면 함수 종료
+    
+    const EDGE_THRESHOLD = 80; //가장자리에서 80px안쪽으로 들어오면 자동 스크롤 시작
+    const SCROLL_SPEED = 15; //한 프레임당 15px씩 밀어내기
+    let scrolled = false; //아직 스크롤 안함
+
+    //1. 오른화면 끝 도달
+    if(currentClientX > window.innerWidth - EDGE_THRESHOLD){
+     (scrollContainer as HTMLElement).scrollLeft += SCROLL_SPEED; //오른쪽으로 스크롤
+      scrolled = true;
+    }
+
+    //2. 왼화면 끝 도달
+    if(currentClientX < EDGE_THRESHOLD){
+      (scrollContainer as HTMLElement).scrollLeft -= SCROLL_SPEED; //왼쪽으로 스크롤
+      scrolled = true;
+    }
+
+    // 스크롤이 발생했다면, 마우스가 가만히 있어도 클립 위치를 갱신해야 함
+  if (scrolled) {
+    updateClipPosition(); 
+  }
+
+  // 드래그 중이면 끊임없이 다음 프레임 예약
+  autoScrollRafId = requestAnimationFrame(autoScrollLoop);
+};
+
+
+}
+
 //1.클립을 쥐었을 때 (Pointer Down)
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   if(e.button !== 0) return; // 좌클릭만 허용하기
@@ -35,6 +99,14 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   startClipBar.value = clip.start; //드래그 시작점의 바 위치 기록
   dragoffsetY.value = 0; //차이 초기화
   clip.isDragging = true; // 시각적으로 피드백을 주기 위한 상태 변경
+
+  // 가장 가까운 스크롤 영역('.overflow-auto')을 찾아 오토 스크롤 셋팅
+  scrollContainer = (e.currentTarget as HTMLElement).closest('.overflow-auto');
+  startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
+  currentClientX = e.clientX; // 좌표 초기화
+
+  // 오토 스크롤 엔진 가동
+  if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
 
   //마우스가 브라우저를 벗어나도 이벤트를 놓지지 않도록 잡음
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -89,6 +161,14 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
       }
     }
+
+    console.log(`\n========================================`);
+    console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
+    console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
+    console.log(`========================================`);
+
+    //드래그 끝난 시점의 최종 마디 위치를 스토어에 알려서 오디오를 재배치
+    trackStore.resyncClip(activeClip.value.clipId, activeClip.value.start);
     
 
     activeClip.value.isDragging = false; //드래그 끝
@@ -226,7 +306,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
-          :class="[clip.isDragging? 'opacity-80 scale-[1.01] z-50!': 'transition duration-200']"
+          :class="[clip.isDragging? 'opacity-80 brightness-125 shadow-2xl z-50!': 'transition duration-200']"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
@@ -252,9 +332,6 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
       </div> 
       <div 
         class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
-        :class="[
-            { 'transition-[left] duration-150 ease-out': !trackStore.isPlaying }
-        ]"
         :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',

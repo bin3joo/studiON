@@ -12,6 +12,9 @@ const timelineCanvasRef = ref<HTMLElement | null>(null);
 //드래그 중인지 상태를 추적
 const isScrubbing = ref(false);
 
+//드래그 최적화를 위한 렌더링 프레임 변수
+let rafId : number | null = null;
+
 // 2. 마우스의 X 좌표를 '마디(Bar)' 단위로 변환해 스토어에 업데이트하는 함수
 const updatePlayhead = (clientX: number) => {
   if(!timelineCanvasRef.value) return;
@@ -36,6 +39,7 @@ const updatePlayhead = (clientX: number) => {
   Tone.getTransport().seconds = newPositionBar * secondsPerBar;
 
 }
+
 
 //마우스 조작 이벤트 헨들러
 
@@ -66,14 +70,29 @@ const onPointerMove = (e: PointerEvent) => {
     isScrubbing.value = false;
     return;
   }
-  //실시간 동기화 재생바가 마우스를 따라다니게 함
-  updatePlayhead(e.clientX);
+
+  //화면그리기 요청 통제
+  //모니터가 그릴 준비가 된 타이밍(60fps)에 맞춰서 한 번만 계산
+  if(rafId){
+    cancelAnimationFrame(rafId);
+  }
+
+  rafId = requestAnimationFrame(()=>{
+    updatePlayhead(e.clientX);
+    rafId = null; // 실행 후에는 변수를 비워준다.
+  });
 };
 
 //드래그 종료 시점
 const onPointerUp = (e:PointerEvent) => {
   if(!isScrubbing.value) return;
   isScrubbing.value = false;
+
+  //찌꺼기 렌더링 요청 취소
+  if(rafId){
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
 
   try{
     //마우스 캡처 해제

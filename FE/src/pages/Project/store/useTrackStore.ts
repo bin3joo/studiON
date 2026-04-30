@@ -7,6 +7,10 @@ import { ref, computed, watch } from 'vue';
 // import { projectApi } from '../api/project.api';
 //트랙과 클립의 타입
 import type { TrackUIState, ClipUIState } from '../types';
+//음원 처리를 위한 lib
+import * as Tone from 'tone';
+
+
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
 export const useTrackStore = defineStore('track', () => {
     // ==========================================
@@ -29,58 +33,19 @@ export const useTrackStore = defineStore('track', () => {
 
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
+    //프로젝트 BPM 설정 및 Tone.js 동기화
+    const bpm = ref(120);
+    Tone.getTransport().bpm.value = bpm.value; // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
+
+    //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
+    watch(bpm, (newBpm) => {
+        Tone.getTransport().bpm.value = newBpm;
+    })
+    //1마디당 걸리는 시간 계산
+    const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
+    let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
-
-    // ==========================================
-    //  재생 애니메이션 엔진 (RequestAnimationFrame)
-    // ==========================================
-    //리퀘스트에니메이션 프레임 아이디
-    let rafId: number | null = null;
-    let lastTimestamp = 0;
-
-    const animate = (timestamp: number) => {
-        if (!isPlaying.value) return;
-
-        //1. 프레임 간 시간 간격 계산(초단위)
-        if (!lastTimestamp) lastTimestamp = timestamp;
-        const dt = (timestamp - lastTimestamp) / 1000; //초 단위로 변환
-        lastTimestamp = timestamp;
-
-        //2. 초당 흐르는 마디 계산
-        //(BPM / 60초) / 1마디 당 박자수
-        const beatsPerSecond = projectInfo.value.tempo / 60;
-        const barsPerSecond = beatsPerSecond / projectInfo.value.timeSigNumerator;
-
-        //3. 현재 위치 업데이트
-        const nextPosition = playheadPosition.value + (barsPerSecond * dt);
-
-        //4. 프로젝트 끝에 도달하면 정지
-        if (nextPosition >= projectInfo.value.totalBarCount) {
-            isPlaying.value = false;
-            playheadPosition.value = projectInfo.value.totalBarCount; //마지막에 딱 맞춘다.
-            return;
-        }
-        //5. 위치 업데이트
-        playheadPosition.value = nextPosition;
-        //6. 화면에 그리기 요청
-        rafId = requestAnimationFrame(animate);
-    }
-
-    //isPlaying 상태를 감시하여 애니메이션의 시작과 정지를 제어
-    watch(isPlaying, (playing) => {
-        if (playing) {
-            // 재생 시작: 타이밍 초기화 후 루프 시작
-            lastTimestamp = 0;
-            rafId = requestAnimationFrame(animate);
-        } else {
-            // 재생 정지: 루프 종료 (rafId가 있으면 캔슬)
-            if (rafId !== null) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-            }
-        }
-    })
 
     // ==========================================
     // 2. 계산된 상태(Getters) - 타임라인 픽셀 계산기
@@ -134,8 +99,49 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     //재생 상태 토글 함수
-    const togglePlay = () => {
-        isPlaying.value = !isPlaying.value;
+    const togglePlay = async () => {
+        //첫 클릭 시 오디오 컨텍스트 시작
+        if (Tone.getContext().state !== 'running') {
+            await Tone.start();
+        }
+
+        if (!isPlaying.value) {
+            // 정지 상태일 때 -> 재생 시작
+            // 1. 현재 재생바 위치를 Tone.js 시간으로 변환하여 세팅
+            Tone.getTransport().seconds = playheadPosition.value * secondsPerBar.value;
+            // 2. 오디오 엔진 재생 시작
+            Tone.getTransport().start();
+            isPlaying.value = true;
+            // 3. UI 업데이트 루프 시작
+            updatePlayheadLoop();
+        } else {
+            //  재생 중일 때 -> 일시정지
+            Tone.getTransport().pause();
+            isPlaying.value = false;
+            cancelAnimationFrame(animationFrameId);
+        }
+    };
+
+    //실시간 재생바 UI 업데이트 루프
+    const updatePlayheadLoop = () => {
+        if (!isPlaying.value) return; //재생중이 아닐때는 루프 멈춤
+        //정밀한 현재 시간 가져오기
+        playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
+        //재생바 프로젝트 전체 길이에 도달하면 자동 정지
+        if (playheadPosition.value >= projectInfo.value.totalBarCount) {
+            stopPlay();
+            return;
+        }
+        //모니터 주사율에 맞춰 부드럽게 반복
+        animationFrameId = requestAnimationFrame(updatePlayheadLoop);
+    }
+
+    // 완전 정지 (처음으로 되돌림)
+    const stopPlay = () => {
+        Tone.getTransport().stop();
+        isPlaying.value = false;
+        playheadPosition.value = 0;
+        cancelAnimationFrame(animationFrameId);
     };
 
     //마우스 휠 방향에 따라 줌 배율을 조절하는 함수
@@ -221,6 +227,8 @@ export const useTrackStore = defineStore('track', () => {
                     timeSigDenominator: data.timeSigDenominator,
                     totalBarCount: data.totalBarCount
                 };
+                //실제 오디오 엔진과 동기화된 bpm 변수에도 값을 넣어줌
+                bpm.value = data.tempo;
 
                 // 백엔드가 준 순수한 트랙 배열을 .map을 사용해 하나씩 순회
                 trackList.value = data.tracks.map((track): TrackUIState => ({
@@ -250,6 +258,8 @@ export const useTrackStore = defineStore('track', () => {
         isPlaying,
         playheadPosition,
         zoomlevel,
+        bpm,
+        secondsPerBar,
 
         // Getters
         pixelPerBar,
@@ -262,5 +272,7 @@ export const useTrackStore = defineStore('track', () => {
         togglePlay,
         updateZoom,
         moveClipToTrack,
+        stopPlay,
+        updatePlayheadLoop,
     };
 });

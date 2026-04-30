@@ -38,11 +38,14 @@ const handleKeyChange = (newNote: string, newMode: string) => {
 };
 
 // 3. 재생 제어 함수
-const handlePlay = () => trackStore.isPlaying = true;
-const handlePause = () => trackStore.isPlaying = false;
+const handlePlay = () => {
+  if(!trackStore.isPlaying) trackStore.togglePlay();
+};
+const handlePause = () => {
+  if(trackStore.isPlaying) trackStore.togglePlay();
+};
 const handleStop = () => {
-  trackStore.isPlaying = false;
-  trackStore.playheadPosition = 0;
+  trackStore.stopPlay();
 };
 </script>
 

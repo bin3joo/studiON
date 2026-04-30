@@ -12,6 +12,8 @@ from app.graph.nodes import suggestion as suggestion_nodes
 from app.graph.state import build_workflow_initial_state
 from app.graph.workflow import build_workflow_response, run_workflow_graph
 from app.services.clap_inference import CLAPInferenceError, CLAPTrackPrediction
+from app.services.plan_critic_llm import PlanCriticLLMResponse
+from app.services.planning_llm import PlanningLLMError, PlanningLLMResponse
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
 
@@ -40,8 +42,12 @@ def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
     return str(audio_path)
 
 
+def _clip_id(track_id: int, ordinal: int) -> int:
+    return (track_id * 1000) + ordinal
+
+
 class _FakeCLAPInferenceClient:
-    def infer_track_roles(self, *, job_id: str, excerpts: list) -> list[CLAPTrackPrediction]:
+    def infer_track_roles(self, *, job_id: int, excerpts: list) -> list[CLAPTrackPrediction]:
         predictions: list[CLAPTrackPrediction] = []
         ordered_track_ids: list[int] = []
         for excerpt in excerpts:
@@ -70,12 +76,108 @@ def patch_clap_client(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakePlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: str,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            issue_type = str(region.get("issue_type"))
+            if issue_type == "clipping":
+                action = {
+                    "actionType": "GAIN_TRIM",
+                    "targetScope": "MASTER",
+                    "targetTrackId": None,
+                    "targetClipId": None,
+                    "startMs": int(region["start_ms"]),
+                    "endMs": int(region["end_ms"]),
+                    "bandLowHz": None,
+                    "bandHighHz": None,
+                    "gainDeltaDb": -2.2,
+                    "params": {
+                        "preGainDb": -2.2,
+                        "postAction": "TRUE_PEAK_LIMITER",
+                        "ceilingDbfs": -1.0,
+                    },
+                }
+            else:
+                preserve_track_id = next(
+                    (
+                        int(item["track_id"])
+                        for item in clip_context
+                        if bool(item.get("is_preserve_target"))
+                    ),
+                    None,
+                )
+                involved_track_ids = [
+                    int(track_id) for track_id in region.get("involved_track_ids", [])
+                ]
+                target_track_id = next(
+                    (
+                        track_id
+                        for track_id in involved_track_ids
+                        if preserve_track_id is None or track_id != preserve_track_id
+                    ),
+                    int(region.get("track_id") or 0),
+                )
+                action = {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetScope": "TRACK",
+                    "targetTrackId": target_track_id,
+                    "targetClipId": None,
+                    "startMs": int(region["start_ms"]),
+                    "endMs": int(region["end_ms"]),
+                    "bandLowHz": int(region.get("band_low_hz") or 250),
+                    "bandHighHz": int(region.get("band_high_hz") or 1200),
+                    "gainDeltaDb": -2.4,
+                    "params": {"threshold": -19, "ratio": 2.0},
+                }
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": f"Plan for {issue_type}",
+                    "strategySummary": "Planner-generated strategy summary",
+                    "summary": "Planner-generated summary",
+                    "explanation": "Planner-generated explanation",
+                    "candidate": {"action": action},
+                }
+            )
+
+    class _FakeCriticClient:
+        def review_plan(
+            self,
+            *,
+            selected_region_id: str,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            plan_payload: dict[str, object],
+            revision_notes: list[str],
+        ) -> PlanCriticLLMResponse:
+            return PlanCriticLLMResponse(result="PASS", note="")
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _FakePlanningClient(),
+    )
+    monkeypatch.setattr(
+        "app.graph.nodes.review.get_plan_critic_llm_client",
+        lambda: _FakeCriticClient(),
+    )
+
+
 def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
     clips = []
     for index, track_id in enumerate(track_ids, start=1):
         clips.append(
             {
-                "clip_id": f"clip-{track_id}-{index}",
+                "clip_id": _clip_id(track_id, index),
                 "track_id": track_id,
                 "start_ms": (index - 1) * 900,
                 "end_ms": ((index - 1) * 900) + 2200,
@@ -115,7 +217,7 @@ def build_project_snapshot_with_audio(
             ],
             "clips": [
                 {
-                    "clip_id": f"clip-{track_id}-1",
+                    "clip_id": _clip_id(track_id, 1),
                     "track_id": track_id,
                     "start_ms": 0,
                     "end_ms": duration_ms,
@@ -129,7 +231,11 @@ def build_project_snapshot_with_audio(
     )
 
 
-def build_plan_input(state: dict, *, user_feedback_message: str | None = None) -> dict[str, str]:
+def build_plan_input(
+    state: dict,
+    *,
+    user_feedback_message: str | None = None,
+) -> dict[str, object]:
     selected_region_id = state["ranked_candidate_ids"][0]
     region = next(
         region for region in state["analysis_regions"] if region["id"] == selected_region_id
@@ -147,8 +253,8 @@ def build_plan_input(state: dict, *, user_feedback_message: str | None = None) -
 def test_workflow_waits_for_user_mix_intent_before_suggestions() -> None:
     result = run_workflow_graph(
         {
-            "job_id": "job-selection",
-            "project_id": "project-selection",
+            "job_id": 10001,
+            "project_id": 20001,
             "project_snapshot": build_project_snapshot(track_ids=[12, 18]),
             "issue_types": ["band_overlap", "clipping"],
         }
@@ -164,8 +270,8 @@ def test_workflow_waits_for_user_mix_intent_before_suggestions() -> None:
 def test_workflow_finalize_without_user_action_when_no_suggestions_exist() -> None:
     result = run_workflow_graph(
         {
-            "job_id": "job-no-action",
-            "project_id": "project-no-action",
+            "job_id": 10002,
+            "project_id": 20002,
             "project_snapshot": build_project_snapshot(track_ids=[9]),
             "issue_types": [],
         }
@@ -179,23 +285,24 @@ def test_workflow_finalize_without_user_action_when_no_suggestions_exist() -> No
 def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-rag",
-            "project_id": "project-rag",
+            "job_id": 10003,
+            "project_id": 20003,
             "project_snapshot": build_project_snapshot(track_ids=[3, 4]),
             "issue_types": ["band_overlap", "clipping"],
         }
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
-    assert result["current_node"] == "wait_user_selection"
+    assert result["current_node"] == "wait_user_confirm"
     assert result["plan_status"] == "APPROVED"
+    assert result["selected_action_ids"] == ["10003-action-1"]
 
 
 def test_workflow_skips_clap_when_not_needed() -> None:
     result = run_workflow_graph(
         {
-            "job_id": "job-no-clap",
-            "project_id": "project-no-clap",
+            "job_id": 10004,
+            "project_id": 20004,
             "project_snapshot": build_project_snapshot(track_ids=[2, 5]),
             "issue_types": ["band_overlap"],
         }
@@ -209,8 +316,8 @@ def test_workflow_skips_clap_when_not_needed() -> None:
 def test_workflow_revises_once_then_passes() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-revise",
-            "project_id": "project-revise",
+            "job_id": 10005,
+            "project_id": 20005,
             "project_snapshot": build_project_snapshot(track_ids=[7]),
             "issue_types": ["clipping"],
             "validator_mode": "REVISE_ONCE",
@@ -219,15 +326,110 @@ def test_workflow_revises_once_then_passes() -> None:
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
-    assert result["current_node"] == "wait_user_selection"
+    assert result["current_node"] == "wait_user_confirm"
     assert result["transition_log"].count("planning_agent") == 2
+
+
+def test_workflow_planning_agent_uses_llm_plan_payload_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakePlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: str,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "LLM plan title",
+                    "strategySummary": "LLM plan summary",
+                    "summary": "LLM summary",
+                    "explanation": "LLM explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": "DYNAMIC_EQ",
+                            "targetScope": "TRACK",
+                            "targetTrackId": 24,
+                            "targetClipId": None,
+                            "startMs": int(region["start_ms"]),
+                            "endMs": int(region["end_ms"]),
+                            "bandLowHz": int(region.get("band_low_hz") or 250),
+                            "bandHighHz": int(region.get("band_high_hz") or 1200),
+                            "gainDeltaDb": -2.4,
+                            "params": {"threshold": -19, "ratio": 2.0},
+                        }
+                    },
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _FakePlanningClient(),
+    )
+    waiting = run_workflow_graph(
+        {
+            "job_id": 10034,
+            "project_id": 20034,
+            "project_snapshot": build_project_snapshot(track_ids=[12, 24]),
+            "issue_types": ["band_overlap"],
+        }
+    )
+
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+
+    suggestion = result["suggestion_payload"]["suggestions"][0]
+    assert result["plan_payload"]["strategyTitle"] == "LLM plan title"
+    assert result["plan_payload"]["strategySummary"] == "LLM plan summary"
+    assert suggestion["summary"] == "LLM summary"
+    assert suggestion["explanation"] == "LLM explanation"
+
+
+def test_workflow_planning_agent_fails_when_llm_call_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingPlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: str,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            raise PlanningLLMError("PLANNING_LLM_TIMEOUT", "timeout")
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _FailingPlanningClient(),
+    )
+    waiting = run_workflow_graph(
+        {
+            "job_id": 10035,
+            "project_id": 20035,
+            "project_snapshot": build_project_snapshot(track_ids=[14]),
+            "issue_types": ["clipping"],
+        }
+    )
+
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+
+    assert result["current_node"] == "fail_workflow"
+    assert result["failure_code"] == "PLANNING_LLM_TIMEOUT"
+    assert result["runtime_status"] == "failed"
 
 
 def test_workflow_fails_when_validator_rejects() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-fail",
-            "project_id": "project-fail",
+            "job_id": 10006,
+            "project_id": 20006,
             "project_snapshot": build_project_snapshot(track_ids=[1, 2]),
             "issue_types": ["band_overlap"],
         }
@@ -287,31 +489,25 @@ def test_workflow_autofixes_sibilance_without_preview() -> None:
 def test_workflow_resume_from_selection_to_preview_confirm_wait() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-preview-2",
-            "project_id": "project-preview-2",
+            "job_id": 10037,
+            "project_id": 20037,
             "project_snapshot": build_project_snapshot(track_ids=[8]),
             "issue_types": ["clipping"],
         }
     )
     selected = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
-    resumed = run_workflow_graph(
-        {
-            **selected,
-            "selected_action_ids": ["job-preview-2-action-1"],
-        }
-    )
-
-    assert resumed["current_node"] == "wait_user_confirm"
-    assert resumed["runtime_status"] == "waiting_for_user"
-    assert resumed["apply_result_id"] == "job-preview-2-apply"
+    assert selected["current_node"] == "wait_user_confirm"
+    assert selected["runtime_status"] == "waiting_for_user"
+    assert selected["apply_result_id"] == "10037-apply"
+    assert selected["selected_action_ids"] == ["10037-action-1"]
 
 
 def test_workflow_confirm_commits_and_finalizes() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-confirm",
-            "project_id": "project-confirm",
+            "job_id": 10038,
+            "project_id": 20038,
             "project_snapshot": build_project_snapshot(track_ids=[4, 14]),
             "issue_types": ["band_overlap"],
         }
@@ -319,46 +515,83 @@ def test_workflow_confirm_commits_and_finalizes() -> None:
     mix_resolved = run_workflow_graph(
         {**waiting, **build_plan_input(waiting)}
     )
-    preview_wait = run_workflow_graph(
-        {
-            **mix_resolved,
-            "selected_action_ids": ["job-confirm-action-1"],
-        }
-    )
     confirmed = run_workflow_graph(
         {
-            **preview_wait,
+            **mix_resolved,
             "user_decision": "confirm",
         }
     )
 
     assert confirmed["current_node"] == "finalize_output"
     assert confirmed["runtime_status"] == "completed"
-    assert confirmed["feedback_event_id"] == "job-confirm-feedback"
+    assert confirmed["feedback_event_id"] == "10038-feedback"
 
 
 def test_workflow_retry_and_cancel_paths_return_to_expected_nodes() -> None:
     mix_resolved = run_workflow_graph(
         {
-            "job_id": "job-retry",
-            "project_id": "project-retry",
+            "job_id": 10039,
+            "project_id": 20039,
             "project_snapshot": build_project_snapshot(track_ids=[6]),
             "issue_types": ["clipping"],
         }
     )
     mix_resolved = run_workflow_graph({**mix_resolved, **build_plan_input(mix_resolved)})
-    preview_wait = run_workflow_graph(
-        {
-            **mix_resolved,
-            "selected_action_ids": ["job-retry-action-1"],
-        }
-    )
-
-    retried = run_workflow_graph({**preview_wait, "user_decision": "retry"})
-    cancelled = run_workflow_graph({**preview_wait, "user_decision": "cancel"})
+    retried = run_workflow_graph({**mix_resolved, "user_decision": "retry"})
+    cancelled = run_workflow_graph({**mix_resolved, "user_decision": "cancel"})
 
     assert retried["current_node"] == "wait_user_confirm"
     assert cancelled["current_node"] == "finalize_output"
+
+
+def test_user_action_gate_keeps_selection_wait_for_multi_action_payload() -> None:
+    original = build_workflow_initial_state(
+            job_id=10036,
+            project_id=20036,
+            phase="analysis_result_persisted",
+            preview_action_ids=["10036-action-1", "10036-action-2"],
+            selected_action_ids=[],
+            user_action_required=True,
+        )
+    gated = nodes.user_action_gate(original)
+
+    assert gated["selected_action_ids"] == []
+    assert gated["phase"] == "user_action_gate_checked"
+    from app.graph.edges import route_after_user_action_gate
+
+    assert route_after_user_action_gate({**original, **gated}) == "wait_user_selection"
+
+
+def test_workflow_fails_when_no_actions_are_selected_for_preview() -> None:
+    failed = nodes.apply_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10017,
+            project_id=20017,
+            phase="waiting_for_user_selection",
+            preview_action_ids=["job-empty-selection-action-1"],
+            selected_action_ids=[],
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "EMPTY_SELECTION"
+
+
+def test_workflow_fails_when_selected_actions_are_not_from_preview() -> None:
+    failed = nodes.apply_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10018,
+            project_id=20018,
+            phase="waiting_for_user_selection",
+            preview_action_ids=["job-unknown-selection-action-1"],
+            selected_action_ids=["job-unknown-selection-action-999"],
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "UNKNOWN_ACTION_SELECTION"
 
 
 def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
@@ -407,8 +640,8 @@ def test_workflow_response_contains_unified_projections() -> None:
 def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
     result = run_workflow_graph(
         {
-            "job_id": "job-clipping-only",
-            "project_id": "project-clipping-only",
+            "job_id": 10031,
+            "project_id": 20031,
             "project_snapshot": build_project_snapshot(track_ids=[6]),
             "issue_types": ["clipping"],
         }
@@ -448,8 +681,8 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     )
     waiting = run_workflow_graph(
         {
-            "job_id": "job-region-shape",
-            "project_id": "project-region-shape",
+            "job_id": 10007,
+            "project_id": 20007,
             "project_snapshot": snapshot,
             "issue_types": ["band_overlap", "sibilance", "clipping"],
         }
@@ -467,8 +700,8 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert overlap["band_high_hz"] == 1200
     assert overlap["measure_start"] == 1
     assert overlap["measure_end"] in {1, 2, 3}
-    assert "clip-30-1" in overlap["affected_clip_ids"]
-    assert "clip-31-1" in overlap["affected_clip_ids"]
+    assert _clip_id(30, 1) in overlap["affected_clip_ids"]
+    assert _clip_id(31, 1) in overlap["affected_clip_ids"]
     assert clipping["requires_user_action"] is True
     assert sibilance["track_id"] == 30
     assert result["sibilance_fix_applied"] is True
@@ -477,7 +710,7 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
 
 def test_merge_analysis_keeps_all_regions_without_issue_cap() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-all-regions",
+        job_id=10019,
         project_id=41,
         issue_types=["band_overlap"],
     )
@@ -514,7 +747,7 @@ def test_merge_analysis_keeps_all_regions_without_issue_cap() -> None:
 
 def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-merge-dedup",
+        job_id=10020,
         project_id=51,
         issue_types=["clipping", "band_overlap"],
     )
@@ -597,7 +830,7 @@ def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
 
 def test_merge_analysis_keeps_distinct_time_ranges() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-merge-time",
+        job_id=10021,
         project_id=52,
         issue_types=["clipping"],
     )
@@ -658,7 +891,7 @@ def test_merge_analysis_keeps_distinct_time_ranges() -> None:
 
 def test_merge_analysis_uses_score_as_third_sort_key() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-merge-sort",
+        job_id=10022,
         project_id=53,
         issue_types=["clipping"],
     )
@@ -715,7 +948,7 @@ def test_merge_analysis_uses_score_as_third_sort_key() -> None:
 
 def test_candidate_ranking_ignores_auto_fix_only_regions_for_user_candidates() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-ranking-autofix",
+        job_id=10023,
         project_id=61,
         issue_types=["sibilance", "band_overlap"],
     )
@@ -772,7 +1005,7 @@ def test_candidate_ranking_ignores_auto_fix_only_regions_for_user_candidates() -
 
 def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-ranking-priority",
+        job_id=10024,
         project_id=62,
         issue_types=["clipping", "band_overlap"],
     )
@@ -830,7 +1063,7 @@ def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
 
 def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> None:
     initial = build_workflow_initial_state(
-        job_id="job-ranking-tie",
+        job_id=10025,
         project_id=63,
         issue_types=["high_band_harshness"],
     )
@@ -909,8 +1142,8 @@ def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> Non
 def test_run_workflow_graph_derives_timeline_metadata_from_project_snapshot() -> None:
     result = run_workflow_graph(
         {
-            "job_id": "job-snapshot-derivation",
-            "project_id": "project-snapshot-derivation",
+            "job_id": 10008,
+            "project_id": 20008,
             "project_snapshot": build_project_snapshot(track_ids=[7, 8]),
             "issue_types": ["band_overlap"],
         }
@@ -918,7 +1151,7 @@ def test_run_workflow_graph_derives_timeline_metadata_from_project_snapshot() ->
 
     assert result["track_ids"] == [7, 8]
     assert result["bar_mapping"][0]["measure_no"] == 1
-    assert result["clip_index"][0]["clip_id"] == "clip-7-1"
+    assert result["clip_index"][0]["clip_id"] == _clip_id(7, 1)
 
 
 def test_workflow_uses_full_stft_summary_when_audio_paths_exist(tmp_path) -> None:
@@ -944,8 +1177,8 @@ def test_workflow_uses_full_stft_summary_when_audio_paths_exist(tmp_path) -> Non
 
     result = run_workflow_graph(
         {
-            "job_id": "job-actual-dsp",
-            "project_id": "project-actual-dsp",
+            "job_id": 10009,
+            "project_id": 20009,
             "project_snapshot": build_project_snapshot_with_audio(
                 track_audio_paths={
                     10: str(first_path),
@@ -959,17 +1192,17 @@ def test_workflow_uses_full_stft_summary_when_audio_paths_exist(tmp_path) -> Non
     assert result["dsp_scan_summary"]["analysis_source"] == "full_stft"
     assert result["dsp_scan_summary"]["track_windows_preview"]["10"][0]["spectral_centroid_hz"] > 0
     assert result["clip_feature_artifact_id"] is not None
-    assert result["sampled_clip_ids"] == ["clip-10-1", "clip-20-1"]
+    assert result["sampled_clip_ids"] == [_clip_id(10, 1), _clip_id(20, 1)]
     assert result["track_representative_specs"] == [
         {
             "track_id": 10,
-            "clip_id": "clip-10-1",
+            "clip_id": _clip_id(10, 1),
             "resolved_audio_path": str(first_path),
             "source_format": ".wav",
         },
         {
             "track_id": 20,
-            "clip_id": "clip-20-1",
+            "clip_id": _clip_id(20, 1),
             "resolved_audio_path": str(second_path),
             "source_format": ".wav",
         },
@@ -977,11 +1210,11 @@ def test_workflow_uses_full_stft_summary_when_audio_paths_exist(tmp_path) -> Non
 
 
 def test_sample_track_clips_builds_track_representative_specs_across_multiple_clips() -> None:
-    state = build_workflow_initial_state(job_id="job-repr", project_id="project-repr")
+    state = build_workflow_initial_state(job_id=10010, project_id=20010)
     state["track_ids"] = [10]
     state["clip_index"] = [
         {
-            "clip_id": "clip-a",
+            "clip_id": 10001,
             "track_id": 10,
             "start_ms": 0,
             "end_ms": 5000,
@@ -990,7 +1223,7 @@ def test_sample_track_clips_builds_track_representative_specs_across_multiple_cl
             "audio_duration_ms": 5000,
         },
         {
-            "clip_id": "clip-b",
+            "clip_id": 10002,
             "track_id": 10,
             "start_ms": 6000,
             "end_ms": 11000,
@@ -999,7 +1232,7 @@ def test_sample_track_clips_builds_track_representative_specs_across_multiple_cl
             "audio_duration_ms": 5000,
         },
         {
-            "clip_id": "clip-c",
+            "clip_id": 10003,
             "track_id": 10,
             "start_ms": 12000,
             "end_ms": 18000,
@@ -1008,7 +1241,7 @@ def test_sample_track_clips_builds_track_representative_specs_across_multiple_cl
             "audio_duration_ms": 6000,
         },
         {
-            "clip_id": "clip-d",
+            "clip_id": 10004,
             "track_id": 10,
             "start_ms": 19000,
             "end_ms": 23000,
@@ -1020,11 +1253,11 @@ def test_sample_track_clips_builds_track_representative_specs_across_multiple_cl
 
     result = analysis_nodes.sample_track_clips(state)
 
-    assert result["sampled_clip_ids"] == ["clip-a"]
+    assert result["sampled_clip_ids"] == [10001]
     assert result["track_representative_specs"] == [
         {
             "track_id": 10,
-            "clip_id": "clip-a",
+            "clip_id": 10001,
             "resolved_audio_path": _ensure_test_audio_file(10, vocal_like=True),
             "source_format": ".wav",
         }
@@ -1033,8 +1266,8 @@ def test_sample_track_clips_builds_track_representative_specs_across_multiple_cl
 
 def test_select_role_candidates_uses_high_band_issue_tracks() -> None:
     state = build_workflow_initial_state(
-        job_id="job-role-candidates",
-        project_id="project-role-candidates",
+        job_id=10011,
+        project_id=20011,
     )
     state["issue_types"] = ["sibilance"]
     state["analysis_regions"] = [
@@ -1056,7 +1289,7 @@ def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() 
     artifact_store.upsert_artifact(
         WorkflowArtifactDocument(
             id="artifact-role-candidates",
-            job_id="job-role-candidates-fallback",
+            job_id=10012,
             artifact_type="full_stft_frame_summary",
             payload={
                 "track_frames": {
@@ -1079,8 +1312,8 @@ def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() 
         )
     )
     state = build_workflow_initial_state(
-        job_id="job-role-candidates-fallback",
-        project_id="project-role-candidates-fallback",
+        job_id=10012,
+        project_id=20012,
         issue_types=["sibilance"],
         clip_feature_artifact_id="artifact-role-candidates",
     )
@@ -1094,10 +1327,10 @@ def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() 
 def test_infer_track_roles_calls_clap_and_persists_summary_artifact() -> None:
     artifact_store = get_workflow_artifact_store()
     artifact_store.reset()
-    state = build_workflow_initial_state(job_id="job-clap", project_id="project-clap")
+    state = build_workflow_initial_state(job_id=10013, project_id=20013)
     state["clip_index"] = [
         {
-            "clip_id": "clip-1",
+            "clip_id": 1001,
             "track_id": 1,
             "start_ms": 0,
             "end_ms": 4800,
@@ -1106,7 +1339,7 @@ def test_infer_track_roles_calls_clap_and_persists_summary_artifact() -> None:
             "audio_duration_ms": 4800,
         },
         {
-            "clip_id": "clip-2",
+            "clip_id": 2001,
             "track_id": 2,
             "start_ms": 0,
             "end_ms": 4800,
@@ -1133,17 +1366,17 @@ def test_infer_track_roles_calls_clap_and_persists_summary_artifact() -> None:
     assert artifact.artifact_type == "clap_track_role_inference"
     assert response["projections"]["track_vocal_predictions"] == [
         {
-            "id": "job-clap-vocal-prediction-1",
+            "id": "10013-vocal-prediction-1",
             "track_id": 1,
-            "job_id": "job-clap",
+            "job_id": 10013,
             "vocal_score": 0.93,
             "is_vocal": True,
             "confidence": 0.89,
         },
         {
-            "id": "job-clap-vocal-prediction-2",
+            "id": "10013-vocal-prediction-2",
             "track_id": 2,
-            "job_id": "job-clap",
+            "job_id": 10013,
             "vocal_score": 0.22,
             "is_vocal": False,
             "confidence": 0.71,
@@ -1155,17 +1388,17 @@ def test_infer_track_roles_fails_without_fallback_when_clap_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _RaisingCLAPClient:
-        def infer_track_roles(self, *, job_id: str, excerpts: list) -> list[CLAPTrackPrediction]:
+        def infer_track_roles(self, *, job_id: int, excerpts: list) -> list[CLAPTrackPrediction]:
             raise CLAPInferenceError("CLAP_INFERENCE_TIMEOUT", "timeout")
 
     monkeypatch.setattr(
         "app.graph.nodes.analysis.get_clap_inference_client",
         lambda: _RaisingCLAPClient(),
     )
-    state = build_workflow_initial_state(job_id="job-clap-fail", project_id="project-clap-fail")
+    state = build_workflow_initial_state(job_id=10014, project_id=20014)
     state["clip_index"] = [
         {
-            "clip_id": "clip-1",
+            "clip_id": 1001,
             "track_id": 1,
             "start_ms": 0,
             "end_ms": 4800,
@@ -1190,8 +1423,8 @@ def test_infer_track_roles_fails_without_fallback_when_clap_errors(
 def test_workflow_fails_when_audio_source_is_missing() -> None:
     result = run_workflow_graph(
         {
-            "job_id": "job-missing-audio",
-            "project_id": "project-missing-audio",
+            "job_id": 10015,
+            "project_id": 20015,
             "project_snapshot": ProjectSnapshot.model_validate(
                 {
                     "duration_ms": 4800,
@@ -1201,7 +1434,7 @@ def test_workflow_fails_when_audio_source_is_missing() -> None:
                     "tracks": [{"track_id": 1, "name": "Track 1"}],
                     "clips": [
                         {
-                            "clip_id": "clip-1-1",
+                            "clip_id": _clip_id(1, 1),
                             "track_id": 1,
                             "start_ms": 0,
                             "end_ms": 2400,
@@ -1224,7 +1457,7 @@ def test_detect_band_overlap_groups_congested_time_region_across_multiple_tracks
     artifact_store.upsert_artifact(
         WorkflowArtifactDocument(
             id="job-band-region:cheap-dsp",
-            job_id="job-band-region",
+            job_id=10026,
             artifact_type="full_stft_frame_summary",
             payload={
                 "track_frames": {
@@ -1297,8 +1530,8 @@ def test_detect_band_overlap_groups_congested_time_region_across_multiple_tracks
         )
     )
     state = build_workflow_initial_state(
-        job_id="job-band-region",
-        project_id="project-band-region",
+        job_id=10026,
+        project_id=20026,
         issue_types=["band_overlap"],
         clip_feature_artifact_id="job-band-region:cheap-dsp",
     )
@@ -1323,19 +1556,19 @@ def test_band_overlap_target_track_excludes_preserved_clip_track() -> None:
         "band_high_hz": 1200,
     }
     state = build_workflow_initial_state(
-        job_id="job-band-target",
-        project_id="project-band-target",
+        job_id=10016,
+        project_id=20016,
         clip_index=[
-            {"clip_id": "clip-10", "track_id": 10},
-            {"clip_id": "clip-20", "track_id": 20},
-            {"clip_id": "clip-30", "track_id": 30},
+            {"clip_id": _clip_id(10, 1), "track_id": 10},
+            {"clip_id": _clip_id(20, 1), "track_id": 20},
+            {"clip_id": _clip_id(30, 1), "track_id": 30},
         ],
     )
 
     action = suggestion_nodes._build_region_action(
         state,
         region=region,
-        preserve_clip_id="clip-10",
+        preserve_clip_id=_clip_id(10, 1),
         index=1,
     )
 
@@ -1369,8 +1602,8 @@ def test_detect_clipping_can_trigger_on_oversampled_true_peak() -> None:
     signal = (0.98 * np.sin(2 * np.pi * 0.1875 * np.arange(1536))).astype(np.float32)
     mix_frames = analysis_nodes._compute_mix_frames(signal, target_track_id=11)
     state = build_workflow_initial_state(
-        job_id="job-true-peak",
-        project_id="project-true-peak",
+        job_id=10027,
+        project_id=20027,
         issue_types=["clipping"],
         clip_feature_artifact_id="artifact-true-peak",
     )
@@ -1379,7 +1612,7 @@ def test_detect_clipping_can_trigger_on_oversampled_true_peak() -> None:
     artifact_store.upsert_artifact(
         WorkflowArtifactDocument(
             id="artifact-true-peak",
-            job_id="job-true-peak",
+            job_id=10027,
             artifact_type="full_stft_frame_summary",
             payload={"mix_frames": mix_frames},
         )
@@ -1397,8 +1630,8 @@ def test_detect_clipping_ignores_near_ceiling_without_true_peak_overflow() -> No
     signal = (0.995 * np.sin(2 * np.pi * 0.25 * np.arange(1536))).astype(np.float32)
     mix_frames = analysis_nodes._compute_mix_frames(signal, target_track_id=11)
     state = build_workflow_initial_state(
-        job_id="job-near-ceiling",
-        project_id="project-near-ceiling",
+        job_id=10028,
+        project_id=20028,
         issue_types=["clipping"],
         clip_feature_artifact_id="artifact-near-ceiling",
     )
@@ -1407,7 +1640,7 @@ def test_detect_clipping_ignores_near_ceiling_without_true_peak_overflow() -> No
     artifact_store.upsert_artifact(
         WorkflowArtifactDocument(
             id="artifact-near-ceiling",
-            job_id="job-near-ceiling",
+            job_id=10028,
             artifact_type="full_stft_frame_summary",
             payload={"mix_frames": mix_frames},
         )
@@ -1430,8 +1663,8 @@ def test_workflow_defaults_include_clipping_detection() -> None:
 
     result = run_workflow_graph(
         {
-            "job_id": "job-default-clipping",
-            "project_id": "project-default-clipping",
+            "job_id": 10032,
+            "project_id": 20032,
             "project_snapshot": build_project_snapshot_with_audio(
                 track_audio_paths={10: str(audio_path)}
             ),
@@ -1460,8 +1693,8 @@ def test_workflow_skips_sibilance_when_clap_candidate_is_absent() -> None:
 
     result = run_workflow_graph(
         {
-            "job_id": "job-no-sibilance-candidate",
-            "project_id": "project-no-sibilance-candidate",
+            "job_id": 10033,
+            "project_id": 20033,
             "project_snapshot": build_project_snapshot_with_audio(
                 track_audio_paths={10: str(audio_path)}
             ),
@@ -1482,7 +1715,7 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
     artifact_store.upsert_artifact(
         WorkflowArtifactDocument(
             id="artifact-sibilance-role-aware",
-            job_id="job-sibilance-role-aware",
+            job_id=10029,
             artifact_type="full_stft_frame_summary",
             payload={
                 "track_frames": {
@@ -1523,8 +1756,8 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
         )
     )
     state = build_workflow_initial_state(
-        job_id="job-sibilance-role-aware",
-        project_id="project-sibilance-role-aware",
+        job_id=10029,
+        project_id=20029,
         issue_types=["sibilance"],
         clip_feature_artifact_id="artifact-sibilance-role-aware",
         inferred_roles={10: "vocal-like", 20: "supporting"},
@@ -1541,8 +1774,8 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
 def test_clipping_plan_materializes_master_true_peak_limiter_action() -> None:
     waiting = run_workflow_graph(
         {
-            "job_id": "job-clipping-action",
-            "project_id": "project-clipping-action",
+            "job_id": 10030,
+            "project_id": 20030,
             "project_snapshot": build_project_snapshot(track_ids=[14]),
             "issue_types": ["clipping"],
         }
@@ -1551,7 +1784,8 @@ def test_clipping_plan_materializes_master_true_peak_limiter_action() -> None:
 
     action = resumed["suggestion_payload"]["suggestions"][0]["actions"][0]
 
-    assert action["actionType"] == "TRUE_PEAK_LIMITER"
+    assert action["actionType"] == "GAIN_TRIM"
     assert action["targetScope"] == "MASTER"
     assert action["targetTrackId"] is None
+    assert action["params"]["postAction"] == "TRUE_PEAK_LIMITER"
     assert action["params"]["ceilingDbfs"] == -1.0

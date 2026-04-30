@@ -9,7 +9,7 @@ from app.graph.state import ApplyState, RuntimeState, WorkflowState
 
 # 런타임 진행 상태를 프론트 polling 응답과 저장 projection에서 공통으로 쓰는 형태로 정리한다.
 class RuntimeStatusProjection(BaseModel):
-    job_id: str
+    job_id: int
     phase: str
     current_node: str
     progress: int
@@ -19,8 +19,8 @@ class RuntimeStatusProjection(BaseModel):
 
 # 분석 job 자체의 메타데이터를 외부 응답용 projection으로 표현한다.
 class AnalysisJobProjection(BaseModel):
-    id: str
-    project_id: str
+    id: int
+    project_id: int
     timeline_snapshot_id: str | None = None
     langgraph_thread_id: str
     status: str
@@ -36,7 +36,7 @@ class AnalysisJobProjection(BaseModel):
 # 개별 분석 region을 프론트/저장 계층이 바로 쓰기 좋은 형태로 정규화한다.
 class AnalysisRegionProjection(BaseModel):
     id: str
-    job_id: str
+    job_id: int
     region_type: str = "ISSUE_REGION"
     issue_type: str | None = None
     start_ms: int | None = None
@@ -55,14 +55,14 @@ class AnalysisRegionProjection(BaseModel):
     detector_score: float | None = None
     involved_track_ids: list[int] = Field(default_factory=list)
     # 프론트 잠금은 트랙 단위가 아니라 실제로 겹치는 clip id 집합 기준으로 판단한다.
-    affected_clip_ids: list[str] = Field(default_factory=list)
+    affected_clip_ids: list[int] = Field(default_factory=list)
 
 
 # 보컬 추론 결과를 별도 projection으로 노출한다.
 class TrackVocalPredictionProjection(BaseModel):
     id: str
     track_id: int
-    job_id: str
+    job_id: int
     vocal_score: float
     is_vocal: bool
     confidence: float | None = None
@@ -71,7 +71,7 @@ class TrackVocalPredictionProjection(BaseModel):
 # 정책 retrieval 결과를 요약해서 외부로 노출한다.
 class PlanStateProjection(BaseModel):
     selected_region_id: str | None = None
-    preserve_clip_id: str | None = None
+    preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
     status: str | None = None
     validator_result: str | None = None
@@ -114,7 +114,7 @@ class SuggestionProjection(BaseModel):
 # suggestion group은 선택된 region 문맥과 suggestion 묶음을 함께 담는다.
 class SuggestionGroupProjection(BaseModel):
     id: str
-    job_id: str
+    job_id: int
     region_id: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
@@ -128,7 +128,7 @@ class SuggestionGroupProjection(BaseModel):
 # preview render 진행 상태를 외부 응답용으로 평평하게 표현한다.
 class PreviewRenderProjection(BaseModel):
     id: str
-    job_id: str
+    job_id: int
     suggestion_id: str | None = None
     status: str
     render_no: int = 1
@@ -146,7 +146,7 @@ class PreviewRenderProjection(BaseModel):
 # 실제 적용 결과를 외부 projection으로 표현한다.
 class AppliedSuggestionProjection(BaseModel):
     id: str
-    job_id: str
+    job_id: int
     suggestion_id: str | None = None
     before_snapshot_id: str | None = None
     after_snapshot_id: str | None = None
@@ -157,7 +157,7 @@ class AppliedSuggestionProjection(BaseModel):
 # 최종 사용자 의사결정 이벤트를 projection으로 정리한다.
 class FeedbackEventProjection(BaseModel):
     id: str
-    job_id: str
+    job_id: int
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -196,7 +196,7 @@ def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections
             project_id=state["project_id"],
             timeline_snapshot_id=state.get("timeline_snapshot_id"),
             langgraph_thread_id=state.get("langgraph_thread_id", f"lg-thread:{state['job_id']}"),
-            status=state.get("durable_status", "PENDING"),
+            status=state.get("durable_status", "REQUESTED"),
             progress=state.get("progress", 0),
             current_node=state.get("current_node"),
             error_code=state.get("failure_code"),
@@ -225,6 +225,28 @@ def build_apply_projections(state: ApplyState) -> ApplyGraphProjections:
     return build_workflow_projections(state)
 
 
+def _to_validation_status(result: str | None) -> str:
+    if result == "PASS":
+        return "PASSED"
+    if result == "REJECT":
+        return "FAILED"
+    if result == "REVISE":
+        return "NEEDS_REVIEW"
+    return "PENDING"
+
+
+def _to_issue_code(issue_type: object) -> str | None:
+    mapping = {
+        "band_overlap": "BAND_OVERLAP",
+        "clipping": "CLIPPING",
+        "sibilance": "SIBILANCE",
+        "high_band_harshness": "HIGH_BAND_HARSHNESS",
+    }
+    if issue_type is None:
+        return None
+    return mapping.get(str(issue_type), str(issue_type))
+
+
 # 내부 analysis_regions state를 응답용 region projection 목록으로 변환한다.
 # 마디 범위와 affected clip id를 외부 포맷으로 고정하는 책임도 여기 있다.
 def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjection]:
@@ -233,7 +255,7 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
         AnalysisRegionProjection(
             id=region["id"],
             job_id=state["job_id"],
-            issue_type=region.get("issue_type"),
+            issue_type=_to_issue_code(region.get("issue_type")),
             start_ms=region.get("start_ms"),
             end_ms=region.get("end_ms"),
             measure_start=region.get("measure_start"),
@@ -251,7 +273,7 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
             involved_track_ids=[
                 int(track_id) for track_id in region.get("involved_track_ids", [])
             ],
-            affected_clip_ids=[str(clip_id) for clip_id in region.get("affected_clip_ids", [])],
+            affected_clip_ids=[int(clip_id) for clip_id in region.get("affected_clip_ids", [])],
         )
         for region in state.get("analysis_regions", [])
     ]
@@ -316,7 +338,9 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
         return None
 
     group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
-    validation_status = state.get("critic_result") or state.get("validator_result") or "PENDING"
+    validation_status = _to_validation_status(
+        state.get("critic_result") or state.get("validator_result")
+    )
     suggestions: list[SuggestionProjection] = []
     for suggestion_index, suggestion in enumerate(payload.get("suggestions", []), start=1):
         suggestion_id = f"{group_id}-suggestion-{suggestion_index}"

@@ -17,20 +17,20 @@ from app.graph.state import UserDecision, WorkflowDispatchType, WorkflowState
 # API와 worker 사이에서 오가는 최소 실행 지시서다.
 # 큰 상태 전체를 큐에 싣지 않고, 어떤 job을 어떤 dispatch_type으로 실행/재개할지만 담아서 전달한다.
 class WorkflowDispatchMessage(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     dispatch_type: WorkflowDispatchType
     requested_by: int | None = None
     selected_region_id: str | None = None
-    preserve_clip_id: str | None = None
+    preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
     selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
 
 class WorkflowJobRecord(BaseModel):
-    id: str
-    project_id: str
+    id: int
+    project_id: int
     status: str
     phase: str
     current_node: str | None = None
@@ -48,14 +48,14 @@ class WorkflowJobRecord(BaseModel):
 class WorkflowJobStore(Protocol):
     def reset(self) -> None: ...
     def create_pending_job(self, state: WorkflowState) -> WorkflowJobRecord: ...
-    def get_job(self, job_id: str) -> WorkflowJobRecord | None: ...
+    def get_job(self, job_id: int) -> WorkflowJobRecord | None: ...
     def save_graph_state(self, state: WorkflowState) -> WorkflowJobRecord: ...
 
 
 class InMemoryWorkflowJobStore:
     def __init__(self) -> None:
         self._lock = RLock()
-        self._jobs: dict[str, WorkflowJobRecord] = {}
+        self._jobs: dict[int, WorkflowJobRecord] = {}
 
     def reset(self) -> None:
         with self._lock:
@@ -70,7 +70,7 @@ class InMemoryWorkflowJobStore:
             self._jobs[job_id] = record
             return record.model_copy(deep=True)
 
-    def get_job(self, job_id: str) -> WorkflowJobRecord | None:
+    def get_job(self, job_id: int) -> WorkflowJobRecord | None:
         with self._lock:
             record = self._jobs.get(job_id)
             return record.model_copy(deep=True) if record else None
@@ -121,7 +121,7 @@ class MySQLWorkflowJobStore:
             raise ValueError(f"Workflow job already exists: {state['job_id']}") from exc
         return record
 
-    def get_job(self, job_id: str) -> WorkflowJobRecord | None:
+    def get_job(self, job_id: int) -> WorkflowJobRecord | None:
         self._ensure_schema()
         with self._engine.begin() as conn:
             row = conn.execute(
@@ -185,8 +185,8 @@ class MySQLWorkflowJobStore:
                     text(
                         """
                         CREATE TABLE IF NOT EXISTS ai_analysis_job (
-                            id VARCHAR(64) NOT NULL PRIMARY KEY,
-                            projectId VARCHAR(64) NOT NULL,
+                            id INT NOT NULL PRIMARY KEY,
+                            projectId INT NOT NULL,
                             status VARCHAR(32) NOT NULL,
                             phase VARCHAR(64) NOT NULL,
                             currentNode VARCHAR(64) NULL,
@@ -203,14 +203,16 @@ class MySQLWorkflowJobStore:
                         """
                     )
                 )
+                conn.execute(text("ALTER TABLE ai_analysis_job MODIFY COLUMN id INT NOT NULL"))
+                conn.execute(text("ALTER TABLE ai_analysis_job MODIFY COLUMN projectId INT NOT NULL"))
             self._schema_ready = True
 
 
 def _build_record(state: WorkflowState) -> WorkflowJobRecord:
     return WorkflowJobRecord(
-        id=state["job_id"],
-        project_id=state["project_id"],
-        status=state.get("durable_status", "PENDING"),
+        id=int(state["job_id"]),
+        project_id=int(state["project_id"]),
+        status=state.get("durable_status", "REQUESTED"),
         phase=state.get("phase", "queued"),
         current_node=state.get("current_node"),
         progress=state.get("progress", 0),
@@ -255,8 +257,8 @@ def _row_to_record(row: dict) -> WorkflowJobRecord:
     else:
         state_snapshot = {}
     return WorkflowJobRecord(
-        id=row["id"],
-        project_id=row["projectId"],
+        id=int(row["id"]),
+        project_id=int(row["projectId"]),
         status=row["status"],
         phase=row["phase"],
         current_node=row.get("currentNode"),

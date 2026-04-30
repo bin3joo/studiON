@@ -575,8 +575,8 @@ CREATE TABLE `ai_workflow_node_timing` (
   ADD CONSTRAINT `PK_AI_WORKFLOW_NODE_TIMING` PRIMARY KEY (`id`);
 
 CREATE TABLE `ai_analysis_job` (
-      `id` VARCHAR(64) NOT NULL COMMENT 'AI workflow durable job ID',
-      `projectId` VARCHAR(64) NOT NULL COMMENT 'AI workflow target project ID',
+      `id` INT NOT NULL COMMENT 'AI workflow durable job ID',
+      `projectId` INT NOT NULL COMMENT 'AI workflow target project ID',
       `status` VARCHAR(32) NOT NULL COMMENT 'Durable workflow job status',
       `phase` VARCHAR(64) NOT NULL COMMENT 'Current workflow phase',
       `currentNode` VARCHAR(64) NULL COMMENT 'Last persisted workflow node',

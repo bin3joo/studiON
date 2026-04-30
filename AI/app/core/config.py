@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Studion AI"
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
+    cors_allow_origins: str = "*"
     environment: str = "local"
     log_level: str = "INFO"
     workflow_queue_name: str = "workflow"
@@ -29,6 +30,20 @@ class Settings(BaseSettings):
     clap_timeout_seconds: float = 20.0
     clap_connect_timeout_seconds: float = 5.0
     clap_vocal_threshold: float = 0.58
+    planning_llm_enabled: bool = False
+    planning_llm_base_url: str | None = None
+    planning_llm_api_key: str | None = None
+    planning_llm_model: str = "gpt-5.2"
+    planning_llm_timeout_seconds: float = 20.0
+    planning_llm_connect_timeout_seconds: float = 5.0
+    plan_critic_enabled: bool = False
+    plan_critic_base_url: str | None = None
+    plan_critic_api_key: str | None = None
+    plan_critic_model: str = "claude-sonnet-4-5-20250929"
+    plan_critic_anthropic_version: str = "2023-06-01"
+    plan_critic_max_tokens: int = 1024
+    plan_critic_timeout_seconds: float = 20.0
+    plan_critic_connect_timeout_seconds: float = 5.0
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="STUDION_AI_", extra="ignore")
 

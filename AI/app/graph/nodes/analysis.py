@@ -40,6 +40,10 @@ STFT_HOP_LENGTH = 256
 STFT_WINDOW = "hann"
 MERGE_GAP_MS = 96
 TRUE_PEAK_OVERSAMPLE_FACTOR = 4
+MASTER_CLIPPING_CONTRIBUTOR_SCORE_THRESHOLD = 0.34
+MASTER_CLIPPING_PROMOTION_MARGIN = 0.12
+MASTER_CLIPPING_DISTRIBUTED_COUNT = 3
+MASTER_CLIPPING_DISTRIBUTED_TOP_SCORE = 0.5
 
 BAND_RANGES = {
     "low_mid": (180, 420),
@@ -51,7 +55,8 @@ BAND_RANGES = {
 # LangGraph
 ISSUE_MIN_DURATION_MS = {
     "band_overlap": 180,
-    "clipping": 80,
+    "track_clipping": 80,
+    "master_clipping": 80,
     "sibilance": 96,
     "high_band_harshness": 96,
 }
@@ -188,15 +193,69 @@ def detect_band_overlap(state: WorkflowState) -> WorkflowState:
     )
 
 
-def detect_clipping(state: WorkflowState) -> WorkflowState:
+def detect_track_clipping(state: WorkflowState) -> WorkflowState:
     return _detect_issue_regions(
         state,
-        node="detect_clipping",
-        phase="clipping_detected",
+        node="detect_track_clipping",
+        phase="track_clipping_detected",
         progress=28,
-        issue="clipping",
-        detector=_find_clipping_regions,
+        issue="track_clipping",
+        detector=_find_track_clipping_regions,
     )
+
+
+def detect_master_clipping_candidates(state: WorkflowState) -> WorkflowState:
+    candidates = _find_master_clipping_candidate_regions(state)
+    normalized_candidates = [
+        {
+            **candidate,
+            "candidate_id": f"{state['job_id']}-master-candidate-{index}",
+        }
+        for index, candidate in enumerate(candidates, start=1)
+    ]
+    return workflow_update(
+        state,
+        node="detect_master_clipping_candidates",
+        phase="master_clipping_candidates_detected",
+        progress=30,
+        extra={
+            "master_clipping_candidates": normalized_candidates,
+            "master_clipping_contributors": [],
+            "promoted_track_clipping_regions": [],
+        },
+    )
+
+
+def analyze_master_clipping_contributors(state: WorkflowState) -> WorkflowState:
+    candidates = deepcopy(state.get("master_clipping_candidates", []))
+    contributors = _analyze_master_clipping_candidate_contributors(state, candidates)
+    return workflow_update(
+        state,
+        node="analyze_master_clipping_contributors",
+        phase="master_clipping_contributors_analyzed",
+        progress=31,
+        extra={
+            "master_clipping_candidates": candidates,
+            "master_clipping_contributors": contributors,
+        },
+    )
+
+
+def detect_residual_master_clipping(state: WorkflowState) -> WorkflowState:
+    return _detect_residual_master_clipping(state)
+
+
+def detect_master_clipping(state: WorkflowState) -> WorkflowState:
+    candidate_delta = detect_master_clipping_candidates(state)
+    candidate_state: WorkflowState = {**state, **candidate_delta}
+    contributor_delta = analyze_master_clipping_contributors(candidate_state)
+    contributor_state: WorkflowState = {**candidate_state, **contributor_delta}
+    residual_delta = detect_residual_master_clipping(contributor_state)
+    return {**contributor_state, **residual_delta}
+
+
+def detect_clipping(state: WorkflowState) -> WorkflowState:
+    return detect_master_clipping(state)
 
 
 def detect_high_band_harshness(state: WorkflowState) -> WorkflowState:
@@ -433,7 +492,9 @@ def build_compact_dsp_summary(state: WorkflowState) -> dict[str, object]:
 def ranking_score(region: dict[str, object]) -> float:
     issue_priority_weight = {
         "clipping": 0.42,
-        "band_overlap": 0.3,
+        "band_overlap": 0.42,
+        "track_clipping": 0.0,
+        "master_clipping": 0.0,
         "high_band_harshness": 0.14,
         "sibilance": 0.08,
     }
@@ -514,18 +575,15 @@ def _detect_issue_regions(
     # 파라미터로 입력받은 detector로 raw_regions 목록을 받음
     raw_regions = detector(state)
     # raw_regions -> analysis_regions로 변환
-    materialized_regions = _materialize_regions(state, issue=issue, raw_regions=raw_regions)
-
-
-    if materialized_regions and issue not in detected_issues:
-        detected_issues.append(issue)
-    analysis_regions.extend(materialized_regions)
-    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
-    latest_artifact_id = state.get("latest_artifact_id")
-    for region in materialized_regions:
-        current_artifact_id = region["evidence_doc_id"]
-        mongo_artifact_ids.append(current_artifact_id)
-        latest_artifact_id = current_artifact_id
+    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = (
+        _append_materialized_regions(
+            state,
+            analysis_regions=analysis_regions,
+            detected_issues=detected_issues,
+            issue=issue,
+            raw_regions=raw_regions,
+        )
+    )
     return workflow_update(
         state,
         node=node,
@@ -1024,49 +1082,40 @@ def _find_band_overlap_regions(state: WorkflowState) -> list[dict[str, object]]:
     return _merge_candidate_windows("band_overlap", candidates)
 
 
-def _find_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
-    if "clipping" not in state.get("issue_types", []):
+def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
+    if "track_clipping" not in state.get("issue_types", []):
         return []
     artifact = _load_dsp_feature_artifact(state)
-    mix_frames = artifact.get("mix_frames", [])
+    track_frames_by_id = {
+        int(track_id): frames for track_id, frames in artifact.get("track_frames", {}).items()
+    }
     candidates = []
-    for window in mix_frames:
-        # peak_dbfs >= -0.1:
-        # 현재 frame의 최대 샘플 피크가 0dBFS 바로 아래까지 올라온 상태다.
-        # 아직 완전히 넘치지 않았더라도 헤드룸이 사실상 거의 없는 위험 구간으로 본다.
-        #
-        # true_peak_dbfs > 0.0:
-        # frame 파형을 4배 업샘플링했을 때 실제 복원 파형의 최대치가 0dBFS를 넘는 상태다.
-        # 샘플 피크는 안전해 보여도 inter-sample peak 때문에
-        # 재생/인코딩 단계에서 클리핑이 날 수 있다.
-        #
-        # clip_ratio >= 0.002:
-        # frame 안에서 절대값이 거의 최대치(0.999 이상)에 붙어 있는
-        # 샘플 비율이 0.2% 이상이라는 뜻이다.
-        # 즉 순간 피크 한 번이 아니라, 파형 일부가 실제로 눌리거나 잘렸을 가능성을 본다.
-        true_peak_dbfs = float(window["true_peak_dbfs"])
-        if true_peak_dbfs <= 0.0:
-            continue
+    for track_id, windows in track_frames_by_id.items():
+        for window in windows:
+            peak_dbfs = float(window["peak_dbfs"])
+            if peak_dbfs < -0.1:
+                continue
+            peak_near_ceiling = max(peak_dbfs + 0.1, 0.0)
+            score = round(
+                (peak_near_ceiling * 1.15)
+                + (float(window.get("high_band_ratio", 0.0)) * 0.25)
+                + (float(window.get("window_energy", 0.0)) * 0.2),
+                3,
+            )
+            candidates.append(
+                {
+                    "track_id": track_id,
+                    "start_ms": window["start_ms"],
+                    "end_ms": window["end_ms"],
+                    "score": score,
+                    "summary": "Detected track clipping candidate near the digital ceiling.",
+                }
+            )
+    return _merge_candidate_windows("track_clipping", candidates)
 
-        # true peak가 0dBFS를 넘은 경우만 clipping region으로 승격한다.
-        # sample peak 근접도와 clip_ratio는 심각도 보정용 보조 신호로만 사용한다.
-        peak_near_ceiling = max(float(window["peak_dbfs"]) + 0.1, 0.0)
-        score = round(
-            (true_peak_dbfs * 0.75)
-            + (peak_near_ceiling * 0.25)
-            + (float(window["clip_ratio"]) * 12),
-            3,
-        )
-        candidates.append(
-            {
-                "track_id": window["target_track_id"],
-                "start_ms": window["start_ms"],
-                "end_ms": window["end_ms"],
-                "score": score,
-                "summary": "Detected clipping candidate from oversampled true-peak overflow.",
-            }
-        )
-    return _merge_candidate_windows("clipping", candidates)
+
+def _find_master_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
+    return _find_master_clipping_candidate_regions(state)
 
 
 def _find_high_band_harshness_regions(state: WorkflowState) -> list[dict[str, object]]:
@@ -1215,6 +1264,314 @@ def _merge_candidate_windows(
     return finalized
 
 
+def _detect_residual_master_clipping(state: WorkflowState) -> WorkflowState:
+    analysis_regions = deepcopy(state.get("analysis_regions", []))
+    detected_issues = [*state.get("detected_issues", [])]
+    contributors_by_candidate = {
+        str(item["candidate_id"]): item for item in state.get("master_clipping_contributors", [])
+    }
+    promoted_regions: list[dict[str, object]] = []
+    residual_regions: list[dict[str, object]] = []
+
+    for candidate in state.get("master_clipping_candidates", []):
+        contributor = contributors_by_candidate.get(str(candidate.get("candidate_id")))
+        promoted_tracks = _promote_master_contributors(candidate, contributor)
+        if promoted_tracks:
+            promoted_regions.extend(promoted_tracks)
+            if _should_keep_residual_master_region(candidate, contributor, promoted_tracks):
+                residual_regions.append(
+                    _build_residual_master_region(candidate, contributor, promoted_tracks)
+                )
+            continue
+        residual_regions.append(_build_residual_master_region(candidate, contributor, []))
+
+    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = _append_materialized_regions(
+        state,
+        analysis_regions=analysis_regions,
+        detected_issues=detected_issues,
+        issue="track_clipping",
+        raw_regions=promoted_regions,
+    )
+    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = _append_materialized_regions(
+        state,
+        analysis_regions=analysis_regions,
+        detected_issues=detected_issues,
+        issue="master_clipping",
+        raw_regions=residual_regions,
+        mongo_artifact_ids=mongo_artifact_ids,
+        latest_artifact_id=latest_artifact_id,
+    )
+    return workflow_update(
+        state,
+        node="detect_residual_master_clipping",
+        phase="master_clipping_detected",
+        progress=32,
+        extra={
+            "detected_issues": detected_issues,
+            "analysis_regions": analysis_regions,
+            "promoted_track_clipping_regions": promoted_regions,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
+        },
+    )
+
+
+def _append_materialized_regions(
+    state: WorkflowState,
+    *,
+    analysis_regions: list[dict[str, object]],
+    detected_issues: list[str],
+    issue: str,
+    raw_regions: list[dict[str, object]],
+    mongo_artifact_ids: list[str] | None = None,
+    latest_artifact_id: str | None = None,
+) -> tuple[list[dict[str, object]], list[str], list[str], str | None]:
+    materialized_regions = _materialize_regions(state, issue=issue, raw_regions=raw_regions)
+    if materialized_regions and issue not in detected_issues:
+        detected_issues.append(issue)
+    analysis_regions.extend(materialized_regions)
+    mongo_ids = [*(mongo_artifact_ids or state.get("mongo_artifact_ids", []))]
+    latest_id = latest_artifact_id or state.get("latest_artifact_id")
+    for region in materialized_regions:
+        current_artifact_id = str(region["evidence_doc_id"])
+        mongo_ids.append(current_artifact_id)
+        latest_id = current_artifact_id
+    return analysis_regions, detected_issues, mongo_ids, latest_id
+
+
+def _find_master_clipping_candidate_regions(state: WorkflowState) -> list[dict[str, object]]:
+    if "master_clipping" not in state.get("issue_types", []):
+        return []
+    artifact = _load_dsp_feature_artifact(state)
+    mix_frames = artifact.get("mix_frames", [])
+    candidates = []
+    for window in mix_frames:
+        true_peak_dbfs = float(window["true_peak_dbfs"])
+        if true_peak_dbfs <= 0.0:
+            continue
+        peak_near_ceiling = max(float(window["peak_dbfs"]) + 0.1, 0.0)
+        score = round(
+            (true_peak_dbfs * 0.75)
+            + (peak_near_ceiling * 0.25)
+            + (float(window["clip_ratio"]) * 12),
+            3,
+        )
+        candidates.append(
+            {
+                "track_id": None,
+                "start_ms": window["start_ms"],
+                "end_ms": window["end_ms"],
+                "score": score,
+                "summary": "Detected master true-peak overflow candidate before contributor routing.",
+                "true_peak_dbfs": true_peak_dbfs,
+                "mix_peak_dbfs": float(window["peak_dbfs"]),
+                "clip_ratio": float(window["clip_ratio"]),
+            }
+        )
+    return _merge_candidate_windows("master_clipping", candidates)
+
+
+def _analyze_master_clipping_candidate_contributors(
+    state: WorkflowState,
+    candidates: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    artifact = _load_dsp_feature_artifact(state)
+    track_frames_by_id = {
+        int(track_id): frames for track_id, frames in artifact.get("track_frames", {}).items()
+    }
+    contributor_results: list[dict[str, object]] = []
+    for candidate in candidates:
+        candidate_id = str(candidate["candidate_id"])
+        contributor_items: list[dict[str, object]] = []
+        total_overlap_energy = 0.0
+        energy_by_track: dict[int, float] = {}
+        for track_id, frames in track_frames_by_id.items():
+            overlapping = [
+                frame
+                for frame in frames
+                if int(frame["start_ms"]) < int(candidate["end_ms"])
+                and int(frame["end_ms"]) > int(candidate["start_ms"])
+            ]
+            if not overlapping:
+                continue
+            overlap_energy = float(sum(float(frame.get("window_energy", 0.0)) for frame in overlapping))
+            if overlap_energy <= 0.0:
+                continue
+            energy_by_track[track_id] = overlap_energy
+            total_overlap_energy += overlap_energy
+
+        for track_id, overlap_energy in energy_by_track.items():
+            overlapping = [
+                frame
+                for frame in track_frames_by_id[track_id]
+                if int(frame["start_ms"]) < int(candidate["end_ms"])
+                and int(frame["end_ms"]) > int(candidate["start_ms"])
+            ]
+            energy_share = overlap_energy / max(total_overlap_energy, 1e-6)
+            avg_peak_dbfs = float(np.mean([float(frame.get("peak_dbfs", -120.0)) for frame in overlapping]))
+            peak_near_ceiling = min(max((avg_peak_dbfs + 0.3) / 0.6, 0.0), 1.0)
+            avg_low_mid = float(
+                np.mean([float(frame.get("low_mid_energy", 0.0)) for frame in overlapping])
+            )
+            avg_body = float(np.mean([float(frame.get("body_energy", 0.0)) for frame in overlapping]))
+            avg_high = float(
+                np.mean([float(frame.get("high_band_ratio", 0.0)) for frame in overlapping])
+            )
+            band_focus = min(max(avg_low_mid, avg_body, avg_high), 1.0)
+            contributor_score = round(
+                (energy_share * 0.55) + (peak_near_ceiling * 0.3) + (band_focus * 0.15),
+                3,
+            )
+            band_hints = _infer_contributor_band_hints(
+                low_mid_energy=avg_low_mid,
+                body_energy=avg_body,
+                high_band_ratio=avg_high,
+            )
+            contributor_items.append(
+                {
+                    "track_id": track_id,
+                    "energy_share": round(energy_share, 3),
+                    "avg_peak_dbfs": round(avg_peak_dbfs, 3),
+                    "peak_near_ceiling": round(peak_near_ceiling, 3),
+                    "avg_low_mid_energy": round(avg_low_mid, 3),
+                    "avg_body_energy": round(avg_body, 3),
+                    "avg_high_band_ratio": round(avg_high, 3),
+                    "contributor_score": contributor_score,
+                    "band_hints": band_hints,
+                }
+            )
+
+        contributor_items.sort(
+            key=lambda item: (
+                -float(item["contributor_score"]),
+                -float(item["energy_share"]),
+                int(item["track_id"]),
+            )
+        )
+        candidate["contributing_track_ids"] = [item["track_id"] for item in contributor_items]
+        candidate["track_contribution_scores"] = {
+            item["track_id"]: item["contributor_score"] for item in contributor_items
+        }
+        candidate["contributor_band_hints"] = {
+            item["track_id"]: item["band_hints"] for item in contributor_items
+        }
+        contributor_results.append(
+            {
+                "candidate_id": candidate_id,
+                "start_ms": candidate["start_ms"],
+                "end_ms": candidate["end_ms"],
+                "contributing_track_ids": candidate["contributing_track_ids"],
+                "track_contribution_scores": candidate["track_contribution_scores"],
+                "contributor_band_hints": candidate["contributor_band_hints"],
+                "contributors": contributor_items,
+            }
+        )
+    return contributor_results
+
+
+def _infer_contributor_band_hints(
+    *,
+    low_mid_energy: float,
+    body_energy: float,
+    high_band_ratio: float,
+) -> list[str]:
+    hints: list[str] = []
+    if low_mid_energy >= 0.12 or body_energy >= 0.28:
+        hints.append("low_mid")
+    if high_band_ratio >= 0.28:
+        hints.append("high")
+    if not hints:
+        hints.append("broadband")
+    return hints
+
+
+def _promote_master_contributors(
+    candidate: dict[str, object],
+    contributor: dict[str, object] | None,
+) -> list[dict[str, object]]:
+    if contributor is None:
+        return []
+    contributors = list(contributor.get("contributors", []))
+    if not contributors:
+        return []
+    top_score = float(contributors[0]["contributor_score"])
+    if (
+        len(contributors) >= MASTER_CLIPPING_DISTRIBUTED_COUNT
+        and top_score < MASTER_CLIPPING_DISTRIBUTED_TOP_SCORE
+    ):
+        return []
+    promoted = []
+    for item in contributors:
+        score = float(item["contributor_score"])
+        if score < MASTER_CLIPPING_CONTRIBUTOR_SCORE_THRESHOLD:
+            continue
+        if top_score - score > MASTER_CLIPPING_PROMOTION_MARGIN:
+            continue
+        promoted.append(
+            {
+                "track_id": int(item["track_id"]),
+                "start_ms": candidate["start_ms"],
+                "end_ms": candidate["end_ms"],
+                "score": max(float(candidate["score"]), score),
+                "summary": "Promoted track clipping fix from master true-peak contributor analysis.",
+                "source_master_candidate_id": candidate["candidate_id"],
+                "auto_fix_source": "promoted_master_contributor",
+                "contributing_track_ids": contributor.get("contributing_track_ids", []),
+                "track_contribution_scores": contributor.get("track_contribution_scores", {}),
+                "contributor_band_hints": contributor.get("contributor_band_hints", {}),
+                "promoted_track_id": int(item["track_id"]),
+                "band_hints": list(item.get("band_hints", [])),
+            }
+        )
+    return promoted
+
+
+def _should_keep_residual_master_region(
+    candidate: dict[str, object],
+    contributor: dict[str, object] | None,
+    promoted_tracks: list[dict[str, object]],
+) -> bool:
+    if contributor is None:
+        return True
+    contributors = list(contributor.get("contributors", []))
+    if not contributors:
+        return True
+    top_score = float(contributors[0]["contributor_score"])
+    if len(contributors) >= MASTER_CLIPPING_DISTRIBUTED_COUNT and top_score < MASTER_CLIPPING_DISTRIBUTED_TOP_SCORE:
+        return True
+    if len(promoted_tracks) < len(contributors) and float(candidate.get("window_count", 1)) >= 4:
+        return True
+    return False
+
+
+def _build_residual_master_region(
+    candidate: dict[str, object],
+    contributor: dict[str, object] | None,
+    promoted_tracks: list[dict[str, object]],
+) -> dict[str, object]:
+    summary = "Detected residual master clipping after contributor-aware track routing."
+    if promoted_tracks:
+        summary = "Detected residual master clipping that still requires master protection."
+    region = {
+        "track_id": None,
+        "start_ms": candidate["start_ms"],
+        "end_ms": candidate["end_ms"],
+        "score": candidate["score"],
+        "summary": summary,
+        "source_master_candidate_id": candidate["candidate_id"],
+        "auto_fix_source": "residual_master_clipping",
+        "promoted_track_ids": [int(item["track_id"]) for item in promoted_tracks],
+        "contributing_track_ids": [],
+        "track_contribution_scores": {},
+        "contributor_band_hints": {},
+    }
+    if contributor is not None:
+        region["contributing_track_ids"] = contributor.get("contributing_track_ids", [])
+        region["track_contribution_scores"] = contributor.get("track_contribution_scores", {})
+        region["contributor_band_hints"] = contributor.get("contributor_band_hints", {})
+    return region
+
+
 def _materialize_regions(
     state: WorkflowState,
     *,
@@ -1229,8 +1586,7 @@ def _materialize_regions(
     materialized = []
     for offset, region in enumerate(raw_regions, start=1):
         evidence_doc_id = artifact_id(state, f"{issue}-evidence-{existing_count + offset}")
-        materialized.append(
-            {
+        materialized_region = {
                 "id": f"{state['job_id']}-{issue}-region-{existing_count + offset}",
                 "issue_type": issue,
                 "summary": region["summary"],
@@ -1239,7 +1595,7 @@ def _materialize_regions(
                 "severity": _severity_from_score(issue=issue, score=region["score"]),
                 # clipping과 다른 user-facing 이슈는 사용자가 구간을 보고 선택한다.
                 # sibilance만 자동 보정 경로로 넘긴다.
-                "requires_user_action": issue != "sibilance",
+                "requires_user_action": issue == "band_overlap",
                 "evidence_doc_id": evidence_doc_id,
                 "track_id": region.get("track_id"),
                 "secondary_track_id": region.get("secondary_track_id"),
@@ -1249,6 +1605,11 @@ def _materialize_regions(
                 "band_high_hz": region.get("band_high_hz"),
                 "score": region["score"],
                 "window_count": region.get("window_count", 1),
+                "source_master_candidate_id": region.get("source_master_candidate_id"),
+                "auto_fix_source": region.get("auto_fix_source", "direct_detection"),
+                "contributing_track_ids": region.get("contributing_track_ids", []),
+                "track_contribution_scores": region.get("track_contribution_scores", {}),
+                "contributor_band_hints": region.get("contributor_band_hints", {}),
                 **_project_region_timeline(
                     state,
                     start_ms=int(region["start_ms"]),
@@ -1256,7 +1617,29 @@ def _materialize_regions(
                     involved_track_ids=region.get("involved_track_ids"),
                 ),
             }
+        get_workflow_artifact_store().upsert_artifact(
+            WorkflowArtifactDocument(
+                id=evidence_doc_id,
+                job_id=state["job_id"],
+                artifact_type="analysis_region_evidence",
+                payload={
+                    "regionId": materialized_region["id"],
+                    "issueType": issue,
+                    "summary": region["summary"],
+                    "startMs": region["start_ms"],
+                    "endMs": region["end_ms"],
+                    "score": region["score"],
+                    "windowCount": region.get("window_count", 1),
+                    "sourceMasterCandidateId": region.get("source_master_candidate_id"),
+                    "autoFixSource": region.get("auto_fix_source", "direct_detection"),
+                    "contributingTrackIds": region.get("contributing_track_ids", []),
+                    "trackContributionScores": region.get("track_contribution_scores", {}),
+                    "contributorBandHints": region.get("contributor_band_hints", {}),
+                    "rawRegion": deepcopy(region),
+                },
+            )
         )
+        materialized.append(materialized_region)
     return materialized
 
 
@@ -1293,12 +1676,18 @@ def _analysis_region_dedup_key(region: dict[str, object]) -> tuple[object, ...]:
 
 
 def _severity_from_score(*, issue: str, score: float) -> str:
-    if issue == "clipping":
+    if issue in {"clipping", "master_clipping"}:
         if score >= 0.16:
             return "CRITICAL"
         if score >= 0.08:
             return "HIGH"
         return "MEDIUM"
+    if issue == "track_clipping":
+        if score >= 0.14:
+            return "HIGH"
+        if score >= 0.07:
+            return "MEDIUM"
+        return "LOW"
     if score >= 0.72:
         return "HIGH"
     if score >= 0.48:
@@ -1319,7 +1708,9 @@ def _severity_priority(severity: object) -> int:
 def _issue_priority(issue_type: object) -> int:
     ranking = {
         "clipping": 4,
-        "band_overlap": 3,
+        "band_overlap": 4,
+        "track_clipping": 0,
+        "master_clipping": 0,
         "high_band_harshness": 2,
         "sibilance": 1,
     }

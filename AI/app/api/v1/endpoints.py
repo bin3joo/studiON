@@ -38,13 +38,20 @@ class WorkflowRunRequest(BaseModel):
     project_id: int
     track_ids: list[int] = Field(default_factory=list)
     project_snapshot: ProjectSnapshot | None = None
-    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
+    issue_types: list[str] = Field(
+        default_factory=lambda: [
+            "band_overlap",
+            "track_clipping",
+            "master_clipping",
+            "sibilance",
+            "high_band_harshness",
+        ]
+    )
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
     selected_region_id: str | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
-    selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
 
@@ -53,7 +60,15 @@ class RuntimeRunRequest(BaseModel):
     project_id: int
     track_ids: list[int] = Field(default_factory=list)
     project_snapshot: ProjectSnapshot | None = None
-    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
+    issue_types: list[str] = Field(
+        default_factory=lambda: [
+            "band_overlap",
+            "track_clipping",
+            "master_clipping",
+            "sibilance",
+            "high_band_harshness",
+        ]
+    )
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
 
@@ -63,7 +78,6 @@ class ApplyRunRequest(BaseModel):
     project_id: int
     preview_id: str
     suggestion_group_id: str
-    selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
 
@@ -118,7 +132,6 @@ def workflow_graph_summary() -> dict[str, Any]:
         "entrypoint": "load_entry_context",
         "terminal_nodes": [
             "wait_user_plan_input",
-            "wait_user_selection",
             "wait_user_confirm",
             "finalize_output",
             "fail_workflow",
@@ -183,7 +196,6 @@ def apply_graph_run(request: ApplyRunRequest) -> ApplyRunResponse:
         "project_id": request.project_id,
         "preview_id": request.preview_id,
         "suggestion_group_id": request.suggestion_group_id,
-        "selected_action_ids": request.selected_action_ids,
         "user_decision": request.user_decision,
     }
     result = run_apply_graph(state)

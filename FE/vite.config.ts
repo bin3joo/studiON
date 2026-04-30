@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
 
-
+  // TODO: 백엔드에 CORS 설정 추가되면 지워도 됨
   server: {
   proxy: {
     '/api': {

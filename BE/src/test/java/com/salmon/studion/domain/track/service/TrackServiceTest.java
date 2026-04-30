@@ -1,0 +1,290 @@
+package com.salmon.studion.domain.track.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.project.entity.Project;
+import com.salmon.studion.domain.project.repository.ProjectRepository;
+import com.salmon.studion.domain.track.dto.TrackState;
+import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
+import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
+import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
+import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
+import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
+import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
+import com.salmon.studion.domain.track.repository.TrackEventRepository;
+import com.salmon.studion.domain.track.repository.TrackRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.Spy;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class TrackServiceTest {
+
+    @Mock private ProjectRepository projectRepository;
+    @Mock private TrackEventRepository trackEventRepository;
+    @Mock private RedisTemplate<String, String> redisTemplate;
+    @Mock private TrackRepository trackRepository;
+    @Spy  private ObjectMapper objectMapper = new ObjectMapper();
+
+    @InjectMocks private TrackService trackService;
+
+    @Mock private ValueOperations<String, String> valueOperations;
+    @Mock private HashOperations<String, Object, Object> hashOperations;
+
+    private static final Integer PROJECT_ID = 1;
+    private static final String TRACKS_KEY = "project:1:tracks";
+    private static final String TRACK_ID_SEQ_KEY = "project:1:track:id_seq";
+    private static final String EVENT_SEQ_KEY = "project:1:event:seq";
+
+    private Map<String, String> store;
+
+    @BeforeEach
+    void setUp() {
+        store = new HashMap<>();
+
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(mock(Project.class)));
+
+        lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                .when(hashOperations).get(eq(TRACKS_KEY), any());
+
+        lenient().doAnswer(inv -> {
+            store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+            return null;
+        }).when(hashOperations).put(eq(TRACKS_KEY), any(), any());
+
+        lenient().doAnswer(inv -> new HashMap<>(store))
+                .when(hashOperations).entries(eq(TRACKS_KEY));
+    }
+
+    private String trackJson(Integer trackId, Integer pre, Integer post) throws JsonProcessingException {
+        return objectMapper.writeValueAsString(TrackState.builder()
+                .trackId(trackId).name("track" + trackId).type("audio")
+                .preTrackId(pre).postTrackId(post)
+                .isMuted(false).isSoloed(false).volume(0.0).pan(0)
+                .build());
+    }
+
+    private TrackState fromStore(Integer trackId) throws JsonProcessingException {
+        return objectMapper.readValue(store.get(String.valueOf(trackId)), TrackState.class);
+    }
+
+    private TrackAddRequest addRequest(String name, String type) {
+        TrackAddRequest req = new TrackAddRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setName(name);
+        req.setType(type);
+        return req;
+    }
+
+    private TrackRemoveRequest removeRequest(Integer trackId) {
+        TrackRemoveRequest req = new TrackRemoveRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        return req;
+    }
+
+    private TrackReorderRequest reorderRequest(Integer trackId, Integer targetPre, Integer targetPost) {
+        TrackReorderRequest req = new TrackReorderRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        req.setTargetPreTrackId(targetPre);
+        req.setTargetPostTrackId(targetPost);
+        return req;
+    }
+
+    @Nested
+    @DisplayName("addTrack")
+    class AddTrackTest {
+
+        @Test
+        @DisplayName("빈 프로젝트에 첫 트랙 추가 시 preTrackId가 null이다")
+        void addFirstTrack() throws JsonProcessingException {
+            when(valueOperations.increment(TRACK_ID_SEQ_KEY)).thenReturn(1L);
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackAddResponse response = trackService.addTrack(addRequest("track1", "audio"), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getPreTrackId()).isNull();
+            assertThat(response.getPostTrackId()).isNull();
+
+            TrackState saved = fromStore(1);
+            assertThat(saved.getPreTrackId()).isNull();
+            assertThat(saved.getPostTrackId()).isNull();
+        }
+
+        @Test
+        @DisplayName("기존 트랙 있을 때 추가 시 마지막 트랙의 postTrackId가 새 트랙으로 업데이트된다")
+        void addTrackAfterExisting() throws JsonProcessingException {
+            store.put("1", trackJson(1, null, null));
+
+            when(valueOperations.increment(TRACK_ID_SEQ_KEY)).thenReturn(2L);
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(2L);
+
+            TrackAddResponse response = trackService.addTrack(addRequest("track2", "audio"), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(2);
+            assertThat(response.getPreTrackId()).isEqualTo(1);
+            assertThat(response.getPostTrackId()).isNull();
+
+            assertThat(fromStore(1).getPostTrackId()).isEqualTo(2);
+            assertThat(fromStore(2).getPreTrackId()).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("removeTrack")
+    class RemoveTrackTest {
+
+        @Test
+        @DisplayName("head 트랙 삭제 시 다음 트랙의 preTrackId가 null로 업데이트된다")
+        void removeHeadTrack() throws JsonProcessingException {
+            // A(1, head) → B(2)
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackRemoveResponse response = trackService.removeTrack(removeRequest(1), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getPreTrackId()).isNull();
+            assertThat(response.getPostTrackId()).isEqualTo(2);
+
+            assertThat(fromStore(2).getPreTrackId()).isNull();
+        }
+
+        @Test
+        @DisplayName("tail 트랙 삭제 시 이전 트랙의 postTrackId가 null로 업데이트된다")
+        void removeTailTrack() throws JsonProcessingException {
+            // A(1) → B(2, tail)
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackRemoveResponse response = trackService.removeTrack(removeRequest(2), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(2);
+            assertThat(response.getPreTrackId()).isEqualTo(1);
+            assertThat(response.getPostTrackId()).isNull();
+
+            assertThat(fromStore(1).getPostTrackId()).isNull();
+        }
+
+        @Test
+        @DisplayName("중간 트랙 삭제 시 앞뒤 트랙이 서로 연결된다")
+        void removeMiddleTrack() throws JsonProcessingException {
+            // A(1) → B(2) → C(3)
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, 3));
+            store.put("3", trackJson(3, 2, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackRemoveResponse response = trackService.removeTrack(removeRequest(2), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(2);
+            assertThat(response.getPreTrackId()).isEqualTo(1);
+            assertThat(response.getPostTrackId()).isEqualTo(3);
+
+            assertThat(fromStore(1).getPostTrackId()).isEqualTo(3);
+            assertThat(fromStore(3).getPreTrackId()).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("reorderTrack")
+    class ReorderTrackTest {
+
+        @Test
+        @DisplayName("tail 트랙을 head로 이동 시 링크드 리스트가 올바르게 재구성된다")
+        void reorderToHead() throws JsonProcessingException {
+            // A(1) → B(2) → C(3), C를 head로 이동
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, 3));
+            store.put("3", trackJson(3, 2, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackReorderResponse response = trackService.reorderTrack(reorderRequest(3, null, 1), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(3);
+            assertThat(response.getPreTrackId()).isNull();
+            assertThat(response.getPostTrackId()).isEqualTo(1);
+
+            // 최종 순서: C(3) → A(1) → B(2)
+            assertThat(fromStore(3).getPreTrackId()).isNull();
+            assertThat(fromStore(3).getPostTrackId()).isEqualTo(1);
+            assertThat(fromStore(1).getPreTrackId()).isEqualTo(3);
+            assertThat(fromStore(2).getPostTrackId()).isNull();
+        }
+
+        @Test
+        @DisplayName("head 트랙을 tail로 이동 시 링크드 리스트가 올바르게 재구성된다")
+        void reorderToTail() throws JsonProcessingException {
+            // A(1) → B(2) → C(3), A를 tail로 이동
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, 3));
+            store.put("3", trackJson(3, 2, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackReorderResponse response = trackService.reorderTrack(reorderRequest(1, 3, null), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getPreTrackId()).isEqualTo(3);
+            assertThat(response.getPostTrackId()).isNull();
+
+            // 최종 순서: B(2) → C(3) → A(1)
+            assertThat(fromStore(2).getPreTrackId()).isNull();
+            assertThat(fromStore(3).getPostTrackId()).isEqualTo(1);
+            assertThat(fromStore(1).getPreTrackId()).isEqualTo(3);
+            assertThat(fromStore(1).getPostTrackId()).isNull();
+        }
+
+        @Test
+        @DisplayName("트랙을 중간 위치로 이동 시 링크드 리스트가 올바르게 재구성된다")
+        void reorderToMiddle() throws JsonProcessingException {
+            // A(1) → B(2) → C(3) → D(4), D를 B와 C 사이로 이동
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, 3));
+            store.put("3", trackJson(3, 2, 4));
+            store.put("4", trackJson(4, 3, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackReorderResponse response = trackService.reorderTrack(reorderRequest(4, 2, 3), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(4);
+            assertThat(response.getPreTrackId()).isEqualTo(2);
+            assertThat(response.getPostTrackId()).isEqualTo(3);
+
+            // 최종 순서: A(1) → B(2) → D(4) → C(3)
+            assertThat(fromStore(2).getPostTrackId()).isEqualTo(4);
+            assertThat(fromStore(4).getPreTrackId()).isEqualTo(2);
+            assertThat(fromStore(4).getPostTrackId()).isEqualTo(3);
+            assertThat(fromStore(3).getPreTrackId()).isEqualTo(4);
+            assertThat(fromStore(3).getPostTrackId()).isNull();
+        }
+    }
+}

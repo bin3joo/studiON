@@ -36,7 +36,7 @@ class CLAPInferenceClient(Protocol):
     def infer_track_roles(
         self,
         *,
-        job_id: str,
+        job_id: int,
         excerpts: list[CLAPExcerptPayload],
     ) -> list[CLAPTrackPrediction]: ...
 
@@ -58,7 +58,7 @@ class HTTPCLAPInferenceClient:
     def infer_track_roles(
         self,
         *,
-        job_id: str,
+        job_id: int,
         excerpts: list[CLAPExcerptPayload],
     ) -> list[CLAPTrackPrediction]:
         if not excerpts:

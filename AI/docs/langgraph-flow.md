@@ -22,22 +22,21 @@ The workflow graph follows this product-oriented order:
 14. candidate ranking
 15. plan input wait
 16. plan input resume
-17. rule candidate build
-18. planning agent
-19. plan rule validation
-20. plan critic
-21. plan approval
-22. execution plan materialization
-23. sibilance auto-fix and logging
-24. analysis persistence
-25. user action gate
-26. user selection wait
-27. selected recipe apply
-28. preview render
-29. user confirm wait
-30. commit or cancel path
-31. feedback event emission
-32. finalize output
+17. planning agent
+18. plan rule validation
+19. plan critic
+20. plan approval
+21. execution plan materialization
+22. sibilance auto-fix and logging
+23. analysis persistence
+24. user action gate
+25. single-action auto select or user selection wait
+26. selected recipe apply
+27. preview render
+28. user confirm wait
+29. commit or cancel path
+30. feedback event emission
+31. finalize output
 
 ## Flow Rules
 - The graph ends in one of five stable states: waiting for plan input, waiting for selection, waiting for confirmation, completed, failed.
@@ -61,8 +60,14 @@ The workflow graph follows this product-oriented order:
 - `candidate_ranking` prioritizes user-facing issues by issue type, severity, detector score, and duration. The current default order is `clipping`, `band_overlap`, then `high_band_harshness`.
 - `clipping` stays on the user plan input path and materializes user-facing suggestion and preview actions.
 - `sibilance` skips plan input, generates deterministic de-esser recipes, and closes without preview.
-- `build_rule_candidates`, `planning_agent`, `plan_rule_validator`, and `plan_critic` form the current plan loop. The graph shape is agent-like, but the planner and critic internals are still deterministic rule-based implementations.
+- `planning_agent`, `plan_rule_validator`, and `plan_critic` form the current plan loop.
+- `planning_agent` is now the source of truth for the executable draft plan. It reads the selected region, preserve clip, and user intent, then calls the GMS OpenAI-compatible Chat Completions endpoint with `gpt-5.2` to generate a single executable `plan_payload`.
+- `plan_rule_validator` is the rule-based safety gate. It checks action schema, issue-to-action compatibility, scope rules, selected-region bounds, and preserve-target conflicts before the plan can reach the critic.
+- `plan_critic` uses a separate Anthropic-compatible GMS endpoint with `claude-sonnet-4-5-20250929` to perform semantic review and can return `PASS`, `REVISE`, or `REJECT`.
+- Planning or critic endpoint failures are explicit workflow failures. There is no deterministic plan fallback on this path.
 - validator and critic can force regeneration of the plan.
+- If the approved suggestion payload contains exactly one preview action, `user_action_gate` auto-fills `selected_action_ids` and skips `wait_user_selection`.
+- If multiple preview actions are introduced later, the existing `wait_user_selection -> resume_selection` path remains the selection source of truth.
 - The MVP exposes a single representative solution, so there is no preview-time reselect loop back to suggestion selection.
 - user-facing preview and confirmation are part of the graph, not a separate apply graph.
 

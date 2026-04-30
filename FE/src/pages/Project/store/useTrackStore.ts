@@ -2,11 +2,15 @@
 //데이터 창고 피니아
 import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 //백엔드 통신 담당
 // import { projectApi } from '../api/project.api';
 //트랙과 클립의 타입
 import type { TrackUIState, ClipUIState } from '../types';
+//음원 처리를 위한 lib
+import * as Tone from 'tone';
+
+
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
 export const useTrackStore = defineStore('track', () => {
     // ==========================================
@@ -29,6 +33,17 @@ export const useTrackStore = defineStore('track', () => {
 
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
+    //프로젝트 BPM 설정 및 Tone.js 동기화
+    const bpm = ref(120);
+    Tone.getTransport().bpm.value = bpm.value; // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
+
+    //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
+    watch(bpm, (newBpm) => {
+        Tone.getTransport().bpm.value = newBpm;
+    })
+    //1마디당 걸리는 시간 계산
+    const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
+    let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
 
@@ -44,16 +59,103 @@ export const useTrackStore = defineStore('track', () => {
     //전체 타임라인의 가로 픽셀 길이(총 마디 수 * 1마디 픽셀)
     const totalTimelineWidth = computed(() => projectInfo.value.totalBarCount * pixelPerBar.value);
 
+    //스크롤 축소 할때 숫자를 표시할 마디 간격 계산 (1,4,8)
+    const barNumberStep = computed(() => {
+        if (zoomlevel.value <= 0.5) return 8; //많이 축소할때 1, 9 ,17 ...
+        if (zoomlevel.value < 1.0) return 4; //약간 축소할때 1, 5, 9 ...
+        return 1; //기본 1칸씩
+    })
+
+    //스크롤 확대 할떄 : 1마디를 몇 칸으로 쪼갤 것인가 (4분 8분 16분 음표)
+    const subDivision = computed(() => {
+        if (zoomlevel.value >= 2.5) return 16; //아주 많이 확대 : 16분음표 단위
+        if (zoomlevel.value >= 1.5) return 8; //많이 확대 : 8분음표 단위
+        if (zoomlevel.value >= 1.0) return 4; //기본 4분음표 단위
+        return 1; //안쪼갬
+    })
+
 
 
     // ==========================================
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
 
-    //재생 상태 토글 함수
-    const togglePlay = () => {
-        isPlaying.value = !isPlaying.value;
+    //클립을 다른 트랙으로 이동시키는 함수
+    const moveClipToTrack = (clipId: number, fromTrackId: number, toTrackId: number) => {
+        if (fromTrackId === toTrackId) return; //같은 트랙이면 취소
+
+        const fromTrack = trackList.value.find(t => t.trackId === fromTrackId);
+        const toTrack = trackList.value.find(t => t.trackId === toTrackId);
+
+        if (!fromTrack || !toTrack) return;
+
+        // 기존 트랙에서 클립을 찾아내 빼낸다.
+        const clipIndex = fromTrack.clips.findIndex(c => c.clipId === clipId);
+        if (clipIndex !== -1) {
+            const [clip] = fromTrack.clips.splice(clipIndex, 1);
+            //vue의 반응성으로 즉시 이동
+            toTrack.clips.push(clip);
+        }
     };
+
+    //재생 상태 토글 함수
+    const togglePlay = async () => {
+        //첫 클릭 시 오디오 컨텍스트 시작
+        if (Tone.getContext().state !== 'running') {
+            await Tone.start();
+        }
+
+        if (!isPlaying.value) {
+            // 정지 상태일 때 -> 재생 시작
+            // 1. 현재 재생바 위치를 Tone.js 시간으로 변환하여 세팅
+            Tone.getTransport().seconds = playheadPosition.value * secondsPerBar.value;
+            // 2. 오디오 엔진 재생 시작
+            Tone.getTransport().start();
+            isPlaying.value = true;
+            // 3. UI 업데이트 루프 시작
+            updatePlayheadLoop();
+        } else {
+            //  재생 중일 때 -> 일시정지
+            Tone.getTransport().pause();
+            isPlaying.value = false;
+            cancelAnimationFrame(animationFrameId);
+        }
+    };
+
+    //실시간 재생바 UI 업데이트 루프
+    const updatePlayheadLoop = () => {
+        if (!isPlaying.value) return; //재생중이 아닐때는 루프 멈춤
+        //정밀한 현재 시간 가져오기
+        playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
+        //재생바 프로젝트 전체 길이에 도달하면 자동 정지
+        if (playheadPosition.value >= projectInfo.value.totalBarCount) {
+            stopPlay();
+            return;
+        }
+        //모니터 주사율에 맞춰 부드럽게 반복
+        animationFrameId = requestAnimationFrame(updatePlayheadLoop);
+    }
+
+    // 완전 정지 (처음으로 되돌림)
+    const stopPlay = () => {
+        Tone.getTransport().stop();
+        isPlaying.value = false;
+        playheadPosition.value = 0;
+        cancelAnimationFrame(animationFrameId);
+    };
+
+    //마우스 휠 방향에 따라 줌 배율을 조절하는 함수
+    const updateZoom = (deltaY: number) => {
+        const zoomStep = 0.1; //한 번 휠을 굴릴 때 변하는 배율(10%)
+
+        if (deltaY > 0) {
+            //휠을 아래루 굴림: 축소(최소 0.5배)
+            zoomlevel.value = Math.max(0.5, zoomlevel.value - zoomStep);
+        } else {
+            //휠을 위로 굴림: 확대(최대 3배)
+            zoomlevel.value = Math.min(3, zoomlevel.value + zoomStep);
+        }
+    }
 
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
@@ -125,6 +227,8 @@ export const useTrackStore = defineStore('track', () => {
                     timeSigDenominator: data.timeSigDenominator,
                     totalBarCount: data.totalBarCount
                 };
+                //실제 오디오 엔진과 동기화된 bpm 변수에도 값을 넣어줌
+                bpm.value = data.tempo;
 
                 // 백엔드가 준 순수한 트랙 배열을 .map을 사용해 하나씩 순회
                 trackList.value = data.tracks.map((track): TrackUIState => ({
@@ -144,6 +248,37 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+    // 실제 프로젝트 상세 호출 코드
+//     const fetchProject = async (projectId: number) => {
+//   try {
+//     const data = await projectApi.getProjectDetail(projectId)
+
+//     projectInfo.value = {
+//       projectId: data.projectId,
+//       tempo: data.tempo,
+//       rootNote: data.rootNote,
+//       mode: data.projectMode,
+//       timeSigNumerator: data.timeSigNumerator,
+//       timeSigDenominator: data.timeSigDenominator,
+//       totalBarCount: data.totalBarCount,
+//     }
+
+//     trackList.value = data.tracks.map((track): TrackUIState => ({
+//       ...track,
+//       height: 100,
+//       isSelected: false,
+//       clips: track.clips.map((clip): ClipUIState => ({
+//         ...clip,
+//         isSelected: false,
+//         isDragging: false,
+//       })),
+//     }))
+//   }
+//   catch (error) {
+//     console.error('프로젝트 로딩 실패:', error)
+//   }
+// }
+
     // ==========================================
     // 3. 내보내기 (Return)
     // ==========================================
@@ -154,13 +289,21 @@ export const useTrackStore = defineStore('track', () => {
         isPlaying,
         playheadPosition,
         zoomlevel,
+        bpm,
+        secondsPerBar,
 
         // Getters
         pixelPerBar,
         totalTimelineWidth,
+        subDivision,
+        barNumberStep,
 
         // Actions
         fetchProject,
-        togglePlay
+        togglePlay,
+        updateZoom,
+        moveClipToTrack,
+        stopPlay,
+        updatePlayheadLoop,
     };
 });

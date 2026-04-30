@@ -20,16 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowDispatchAccepted(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     dispatch_type: WorkflowDispatchType
     status: str = "accepted"
     queue_name: str = "workflow"
 
 
 class WorkflowStartPayload(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     project_snapshot: ProjectSnapshot
     issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
     validator_mode: str = "PASS"
@@ -38,10 +38,10 @@ class WorkflowStartPayload(BaseModel):
 
 
 class WorkflowResumePayload(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     selected_region_id: str | None = None
-    preserve_clip_id: str | None = None
+    preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
     selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
@@ -111,7 +111,7 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow job was not found.",
         )
-    if job.status == "IN_PROGRESS":
+    if job.status == "RUNNING":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Workflow job is already running.",
@@ -146,7 +146,7 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
     )
 
 
-def get_workflow_job_status(job_id: str) -> dict[str, object]:
+def get_workflow_job_status(job_id: int) -> dict[str, object]:
     from app.persistence.projections import build_workflow_projections
 
     store = get_workflow_job_store()

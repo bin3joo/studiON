@@ -38,10 +38,10 @@ BROWSER_CANDIDATES = (
 )
 
 ENTRY_PATH_MAP = {
+    "resume_after_plan_input": "resume_after_plan_input",
     "init_state": "init_state",
     "fail_workflow": "fail_workflow",
     "wait_user_plan_input": "wait_user_plan_input",
-    "resume_after_plan_input": "resume_after_plan_input",
     "wait_user_selection": "wait_user_selection",
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
     "wait_user_confirm": "wait_user_confirm",
@@ -63,7 +63,7 @@ RANKING_PATH_MAP = {
 }
 
 PLAN_INPUT_PATH_MAP = {
-    "build_rule_candidates": "build_rule_candidates",
+    "planning_agent": "planning_agent",
 }
 
 VALIDATOR_PATH_MAP = {
@@ -79,6 +79,7 @@ CRITIC_PATH_MAP = {
 }
 
 USER_ACTION_GATE_PATH_MAP = {
+    "apply_selected_edit_recipe": "apply_selected_edit_recipe",
     "wait_user_selection": "wait_user_selection",
     "finalize_output": "finalize_output",
 }
@@ -108,7 +109,6 @@ WORKFLOW_NODE_LABELS = {
     "candidate_ranking": "candidate_ranking / 후보 랭킹",
     "wait_user_plan_input": "wait_user_plan_input / 계획 입력 대기",
     "resume_after_plan_input": "resume_after_plan_input / 계획 입력 반영",
-    "build_rule_candidates": "build_rule_candidates / 규칙 후보 생성",
     "planning_agent": "planning_agent / 계획 생성기",
     "plan_rule_validator": "plan_rule_validator / 계획 규칙 검증",
     "plan_critic": "plan_critic / 계획 비평",
@@ -138,6 +138,8 @@ def build_workflow_graph():
     graph = StateGraph(WorkflowState)
 
     graph.add_node("load_entry_context", nodes.load_entry_context)
+    # Mermaid 렌더링에서 resume 진입 분기가 먼저 배치되도록 등록 순서를 앞당긴다.
+    graph.add_node("resume_after_plan_input", nodes.resume_after_plan_input)
     graph.add_node("init_state", nodes.init_state)
     graph.add_node("load_project_snapshot", nodes.load_project_snapshot)
     graph.add_node("sample_track_clips", nodes.sample_track_clips)
@@ -152,8 +154,6 @@ def build_workflow_graph():
     graph.add_node("merge_analysis", nodes.merge_analysis)
     graph.add_node("candidate_ranking", nodes.candidate_ranking)
     graph.add_node("wait_user_plan_input", nodes.wait_user_plan_input)
-    graph.add_node("resume_after_plan_input", nodes.resume_after_plan_input)
-    graph.add_node("build_rule_candidates", nodes.build_rule_candidates)
     graph.add_node("planning_agent", nodes.planning_agent)
     graph.add_node("plan_rule_validator", nodes.plan_rule_validator)
     graph.add_node("plan_critic", nodes.plan_critic)
@@ -201,7 +201,6 @@ def build_workflow_graph():
         edges.route_after_plan_input,
         PLAN_INPUT_PATH_MAP,
     )
-    graph.add_edge("build_rule_candidates", "planning_agent")
     graph.add_edge("planning_agent", "plan_rule_validator")
     graph.add_conditional_edges(
         "plan_rule_validator",

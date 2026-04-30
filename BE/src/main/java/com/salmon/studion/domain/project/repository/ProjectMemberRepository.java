@@ -24,4 +24,6 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, In
         WHERE pm.project.id IN :projectIds
     """)
     List<ProjectMember> findAllWithUserByProjectIdIn(List<Integer> projectIds);
+
+    boolean existsByProject_IdAndUser_Id(Integer projectId, Integer userId);
 }

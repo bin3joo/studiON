@@ -12,7 +12,7 @@ from app.graph.state import utc_now
 
 class WorkflowArtifactDocument(BaseModel):
     id: str
-    job_id: str
+    job_id: int
     artifact_type: str
     created_at: str = Field(default_factory=utc_now)
     payload: dict[str, Any] = Field(default_factory=dict)

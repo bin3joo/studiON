@@ -21,7 +21,7 @@ export type Mode = 'Major' | 'Minor'
 export interface CreateProjectRequest {
   name: string
   rootNote: RootNote
-  mode: Mode
+  projectMode: Mode
   tempo: number
   timeSigNumerator: number
   timeSigDenominator: number
@@ -36,7 +36,7 @@ export interface CreateProjectResponse {
       projectId: number
       name: string
       rootNote: RootNote
-      mode: Mode
+      projectMode: Mode
       tempo: number
       timeSigNumerator: number
       timeSigDenominator: number
@@ -57,7 +57,7 @@ export interface ProjectSummary {
   projectId: ProjectId
   name: string
   rootNote: RootNote
-  mode: Mode
+  projectMode: Mode
   tempo: number
   timeSigNumerator: number
   timeSigDenominator: number

@@ -18,7 +18,7 @@ class ProjectTrack(BaseModel):
 
 
 class ProjectClip(BaseModel):
-    clip_id: str
+    clip_id: int
     track_id: int
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
@@ -58,8 +58,8 @@ class ProjectSnapshot(BaseModel):
 
 class TimelineSnapshotDocument(BaseModel):
     id: str
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     created_at: str
     duration_ms: int
     track_ids: list[int] = Field(default_factory=list)
@@ -67,7 +67,7 @@ class TimelineSnapshotDocument(BaseModel):
     numerator: int
     denominator: int
     bar_mapping: list[dict[str, int]] = Field(default_factory=list)
-    clip_index: list[dict[str, int | str | None]] = Field(default_factory=list)
+    clip_index: list[dict[str, object | None]] = Field(default_factory=list)
     snapshot: dict
 
 
@@ -79,7 +79,7 @@ class SnapshotRuntimeContext:
     numerator: int
     denominator: int
     bar_mapping: list[dict[str, int]]
-    clip_index: list[dict[str, int | str | None]]
+    clip_index: list[dict[str, object | None]]
 
 
 class WorkflowSnapshotStore(Protocol):
@@ -130,7 +130,7 @@ class MongoWorkflowSnapshotStore:
         return TimelineSnapshotDocument.model_validate(payload)
 
 
-def build_snapshot_id(job_id: str) -> str:
+def build_snapshot_id(job_id: int) -> str:
     return f"{job_id}-timeline-snapshot"
 
 
@@ -155,8 +155,8 @@ def build_snapshot_runtime_context(snapshot: ProjectSnapshot | dict) -> Snapshot
 
 def build_timeline_snapshot_document(
     *,
-    job_id: str,
-    project_id: str,
+    job_id: int,
+    project_id: int,
     snapshot_id: str,
     snapshot: ProjectSnapshot | dict,
 ) -> TimelineSnapshotDocument:
@@ -208,7 +208,7 @@ def _build_bar_mapping(
     return bars
 
 
-def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, int | str | None]]:
+def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, object | None]]:
     audio_metadata_store = get_workflow_audio_metadata_store()
     audio_metadata_ids = [
         clip.audio_metadata_id

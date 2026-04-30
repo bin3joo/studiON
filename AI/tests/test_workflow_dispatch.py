@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.services.clap_inference import CLAPTrackPrediction
+from app.services.plan_critic_llm import PlanCriticLLMResponse
+from app.services.planning_llm import PlanningLLMResponse
 from app.services.workflow_artifacts import get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 from app.services.workflow_orchestration import (
@@ -45,8 +47,12 @@ def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
     return str(audio_path)
 
 
+def _clip_id(track_id: int, ordinal: int) -> int:
+    return (track_id * 1000) + ordinal
+
+
 class _FakeCLAPInferenceClient:
-    def infer_track_roles(self, *, job_id: str, excerpts: list) -> list[CLAPTrackPrediction]:
+    def infer_track_roles(self, *, job_id: int, excerpts: list) -> list[CLAPTrackPrediction]:
         predictions: list[CLAPTrackPrediction] = []
         ordered_track_ids: list[int] = []
         for excerpt in excerpts:
@@ -90,12 +96,71 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     artifact_store.reset()
 
 
+@pytest.fixture(autouse=True)
+def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakePlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: str,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "dispatch test plan",
+                    "strategySummary": "dispatch test summary",
+                    "summary": "dispatch test suggestion",
+                    "explanation": "dispatch test explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": "TRUE_PEAK_LIMITER",
+                            "targetScope": "MASTER",
+                            "targetTrackId": None,
+                            "targetClipId": None,
+                            "startMs": int(region["start_ms"]),
+                            "endMs": int(region["end_ms"]),
+                            "bandLowHz": None,
+                            "bandHighHz": None,
+                            "gainDeltaDb": None,
+                            "params": {"ceilingDbTP": -1.0, "releaseMs": 60},
+                        }
+                    },
+                }
+            )
+
+    class _FakeCriticClient:
+        def review_plan(
+            self,
+            *,
+            selected_region_id: str,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            plan_payload: dict[str, object],
+            revision_notes: list[str],
+        ) -> PlanCriticLLMResponse:
+            return PlanCriticLLMResponse(result="PASS", note="")
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _FakePlanningClient(),
+    )
+    monkeypatch.setattr(
+        "app.graph.nodes.review.get_plan_critic_llm_client",
+        lambda: _FakeCriticClient(),
+    )
+
+
 def build_project_snapshot(*, track_ids: list[int]) -> dict:
     clips = []
     for index, track_id in enumerate(track_ids, start=1):
         clips.append(
             {
-                "clip_id": f"clip-{track_id}-{index}",
+                "clip_id": _clip_id(track_id, index),
                 "track_id": track_id,
                 "start_ms": (index - 1) * 900,
                 "end_ms": ((index - 1) * 900) + 2200,
@@ -114,7 +179,7 @@ def build_project_snapshot(*, track_ids: list[int]) -> dict:
     }
 
 
-def build_plan_input(state: dict) -> dict[str, str]:
+def build_plan_input(state: dict) -> dict[str, object]:
     selected_region_id = state["ranked_candidate_ids"][0]
     region = next(
         region for region in state["analysis_regions"] if region["id"] == selected_region_id
@@ -132,8 +197,8 @@ def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.Monkey
     )
     start_workflow_job(
         WorkflowStartPayload(
-            job_id="job-async-start",
-            project_id="project-async-start",
+            job_id=20001,
+            project_id=30001,
             project_snapshot=build_project_snapshot(track_ids=[12, 18]),
             issue_types=["band_overlap", "sibilance"],
         )
@@ -141,13 +206,13 @@ def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.Monkey
 
     result = run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-async-start",
-            project_id="project-async-start",
+            job_id=20001,
+            project_id=30001,
             dispatch_type="start",
         )
     )
 
-    stored = get_workflow_job_store().get_job("job-async-start")
+    stored = get_workflow_job_store().get_job(20001)
     assert result["current_node"] == "wait_user_plan_input"
     assert result["runtime_status"] == "waiting_for_user"
     assert stored is not None
@@ -164,16 +229,16 @@ def test_worker_start_dispatch_for_clipping_waits_for_plan_input(
     )
     start_workflow_job(
         WorkflowStartPayload(
-            job_id="job-async-resume",
-            project_id="project-async-resume",
+            job_id=20002,
+            project_id=30002,
             project_snapshot=build_project_snapshot(track_ids=[8]),
             issue_types=["clipping"],
         )
     )
     resumed = run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-async-resume",
-            project_id="project-async-resume",
+            job_id=20002,
+            project_id=30002,
             dispatch_type="start",
         )
     )
@@ -209,8 +274,8 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
     )
     start_workflow_job(
         WorkflowStartPayload(
-            job_id="job-async-sibilance",
-            project_id="project-async-sibilance",
+            job_id=20003,
+            project_id=30003,
             project_snapshot={
                 "duration_ms": 4800,
                 "bpm": 120,
@@ -219,7 +284,7 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
                 "tracks": [{"track_id": 8, "name": "Track 8"}],
                 "clips": [
                     {
-                        "clip_id": "clip-8-1",
+                        "clip_id": _clip_id(8, 1),
                         "track_id": 8,
                         "start_ms": 0,
                         "end_ms": 4800,
@@ -235,8 +300,8 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
 
     result = run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-async-sibilance",
-            project_id="project-async-sibilance",
+            job_id=20003,
+            project_id=30003,
             dispatch_type="start",
         )
     )
@@ -253,32 +318,190 @@ def test_worker_rejects_stale_resume_dispatch(monkeypatch: pytest.MonkeyPatch) -
     )
     start_workflow_job(
         WorkflowStartPayload(
-            job_id="job-stale-dispatch",
-            project_id="project-stale-dispatch",
+            job_id=20004,
+            project_id=30004,
             project_snapshot=build_project_snapshot(track_ids=[5, 6]),
             issue_types=["band_overlap"],
         )
     )
     run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-stale-dispatch",
-            project_id="project-stale-dispatch",
+            job_id=20004,
+            project_id=30004,
             dispatch_type="start",
         )
     )
 
     failed = run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-stale-dispatch",
-            project_id="project-stale-dispatch",
+            job_id=20004,
+            project_id=30004,
             dispatch_type="resume_selection",
-            selected_action_ids=["job-stale-dispatch-action-1"],
+            selected_action_ids=["20004-action-1"],
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
     assert failed["failure_code"] == "INVALID_RESUME_PHASE"
+
+
+def test_worker_rejects_plan_resume_without_selected_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20005,
+            project_id=30005,
+            project_snapshot=build_project_snapshot(track_ids=[3, 7]),
+            issue_types=["band_overlap"],
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20005,
+            project_id=30005,
+            dispatch_type="start",
+        )
+    )
+    stored = get_workflow_job_store().get_job(20005)
+    assert stored is not None
+    preserve_clip_id = build_plan_input(stored.state_snapshot)["preserve_clip_id"]
+
+    failed = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20005,
+            project_id=30005,
+            dispatch_type="resume_plan_input",
+            preserve_clip_id=preserve_clip_id,
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "MISSING_SELECTED_REGION"
+
+
+def test_worker_rejects_plan_resume_without_preserve_clip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20006,
+            project_id=30006,
+            project_snapshot=build_project_snapshot(track_ids=[4, 9]),
+            issue_types=["band_overlap"],
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20006,
+            project_id=30006,
+            dispatch_type="start",
+        )
+    )
+    stored = get_workflow_job_store().get_job(20006)
+    assert stored is not None
+    selected_region_id = build_plan_input(stored.state_snapshot)["selected_region_id"]
+
+    failed = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20006,
+            project_id=30006,
+            dispatch_type="resume_plan_input",
+            selected_region_id=selected_region_id,
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "MISSING_PRESERVE_CLIP"
+
+
+def test_worker_rejects_selection_resume_without_selected_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = get_workflow_job_store()
+    store.create_pending_job(
+        {
+            "job_id": 20007,
+            "project_id": 30007,
+            "phase": "waiting_for_user_selection",
+            "current_node": "wait_user_selection",
+            "progress": 95,
+            "runtime_status": "waiting_for_user",
+            "durable_status": "WAITING_USER",
+            "timeline_snapshot_id": "20007-timeline-snapshot",
+            "langgraph_thread_id": "lg-thread:20007",
+            "selected_action_ids": [],
+            "preview_action_ids": ["20007-action-1", "20007-action-2"],
+        }
+    )
+
+    failed = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20007,
+            project_id=30007,
+            dispatch_type="resume_selection",
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "MISSING_SELECTED_ACTIONS"
+
+
+def test_worker_rejects_confirm_resume_without_user_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20008,
+            project_id=30008,
+            project_snapshot=build_project_snapshot(track_ids=[11]),
+            issue_types=["clipping"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20008,
+            project_id=30008,
+            dispatch_type="start",
+        )
+    )
+    preview_wait = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20008,
+            project_id=30008,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+    assert preview_wait["phase"] == "waiting_for_user_confirm"
+
+    failed = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20008,
+            project_id=30008,
+            dispatch_type="resume_confirm",
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "MISSING_USER_DECISION"
 
 
 def test_start_api_enqueues_without_running_worker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -292,8 +515,8 @@ def test_start_api_enqueues_without_running_worker(monkeypatch: pytest.MonkeyPat
     response = client.post(
         "/api/v1/workflow/jobs/start",
         json={
-            "job_id": "job-api-start",
-            "project_id": "project-api-start",
+            "job_id": 20009,
+            "project_id": 30009,
             "project_snapshot": build_project_snapshot(track_ids=[1, 2]),
             "issue_types": ["band_overlap"],
             "requested_by": 101,
@@ -303,12 +526,27 @@ def test_start_api_enqueues_without_running_worker(monkeypatch: pytest.MonkeyPat
     assert response.status_code == 200
     assert response.json()["job"]["dispatch_type"] == "start"
     assert len(queued_messages) == 1
-    assert queued_messages[0].job_id == "job-api-start"
-    stored = get_workflow_job_store().get_job("job-api-start")
+    assert queued_messages[0].job_id == 20009
+    stored = get_workflow_job_store().get_job(20009)
     assert stored is not None
     assert stored.phase == "queued"
-    assert stored.status == "PENDING"
+    assert stored.status == "REQUESTED"
     assert "project_snapshot" not in stored.state_snapshot
+
+
+def test_start_api_allows_cors_preflight() -> None:
+    client = TestClient(create_app())
+
+    response = client.options(
+        "/api/v1/workflow/jobs/start",
+        headers={
+            "Origin": "http://127.0.0.1:5500",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
 
 
 def test_start_api_persists_snapshot_only_in_snapshot_store(
@@ -319,22 +557,22 @@ def test_start_api_persists_snapshot_only_in_snapshot_store(
         lambda message: None,
     )
     payload = WorkflowStartPayload(
-        job_id="job-snapshot-store",
-        project_id="project-snapshot-store",
+        job_id=20010,
+        project_id=30010,
         project_snapshot=build_project_snapshot(track_ids=[3, 4]),
         issue_types=["band_overlap"],
     )
 
     start_workflow_job(payload)
 
-    stored = get_workflow_job_store().get_job("job-snapshot-store")
-    snapshot = get_workflow_snapshot_store().get_snapshot("job-snapshot-store-timeline-snapshot")
+    stored = get_workflow_job_store().get_job(20010)
+    snapshot = get_workflow_snapshot_store().get_snapshot("20010-timeline-snapshot")
 
     assert stored is not None
     assert snapshot is not None
     assert stored.timeline_snapshot_id == snapshot.id
     assert "project_snapshot" not in stored.state_snapshot
-    assert snapshot.snapshot["clips"][0]["clip_id"] == "clip-3-1"
+    assert snapshot.snapshot["clips"][0]["clip_id"] == _clip_id(3, 1)
 
 
 def test_resume_api_infers_dispatch_type_from_waiting_phase(
@@ -347,20 +585,20 @@ def test_resume_api_infers_dispatch_type_from_waiting_phase(
     )
     start_workflow_job(
         WorkflowStartPayload(
-            job_id="job-api-resume",
-            project_id="project-api-resume",
+            job_id=20011,
+            project_id=30011,
             project_snapshot=build_project_snapshot(track_ids=[9, 10]),
             issue_types=["band_overlap"],
         )
     )
     run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-api-resume",
-            project_id="project-api-resume",
+            job_id=20011,
+            project_id=30011,
             dispatch_type="start",
         )
     )
-    stored = get_workflow_job_store().get_job("job-api-resume")
+    stored = get_workflow_job_store().get_job(20011)
     assert stored is not None
     plan_input = build_plan_input(stored.state_snapshot)
     client = TestClient(create_app())
@@ -368,8 +606,8 @@ def test_resume_api_infers_dispatch_type_from_waiting_phase(
     response = client.post(
         "/api/v1/workflow/jobs/resume",
         json={
-            "job_id": "job-api-resume",
-            "project_id": "project-api-resume",
+            "job_id": 20011,
+            "project_id": 30011,
             **plan_input,
         },
     )
@@ -388,35 +626,35 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     )
     start_workflow_job(
         WorkflowStartPayload(
-            job_id="job-status-api",
-            project_id="project-status-api",
+            job_id=20012,
+            project_id=30012,
             project_snapshot=build_project_snapshot(track_ids=[10, 11]),
             issue_types=["band_overlap"],
         )
     )
     run_workflow_dispatch(
         WorkflowDispatchMessage(
-            job_id="job-status-api",
-            project_id="project-status-api",
+            job_id=20012,
+            project_id=30012,
             dispatch_type="start",
         )
     )
     client = TestClient(create_app())
 
-    response = client.get("/api/v1/workflow/jobs/job-status-api")
+    response = client.get("/api/v1/workflow/jobs/20012")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["job"]["id"] == "job-status-api"
-    assert body["projections"]["analysis_job"]["id"] == "job-status-api"
+    assert body["job"]["id"] == 20012
+    assert body["projections"]["analysis_job"]["id"] == 20012
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert body["projections"]["suggestion_group"] is None
 
 
 def test_workflow_start_payload_defaults_include_clipping() -> None:
     payload = WorkflowStartPayload(
-        job_id="job-default-issues",
-        project_id="project-default-issues",
+        job_id=20013,
+        project_id=30013,
         project_snapshot=build_project_snapshot(track_ids=[1]),
     )
 

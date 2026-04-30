@@ -35,7 +35,6 @@ from app.graph.nodes.runtime import (
 )
 from app.graph.nodes.suggestion import (
     approve_plan,
-    build_rule_candidates,
     materialize_execution_plan,
     planning_agent,
 )
@@ -55,7 +54,6 @@ __all__ = [
     "fail_workflow",
     "finalize_output",
     "approve_plan",
-    "build_rule_candidates",
     "infer_track_roles",
     "init_state",
     "load_entry_context",

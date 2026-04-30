@@ -38,24 +38,32 @@ const handleKeyChange = (newNote: string, newMode: string) => {
 };
 
 // 3. 재생 제어 함수
-const handlePlay = () => trackStore.isPlaying = true;
-const handlePause = () => trackStore.isPlaying = false;
+const handlePlay = () => {
+  if(!trackStore.isPlaying) trackStore.togglePlay();
+};
+const handlePause = () => {
+  if(trackStore.isPlaying) trackStore.togglePlay();
+};
 const handleStop = () => {
-  trackStore.isPlaying = false;
-  trackStore.playheadPosition = 0;
+  trackStore.stopPlay();
 };
 </script>
 
 <template>
+  <!--조작 담당의 네비게이션 역할-->
+  <!--select none은 마우스로 선택할 수 없게 함-->
   <nav 
     aria-label="트랜스포트 컨트롤 및 프로젝트 정보 바"
     class="relative flex h-12 w-full items-center justify-between border-b border-border bg-[#151515] px-4 md:px-6 select-none"
   >
+  <!--:arial-label 재생바가 움직일때마다 읽는 정보가 실시간으로 변경 font mono는 숫자 바뀔떄 UI 흔들림을 방지-->
     <div class="flex items-center">
+      <!--tabular-nums : 고정폭 숫자표시로 숫자바뀔떄 UI 흔들림을 방지 drop-shadow : 숫자에 네온 효과-->
       <div 
         :aria-label="`현재 재생 위치: ${formattedPosition.bar}마디 ${formattedPosition.beat}박자, 전체 ${formattedPosition.total}마디`"
         class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-3 font-mono text-sm"
       >
+        <!-- 마디 정보 -->
         <span class="text-[10px] uppercase tracking-wider text-muted-foreground" aria-hidden="true">마디</span>
         <span class="tabular-nums text-primary drop-shadow-[0_0_6px_hsl(var(--primary)/0.6)]">
           {{ formattedPosition.bar }}<span class="text-muted-foreground">.</span>{{ formattedPosition.beat }}
@@ -65,6 +73,7 @@ const handleStop = () => {
       </div>
     </div>
 
+    <!--absolute left-1/2 flex -translate-x-1/2 : 버튼을 정확히 가운데 배치 role='group' 그룹으로 묶어줌-->
     <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤">
       <button 
         :aria-label="trackStore.isPlaying ? '현재 재생 중' : '재생 시작'"
@@ -128,6 +137,7 @@ const handleStop = () => {
       </div>
 
       <div class="relative">
+        
         <button 
           :aria-label="`현재 키: ${displayKey}. 클릭하여 변경`"
           :aria-expanded="isKeyPickerOpen"
@@ -138,13 +148,15 @@ const handleStop = () => {
           <span class="font-display text-xs tracking-wider text-white">{{ displayKey }}</span>
           <ChevronDown class="h-3 w-3 text-muted-foreground transition-transform" :class="isKeyPickerOpen ? 'rotate-180' : ''" aria-hidden="true" />
         </button>
-
+        <!--현재키를 변경하는 버튼이 true일 때만 div 팝업창을 화면에 출력한다 v-if-->
+        <!--role="dialog" -> 키 및 스케일 선택창 역할 부여 aria-expanded="isKeyPickerOpen" 버튼과 연동하여 확장 여부 알려줌-->
         <div 
           v-if="isKeyPickerOpen" 
           role="dialog"
           aria-label="키 및 스케일 선택창"
           class="absolute right-0 top-full mt-2 z-50 min-w-[280px] rounded-md border border-border bg-[#1c1c1c] p-5 shadow-xl shadow-black/50"
         >
+        <!--화면 전체를 덮는 막 fixed inset-0 z-[-1] -> -> 팝업창이 클릭되어 열려있을 때 키보드나 마우스로 팝업창 밖을 클릭하면 팝업창이 닫히게 하는 기능-->
           <div class="fixed inset-0 z-[-1]" @click="isKeyPickerOpen = false"></div>
 
           <div class="mb-4 flex gap-2" role="group" aria-label="음계 모드 선택">
@@ -166,6 +178,8 @@ const handleStop = () => {
           </div>
 
           <div class="mb-1.5 grid grid-cols-7 gap-1.5" role="group" aria-label="반음계 선택">
+            <!--Sharp_flat_row 검은 건반 배열-->
+            <!--null은 빈칸 피아노 건반 모양-->
             <template v-for="(note, i) in SHARP_FLAT_ROW" :key="i">
               <div v-if="note === null" aria-hidden="true" class="translate-x-[calc(50%+0.1875rem)]"></div>
               <button
@@ -186,6 +200,8 @@ const handleStop = () => {
           </div>
 
           <div class="grid grid-cols-7 gap-1.5" role="group" aria-label="자연음계 선택">
+           <!--반복문사용, 배열 안에 있는 요소를 하나씩 꺼내서 반복적으로 버튼을 만든다. 반복할 요소는 NATURAL_NOTES-->
+           <!-- 현재 스토어의 mode 값과 버튼의 mode 값이 일치하면 불이 켜진다. -> v-for에 바인딩된 렝이 현재 스토어의 값과 같다면 해당하는 버튼이 불이 켜진다. v-bind:aria-pressed-->
             <button
               v-for="note in NATURAL_NOTES" 
               :key="note"

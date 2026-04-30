@@ -4,7 +4,8 @@ import axios from 'axios';
 
 //1. 기본 설정이 적용된 axios instance 생성
 export const axiosInstance = axios.create({
-    //Vite 환경 변수로 API 주소를 설정하거나, 백엔드 주소를 직접 입력
+    // Vite 환경 변수로 API 주소를 설정하거나, 백엔드 주소를 직접 입력
+    // proxy로 테스트할 때는 주석 처리
     baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8080",
     timeout: 10000, //10초 이상이 없으면 에러 처리
 });

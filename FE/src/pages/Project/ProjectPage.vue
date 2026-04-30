@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -26,12 +26,73 @@ const projectName = computed(() => {
 })
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 
+//휠 이벤트를 적용할 컨테이너
+const timelineContainerRef = ref<HTMLElement | null>(null)
+
+//휠할때 마우스가 가르키는 위치에서 휠되게 
+const handleWheel = (e: WheelEvent) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    
+    const container = timelineContainerRef.value;
+    if (!container) return;
+
+    // 1. 마우스의 현재 컨테이너 내 상대적 픽셀 위치 구하기
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+
+    // 2. 줌 전의 스크롤 위치와 마디당 픽셀 확인
+    const oldScrollLeft = container.scrollLeft;
+    const oldPixelPerBar = trackStore.pixelPerBar;
+
+    // 3. 현재 마우스가 가리키고 있는 '음악적 위치(마디)' 계산
+    // 예: (스크롤 500px + 마우스 200px) / 마디당 120px = 5.83마디 지점
+    const mouseBarPos = (oldScrollLeft + mouseX) / oldPixelPerBar;
+
+    // 4. 줌 레벨 변경 (스토어 업데이트)
+    trackStore.updateZoom(e.deltaY);
+
+    // 5. 변경된 줌 배율이 적용된 후의 마디당 픽셀 확인
+    const newPixelPerBar = trackStore.pixelPerBar;
+
+    // 6. 새로운 스크롤 위치 계산
+    // (마우스가 가리키던 마디 지점 * 새로운 픽셀 단위) - 마우스의 화면상 픽셀 위치
+    const newScrollLeft = (mouseBarPos * newPixelPerBar) - mouseX;
+
+    // 7. 계산된 스크롤 위치를 적용하여 마우스 위치 고정
+    container.scrollLeft = newScrollLeft;
+  }
+};
+
+//스페이스바 단축키 핸들러
+const handleKeyDown = (e: KeyboardEvent) => {
+  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+    return;
+  }
+  if(e.code === 'Space'){
+    e.preventDefault();
+    trackStore.togglePlay();
+  }
+}
+
 // 프로젝트 시작 시 트랙 정보 불러오기
 onMounted(async () => {
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
   }
+  //키보드 이벤트 리스너 등록
+  window.addEventListener('keydown', handleKeyDown);
+
+//브라우저 기본 줌을 막기 위해 수동으로 이벤트 리스너 등록
+if(timelineContainerRef.value) {
+  timelineContainerRef.value.addEventListener('wheel', handleWheel, {passive: false}) 
+  }
+})
+
+onUnmounted(()=>{
+  //키보드 이벤트 제거
+  window.removeEventListener('keydown',handleKeyDown);
 })
 
 const isInviteModalOpen = ref(false)
@@ -205,7 +266,7 @@ function handleResolveComment(payload: {
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
       <!-- flex-1 -> 남은 공간 차지, overflow-auto -> 넘치는 부분 스크롤 -->
-      <div class="flex-1 overflow-auto relative flex flex-col">
+      <div ref="timelineContainerRef" class="flex-1 overflow-auto relative flex flex-col">
         <!--눈금자 컴포넌트 추가 -->
         <TimelineRuler />
         <!--트랙리스트-->

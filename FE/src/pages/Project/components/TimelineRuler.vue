@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {ref} from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
+import * as Tone from 'tone';
 
 // 트랙 스토어에서 타임라인 상태와 픽셀 계산 사용
 const trackStore = useTrackStore();
@@ -30,12 +31,16 @@ const updatePlayhead = (clientX: number) => {
   //반응형으로 인해 재생바 UI가 즉시 이동 (스토어 업데이트)
   trackStore.playheadPosition = newPositionBar;
 
+  //오디오 엔진 시간 동기화
+  const secondsPerBar = (4*60) / trackStore.bpm;
+  Tone.getTransport().seconds = newPositionBar * secondsPerBar;
+
 }
 
 //마우스 조작 이벤트 헨들러
 
 //눈금을 더블클릭 했을때 해당 위치로 이동하도록 하는 함수
-const onDoubleClick = (e: MouseEvent) => {
+const onClick = (e: MouseEvent) => {
   updatePlayhead(e.clientX);
 };
 
@@ -84,23 +89,23 @@ const onPointerUp = (e:PointerEvent) => {
 <template>
   <div 
     aria-label="타임라인 눈금자 및 재생 바 영역"
-    class="sticky top-0 z-40 flex h-7 border-b border-border bg-card select-none"
+    class="sticky top-0 z-40 flex h-7 border-b border-border bg-card select-none w-max min-w-full"
   >
     <div 
       aria-label="트랙 헤더 정렬 공간"
-      class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"
+      class="sticky left-0 z-50 w-[224px] shrink-0 border-r border-border bg-card"
     ></div>
 
     <div 
       aria-label="시간 축 탐색 영역"
-      class="relative flex-1 cursor-pointer touch-none"
-      @dblclick="onDoubleClick"
+      class="relative shrink-0 cursor-pointer touch-none"
+      :style="{ width: `${trackStore.totalTimelineWidth}px` }"
+      @click="onClick"
     >
       
       <div
         ref="timelineCanvasRef"
-        class="relative h-full"
-        :style="{ width: `${trackStore.totalTimelineWidth}px` }"
+        class="relative h-full w-full"
       >
         <div 
           v-for="bar in trackStore.projectInfo.totalBarCount" 
@@ -109,16 +114,28 @@ const onPointerUp = (e:PointerEvent) => {
           :style="{ left: `${(bar - 1) * trackStore.pixelPerBar}px` }"
         >
           <span 
-            v-if="(bar - 1) % 4 === 0" 
+            v-if="(bar - 1) % trackStore.barNumberStep === 0" 
             class="absolute left-1.5 bottom-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
           >
-            {{ bar - 1 }}
+            {{ bar }}
           </span>
+
+      <template v-if="trackStore.subDivision > 1">
+            <div
+              v-for="sub in trackStore.subDivision - 1"
+              :key="sub"
+              class="absolute bottom-0 border-l border-white/5"
+              :style="{ 
+                left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px`,
+                height: sub % (trackStore.subDivision / 4) === 0 ? '40%' : '20%' // 정박자 눈금은 조금 더 길게
+              }"
+            ></div>
+          </template>
         </div>
 
         <div 
           aria-label="현재 재생 위치 표시 바"
-          class="absolute top-0 bottom-0 z-50 w-3.5 cursor-pointer pointer-events-auto"
+          class="absolute top-0 bottom-0 z-40 w-3.5 cursor-pointer pointer-events-auto"
           :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)'
@@ -131,7 +148,7 @@ const onPointerUp = (e:PointerEvent) => {
           <div class="absolute top-0 bottom-[10px] left-1/2 -translate-x-1/2 w-1px bg-white/20 pointer-events-none"></div>
 
           <div
-            class="absolute -bottom-px left-0 w-full h-2.5 bg-primary pointer-events-none"
+            class="absolute bottom-0 left-0 w-full h-2.5 bg-primary pointer-events-none"
             style="
               clip-path: polygon(0% 0%, 100% 0%, 50% 100%); 
               filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.8));

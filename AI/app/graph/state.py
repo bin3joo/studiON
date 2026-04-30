@@ -25,19 +25,20 @@ RuntimeStatus = Literal[
     "completed",
 ]
 DurableJobStatus = Literal[
-    "PENDING",
-    "IN_PROGRESS",
+    "REQUESTED",
+    "RUNNING",
     "WAITING_USER",
     "COMPLETED",
     "FAILED",
     "CANCELLED",
+    "EXPIRED",
 ]
 UserDecision = Literal["confirm", "retry", "cancel"]
 
 
 class WorkflowState(TypedDict, total=False):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     dispatch_type: WorkflowDispatchType | None
     phase: str
     current_node: str
@@ -56,7 +57,7 @@ class WorkflowState(TypedDict, total=False):
     bar_mapping: list[dict]
     clip_index: list[dict]
     track_ids: list[int]
-    sampled_clip_ids: list[str]
+    sampled_clip_ids: list[int]
     track_representative_specs: list[dict]
     role_candidate_track_ids: list[int]
     inferred_roles: dict[int, str]
@@ -69,7 +70,7 @@ class WorkflowState(TypedDict, total=False):
     ranked_candidate_ids: list[str]
     ranking_scores: dict[str, float]
     selected_region_id: str | None
-    preserve_clip_id: str | None
+    preserve_clip_id: int | None
     user_feedback_message: str | None
     clip_feature_artifact_id: str | None
     dsp_scan_summary: dict[str, object]
@@ -81,7 +82,6 @@ class WorkflowState(TypedDict, total=False):
     sibilance_fix_applied: bool
     sibilance_fix_log_id: str | None
     auto_fix_recipe_artifact_id: str | None
-    rule_candidate_payload: dict
     plan_payload: dict
     plan_status: str | None
     plan_revision_notes: list[str]
@@ -123,8 +123,8 @@ def utc_now() -> str:
 
 
 def build_workflow_initial_state(
-    job_id: str,
-    project_id: str,
+    job_id: int,
+    project_id: int,
     **overrides: object,
 ) -> WorkflowState:
     state: WorkflowState = {
@@ -137,7 +137,7 @@ def build_workflow_initial_state(
         "heartbeat_at": utc_now(),
         "transition_log": [],
         "runtime_status": "queued",
-        "durable_status": "PENDING",
+        "durable_status": "REQUESTED",
         "langgraph_thread_id": f"lg-thread:{job_id}",
         "timeline_snapshot_id": None,
         "project_duration_ms": None,
@@ -172,7 +172,6 @@ def build_workflow_initial_state(
         "sibilance_fix_applied": False,
         "sibilance_fix_log_id": None,
         "auto_fix_recipe_artifact_id": None,
-        "rule_candidate_payload": {},
         "plan_payload": {},
         "plan_status": None,
         "plan_revision_notes": [],
@@ -204,13 +203,13 @@ def build_workflow_initial_state(
     return state
 
 
-def build_runtime_initial_state(job_id: str, project_id: str, **overrides: object) -> RuntimeState:
+def build_runtime_initial_state(job_id: int, project_id: int, **overrides: object) -> RuntimeState:
     return build_workflow_initial_state(job_id=job_id, project_id=project_id, **overrides)
 
 
 def build_apply_initial_state(
-    job_id: str,
-    project_id: str,
+    job_id: int,
+    project_id: int,
     preview_id: str,
     suggestion_group_id: str,
     **overrides: object,

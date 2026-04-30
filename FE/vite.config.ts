@@ -19,4 +19,18 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+
+  // TODO: 백엔드에 CORS 설정 추가되면 지워도 됨
+  server: {
+  proxy: {
+    '/api': {
+      target: 'http://localhost:8080',
+      changeOrigin: true,
+    },
+  },
+}
+
+
 })
+
+

@@ -36,6 +36,51 @@ export interface ProjectDetailResponse {
   }
 }
 
+// ==============================
+// 프로젝트 생성 기본값
+// ==============================
+
+const MOCK_PROJECT_CREATE_DELAY_MS = 400;
+const MOCK_PROJECT_LIST_DELAY_MS = 300;
+const DEFAULT_PROJECT_NAME = '새 프로젝트';
+const DEFAULT_ROOT_NOTE: RootNote = 'C';
+const DEFAULT_MODE: Mode = 'Major';
+const DEFAULT_TEMPO = 120.0;
+const DEFAULT_TIME_SIG_NUMERATOR = 4;
+const DEFAULT_TIME_SIG_DENOMINATOR = 4;
+
+// 기존 프로젝트명과 겹치지 않는 기본 프로젝트명을 만든다.
+// 예: 새 프로젝트, 새 프로젝트1, 새 프로젝트2
+export function getNextDefaultProjectName(existingProjectNames: string[]): string {
+  const nameSet = new Set(existingProjectNames)
+
+  if (!nameSet.has(DEFAULT_PROJECT_NAME)) {
+    return DEFAULT_PROJECT_NAME
+  }
+
+  let suffix = 1
+
+  while (nameSet.has(`${DEFAULT_PROJECT_NAME}${suffix}`)) {
+    suffix += 1
+  }
+
+  return `${DEFAULT_PROJECT_NAME}${suffix}`
+}
+
+// 프로젝트 생성 API에 보낼 기본 payload를 만든다.
+export function buildCreateProjectPayload(
+  existingProjectNames: string[] = [],
+): CreateProjectRequest {
+  return {
+    name: getNextDefaultProjectName(existingProjectNames),
+    rootNote: DEFAULT_ROOT_NOTE,
+    projectMode: DEFAULT_MODE,
+    tempo: DEFAULT_TEMPO,
+    timeSigNumerator: DEFAULT_TIME_SIG_NUMERATOR,
+    timeSigDenominator: DEFAULT_TIME_SIG_DENOMINATOR,
+  }
+}
+
 
 // ==========================================
 // [API 객체] 프로젝트 관련 통신 모음집
@@ -57,47 +102,71 @@ export const projectApi = {
   }
 }
 
+// 프로젝트 목록 조회
 
+export async function fetchProjects(): Promise<FetchProjectsResponse> {
+  // =========================
+  // mock implementation
+  // =========================
+  // await wait(MOCK_PROJECT_LIST_DELAY_MS)
 
+  // return {
+  //   code: 200,
+  //   message: '요청에 성공하였습니다.',
+  //   isSuccess: true,
+  //   data: {
+  //     projects: [
+  //       {
+  //         projectId: 1,
+  //         projectName: '새 프로젝트',
+  //         totalBarCount: 0,
+  //         totalPlayTime: 0,
+  //         totalAudioSize: 0,
+  //         lastUpdateAt: '2026-04-20T12:30:44',
+  //         members: [
+  //           {
+  //             userId: 1,
+  //             profileImgUrl: 'https://example.com/profile-1.png',
+  //           },
+  //         ],
+  //       },
+  //       {
+  //         projectId: 2,
+  //         projectName: '새 프로젝트1',
+  //         totalBarCount: 8,
+  //         totalPlayTime: 180000,
+  //         totalAudioSize: 314572800,
+  //         lastUpdateAt: '2026-04-21T10:00:00',
+  //         members: [
+  //           {
+  //             userId: 1,
+  //             profileImgUrl: 'https://example.com/profile-1.png',
+  //           },
+  //           {
+  //             userId: 2,
+  //             profileImgUrl: 'https://example.com/profile-2.png',
+  //           },
+  //         ],
+  //       },
+  //     ],
+  //   },
+  // }
 
-const MOCK_PROJECT_CREATE_DELAY_MS = 400;
-const MOCK_PROJECT_LIST_DELAY_MS = 300;
-const DEFAULT_PROJECT_NAME = '새 프로젝트';
-const DEFAULT_ROOT_NOTE: RootNote = 'C';
-const DEFAULT_MODE: Mode = 'Major';
-const DEFAULT_TEMPO = 120.0;
-const DEFAULT_TIME_SIG_NUMERATOR = 4;
-const DEFAULT_TIME_SIG_DENOMINATOR = 4;
-
-function wait(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-export function getNextDefaultProjectName(existingProjectNames: string[]): string {
-  const nameSet = new Set(existingProjectNames)
-
-  if (!nameSet.has(DEFAULT_PROJECT_NAME)) {
-    return DEFAULT_PROJECT_NAME
+  // =========================
+  // real API implementation
+  // =========================
+  const response = await fetch('/api/v1/projects', {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+  
+  if (!response.ok) {
+    throw new Error('프로젝트 목록 조회에 실패했습니다.')
   }
-
-  let suffix = 1
-
-  while (nameSet.has(`${DEFAULT_PROJECT_NAME}${suffix}`)) {
-    suffix += 1
-  }
-
-  return `${DEFAULT_PROJECT_NAME}${suffix}`
-}
-
-export function buildCreateProjectPayload(existingProjectNames: string[] = []): CreateProjectRequest {
-  return {
-    name: getNextDefaultProjectName(existingProjectNames),
-    rootNote: DEFAULT_ROOT_NOTE,
-    projectMode: DEFAULT_MODE,
-    tempo: DEFAULT_TEMPO,
-    timeSigNumerator: DEFAULT_TIME_SIG_NUMERATOR,
-    timeSigDenominator: DEFAULT_TIME_SIG_DENOMINATOR,
-  }
+  
+  return await response.json() as FetchProjectsResponse
 }
 
 /**
@@ -144,141 +213,31 @@ export async function createProject(
   // =========================
   // real API implementation
   // =========================
-  const response = await fetch('/api/v1/projects', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
-  
-  if (!response.ok) {
-    throw new Error('프로젝트 생성에 실패했습니다.')
-  }
-  
-  const contentType = response.headers.get('content-type') ?? ''
-  
-  if (!contentType.includes('application/json')) {
-  throw new Error('서버 응답이 JSON 형식이 아닙니다.')
-}
+  const response = await axiosInstance.post<CreateProjectResponse>(
+      '/api/v1/projects',
+      payload,
+    )
 
-  return await response.json() as CreateProjectResponse
-}
-
-export async function fetchProjects(): Promise<FetchProjectsResponse> {
-  // =========================
-  // mock implementation
-  // =========================
-  await wait(MOCK_PROJECT_LIST_DELAY_MS)
-
-  return {
-    code: 200,
-    message: '요청에 성공하였습니다.',
-    isSuccess: true,
-    data: {
-      projects: [
-        {
-          projectId: 1,
-          projectName: '새 프로젝트',
-          totalBarCount: 0,
-          totalPlayTime: 0,
-          totalAudioSize: 0,
-          lastUpdateAt: '2026-04-20T12:30:44',
-          members: [
-            {
-              userId: 1,
-              profileImgUrl: 'https://example.com/profile-1.png',
-            },
-          ],
-        },
-        {
-          projectId: 2,
-          projectName: '새 프로젝트1',
-          totalBarCount: 8,
-          totalPlayTime: 180000,
-          totalAudioSize: 314572800,
-          lastUpdateAt: '2026-04-21T10:00:00',
-          members: [
-            {
-              userId: 1,
-              profileImgUrl: 'https://example.com/profile-1.png',
-            },
-            {
-              userId: 2,
-              profileImgUrl: 'https://example.com/profile-2.png',
-            },
-          ],
-        },
-      ],
-    },
+    return response.data
   }
 
-  // =========================
-  // real API implementation
-  // =========================
-  // const response = await fetch('/api/v1/projects', {
-  //   method: 'GET',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //   },
-  // })
-  //
-  // if (!response.ok) {
-  //   throw new Error('프로젝트 목록 조회에 실패했습니다.')
-  // }
-  //
-  // return await response.json() as FetchProjectsResponse
-}
 
-/**
- * 프로젝트 참여 (초대코드 검증)
- * 현재는 실제 백엔드 호출을 사용한다.
- * 백엔드가 없으면 404가 나는 것이 정상이다.
- */
+// 프로젝트 참여 (초대코드 검증)
 export async function joinProject(payload: JoinProjectRequest): Promise<JoinProjectResponse> {
-  const response = await fetch('/api/v1/projects/join', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
+  const response = await axiosInstance.post<JoinProjectResponse>(
+      '/api/v1/projects/join',
+      payload,
+    )
 
-  if (!response.ok) {
-    throw new Error('초대코드 확인에 실패했습니다.')
+    return response.data
   }
 
-  const contentType = response.headers.get('content-type') ?? ''
+//프로젝트 초대코드 생성
 
-  if (!contentType.includes('application/json')) {
-    return {}
-  }
-
-  return await response.json() as JoinProjectResponse
-}
-
-/**
- * 프로젝트 초대코드 생성
- * 현재는 실제 백엔드 호출을 사용한다.
- * 백엔드가 없으면 404가 나는 것이 정상이다.
- */
 export async function createProjectInviteCode(projectId: ProjectId): Promise<CreateInviteCodeResponse> {
-  const response = await fetch(`/api/v1/projects/${projectId}/invite-code`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  })
+  const response = await axiosInstance.post<CreateInviteCodeResponse>(
+      `/api/v1/projects/${projectId}/invite-code`,
+    )
 
-  if (!response.ok) {
-    throw new Error('초대코드 생성에 실패했습니다.')
+    return response.data
   }
-
-  const contentType = response.headers.get('content-type') ?? ''
-
-  if (!contentType.includes('application/json')) {
-    return {}
-  }
-
-  return await response.json() as CreateInviteCodeResponse
-}

@@ -240,6 +240,37 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+    // 실제 프로젝트 상세 호출 코드
+//     const fetchProject = async (projectId: number) => {
+//   try {
+//     const data = await projectApi.getProjectDetail(projectId)
+
+//     projectInfo.value = {
+//       projectId: data.projectId,
+//       tempo: data.tempo,
+//       rootNote: data.rootNote,
+//       mode: data.projectMode,
+//       timeSigNumerator: data.timeSigNumerator,
+//       timeSigDenominator: data.timeSigDenominator,
+//       totalBarCount: data.totalBarCount,
+//     }
+
+//     trackList.value = data.tracks.map((track): TrackUIState => ({
+//       ...track,
+//       height: 100,
+//       isSelected: false,
+//       clips: track.clips.map((clip): ClipUIState => ({
+//         ...clip,
+//         isSelected: false,
+//         isDragging: false,
+//       })),
+//     }))
+//   }
+//   catch (error) {
+//     console.error('프로젝트 로딩 실패:', error)
+//   }
+// }
+
     // ==========================================
     // 3. 내보내기 (Return)
     // ==========================================

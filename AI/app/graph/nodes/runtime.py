@@ -34,7 +34,6 @@ def init_state(state: WorkflowState) -> WorkflowState:
 
 
 def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
-    # candidate_ranking 이후에는 사용자 선택값이 들어올 때까지 여기서 멈춘다.
     return workflow_update(
         state,
         node="wait_user_plan_input",
@@ -46,15 +45,12 @@ def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
 
 
 def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
-    # selected_region_id / preserve_clip_id는 이후 계획 생성의 기준 입력이므로 둘 다 필수다.
     if not state.get("selected_region_id"):
         return fail_workflow(
             {
                 **state,
                 "failure_code": "MISSING_SELECTED_REGION",
-                "failure_message": (
-                    "A selected region is required before generating a plan."
-                ),
+                "failure_message": "A selected region is required before generating a plan.",
             }
         )
     if not state.get("preserve_clip_id"):
@@ -65,8 +61,16 @@ def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
                 "failure_message": "A preserve clip selection is required before planning.",
             }
         )
+    validation_error = _validate_plan_input_selection(state)
+    if validation_error is not None:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": validation_error[0],
+                "failure_message": validation_error[1],
+            }
+        )
     notes = [*state.get("notes", [])]
-    # 사용자 입력이 실제로 어떤 값으로 계획 단계에 전달됐는지 추적할 수 있게 메모를 남긴다.
     notes.append(
         f"User selected region {state['selected_region_id']} and preserve clip "
         f"{state['preserve_clip_id']} for plan generation."
@@ -97,6 +101,20 @@ def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
     latest_artifact_id = state.get("latest_artifact_id")
 
     if sibilance_fix_applied:
+        recipes = [_build_sibilance_fix_recipe(region) for region in sibilance_regions]
+        region_ids = [str(region.get("id")) for region in sibilance_regions if region.get("id") is not None]
+        track_ids = sorted(
+            {
+                int(region.get("track_id") or 0)
+                for region in sibilance_regions
+                if region.get("track_id") is not None
+            }
+        )
+        applied_in_mixed_issue_flow = any(
+            region.get("requires_user_action", True)
+            for region in state.get("analysis_regions", [])
+            if region.get("issue_type") != "sibilance"
+        )
         auto_fix_recipe_artifact_id = artifact_id(state, "sibilance-auto-fix")
         get_workflow_artifact_store().upsert_artifact(
             WorkflowArtifactDocument(
@@ -105,7 +123,10 @@ def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
                 artifact_type="auto_fix_recipe",
                 payload={
                     "issueType": "sibilance",
-                    "recipes": [_build_sibilance_fix_recipe(region) for region in sibilance_regions],
+                    "regionIds": region_ids,
+                    "trackIds": track_ids,
+                    "appliedInMixedIssueFlow": applied_in_mixed_issue_flow,
+                    "recipes": recipes,
                 },
             )
         )
@@ -114,6 +135,8 @@ def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
         notes.append(
             f"Applied deterministic sibilance repair recipe to {len(sibilance_regions)} region(s)."
         )
+        if applied_in_mixed_issue_flow:
+            notes.append("사용자 승인 이슈와 함께 탐지된 치찰음도 같은 run에서 자동 보정 artifact로 기록했다.")
 
     return workflow_update(
         state,
@@ -136,8 +159,14 @@ def log_sibilance_fix(state: WorkflowState) -> WorkflowState:
     sibilance_fix_log_id = None
     mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
     latest_artifact_id = state.get("latest_artifact_id")
+    notes = [*state.get("notes", [])]
 
     if state.get("sibilance_fix_applied"):
+        sibilance_regions = [
+            region
+            for region in state.get("analysis_regions", [])
+            if region.get("issue_type") == "sibilance"
+        ]
         sibilance_fix_log_id = artifact_id(state, "sibilance-fix-log")
         get_workflow_artifact_store().upsert_artifact(
             WorkflowArtifactDocument(
@@ -145,20 +174,31 @@ def log_sibilance_fix(state: WorkflowState) -> WorkflowState:
                 job_id=state["job_id"],
                 artifact_type="auto_fix_log",
                 payload={
+                    "logVersion": 1,
                     "issueType": "sibilance",
                     "recipeArtifactId": state.get("auto_fix_recipe_artifact_id"),
-                    "regionCount": len(
-                        [
-                            region
-                            for region in state.get("analysis_regions", [])
-                            if region.get("issue_type") == "sibilance"
-                        ]
+                    "applied": True,
+                    "regionIds": [
+                        str(region.get("id"))
+                        for region in sibilance_regions
+                        if region.get("id") is not None
+                    ],
+                    "trackIds": sorted(
+                        {
+                            int(region.get("track_id") or 0)
+                            for region in sibilance_regions
+                            if region.get("track_id") is not None
+                        }
                     ),
+                    "regionCount": len(sibilance_regions),
                 },
             )
         )
         mongo_artifact_ids.append(sibilance_fix_log_id)
         latest_artifact_id = sibilance_fix_log_id
+        notes.append(
+            f"치찰음 자동 보정 로그 artifact {sibilance_fix_log_id}를 기록했다."
+        )
 
     return workflow_update(
         state,
@@ -169,13 +209,142 @@ def log_sibilance_fix(state: WorkflowState) -> WorkflowState:
             "sibilance_fix_log_id": sibilance_fix_log_id,
             "mongo_artifact_ids": mongo_artifact_ids,
             "latest_artifact_id": latest_artifact_id,
+            "notes": notes,
+        },
+    )
+
+
+def auto_fix_non_user_issues(state: WorkflowState) -> WorkflowState:
+    notes = [*state.get("notes", [])]
+    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
+    latest_artifact_id = state.get("latest_artifact_id")
+    auto_fix_recipe_artifact_id = None
+    grouped_recipes = _build_non_user_issue_recipe_groups(state)
+
+    clipping_fix_applied = any(
+        group["issueType"] in {"track_clipping", "master_clipping"} for group in grouped_recipes
+    )
+    sibilance_fix_applied = any(group["issueType"] == "sibilance" for group in grouped_recipes)
+    high_band_harshness_fix_applied = any(
+        group["issueType"] == "high_band_harshness" for group in grouped_recipes
+    )
+
+    if grouped_recipes:
+        first_group = grouped_recipes[0]
+        auto_fix_recipe_artifact_id = artifact_id(state, "non-user-auto-fix")
+        get_workflow_artifact_store().upsert_artifact(
+            WorkflowArtifactDocument(
+                id=auto_fix_recipe_artifact_id,
+                job_id=state["job_id"],
+                artifact_type="auto_fix_recipe",
+                payload={
+                    "recipeVersion": 2,
+                    "issueType": first_group["issueType"],
+                    "regionIds": first_group["regionIds"],
+                    "trackIds": first_group["trackIds"],
+                    "appliedInMixedIssueFlow": first_group["appliedInMixedIssueFlow"],
+                    "containsPromotedMasterContributor": first_group[
+                        "containsPromotedMasterContributor"
+                    ],
+                    "recipes": first_group["recipes"],
+                    "groups": grouped_recipes,
+                },
+            )
+        )
+        mongo_artifact_ids.append(auto_fix_recipe_artifact_id)
+        latest_artifact_id = auto_fix_recipe_artifact_id
+        notes.append(
+            f"Applied deterministic auto-fix recipes to {len(grouped_recipes)} non-user issue group(s)."
+        )
+
+    return workflow_update(
+        state,
+        node="auto_fix_non_user_issues",
+        phase="non_user_issue_autofix_processed",
+        progress=88,
+        extra={
+            "clipping_fix_applied": clipping_fix_applied,
+            "clipping_fix_log_id": None,
+            "sibilance_fix_applied": sibilance_fix_applied,
+            "sibilance_fix_log_id": None,
+            "high_band_harshness_fix_applied": high_band_harshness_fix_applied,
+            "auto_fix_log_artifact_id": None,
+            "auto_fix_recipe_artifact_id": auto_fix_recipe_artifact_id,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
+            "notes": notes,
+        },
+    )
+
+
+def log_non_user_issue_fixes(state: WorkflowState) -> WorkflowState:
+    grouped_recipes = _build_non_user_issue_recipe_groups(state)
+    mongo_artifact_ids = [*state.get("mongo_artifact_ids", [])]
+    latest_artifact_id = state.get("latest_artifact_id")
+    notes = [*state.get("notes", [])]
+    auto_fix_log_artifact_id = None
+
+    if grouped_recipes:
+        first_group = grouped_recipes[0]
+        auto_fix_log_artifact_id = artifact_id(state, "non-user-auto-fix-log")
+        get_workflow_artifact_store().upsert_artifact(
+            WorkflowArtifactDocument(
+                id=auto_fix_log_artifact_id,
+                job_id=state["job_id"],
+                artifact_type="auto_fix_log",
+                payload={
+                    "logVersion": 2,
+                    "recipeArtifactId": state.get("auto_fix_recipe_artifact_id"),
+                    "issueType": first_group["issueType"],
+                    "regionIds": first_group["regionIds"],
+                    "trackIds": first_group["trackIds"],
+                    "regionCount": first_group["regionCount"],
+                    "groups": [
+                        {
+                            "issueType": group["issueType"],
+                            "applied": True,
+                            "regionIds": group["regionIds"],
+                            "trackIds": group["trackIds"],
+                            "regionCount": group["regionCount"],
+                            "containsPromotedMasterContributor": group[
+                                "containsPromotedMasterContributor"
+                            ],
+                        }
+                        for group in grouped_recipes
+                    ],
+                },
+            )
+        )
+        mongo_artifact_ids.append(auto_fix_log_artifact_id)
+        latest_artifact_id = auto_fix_log_artifact_id
+        notes.append(f"Recorded non-user auto-fix log artifact {auto_fix_log_artifact_id}.")
+
+    return workflow_update(
+        state,
+        node="log_non_user_issue_fixes",
+        phase="non_user_issue_fixes_logged",
+        progress=90,
+        extra={
+            "clipping_fix_log_id": (
+                auto_fix_log_artifact_id if state.get("clipping_fix_applied") else None
+            ),
+            "sibilance_fix_log_id": (
+                auto_fix_log_artifact_id if state.get("sibilance_fix_applied") else None
+            ),
+            "auto_fix_log_artifact_id": auto_fix_log_artifact_id,
+            "mongo_artifact_ids": mongo_artifact_ids,
+            "latest_artifact_id": latest_artifact_id,
+            "notes": notes,
         },
     )
 
 
 def persist_analysis_result(state: WorkflowState) -> WorkflowState:
     preview_id = state.get("preview_id")
-    if state.get("preview_action_ids"):
+    user_action_required = any(
+        bool(region.get("requires_user_action")) for region in state.get("analysis_regions", [])
+    ) and bool(state.get("preview_action_ids"))
+    if user_action_required:
         preview_id = preview_id or f"{state['job_id']}-preview"
     return workflow_update(
         state,
@@ -184,69 +353,42 @@ def persist_analysis_result(state: WorkflowState) -> WorkflowState:
         progress=92,
         extra={
             "preview_id": preview_id,
-            "user_action_required": bool(state.get("preview_action_ids")),
+            "user_action_required": user_action_required,
         },
     )
 
 
 def user_action_gate(state: WorkflowState) -> WorkflowState:
-    preview_action_ids = [*state.get("preview_action_ids", [])]
-    selected_action_ids = [*state.get("selected_action_ids", [])]
-    notes = [*state.get("notes", [])]
-
-    # 단일 action 제안은 선택 단계를 생략하고 preview/confirm으로 바로 넘긴다.
-    if (
-        state.get("user_action_required")
-        and len(preview_action_ids) == 1
-        and not selected_action_ids
-    ):
-        selected_action_ids = [preview_action_ids[0]]
-        notes.append(
-            f"Auto-selected single preview action {preview_action_ids[0]} and skipped user selection."
-        )
-
     return workflow_update(
         state,
         node="user_action_gate",
         phase="user_action_gate_checked",
         progress=94,
-        extra={
-            "selected_action_ids": selected_action_ids,
-            "notes": notes,
-        },
-    )
-
-
-def wait_user_selection(state: WorkflowState) -> WorkflowState:
-    return workflow_update(
-        state,
-        node="wait_user_selection",
-        phase="waiting_for_user_selection",
-        progress=95,
-        runtime_status="waiting_for_user",
-        durable_status="WAITING_USER",
     )
 
 
 def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
-    selected_action_ids = state.get("selected_action_ids", [])
-    preview_action_ids = set(state.get("preview_action_ids", []))
-    if not selected_action_ids:
+    preview_action_ids = [*state.get("preview_action_ids", [])]
+    if not preview_action_ids:
         return fail_workflow(
             {
                 **state,
-                "failure_code": "EMPTY_SELECTION",
-                "failure_message": "A selected edit recipe is required before applying actions.",
+                "failure_code": "MISSING_PREVIEW_ACTION",
+                "failure_message": "A preview action is required before applying the representative recipe.",
             }
         )
-    if not set(selected_action_ids).issubset(preview_action_ids):
+    if len(preview_action_ids) != 1:
         return fail_workflow(
             {
                 **state,
-                "failure_code": "UNKNOWN_ACTION_SELECTION",
-                "failure_message": "Selected actions must come from the preview action set.",
+                "failure_code": "INVALID_PREVIEW_ACTION_COUNT",
+                "failure_message": "Exactly one representative preview action is required in the MVP flow.",
             }
         )
+    notes = [*state.get("notes", [])]
+    notes.append(
+        f"Automatically applied representative preview action {preview_action_ids[0]} without selection wait."
+    )
     return workflow_update(
         state,
         node="apply_selected_edit_recipe",
@@ -254,7 +396,10 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         progress=96,
         runtime_status="running",
         durable_status="RUNNING",
-        extra={"apply_result_id": f"{state['job_id']}-apply"},
+        extra={
+            "apply_result_id": f"{state['job_id']}-apply",
+            "notes": notes,
+        },
     )
 
 
@@ -360,7 +505,6 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "selected_region_id": state.get("selected_region_id"),
             "preserve_clip_id": state.get("preserve_clip_id"),
             "user_feedback_message": state.get("user_feedback_message"),
-            "selected_action_ids": state.get("selected_action_ids", []),
             "user_decision": state.get("user_decision"),
         }
     )
@@ -384,15 +528,12 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "current_node": "load_entry_context",
         }
     )
-    # wait 상태에서 재개될 때 사용자가 보낸 입력값만 덮어써서 다음 노드가 그대로 이어받게 한다.
     if dispatch.selected_region_id is not None:
         restored["selected_region_id"] = dispatch.selected_region_id
     if dispatch.preserve_clip_id is not None:
         restored["preserve_clip_id"] = dispatch.preserve_clip_id
     if dispatch.user_feedback_message is not None:
         restored["user_feedback_message"] = dispatch.user_feedback_message
-    if dispatch.selected_action_ids:
-        restored["selected_action_ids"] = dispatch.selected_action_ids
     if dispatch.user_decision is not None:
         restored["user_decision"] = dispatch.user_decision
     return restored
@@ -426,18 +567,12 @@ def _validate_dispatch(
                 "MISSING_PRESERVE_CLIP",
                 "preserve_clip_id is required for plan-input resume.",
             )
-        return None
-    if dispatch.dispatch_type == "resume_selection":
-        if phase != "waiting_for_user_selection":
-            return (
-                "INVALID_RESUME_PHASE",
-                f"Selection resume expected 'waiting_for_user_selection', got '{phase}'.",
-            )
-        if not dispatch.selected_action_ids:
-            return (
-                "MISSING_SELECTED_ACTIONS",
-                "selected_action_ids is required for selection resume.",
-            )
+        restored_snapshot = deepcopy(snapshot)
+        restored_snapshot["selected_region_id"] = dispatch.selected_region_id
+        restored_snapshot["preserve_clip_id"] = dispatch.preserve_clip_id
+        selection_error = _validate_plan_input_selection(restored_snapshot)
+        if selection_error is not None:
+            return selection_error
         return None
     if phase != "waiting_for_user_confirm":
         return (
@@ -468,6 +603,48 @@ def _entry_failure(
     }
 
 
+def _validate_plan_input_selection(state: WorkflowState) -> tuple[str, str] | None:
+    selected_region_id = state.get("selected_region_id")
+    preserve_clip_id = state.get("preserve_clip_id")
+    ranked_candidate_ids = [str(region_id) for region_id in state.get("ranked_candidate_ids", [])]
+    if selected_region_id is None or preserve_clip_id is None:
+        return None
+    if str(selected_region_id) not in ranked_candidate_ids:
+        return (
+            "INVALID_SELECTED_REGION",
+            "selected_region_id must reference a ranked user-action candidate.",
+        )
+    selected_region = next(
+        (
+            region
+            for region in state.get("analysis_regions", [])
+            if str(region.get("id")) == str(selected_region_id)
+        ),
+        None,
+    )
+    if not isinstance(selected_region, dict):
+        return (
+            "INVALID_SELECTED_REGION",
+            "selected_region_id did not match a known analysis region.",
+        )
+    if not bool(selected_region.get("requires_user_action")):
+        return (
+            "INVALID_SELECTED_REGION",
+            "selected_region_id must reference a user-action issue.",
+        )
+    affected_clip_ids = {
+        int(clip_id)
+        for clip_id in selected_region.get("affected_clip_ids", [])
+        if clip_id is not None
+    }
+    if affected_clip_ids and int(preserve_clip_id) not in affected_clip_ids:
+        return (
+            "INVALID_PRESERVE_CLIP",
+            "preserve_clip_id must belong to the selected region.",
+        )
+    return None
+
+
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:
     score = float(region.get("score", 0.0))
     reduction_target_db = round(min(max(1.5 + (score * 8.0), 2.0), 6.5), 2)
@@ -489,3 +666,153 @@ def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:
             "gainReductionDbTarget": reduction_target_db,
         },
     }
+
+
+def _build_non_user_issue_recipe_groups(state: WorkflowState) -> list[dict[str, object]]:
+    issue_builders = {
+        "track_clipping": _build_track_clipping_fix_recipe,
+        "high_band_harshness": _build_high_band_harshness_fix_recipe,
+        "sibilance": _build_sibilance_fix_recipe,
+        "master_clipping": _build_master_clipping_fix_recipe,
+    }
+    ordered_issue_types = [
+        "track_clipping",
+        "high_band_harshness",
+        "sibilance",
+        "master_clipping",
+    ]
+    mixed_issue_flow = any(
+        bool(region.get("requires_user_action")) for region in state.get("analysis_regions", [])
+    )
+    groups: list[dict[str, object]] = []
+    for issue_type in ordered_issue_types:
+        regions = [
+            region
+            for region in state.get("analysis_regions", [])
+            if region.get("issue_type") == issue_type
+        ]
+        if not regions:
+            continue
+        builder = issue_builders[issue_type]
+        groups.append(
+            {
+                "issueType": issue_type,
+                "regionIds": [
+                    str(region.get("id")) for region in regions if region.get("id") is not None
+                ],
+                "trackIds": sorted(
+                    {
+                        int(region.get("track_id") or 0)
+                        for region in regions
+                        if region.get("track_id") is not None
+                    }
+                ),
+                "regionCount": len(regions),
+                "appliedInMixedIssueFlow": mixed_issue_flow,
+                "containsPromotedMasterContributor": any(
+                    region.get("auto_fix_source") == "promoted_master_contributor"
+                    for region in regions
+                ),
+                "recipes": [builder(region) for region in regions],
+            }
+        )
+    return groups
+
+
+def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object]:
+    score = float(region.get("score", 0.0))
+    gain_trim_db = round(min(max(1.0 + (score * 4.0), 1.5), 4.5), 2)
+    band_hints = _collect_track_clipping_band_hints(region)
+    action_type = "GAIN_TRIM"
+    band_low_hz = None
+    band_high_hz = None
+    gain_delta_db: float | None = -gain_trim_db
+    params: dict[str, object] = {"preGainDb": -gain_trim_db}
+    if "high" in band_hints:
+        action_type = "DYNAMIC_EQ"
+        band_low_hz = 4500
+        band_high_hz = 9000
+        gain_delta_db = -round(min(max(1.0 + (score * 2.2), 1.5), 3.0), 2)
+        params = {"threshold": -20, "ratio": 2.0, "preGainDb": -gain_trim_db}
+    elif "low_mid" in band_hints:
+        action_type = "EQ_CUT"
+        band_low_hz = 180
+        band_high_hz = 1200
+        gain_delta_db = -round(min(max(0.8 + (score * 1.6), 1.2), 2.8), 2)
+        params = {"q": 1.1, "preGainDb": -gain_trim_db}
+    return {
+        "regionId": region.get("id"),
+        "actionType": action_type,
+        "targetScope": "TRACK",
+        "targetTrackId": int(region.get("track_id") or 0),
+        "startMs": int(region.get("start_ms") or 0),
+        "endMs": int(region.get("end_ms") or 0),
+        "bandLowHz": band_low_hz,
+        "bandHighHz": band_high_hz,
+        "gainDeltaDb": gain_delta_db,
+        "params": params,
+        "origin": region.get("auto_fix_source", "direct_detection"),
+        "sourceMasterCandidateId": region.get("source_master_candidate_id"),
+    }
+
+
+def _build_high_band_harshness_fix_recipe(region: dict[str, object]) -> dict[str, object]:
+    score = float(region.get("score", 0.0))
+    reduction_db = round(min(max(1.2 + (score * 2.5), 1.5), 3.5), 2)
+    return {
+        "regionId": region.get("id"),
+        "actionType": "DYNAMIC_EQ",
+        "targetScope": "TRACK",
+        "targetTrackId": int(region.get("track_id") or 0),
+        "startMs": int(region.get("start_ms") or 0),
+        "endMs": int(region.get("end_ms") or 0),
+        "bandLowHz": region.get("band_low_hz"),
+        "bandHighHz": region.get("band_high_hz"),
+        "gainDeltaDb": -reduction_db,
+        "params": {"threshold": -20, "ratio": 2.1},
+    }
+
+
+def _build_master_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object]:
+    score = float(region.get("score", 0.0))
+    pre_gain_db = round(min(max(1.5 + (score * 3.5), 2.0), 5.0), 2)
+    action_type = "TRUE_PEAK_LIMITER"
+    gain_delta_db = None
+    params: dict[str, object] = {
+        "preGainDb": -pre_gain_db,
+        "ceilingDbfs": -1.0,
+        "attackMs": 2,
+        "releaseMs": 80,
+        "lookaheadMs": 3,
+    }
+    if float(region.get("score", 0.0)) < 0.2 and not region.get("contributing_track_ids"):
+        action_type = "GAIN_TRIM"
+        gain_delta_db = -pre_gain_db
+        params = {"preGainDb": -pre_gain_db}
+    return {
+        "regionId": region.get("id"),
+        "actionType": action_type,
+        "targetScope": "MASTER",
+        "targetTrackId": None,
+        "startMs": int(region.get("start_ms") or 0),
+        "endMs": int(region.get("end_ms") or 0),
+        "bandLowHz": None,
+        "bandHighHz": None,
+        "gainDeltaDb": gain_delta_db,
+        "params": params,
+        "origin": region.get("auto_fix_source", "residual_master_clipping"),
+        "sourceMasterCandidateId": region.get("source_master_candidate_id"),
+    }
+
+
+def _collect_track_clipping_band_hints(region: dict[str, object]) -> set[str]:
+    hints: set[str] = set()
+    for hint in region.get("band_hints", []) or []:
+        hints.add(str(hint))
+    contributor_hints = region.get("contributor_band_hints", {})
+    track_id = region.get("track_id")
+    if track_id is not None and str(track_id) in contributor_hints:
+        hints.update(str(hint) for hint in contributor_hints[str(track_id)])
+    if track_id in contributor_hints:
+        hints.update(str(hint) for hint in contributor_hints[track_id])
+    return hints

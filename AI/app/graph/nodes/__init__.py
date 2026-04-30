@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from app.graph.nodes.analysis import (
+    analyze_master_clipping_contributors,
     candidate_ranking,
     cheap_dsp_scan,
     clap_gate,
     detect_band_overlap,
     detect_clipping,
+    detect_master_clipping,
+    detect_master_clipping_candidates,
+    detect_residual_master_clipping,
+    detect_track_clipping,
     detect_high_band_harshness,
     detect_sibilance,
     infer_track_roles,
@@ -17,21 +22,20 @@ from app.graph.nodes.analysis import (
 from app.graph.nodes.review import plan_critic, plan_rule_validator
 from app.graph.nodes.runtime import (
     apply_selected_edit_recipe,
-    auto_fix_sibilance,
+    auto_fix_non_user_issues,
     commit_selected_edit_recipe,
     emit_feedback_event,
     fail_workflow,
     finalize_output,
     init_state,
     load_entry_context,
-    log_sibilance_fix,
+    log_non_user_issue_fixes,
     persist_analysis_result,
     render_preview,
     resume_after_plan_input,
     user_action_gate,
     wait_user_confirm,
     wait_user_plan_input,
-    wait_user_selection,
 )
 from app.graph.nodes.suggestion import (
     approve_plan,
@@ -40,14 +44,19 @@ from app.graph.nodes.suggestion import (
 )
 
 __all__ = [
+    "analyze_master_clipping_contributors",
     "apply_selected_edit_recipe",
-    "auto_fix_sibilance",
+    "auto_fix_non_user_issues",
     "candidate_ranking",
     "cheap_dsp_scan",
     "clap_gate",
     "commit_selected_edit_recipe",
     "detect_band_overlap",
     "detect_clipping",
+    "detect_master_clipping",
+    "detect_master_clipping_candidates",
+    "detect_residual_master_clipping",
+    "detect_track_clipping",
     "detect_high_band_harshness",
     "detect_sibilance",
     "emit_feedback_event",
@@ -58,7 +67,7 @@ __all__ = [
     "init_state",
     "load_entry_context",
     "load_project_snapshot",
-    "log_sibilance_fix",
+    "log_non_user_issue_fixes",
     "materialize_execution_plan",
     "merge_analysis",
     "plan_critic",
@@ -72,5 +81,4 @@ __all__ = [
     "user_action_gate",
     "wait_user_confirm",
     "wait_user_plan_input",
-    "wait_user_selection",
 ]

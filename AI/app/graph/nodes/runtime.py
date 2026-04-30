@@ -28,12 +28,13 @@ def init_state(state: WorkflowState) -> WorkflowState:
         phase="job_initialized",
         progress=4,
         runtime_status="running",
-        durable_status="IN_PROGRESS",
+        durable_status="RUNNING",
         extra={"started_at": state.get("started_at") or utc_now()},
     )
 
 
 def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
+    # candidate_ranking 이후에는 사용자 선택값이 들어올 때까지 여기서 멈춘다.
     return workflow_update(
         state,
         node="wait_user_plan_input",
@@ -45,6 +46,7 @@ def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
 
 
 def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
+    # selected_region_id / preserve_clip_id는 이후 계획 생성의 기준 입력이므로 둘 다 필수다.
     if not state.get("selected_region_id"):
         return fail_workflow(
             {
@@ -64,6 +66,7 @@ def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
             }
         )
     notes = [*state.get("notes", [])]
+    # 사용자 입력이 실제로 어떤 값으로 계획 단계에 전달됐는지 추적할 수 있게 메모를 남긴다.
     notes.append(
         f"User selected region {state['selected_region_id']} and preserve clip "
         f"{state['preserve_clip_id']} for plan generation."
@@ -76,7 +79,7 @@ def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
         phase="user_plan_input_resolved",
         progress=64,
         runtime_status="running",
-        durable_status="IN_PROGRESS",
+        durable_status="RUNNING",
         extra={"notes": notes},
     )
 
@@ -187,11 +190,30 @@ def persist_analysis_result(state: WorkflowState) -> WorkflowState:
 
 
 def user_action_gate(state: WorkflowState) -> WorkflowState:
+    preview_action_ids = [*state.get("preview_action_ids", [])]
+    selected_action_ids = [*state.get("selected_action_ids", [])]
+    notes = [*state.get("notes", [])]
+
+    # 단일 action 제안은 선택 단계를 생략하고 preview/confirm으로 바로 넘긴다.
+    if (
+        state.get("user_action_required")
+        and len(preview_action_ids) == 1
+        and not selected_action_ids
+    ):
+        selected_action_ids = [preview_action_ids[0]]
+        notes.append(
+            f"Auto-selected single preview action {preview_action_ids[0]} and skipped user selection."
+        )
+
     return workflow_update(
         state,
         node="user_action_gate",
         phase="user_action_gate_checked",
         progress=94,
+        extra={
+            "selected_action_ids": selected_action_ids,
+            "notes": notes,
+        },
     )
 
 
@@ -231,7 +253,7 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         phase="selected_recipe_applied",
         progress=96,
         runtime_status="running",
-        durable_status="IN_PROGRESS",
+        durable_status="RUNNING",
         extra={"apply_result_id": f"{state['job_id']}-apply"},
     )
 
@@ -267,7 +289,7 @@ def commit_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         phase="selected_recipe_committed",
         progress=99,
         runtime_status="running",
-        durable_status="IN_PROGRESS",
+        durable_status="RUNNING",
     )
 
 
@@ -356,12 +378,13 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             if dispatch.requested_by is not None
             else restored.get("requested_by"),
             "runtime_status": "running",
-            "durable_status": "IN_PROGRESS",
+            "durable_status": "RUNNING",
             "heartbeat_at": utc_now(),
             "transition_log": append_transition(restored, "load_entry_context"),
             "current_node": "load_entry_context",
         }
     )
+    # wait 상태에서 재개될 때 사용자가 보낸 입력값만 덮어써서 다음 노드가 그대로 이어받게 한다.
     if dispatch.selected_region_id is not None:
         restored["selected_region_id"] = dispatch.selected_region_id
     if dispatch.preserve_clip_id is not None:

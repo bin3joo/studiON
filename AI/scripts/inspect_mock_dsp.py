@@ -12,8 +12,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Mock DSP 워크플로우를 직접 실행하고 핵심 상태를 출력합니다.",
     )
-    parser.add_argument("--job-id", default="inspect-job")
-    parser.add_argument("--project-id", default="inspect-project")
+    parser.add_argument("--job-id", type=int, default=10001)
+    parser.add_argument("--project-id", type=int, default=20001)
     parser.add_argument("--track-ids", default="10,20")
     parser.add_argument(
         "--audio-paths",
@@ -31,6 +31,26 @@ def parse_args() -> argparse.Namespace:
         "--auto-resume-mix-intent",
         action="store_true",
         help="main_track_id가 있으면 waiting 상태를 자동으로 한 번 더 진행합니다.",
+    )
+    parser.add_argument(
+        "--resume-plan-input",
+        action="store_true",
+        help="wait_user_plan_input 결과를 사용자 입력으로 바로 재개합니다.",
+    )
+    parser.add_argument(
+        "--selected-region-id",
+        default=None,
+        help="재개할 때 사용할 선택된 문제 구간 id입니다.",
+    )
+    parser.add_argument(
+        "--preserve-clip-id",
+        default=None,
+        help="재개할 때 사용할 보존 기준 clip id입니다.",
+    )
+    parser.add_argument(
+        "--user-feedback-message",
+        default=None,
+        help="사용자가 추가로 남긴 변경 요구사항입니다.",
     )
     parser.add_argument(
         "--json-only",
@@ -72,7 +92,7 @@ def build_project_snapshot(args: argparse.Namespace) -> dict[str, Any]:
             end_ms = min(start_ms + clip_length_ms + 600, args.duration_ms)
             clips.append(
                 {
-                    "clip_id": f"clip-{track_id}-{clip_index + 1}",
+                    "clip_id": (track_id * 1000) + clip_index + 1,
                     "track_id": track_id,
                     "start_ms": start_ms,
                     "end_ms": end_ms,
@@ -114,6 +134,8 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
 def run_request(args: argparse.Namespace) -> dict[str, Any]:
     initial_request = build_request(args)
     first_result = run_workflow_graph(initial_request)
+    if args.resume_plan_input:
+        return _resume_plan_input(first_result, args)
     if not args.auto_resume_mix_intent or args.main_track_id is None:
         return first_result
     if first_result.get("phase") != "waiting_for_user_mix_intent":
@@ -124,6 +146,44 @@ def run_request(args: argparse.Namespace) -> dict[str, Any]:
             "main_track_id": args.main_track_id,
         }
     )
+
+
+def _resume_plan_input(first_result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    if first_result.get("phase") != "waiting_for_user_plan_input":
+        return first_result
+
+    # 명시 인자가 없으면 실제 UI와 비슷하게 랭킹 1순위 region과 첫 affected clip을 기본값으로 사용한다.
+    selected_region_id = args.selected_region_id or _default_selected_region_id(first_result)
+    preserve_clip_id = args.preserve_clip_id or _default_preserve_clip_id(
+        first_result,
+        selected_region_id,
+    )
+    resume_payload = {
+        **first_result,
+        "selected_region_id": selected_region_id,
+        "preserve_clip_id": preserve_clip_id,
+    }
+    if args.user_feedback_message:
+        resume_payload["user_feedback_message"] = args.user_feedback_message
+    return run_workflow_graph(resume_payload)
+
+
+def _default_selected_region_id(result: dict[str, Any]) -> str | None:
+    ranked_candidate_ids = result.get("ranked_candidate_ids", [])
+    if ranked_candidate_ids:
+        return str(ranked_candidate_ids[0])
+    return None
+
+
+def _default_preserve_clip_id(result: dict[str, Any], selected_region_id: str | None) -> str | None:
+    if selected_region_id is None:
+        return None
+    for region in result.get("analysis_regions", []):
+        if region.get("id") == selected_region_id:
+            affected_clip_ids = region.get("affected_clip_ids", [])
+            if affected_clip_ids:
+                return str(affected_clip_ids[0])
+    return None
 
 
 def build_preview_payload(

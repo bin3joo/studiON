@@ -115,10 +115,7 @@ def sample_track_clips(state: WorkflowState) -> WorkflowState:
     }
     """
     representative_specs = _build_track_representative_specs(state)     # 트랙별 CLAP 판정에 들어갈 원본 파일 중간 데이터
-    sampled_clip_ids = [
-        str(spec["clip_id"])
-        for spec in representative_specs
-    ]
+    sampled_clip_ids = [int(spec["clip_id"]) for spec in representative_specs]
     return workflow_update(
         state,
         node="sample_track_clips",
@@ -478,7 +475,7 @@ def _build_track_representative_specs(
             clips_by_track[track_id],
             key=lambda clip: (
                 int(clip.get("start_ms") or 0),
-                str(clip.get("clip_id") or ""),
+                int(clip.get("clip_id") or 0),
             ),
         )
         selected_clip: dict[str, object] | None = None
@@ -493,7 +490,7 @@ def _build_track_representative_specs(
         representative_specs.append(
             {
                 "track_id": track_id,
-                "clip_id": str(selected_clip["clip_id"]),
+                "clip_id": int(selected_clip["clip_id"]),
                 "resolved_audio_path": str(selected_clip["resolved_audio_path"]),
                 "source_format": Path(str(selected_clip["resolved_audio_path"])).suffix or ".wav",
             }
@@ -623,17 +620,18 @@ def _build_compact_dsp_summary(state: WorkflowState) -> tuple[dict[str, object],
 
 def _resolve_all_clip_audio(clip_index: list[dict[str, object]]) -> list[dict[str, object]]:
     resolved_clips: list[dict[str, object]] = []
-    missing_clip_ids: list[str] = []
+    missing_clip_ids: list[int] = []
     for clip in clip_index:
         audio_path = _resolve_audio_path(clip)
         if audio_path is None:
-            missing_clip_ids.append(str(clip["clip_id"]))
+            missing_clip_ids.append(int(clip["clip_id"]))
             continue
         resolved_clips.append({**clip, "resolved_audio_path": audio_path})
     if missing_clip_ids:
         raise DSPBuildError(
             "AUDIO_SOURCE_MISSING",
-            "Missing resolvable audio source for clips: " + ", ".join(missing_clip_ids),
+            "Missing resolvable audio source for clips: "
+            + ", ".join(str(clip_id) for clip_id in missing_clip_ids),
         )
     return resolved_clips
 
@@ -659,7 +657,7 @@ def _build_clap_track_payloads(
                 "CLAP_SAMPLE_MISSING",
                 f"Missing representative source audio for CLAP candidate track {track_id}.",
             )
-        clip_id = str(spec["clip_id"])
+        clip_id = int(spec["clip_id"])
         resolved_audio_path = str(spec["resolved_audio_path"])
         metadata = {
             "track_id": track_id,
@@ -1342,7 +1340,7 @@ def _project_region_timeline(
         if int(bar["start_ms"]) < end_ms and int(bar["end_ms"]) > start_ms
     ]
     affected_clip_ids = [
-        str(clip["clip_id"])
+        int(clip["clip_id"])
         for clip in state.get("clip_index", [])
         if int(clip["start_ms"]) < end_ms and int(clip["end_ms"]) > start_ms
         and (

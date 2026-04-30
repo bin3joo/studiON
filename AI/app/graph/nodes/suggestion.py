@@ -3,37 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.graph.nodes.common import build_action, workflow_update
+from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
-
-
-def build_rule_candidates(state: WorkflowState) -> WorkflowState:
-    region_map = {region["id"]: region for region in state.get("analysis_regions", [])}
-    selected_region_id = state.get("selected_region_id") or next(
-        iter(state.get("ranked_candidate_ids", [])),
-        None,
-    )
-    if selected_region_id is None and state.get("analysis_regions"):
-        selected_region_id = state["analysis_regions"][0]["id"]
-    selected_region = region_map.get(selected_region_id) if selected_region_id else None
-    preserve_clip_id = state.get("preserve_clip_id")
-    rule_candidate_payload = {
-        "selectedRegionId": selected_region_id,
-        "preserveClipId": preserve_clip_id,
-        "userFeedbackMessage": state.get("user_feedback_message"),
-        "region": deepcopy(selected_region) if selected_region else None,
-        "candidates": [],
-    }
-    if selected_region:
-        candidate = _build_rule_candidate(state, selected_region, preserve_clip_id)
-        if candidate is not None:
-            rule_candidate_payload["candidates"].append(candidate)
-    return workflow_update(
-        state,
-        node="build_rule_candidates",
-        phase="rule_candidates_built",
-        progress=70,
-        extra={"rule_candidate_payload": rule_candidate_payload},
-    )
+from app.services.planning_llm import PlanningLLMError, get_planning_llm_client
 
 
 def planning_agent(state: WorkflowState) -> WorkflowState:
@@ -41,35 +13,51 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
     if state.get("validator_result") == "REVISE" or state.get("critic_result") == "REVISE":
         revise_count += 1
 
-    candidate_payload = state.get("rule_candidate_payload") or {}
-    candidates = candidate_payload.get("candidates", [])
-    if not candidates:
-        return workflow_update(
-            state,
-            node="planning_agent",
-            phase="plan_generated",
-            progress=74,
-            extra={
-                "plan_payload": {},
-                "plan_status": "SKIPPED",
-                "plan_revision_notes": [],
-                "revise_count": revise_count,
-            },
+    selected_region = _resolve_selected_region(state)
+    if selected_region is None:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "PLANNING_REGION_NOT_FOUND",
+                "failure_message": "The selected analysis region could not be restored for planning.",
+            }
         )
 
-    selected_candidate = deepcopy(candidates[0])
-    region = candidate_payload.get("region") or {}
-    user_feedback_message = state.get("user_feedback_message")
-    plan_payload = {
-        "selectedRegionId": candidate_payload.get("selectedRegionId"),
-        "preserveClipId": candidate_payload.get("preserveClipId"),
-        "strategyTitle": _group_title_for_region(region),
-        "strategySummary": _group_summary_for_region(region, user_feedback_message),
-        "summary": _suggestion_summary_for_region(region),
-        "explanation": _suggestion_explanation_for_region(region, user_feedback_message),
-        "candidate": selected_candidate,
-        "userFeedbackMessage": user_feedback_message,
-    }
+    selected_region_id = str(selected_region["id"])
+    preserve_clip_id = state.get("preserve_clip_id")
+    if preserve_clip_id is None:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "MISSING_PRESERVE_CLIP",
+                "failure_message": "A preserve clip selection is required before planning.",
+            }
+        )
+
+    try:
+        llm_response = get_planning_llm_client().generate_plan(
+            selected_region_id=selected_region_id,
+            preserve_clip_id=int(preserve_clip_id),
+            user_feedback_message=state.get("user_feedback_message"),
+            region=deepcopy(selected_region),
+            clip_context=_build_clip_context(state, selected_region, int(preserve_clip_id)),
+            revision_notes=[*state.get("plan_revision_notes", [])],
+        )
+    except PlanningLLMError as exc:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": exc.code,
+                "failure_message": exc.message,
+            }
+        )
+
+    plan_payload = _normalize_plan_payload(
+        state,
+        region=selected_region,
+        preserve_clip_id=int(preserve_clip_id),
+        raw_plan_payload=llm_response.plan_payload,
+    )
     return workflow_update(
         state,
         node="planning_agent",
@@ -78,7 +66,6 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
         extra={
             "plan_payload": plan_payload,
             "plan_status": "DRAFT",
-            "plan_revision_notes": [],
             "validator_result": None,
             "critic_result": None,
             "revise_count": revise_count,
@@ -147,29 +134,82 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     )
 
 
-def _build_rule_candidate(
+def _resolve_selected_region(state: WorkflowState) -> dict[str, object] | None:
+    region_map = {region["id"]: region for region in state.get("analysis_regions", [])}
+    selected_region_id = state.get("selected_region_id") or next(
+        iter(state.get("ranked_candidate_ids", [])),
+        None,
+    )
+    if selected_region_id is None and state.get("analysis_regions"):
+        selected_region_id = state["analysis_regions"][0]["id"]
+    return deepcopy(region_map.get(selected_region_id)) if selected_region_id else None
+
+
+def _build_clip_context(
     state: WorkflowState,
     region: dict[str, object],
-    preserve_clip_id: str | None,
-) -> dict[str, object] | None:
-    issue = region.get("issue_type")
-    action = _build_region_action(state, region=region, preserve_clip_id=preserve_clip_id, index=1)
-    if action is None:
-        return None
-    return {
-        "candidateId": f"{state['job_id']}-rule-candidate-1",
-        "issueType": issue,
-        "preserveClipId": preserve_clip_id,
-        "targetTrackId": action["targetTrackId"],
-        "action": action,
-    }
+    preserve_clip_id: int,
+) -> list[dict[str, object]]:
+    involved_track_ids = {int(track_id) for track_id in region.get("involved_track_ids", [])}
+    if region.get("track_id") is not None:
+        involved_track_ids.add(int(region["track_id"]))
+    if region.get("secondary_track_id") is not None:
+        involved_track_ids.add(int(region["secondary_track_id"]))
+    affected_clip_ids = {int(clip_id) for clip_id in region.get("affected_clip_ids", [])}
+    affected_clip_ids.add(preserve_clip_id)
+
+    clip_context: list[dict[str, object]] = []
+    for clip in state.get("clip_index", []):
+        clip_id = int(clip.get("clip_id") or 0)
+        track_id = int(clip.get("track_id") or 0)
+        if clip_id not in affected_clip_ids and track_id not in involved_track_ids:
+            continue
+        clip_context.append(
+            {
+                "clip_id": clip_id,
+                "track_id": track_id,
+                "start_ms": clip.get("start_ms"),
+                "end_ms": clip.get("end_ms"),
+                "is_preserve_target": clip_id == preserve_clip_id,
+            }
+        )
+    return clip_context
+
+
+def _normalize_plan_payload(
+    state: WorkflowState,
+    *,
+    region: dict[str, object],
+    preserve_clip_id: int,
+    raw_plan_payload: dict[str, object],
+) -> dict[str, object]:
+    plan_payload = deepcopy(raw_plan_payload)
+    candidate = deepcopy(plan_payload.get("candidate") or {})
+    action = deepcopy(candidate.get("action") or {})
+
+    selected_region_id = str(region["id"])
+    plan_payload["selectedRegionId"] = selected_region_id
+    plan_payload["preserveClipId"] = preserve_clip_id
+    plan_payload["userFeedbackMessage"] = state.get("user_feedback_message")
+
+    candidate["candidateId"] = str(candidate.get("candidateId") or f"{state['job_id']}-plan-candidate-1")
+    candidate["issueType"] = region.get("issue_type")
+    candidate["preserveClipId"] = preserve_clip_id
+
+    action["actionId"] = str(action.get("actionId") or f"{state['job_id']}-action-1")
+    action["targetScope"] = action.get("targetScope", "TRACK")
+    action["params"] = action.get("params") or {}
+    candidate["targetTrackId"] = action.get("targetTrackId")
+    candidate["action"] = action
+    plan_payload["candidate"] = candidate
+    return plan_payload
 
 
 def _build_region_action(
     state: WorkflowState,
     *,
     region: dict[str, object],
-    preserve_clip_id: str | None,
+    preserve_clip_id: int | None,
     index: int,
 ) -> dict | None:
     issue = region.get("issue_type")
@@ -204,7 +244,7 @@ def _build_region_action(
         return build_action(
             state,
             index=index,
-            action_type="TRUE_PEAK_LIMITER",
+            action_type="GAIN_TRIM",
             track_id=None,
             target_scope="MASTER",
             start_ms=region["start_ms"],
@@ -212,6 +252,7 @@ def _build_region_action(
             gain_delta_db=round(-recommended_trim_db, 2),
             params={
                 "preGainDb": round(-recommended_trim_db, 2),
+                "postAction": "TRUE_PEAK_LIMITER",
                 "ceilingDbfs": -1.0,
                 "attackMs": 2,
                 "releaseMs": 80,
@@ -234,65 +275,10 @@ def _build_region_action(
     return None
 
 
-def _group_title_for_region(region: dict[str, object]) -> str:
-    title_map = {
-        "band_overlap": "대역 충돌 해결 계획",
-        "sibilance": "치찰음 완화 계획",
-        "high_band_harshness": "고역 harshness 완화 계획",
-    }
-    return title_map.get(region.get("issue_type"), "문제 구간 보정 계획")
-
-
-def _group_summary_for_region(
-    region: dict[str, object],
-    user_feedback_message: str | None,
-) -> str:
-    base = {
-        "band_overlap": "선택한 clip을 우선 보존하면서 겹치는 대역을 정리합니다.",
-        "sibilance": "선택한 clip의 치찰음만 필요한 구간에서 보수적으로 줄입니다.",
-        "high_band_harshness": "선택한 clip의 거친 고역만 구간 한정으로 완화합니다.",
-    }.get(region.get("issue_type"), "선택한 clip 우선순위에 맞춰 문제 구간을 정리합니다.")
-    if not user_feedback_message:
-        return base
-    return f"{base} 사용자 요구: {user_feedback_message}"
-
-
-def _suggestion_summary_for_region(region: dict[str, object]) -> str:
-    issue = region.get("issue_type")
-    if issue == "band_overlap":
-        return "보존 clip을 남기고 겹치는 대역을 조건부로 정리"
-    if issue == "sibilance":
-        return "선택 clip의 치찰음 구간만 de-esser 적용"
-    if issue == "high_band_harshness":
-        return "선택 clip의 고역 harshness만 dynamic EQ로 완화"
-    return "문제 구간 보정 제안"
-
-
-def _suggestion_explanation_for_region(
-    region: dict[str, object],
-    user_feedback_message: str | None,
-) -> str:
-    issue = region.get("issue_type")
-    base = {
-        "band_overlap": (
-            "사용자가 보존하려는 clip은 유지하고, 겹치는 상대 clip 쪽 대역만 "
-            "보수적으로 누릅니다."
-        ),
-        "sibilance": (
-            "선택한 clip의 치찰음 대역만 줄여 밝기를 크게 해치지 않는 방향으로 "
-            "정리합니다."
-        ),
-        "high_band_harshness": "선택한 clip의 거친 고역만 필요한 구간에 한정해 완화합니다.",
-    }.get(issue, "선택한 clip 우선순위에 맞춰 문제 구간을 정리합니다.")
-    if not user_feedback_message:
-        return base
-    return f"{base} 사용자 피드백을 반영해 계획 강도와 우선순위를 조정합니다."
-
-
 def _resolve_overlap_target_track(
     state: WorkflowState,
     region: dict[str, object],
-    preserve_clip_id: str | None,
+    preserve_clip_id: int | None,
 ) -> int:
     primary = int(region.get("track_id") or 0)
     involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
@@ -333,9 +319,9 @@ def _resolve_overlap_target_track(
     return secondary
 
 
-def _resolve_clip_track_id(state: WorkflowState, clip_id: str) -> int | None:
+def _resolve_clip_track_id(state: WorkflowState, clip_id: int) -> int | None:
     for clip in state.get("clip_index", []):
-        if str(clip.get("clip_id")) == str(clip_id):
+        if int(clip.get("clip_id") or 0) == int(clip_id):
             return int(clip["track_id"])
     return None
 

@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Planner/Critic Playground</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf8;
+      --line: #d8cdbb;
+      --text: #201a15;
+      --muted: #6d6258;
+      --accent: #0f6d62;
+      --accent-2: #a54b2a;
+      --code: #f2ede3;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(15, 109, 98, 0.08), transparent 24rem),
+        radial-gradient(circle at top right, rgba(165, 75, 42, 0.08), transparent 24rem),
+        var(--bg);
+    }
+
+    .wrap {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1, h2 {
+      margin: 0 0 12px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .notice {
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.85);
+      border-radius: 14px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.1fr 0.9fr;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(32, 26, 21, 0.05);
+    }
+
+    .stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    input, textarea, button {
+      font: inherit;
+    }
+
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: white;
+      color: var(--text);
+    }
+
+    textarea {
+      min-height: 240px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    .row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .row-3 {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #3c4f6f;
+    }
+
+    button.ghost {
+      background: #e9e0d2;
+      color: var(--text);
+    }
+
+    button.warn {
+      background: var(--accent-2);
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      border-radius: 14px;
+      background: var(--code);
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.45;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #ece5d8;
+      color: var(--text);
+      font-size: 13px;
+      margin: 0 8px 8px 0;
+    }
+
+    .regions {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .region {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: white;
+    }
+
+    .region strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 960px) {
+      .grid, .row, .row-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="notice">
+      <h1>Planner/Critic Playground</h1>
+      <p>실제 검증 경로는 <code>start -> poll -> resume</code> 입니다. planner는 <code>gpt-5.2</code>, critic은 <code>claude-sonnet-4-5-20250929</code>를 타게 됩니다.</p>
+      <p>기본 서버 설정은 CORS를 허용하도록 맞췄습니다. 다른 포트나 정적 파일 서버에서 이 페이지를 띄워도 직접 API를 호출할 수 있어야 합니다.</p>
+    </div>
+
+    <div class="grid">
+      <div class="stack">
+        <section class="panel">
+          <h2>1. Start Job</h2>
+          <div class="row">
+            <div>
+              <label for="apiBase">API Base</label>
+              <input id="apiBase" value="http://127.0.0.1:8000/api/v1" />
+            </div>
+            <div>
+              <label for="requestedBy">requested_by</label>
+              <input id="requestedBy" type="number" value="1" />
+            </div>
+          </div>
+          <div class="row-3" style="margin-top: 12px;">
+            <div>
+              <label for="jobId">job_id</label>
+              <input id="jobId" type="number" value="910001" />
+            </div>
+            <div>
+              <label for="projectId">project_id</label>
+              <input id="projectId" type="number" value="310001" />
+            </div>
+            <div>
+              <label for="issueTypes">issue_types</label>
+              <input id="issueTypes" value="band_overlap,clipping" />
+            </div>
+          </div>
+          <div style="margin-top: 12px;">
+            <label for="snapshotJson">project_snapshot JSON</label>
+            <textarea id="snapshotJson"></textarea>
+          </div>
+          <div class="buttons">
+            <button id="fillSampleBtn" class="ghost" type="button">샘플 채우기</button>
+            <button id="startBtn" type="button">Start</button>
+            <button id="pollBtn" class="secondary" type="button">Poll</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>2. Resume Plan Input</h2>
+          <div class="row">
+            <div>
+              <label for="selectedRegionId">selected_region_id</label>
+              <input id="selectedRegionId" />
+            </div>
+            <div>
+              <label for="preserveClipId">preserve_clip_id</label>
+              <input id="preserveClipId" type="number" />
+            </div>
+          </div>
+          <div style="margin-top: 12px;">
+            <label for="feedbackMessage">user_feedback_message</label>
+            <textarea id="feedbackMessage" style="min-height: 96px;">보컬은 유지하고 거친 겹침만 줄여줘</textarea>
+          </div>
+          <div class="buttons">
+            <button id="autofillBtn" class="ghost" type="button">첫 후보 자동 채우기</button>
+            <button id="resumeBtn" class="warn" type="button">Resume</button>
+          </div>
+          <div class="regions" id="regions"></div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="panel">
+          <h2>Latest Status</h2>
+          <div id="summaryPills"></div>
+          <pre id="summaryText">아직 호출 전입니다.</pre>
+        </section>
+
+        <section class="panel">
+          <h2>Latest Response JSON</h2>
+          <pre id="responseJson">{}</pre>
+        </section>
+
+        <section class="panel">
+          <h2>Quick API Guide</h2>
+          <pre>POST /workflow/jobs/start
+GET  /workflow/jobs/{job_id}
+POST /workflow/jobs/resume
+
+resume payload required fields:
+- job_id
+- project_id
+- selected_region_id
+- preserve_clip_id
+- user_feedback_message (optional)</pre>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const els = {
+      apiBase: document.getElementById("apiBase"),
+      requestedBy: document.getElementById("requestedBy"),
+      jobId: document.getElementById("jobId"),
+      projectId: document.getElementById("projectId"),
+      issueTypes: document.getElementById("issueTypes"),
+      snapshotJson: document.getElementById("snapshotJson"),
+      selectedRegionId: document.getElementById("selectedRegionId"),
+      preserveClipId: document.getElementById("preserveClipId"),
+      feedbackMessage: document.getElementById("feedbackMessage"),
+      summaryText: document.getElementById("summaryText"),
+      responseJson: document.getElementById("responseJson"),
+      summaryPills: document.getElementById("summaryPills"),
+      regions: document.getElementById("regions"),
+      fillSampleBtn: document.getElementById("fillSampleBtn"),
+      startBtn: document.getElementById("startBtn"),
+      pollBtn: document.getElementById("pollBtn"),
+      autofillBtn: document.getElementById("autofillBtn"),
+      resumeBtn: document.getElementById("resumeBtn"),
+    };
+
+    let latestStatus = null;
+
+    function pretty(value) {
+      return JSON.stringify(value, null, 2);
+    }
+
+    function api(path) {
+      return `${els.apiBase.value.replace(/\/$/, "")}${path}`;
+    }
+
+    function parseIssueTypes() {
+      return els.issueTypes.value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function setResponse(data) {
+      latestStatus = data;
+      els.responseJson.textContent = pretty(data);
+      renderSummary(data);
+      renderRegions(data);
+    }
+
+    function renderSummary(data) {
+      const job = data?.job ?? {};
+      const projections = data?.projections ?? {};
+      const planState = projections.plan_state ?? {};
+      const suggestionGroup = projections.suggestion_group ?? null;
+
+      els.summaryPills.innerHTML = "";
+      [
+        ["status", job.status],
+        ["phase", job.phase],
+        ["current_node", job.current_node],
+        ["plan_status", planState.status],
+        ["validator", planState.validator_result],
+        ["critic", planState.critic_result],
+      ].forEach(([label, value]) => {
+        if (!value) return;
+        const span = document.createElement("span");
+        span.className = "pill";
+        span.textContent = `${label}: ${value}`;
+        els.summaryPills.appendChild(span);
+      });
+
+      const summary = {
+        job,
+        plan_state: planState,
+        suggestion_group: suggestionGroup,
+      };
+      els.summaryText.textContent = pretty(summary);
+    }
+
+    function renderRegions(data) {
+      const regions = data?.projections?.analysis_regions ?? [];
+      els.regions.innerHTML = "";
+      for (const region of regions) {
+        const div = document.createElement("div");
+        div.className = "region";
+        const affected = Array.isArray(region.affected_clip_ids) ? region.affected_clip_ids : [];
+        div.innerHTML = `
+          <strong>${region.id}</strong>
+          <div class="muted">issue: ${region.issue_type ?? ""}</div>
+          <div class="muted">range: ${region.start_ms ?? "?"}ms - ${region.end_ms ?? "?"}ms</div>
+          <div class="muted">track: ${region.track_id ?? "-"} / secondary: ${region.secondary_track_id ?? "-"}</div>
+          <div class="muted">affected clips: ${affected.join(", ") || "-"}</div>
+        `;
+        const fillBtn = document.createElement("button");
+        fillBtn.type = "button";
+        fillBtn.className = "ghost";
+        fillBtn.style.marginTop = "10px";
+        fillBtn.textContent = "이 값으로 채우기";
+        fillBtn.addEventListener("click", () => fillPlanInputFromRegion(region));
+        div.appendChild(fillBtn);
+        els.regions.appendChild(div);
+      }
+    }
+
+    function fillPlanInputFromRegion(region) {
+      els.selectedRegionId.value = region.id ?? "";
+      const firstClipId = Array.isArray(region.affected_clip_ids) ? region.affected_clip_ids[0] : "";
+      els.preserveClipId.value = firstClipId ?? "";
+    }
+
+    async function callJson(path, payload, method = "POST") {
+      const response = await fetch(api(path), {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { raw: text };
+      }
+      if (!response.ok) {
+        throw new Error(pretty(data));
+      }
+      return data;
+    }
+
+    async function startJob() {
+      const payload = {
+        job_id: Number(els.jobId.value),
+        project_id: Number(els.projectId.value),
+        requested_by: Number(els.requestedBy.value),
+        issue_types: parseIssueTypes(),
+        project_snapshot: JSON.parse(els.snapshotJson.value),
+      };
+      const data = await callJson("/workflow/jobs/start", payload);
+      setResponse(data);
+      els.summaryText.textContent = "start accepted\n\n" + pretty(data);
+    }
+
+    async function pollJob() {
+      const data = await callJson(`/workflow/jobs/${Number(els.jobId.value)}`, null, "GET");
+      setResponse(data);
+    }
+
+    async function resumePlanInput() {
+      const payload = {
+        job_id: Number(els.jobId.value),
+        project_id: Number(els.projectId.value),
+        requested_by: Number(els.requestedBy.value),
+        selected_region_id: els.selectedRegionId.value.trim(),
+        preserve_clip_id: Number(els.preserveClipId.value),
+        user_feedback_message: els.feedbackMessage.value.trim() || null,
+      };
+      const data = await callJson("/workflow/jobs/resume", payload);
+      setResponse(data);
+      els.summaryText.textContent = "resume accepted\n\n" + pretty(data);
+    }
+
+    function autofillFirstRegion() {
+      const regions = latestStatus?.projections?.analysis_regions ?? [];
+      if (!regions.length) {
+        alert("먼저 Poll로 analysis_regions를 가져오세요.");
+        return;
+      }
+      fillPlanInputFromRegion(regions[0]);
+    }
+
+    function fillSampleSnapshot() {
+      const payload = {
+        duration_ms: 4800,
+        bpm: 120,
+        numerator: 4,
+        denominator: 4,
+        tracks: [
+          { track_id: 10, name: "Lead Vocal" },
+          { track_id: 20, name: "Backing Track" }
+        ],
+        clips: [
+          {
+            clip_id: 10001,
+            track_id: 10,
+            start_ms: 0,
+            end_ms: 4800,
+            audio_path: "C:/replace/with/real/vocal.wav",
+            audio_start_ms: 0,
+            audio_duration_ms: 4800
+          },
+          {
+            clip_id: 20001,
+            track_id: 20,
+            start_ms: 0,
+            end_ms: 4800,
+            audio_path: "C:/replace/with/real/support.wav",
+            audio_start_ms: 0,
+            audio_duration_ms: 4800
+          }
+        ]
+      };
+      els.snapshotJson.value = pretty(payload);
+    }
+
+    function wire(button, fn) {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await fn();
+        } catch (error) {
+          els.summaryText.textContent = String(error.message || error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+
+    fillSampleSnapshot();
+    wire(els.startBtn, startJob);
+    wire(els.pollBtn, pollJob);
+    wire(els.resumeBtn, resumePlanInput);
+    els.fillSampleBtn.addEventListener("click", fillSampleSnapshot);
+    els.autofillBtn.addEventListener("click", autofillFirstRegion);
+  </script>
+</body>
+</html>

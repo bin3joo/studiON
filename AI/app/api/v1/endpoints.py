@@ -34,23 +34,23 @@ router = APIRouter()
 
 
 class WorkflowRunRequest(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     track_ids: list[int] = Field(default_factory=list)
     project_snapshot: ProjectSnapshot | None = None
     issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
     selected_region_id: str | None = None
-    preserve_clip_id: str | None = None
+    preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
     selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
 
 class RuntimeRunRequest(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     track_ids: list[int] = Field(default_factory=list)
     project_snapshot: ProjectSnapshot | None = None
     issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
@@ -59,8 +59,8 @@ class RuntimeRunRequest(BaseModel):
 
 
 class ApplyRunRequest(BaseModel):
-    job_id: str
-    project_id: str
+    job_id: int
+    project_id: int
     preview_id: str
     suggestion_group_id: str
     selected_action_ids: list[str] = Field(default_factory=list)
@@ -77,8 +77,8 @@ class WorkflowDispatchResponse(BaseModel):
 
 
 class WorkflowJobView(BaseModel):
-    id: str
-    project_id: str
+    id: int
+    project_id: int
     status: str
     phase: str
     current_node: str | None = None
@@ -165,7 +165,7 @@ def workflow_job_resume(request: WorkflowResumePayload) -> WorkflowDispatchRespo
 
 
 @router.get("/workflow/jobs/{job_id}")
-def workflow_job_status(job_id: str) -> WorkflowJobStatusResponse:
+def workflow_job_status(job_id: int) -> WorkflowJobStatusResponse:
     # 프론트 polling은 이 조회 하나로 job 상태와 projection을 함께 받는다.
     return WorkflowJobStatusResponse.model_validate(get_workflow_job_status(job_id))
 

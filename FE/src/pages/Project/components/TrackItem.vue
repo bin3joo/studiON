@@ -234,7 +234,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
-          :class="[clip.isDragging? 'opacity-80 scale-[1.01] z-50!': 'transition duration-200']"
+          :class="[clip.isDragging? 'opacity-80 brightness-125 shadow-2xl z-50!': 'transition duration-200']"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
@@ -260,9 +260,6 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
       </div> 
       <div 
         class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
-        :class="[
-            { 'transition-[left] duration-150 ease-out': !trackStore.isPlaying }
-        ]"
         :style="{ 
             left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
             transform: 'translateX(-50%)',

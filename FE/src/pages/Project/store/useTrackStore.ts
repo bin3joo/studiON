@@ -115,7 +115,7 @@ export const useTrackStore = defineStore('track', () => {
             // 1. 현재 재생바 위치를 Tone.js 시간으로 변환하여 세팅
             Tone.getTransport().seconds = playheadPosition.value * secondsPerBar.value;
             // 2. 오디오 엔진 재생 시작
-            Tone.getTransport().start();
+            Tone.getTransport().start("+0.05");
             isPlaying.value = true;
             // 3. UI 업데이트 루프 시작
             updatePlayheadLoop();
@@ -216,7 +216,7 @@ export const useTrackStore = defineStore('track', () => {
 
             // 재생 중이었다면 다시 시계 돌리기
             if (wasPlaying) {
-                Tone.getTransport().start();
+                Tone.getTransport().start("+0.05");
             }
         }
     }

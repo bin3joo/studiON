@@ -17,6 +17,11 @@ export const useTrackStore = defineStore('track', () => {
     // 1. 상태(State) 선언
     // ==========================================
 
+    //오디오 객체 보관함 만들기 순수 자바스크립트 객체 보관용이기 때문에 ref를 사용하지 않는다.
+    //음원 파일의 데이터를 브라우저 메모리에 올려서 타이밍에 맞춰 스피커로 재생
+    const trackChannels = new Map<number, Tone.Channel>();  //트랙별 믹서(볼륨/팬)
+    const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
+
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들ㅇ르 담을 배열
     //<trackUIstate[]>로 UI용 트랙데이터만 들어올수 있음을 선언 ref이므로 추가 삭제시 화면이 반응함 
@@ -157,6 +162,36 @@ export const useTrackStore = defineStore('track', () => {
         }
     }
 
+    //오디오 파일 로딩 및 Transport 조절 함수
+    const setupAudioEngine = async (tracks: TrackUIState[]) => {
+        //테스트용 드럼 루프 파일 (CORS 허용)
+        const sampleUrl = "/test.mp3";
+
+        for (const track of tracks) {
+            //1.트랙 믹서 채널 생성 및 마스터 스피커(Destination)에 연결
+            const channel = new Tone.Channel(track.volume, track.pan).toDestination();
+            trackChannels.set(track.trackId, channel);
+
+            for (const clip of track.clips) {
+                //2. 오디오 플레이어 생성 및 버퍼 다운로드 시작
+                //clip.audio.url을 넣어야 하지만 지금은 샘플 유알엘 사용
+                const player = new Tone.Player(sampleUrl).connect(channel);
+
+                //파일이 브라우저 메모리에 완벽히 올라갈 때까지 대기
+                await player.loaded;
+                console.log(`클립${clip.clipId} 로딩 완료`);
+
+                //3. 타임라인의 start 마디에 맞춰 재생 예약
+                //초단위 계산 없이 숫자뒤에 'm'을 붙이면
+                //Tone.js 가 자동으로 BPM에 맞춰 해당 마디에 재생
+                player.sync().start(`${clip.start}m`);
+
+                //단일 클립 재생/정지용 플레이어 저장
+                clipPlayers.set(clip.clipId, player);
+            }
+        }
+    }
+
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
         // 통신 중 인터넷이 끊기거나 에러가 나더라도 앱이 터지지 않게 안저망을 치는 구문
@@ -187,7 +222,7 @@ export const useTrackStore = defineStore('track', () => {
                         clips: [
                             {
                                 clipId: 1,
-                                start: 10,
+                                start: 1,
                                 duration: 30,
                                 color: "#FF3DCB",
                                 audioStartMs: 0,
@@ -242,6 +277,9 @@ export const useTrackStore = defineStore('track', () => {
                         isDragging: false
                     }))
                 }));
+
+                //데이터 세팅 이후에 오디오 로딩 및 스케줄링 시작
+                setupAudioEngine(trackList.value);
             }
         } catch (error) {
             console.error("프로젝트 로딩 실패:", error);
@@ -249,35 +287,35 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // 실제 프로젝트 상세 호출 코드
-//     const fetchProject = async (projectId: number) => {
-//   try {
-//     const data = await projectApi.getProjectDetail(projectId)
+    //     const fetchProject = async (projectId: number) => {
+    //   try {
+    //     const data = await projectApi.getProjectDetail(projectId)
 
-//     projectInfo.value = {
-//       projectId: data.projectId,
-//       tempo: data.tempo,
-//       rootNote: data.rootNote,
-//       mode: data.projectMode,
-//       timeSigNumerator: data.timeSigNumerator,
-//       timeSigDenominator: data.timeSigDenominator,
-//       totalBarCount: data.totalBarCount,
-//     }
+    //     projectInfo.value = {
+    //       projectId: data.projectId,
+    //       tempo: data.tempo,
+    //       rootNote: data.rootNote,
+    //       mode: data.projectMode,
+    //       timeSigNumerator: data.timeSigNumerator,
+    //       timeSigDenominator: data.timeSigDenominator,
+    //       totalBarCount: data.totalBarCount,
+    //     }
 
-//     trackList.value = data.tracks.map((track): TrackUIState => ({
-//       ...track,
-//       height: 100,
-//       isSelected: false,
-//       clips: track.clips.map((clip): ClipUIState => ({
-//         ...clip,
-//         isSelected: false,
-//         isDragging: false,
-//       })),
-//     }))
-//   }
-//   catch (error) {
-//     console.error('프로젝트 로딩 실패:', error)
-//   }
-// }
+    //     trackList.value = data.tracks.map((track): TrackUIState => ({
+    //       ...track,
+    //       height: 100,
+    //       isSelected: false,
+    //       clips: track.clips.map((clip): ClipUIState => ({
+    //         ...clip,
+    //         isSelected: false,
+    //         isDragging: false,
+    //       })),
+    //     }))
+    //   }
+    //   catch (error) {
+    //     console.error('프로젝트 로딩 실패:', error)
+    //   }
+    // }
 
     // ==========================================
     // 3. 내보내기 (Return)

@@ -5,11 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipMoveEventDocument;
+import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
 import com.salmon.studion.domain.clip.repository.ClipRepository;
 import com.salmon.studion.domain.project.service.ProjectService;
@@ -154,6 +157,69 @@ public class ClipService {
                 .after(ClipMoveResponse.ClipPosition.builder()
                         .trackId(request.getTargetTrackId())
                         .startBar(request.getTargetStartBar())
+                        .build())
+                .build();
+    }
+
+    public ClipResizeResponse resizeClip(ClipResizeRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
+        String currentLocker = redisTemplate.opsForValue().get(lockKey);
+        if (!String.valueOf(userId).equals(currentLocker)) {
+            throw new BusinessException(ErrorCode.CLIP_LOCKED);
+        }
+
+        ClipState state = getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        Double beforeStart = state.getStart();
+        Double beforeDuration = state.getDuration();
+
+        ClipState updated = ClipState.builder()
+                .clipId(state.getClipId())
+                .trackId(state.getTrackId())
+                .start(request.getStartBar())
+                .duration(request.getLength())
+                .build();
+        saveClipStateToRedis(request.getProjectId(), updated);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            clipEventRepository.save(ClipResizeEventDocument.builder()
+                    .event("CLIP_RESIZE")
+                    .projectId(request.getProjectId())
+                    .clipId(request.getClipId())
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .before(ClipResizeEventDocument.ClipSize.builder()
+                            .startBar(beforeStart)
+                            .length(beforeDuration)
+                            .build())
+                    .after(ClipResizeEventDocument.ClipSize.builder()
+                            .startBar(request.getStartBar())
+                            .length(request.getLength())
+                            .build())
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_RESIZE, clipId={}", request.getClipId(), e);
+        }
+
+        return ClipResizeResponse.builder()
+                .clipId(request.getClipId())
+                .before(ClipResizeResponse.ClipSize.builder()
+                        .startBar(beforeStart)
+                        .length(beforeDuration)
+                        .build())
+                .after(ClipResizeResponse.ClipSize.builder()
+                        .startBar(request.getStartBar())
+                        .length(request.getLength())
                         .build())
                 .build();
     }

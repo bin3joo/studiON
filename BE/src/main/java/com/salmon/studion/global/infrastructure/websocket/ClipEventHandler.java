@@ -2,6 +2,7 @@ package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.service.ClipService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,8 @@ public class ClipEventHandler {
                 response = clipService.lockClip(lockRequest, userId);
                 break;
             case "CLIP_MOVE":
+                ClipMoveRequest moveRequest = objectMapper.convertValue(raw.getPayload(), ClipMoveRequest.class);
+                response = clipService.moveClip(moveRequest, userId);
                 break;
             case "CLIP_RESIZE":
                 break;

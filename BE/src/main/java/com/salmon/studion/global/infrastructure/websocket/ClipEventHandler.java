@@ -1,6 +1,7 @@
 package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
@@ -45,6 +46,8 @@ public class ClipEventHandler {
             case "CLIP_PASTE":
                 break;
             case "CLIP_DELETE":
+                ClipDeleteRequest deleteRequest = objectMapper.convertValue(raw.getPayload(), ClipDeleteRequest.class);
+                response = clipService.deleteClip(deleteRequest, userId);
                 break;
             default:
                 webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다.");

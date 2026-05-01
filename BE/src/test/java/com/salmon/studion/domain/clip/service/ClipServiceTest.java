@@ -3,9 +3,11 @@ package com.salmon.studion.domain.clip.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
@@ -549,6 +551,136 @@ class ClipServiceTest {
                 req.setStartBar(NEW_START_BAR);
 
                 assertThatThrownBy(() -> clipService.resizeClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("deleteClip")
+    class DeleteClipTest {
+
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+
+            lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                    .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
+            lenient().doAnswer(inv -> {
+                store.remove(inv.getArgument(1).toString());
+                return 1L;
+            }).when(hashOperations).delete(eq(CLIP_STATE_KEY), any());
+        }
+
+        private ClipDeleteRequest deleteRequest(Integer clipId) {
+            ClipDeleteRequest req = new ClipDeleteRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(clipId);
+            return req;
+        }
+
+        private String clipStateJson() throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(1).start(1.0).duration(4.0)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("Redis에 클립 상태가 있을 때 삭제 성공 시 clipId를 반환하고 Redis 상태와 락을 제거한다")
+        void deleteSuccess_fromRedis() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+            when(redisTemplate.delete(LOCK_KEY)).thenReturn(true);
+
+            ClipDeleteResponse response = clipService.deleteClip(deleteRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+            assertThat(store).doesNotContainKey(String.valueOf(CLIP_ID));
+            verify(redisTemplate).delete(LOCK_KEY);
+        }
+
+        @Test
+        @DisplayName("Redis에 클립 상태가 없을 때 MySQL에서 확인 후 삭제 성공한다")
+        void deleteSuccess_lazyInit() {
+            Track mockTrack = mock(Track.class);
+            Clip mockClip = mock(Clip.class);
+            when(mockTrack.getId()).thenReturn(1);
+            when(mockClip.getId()).thenReturn(CLIP_ID);
+            when(mockClip.getTrack()).thenReturn(mockTrack);
+            when(mockClip.getStart()).thenReturn(1.0);
+            when(mockClip.getDuration()).thenReturn(4.0);
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
+            when(redisTemplate.delete(LOCK_KEY)).thenReturn(true);
+
+            ClipDeleteResponse response = clipService.deleteClip(deleteRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+            verify(redisTemplate).delete(LOCK_KEY);
+        }
+
+        @Test
+        @DisplayName("클립이 잠겨있지 않으면 CLIP_LOCKED 예외를 던진다")
+        void deleteFailWhenNotLocked() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(null);
+
+            assertThatThrownBy(() -> clipService.deleteClip(deleteRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("다른 사용자가 잠근 클립에 삭제 요청 시 CLIP_LOCKED 예외를 던진다")
+        void deleteFailWhenLockedByOtherUser() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(OTHER_USER_ID));
+
+            assertThatThrownBy(() -> clipService.deleteClip(deleteRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("Redis에 없고 MySQL에도 없는 클립 삭제 시 CLIP_NOT_FOUND 예외를 던진다")
+        void deleteFailWhenClipNotFound() {
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clipService.deleteClip(deleteRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipDeleteRequest req = new ClipDeleteRequest();
+                req.setClipId(CLIP_ID);
+
+                assertThatThrownBy(() -> clipService.deleteClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("clipId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void clipIdNull() {
+                ClipDeleteRequest req = new ClipDeleteRequest();
+                req.setProjectId(PROJECT_ID);
+
+                assertThatThrownBy(() -> clipService.deleteClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

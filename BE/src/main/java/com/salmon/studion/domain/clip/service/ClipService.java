@@ -5,11 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
+import com.salmon.studion.domain.clip.entity.ClipDeleteEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipMoveEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
@@ -221,6 +224,46 @@ public class ClipService {
                         .startBar(request.getStartBar())
                         .length(request.getLength())
                         .build())
+                .build();
+    }
+
+    public ClipDeleteResponse deleteClip(ClipDeleteRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
+        String currentLocker = redisTemplate.opsForValue().get(lockKey);
+        if (!String.valueOf(userId).equals(currentLocker)) {
+            throw new BusinessException(ErrorCode.CLIP_LOCKED);
+        }
+
+        getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        String stateKey = String.format(CLIP_STATE_KEY, request.getProjectId());
+        redisTemplate.opsForHash().delete(stateKey, String.valueOf(request.getClipId()));
+        redisTemplate.delete(lockKey);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            clipEventRepository.save(ClipDeleteEventDocument.builder()
+                    .event("CLIP_DELETE")
+                    .projectId(request.getProjectId())
+                    .clipId(request.getClipId())
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_DELETE, clipId={}", request.getClipId(), e);
+        }
+
+        return ClipDeleteResponse.builder()
+                .clipId(request.getClipId())
                 .build();
     }
 

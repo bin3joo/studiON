@@ -3,6 +3,7 @@ import {ref} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
+import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
@@ -316,6 +317,13 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           >
             {{ clip.audio?.originalName || track.name }}
           </div>
+
+          <!--GPU 파형 컴포넌트-->
+          <WaveformWebGL 
+            v-if="clip.audio?.cdnUrl" 
+            :clip="clip"
+          />
+
         </div>
 
       </div> 

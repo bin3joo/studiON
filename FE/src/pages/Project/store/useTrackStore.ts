@@ -251,15 +251,15 @@ export const useTrackStore = defineStore('track', () => {
                             {
                                 clipId: 1,
                                 start: 1,
-                                duration: 30,
+                                duration: 120,
                                 color: "#FF3DCB",
                                 audioStartMs: 0,
-                                audioDurationMs: 15000,
+                                audioDurationMs: 200000,
                                 audio: {
                                     audioMetadataId: 1,
-                                    cdnUrl: "https://example.com/dummy.wav",
-                                    originalName: "vocal_take1.wav",
-                                    durationMs: 15000
+                                    cdnUrl: "/test.mp3",
+                                    originalName: "test.mp3",
+                                    durationMs: 200000
                                 }
                             }
                         ]

@@ -30,63 +30,65 @@ let currentClientX = 0; //현재 마우스 X 좌표 (루프에서 감시용)
 let autoScrollRafId: number | null = null; // 오토스크롤 애니메이션 ID
 
 //클립 위치 계산 함수(마우스 이동 + 스크롤 이동 동시 반영)
-const updateClipPosition = () => {
+function updateClipPosition() {
   if(!activeClip.value || !scrollContainer) return;
 
   const currentScrollLeft = (scrollContainer as HTMLElement).scrollLeft; //현재 스크롤량 가져오기
 
-  const deltaX = (currentClientX - startMouseX.value) + (currentScrollLeft - startScrollLeft.value); //이동거리 계산(드래그 거리 + 스크롤 거리)
+  const deltaX = (currentClientX - startMouseX.value) + (currentScrollLeft - startScrollLeft.value); //이동거리 계산
   const deltaBar = deltaX / trackStore.pixelPerBar; //이동 거리를 마디 단위로 변환
   let newStart = startClipBar.value + deltaBar; //새로운 시작점 계산
 
   //0마디 이전으로 뚫고 나가지 못하게 막기
   newStart = Math.max(0, newStart);
-
-  const snapResolution = trackStore.subDivision; //현재 확대/축소 배율에 따라 적용할 분할 단위(1,4,8,16)
-  newStart = Math.round(newStart * snapResolution) / snapResolution; //스냅 적용 (정확한 박자에 붙도록)
+  //클립 이동시 자동처럼 붙는 기능
+  const snapResolution = trackStore.subDivision; //스냅 해상도
+  newStart = Math.round(newStart * snapResolution) / snapResolution; 
   
-  activeClip.value.start = newStart; //계산된 새 위치로 클립의 시작점 업데이트(화면 즉시 반영)
+  activeClip.value.start = newStart; 
   
   //드래그가 끝나도 화면이 잘리지 않도록 필요하면 트랙을 늘리는 로직
-  const clipEnd = newStart + activeClip.value.duration; // 현재 클립의 끝나는 지점 계산
-  const currentTotalBars = trackStore.projectInfo.totalBarCount; // 현재 전체 마디 수 확인
+  const clipEnd = newStart + activeClip.value.duration; 
+  const currentTotalBars = trackStore.projectInfo.totalBarCount; 
   
-  if(clipEnd > currentTotalBars * 0.9) { //클립의 끝이 전체 길의 90%를 넘으면
-    trackStore.projectInfo.totalBarCount += 50; //전체 마디 수를 50마디 늘린다.
-  };
+  if(clipEnd > currentTotalBars * 0.9) { 
+    trackStore.projectInfo.totalBarCount += 50; 
+  }
+}
   
   //마우스를 누르고 있을때 백 그라운드에서 돌아가는 오토 스크롤 엔진
-  const autoScrollLoop = () => {
-    if(!activeClip.value || !scrollContainer) return;//조건이 맞지 않으면 함수 종료
-    
-    const EDGE_THRESHOLD = 80; //가장자리에서 80px안쪽으로 들어오면 자동 스크롤 시작
-    const SCROLL_SPEED = 15; //한 프레임당 15px씩 밀어내기
-    let scrolled = false; //아직 스크롤 안함
+ //마우스를 누르고 있을때 백 그라운드에서 돌아가는 오토 스크롤 엔진
+function autoScrollLoop() {
+  if(!activeClip.value || !scrollContainer) return; //조건이 맞지 않으면 함수 종료
+  
+  const EDGE_THRESHOLD = 80; //가장자리에서 80px안쪽으로 들어오면 자동 스크롤 시작
+  const SCROLL_SPEED = 15; //한 프레임당 15px씩 밀어내기
+  let scrolled = false; 
 
-    //1. 오른화면 끝 도달
-    if(currentClientX > window.innerWidth - EDGE_THRESHOLD){
-     (scrollContainer as HTMLElement).scrollLeft += SCROLL_SPEED; //오른쪽으로 스크롤
-      scrolled = true;
-    }
+  //1. 오른화면 끝 도달
+  if(currentClientX > window.innerWidth - EDGE_THRESHOLD){
+    (scrollContainer as HTMLElement).scrollLeft += SCROLL_SPEED; 
+    scrolled = true;
+  }
 
-    //2. 왼화면 끝 도달
-    if(currentClientX < EDGE_THRESHOLD){
-      (scrollContainer as HTMLElement).scrollLeft -= SCROLL_SPEED; //왼쪽으로 스크롤
-      scrolled = true;
-    }
+  //2. 왼화면 끝 도달 (왼쪽 컨트롤 패널 224px 고려)
+  if(currentClientX < 224 + EDGE_THRESHOLD){
+    (scrollContainer as HTMLElement).scrollLeft -= SCROLL_SPEED; 
+    scrolled = true;
+  }
 
-    // 스크롤이 발생했다면, 마우스가 가만히 있어도 클립 위치를 갱신해야 함
+  // 스크롤이 발생했다면, 마우스가 가만히 있어도 클립 위치를 갱신해야 함
   if (scrolled) {
     updateClipPosition(); 
   }
 
   // 드래그 중이면 끊임없이 다음 프레임 예약
   autoScrollRafId = requestAnimationFrame(autoScrollLoop);
-};
-
-
 }
 
+// ==========================================
+// 3. 마우스 조작 이벤트 핸들러
+// ==========================================
 //1.클립을 쥐었을 때 (Pointer Down)
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   if(e.button !== 0) return; // 좌클릭만 허용하기
@@ -107,47 +109,34 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
   // 오토 스크롤 엔진 가동
   if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
+  autoScrollRafId = requestAnimationFrame(autoScrollLoop);
 
   //마우스가 브라우저를 벗어나도 이벤트를 놓지지 않도록 잡음
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 };
+
   //2.클립을 잡고 움직일때
   const onClipPointerMove = (e: PointerEvent) => {
     if(!activeClip.value || !activeClip.value.isDragging) return;
 
-    //움직인 마우스 픽셀을 마디단위로 변환
-    const deltaX = e.clientX - startMouseX.value;
-    const deltaBar = deltaX / trackStore.pixelPerBar;
+    //1. 엔진이 알 수 있게 마우스 좌표 최신화
+    currentClientX = e.clientX;
+    dragoffsetY.value = e.clientY - startMouseY.value; //2. 세로 이동값 계산
 
-    let newStart = startClipBar.value + deltaBar;
 
-    //0마디 이전으로 뚫고 나가지 못하게 막기
-    newStart = Math.max(0, newStart); //0이하로는 내려가지마!
-
-    //현재 줌 레벨에 따라 보이는 눈금에 맞춰서 반올림하여 자석처럼 붙게하기
-    const snapResolution = trackStore.subDivision;
-    newStart = Math.round(newStart * snapResolution) / snapResolution;
-
-    //마우스가 위아래로 움직인 픽셀만큼 화면에 반영하기 위해 기록
-    dragoffsetY.value = e.clientY - startMouseY.value;
-
-    //클립위치 실시간 업데이트(Vue반응성에 의해 화면이 즉시 이동한다.)
-    activeClip.value.start = newStart;
-
-    //클립의 끝부분이 전체 타임라인의 90%를 넘어가면 트랙을 50마디씩 늘린다.
-    const clipEnd = newStart + activeClip.value.duration;
-    const currentTotalBars = trackStore.projectInfo.totalBarCount;
-
-    if(clipEnd > currentTotalBars * 0.9) {
-      trackStore.projectInfo.totalBarCount += 50;
-
-    }
+    //2. 업데이트 클립으로 위치 갱신
+    updateClipPosition();
   };
 
   //3.클립을 놓았을때 (Pointer Up)
   const onClipPointerUp = (e: PointerEvent) => {
     if(!activeClip.value) return;
 
+    //오토 스크롤 엔진 종료
+    if(autoScrollRafId) {
+      cancelAnimationFrame(autoScrollRafId);
+      autoScrollRafId = null;
+    }
     //트랙간 이동 -> 마우스 커서 위치에 있는 모든 DOM요소를 뚫고 지나가서 실제 위에 있는 요소 찾기
     const elementsUnderMouse = document.elementsFromPoint(e.clientX, e.clientY);
     //검사된 요소 중 'data-track-id'속성을 가진 트랙 박스를 찾는다 (트랙이라고 선언된 녀석 찾기)

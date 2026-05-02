@@ -267,6 +267,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
       aria-label="오디오 클립 작업 영역" 
       class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
+      @wheel.ctrl.prevent="trackStore.updateZoom($event.deltaY)"
     >
       <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
         

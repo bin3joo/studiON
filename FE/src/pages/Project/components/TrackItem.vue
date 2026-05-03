@@ -170,7 +170,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
         
         for (const c of finalTrack.clips) {
           if (c.clipId === currentClip.clipId) continue;
-          if (targetStart < c.start + c.duration - epsilon && targetEnd > c.start + epsilon) {
+          if (targetStart < c.start + c.duration - 0.005 && targetEnd > c.start + 0.005) {
             return false; // 다른 클립에 부딪히면 좁은 것
           }
         }
@@ -194,6 +194,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           const activeDuration = activeClip.value.duration;
 
           // 겹침 판별 공식: (A의 시작 < B의 끝) && (A의 끝 > B의 시작)
+          // A의 시작점이 B의 끝점보다 '확실히' 작고, A의 끝점이 B의 시작점보다 '확실히' 클 때만 겹친 것으로 판정!
           if (activeStart < existingEnd - epsilon && activeEnd > existingStart + epsilon) {
             hasOverlap = true;
 
@@ -247,6 +248,87 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     (e.currentTarget as HTMLElement).onpointerup = null;
     (e.currentTarget as HTMLElement).onpointermove = null;
   };
+
+  // ==========================================
+// 클립 리사이즈(Trim) 로직
+// ==========================================
+const resizeState = ref({
+  clip: null as ClipUIState | null,
+  side: '' as 'left' | 'right',
+  startX: 0,
+  origStart: 0,
+  origDuration: 0,
+  isResizing: false
+});
+
+// 리사이즈 핸들 잡기
+const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 'right') => {
+  if(e.button !== 0) return;
+  e.stopPropagation(); // 일반 클립 이동(드래그) 이벤트 방지
+
+  resizeState.value = {
+    clip,
+    side,
+    startX: e.clientX,
+    origStart: clip.start,
+    origDuration: clip.duration,
+    isResizing: true
+  };
+
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+};
+
+// 리사이즈 마우스 이동 (UI 선반영으로 부드럽게)
+const onResizePointerMove = (e: PointerEvent) => {
+  if (!resizeState.value.isResizing || !resizeState.value.clip) return;
+
+  const state = resizeState.value;
+  const tartgetClip = state.clip as ClipUIState;
+  const deltaX = e.clientX - state.startX;
+  let deltaBar = deltaX / trackStore.pixelPerBar;
+
+  const minDuration = 0.5; // 최소 0.5마디 길이 보장
+
+  if (state.side === 'right') {
+    tartgetClip.duration = Math.max(minDuration, state.origDuration + deltaBar);
+  } else if (state.side === 'left') {
+    // 왼쪽을 줄일 때는 시작점(start)과 길이(duration)가 동시에 변함
+    const maxDelta = state.origDuration - minDuration;
+    const boundedDelta = Math.min(deltaBar, maxDelta);
+    
+    // 0마디 뚫고 나가지 않게
+    const finalDelta = state.origStart + boundedDelta < 0 ? -state.origStart : boundedDelta;
+
+    tartgetClip.start = state.origStart + finalDelta;
+    tartgetClip.duration = state.origDuration - finalDelta;
+  }
+};
+
+// 리사이즈 종료 (스토어에 통신 요청)
+const onResizePointerUp = (e: PointerEvent) => {
+  if (!resizeState.value.isResizing || !resizeState.value.clip) return;
+
+  const state = resizeState.value;
+  const tartgetClip = state.clip as ClipUIState;
+  
+  // 백엔드 요청: 변경된 값 확정 (왼쪽을 얼마나 잘라냈는지 trimLeftBars 전달)
+  const trimLeftBars = state.side === 'left' ? (tartgetClip.start - state.origStart) : 0;
+  
+  trackStore.resizeClip(
+      tartgetClip.clipId, 
+      props.track.trackId, 
+      tartgetClip.start, 
+      tartgetClip.duration,
+      trimLeftBars
+  );
+
+  resizeState.value.isResizing = false;
+  resizeState.value.clip = null;
+
+  try {
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+  } catch(err) {}
+};
 
  // ==========================================
 // 우클릭 컨텍스트 메뉴 상태 관리
@@ -339,6 +421,14 @@ const handlePaste = () => {
 //삭제
 const handleDelete = () => {
   if (menuState.value.targetClip) trackStore.deleteClip(menuState.value.targetClip.clipId, menuState.value.targetTrackId);
+  closeMenu();
+};
+
+// 분할 (Split)
+const handleSplit = () => {
+  if (menuState.value.targetClip) {
+    trackStore.splitClip(menuState.value.targetClip.clipId, menuState.value.targetTrackId);
+  }
   closeMenu();
 };
 
@@ -467,12 +557,13 @@ const handleDelete = () => {
         </div>
         
         <!--실제 클립 렌더링 및  클립 전용 우클릭 이벤트(z-10)-->
+       <!-- 🌟 수정: key를 clip.clipId로 고정하여 드래그 중 파괴 방지 -->
         <div 
           v-for="clip in track.clips" 
-          :key="`${clip.clipId}-${clip.start}`"
+          :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
-          :class="[clip.isDragging? 'opacity-80 brightness-125 shadow-2xl z-50!': 'transition duration-200']"
+          :class="[clip.isDragging ? 'opacity-80 brightness-125 shadow-2xl z-50!' : 'transition duration-200']"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
@@ -487,6 +578,38 @@ const handleDelete = () => {
           @pointercancel="onClipPointerUp"
           @contextmenu.prevent.stop="onClipRightClick($event, clip, track.trackId)"
         >
+          <!-- 왼쪽 리사이즈 핸들 -->
+          <div 
+            class="absolute left-0 top-0 bottom-0 w-2.5 z-20 cursor-w-resize hover:bg-white/30"
+            @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
+            @pointermove.stop="onResizePointerMove"
+            @pointerup.stop="onResizePointerUp"
+            @pointercancel.stop="onResizePointerUp"
+          ></div>
+
+          <div 
+            aria-hidden="true"
+            class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
+            :style="{ color: clip.color }"
+          >
+            {{ clip.audio?.originalName || track.name }}
+          </div>
+
+          <!--GPU 파형 컴포넌트-->
+          <WaveformWebGL
+          v-if="clip.audio?.cdnUrl"
+          :key="clip.clipId"
+          :clip="clip" />
+
+          <!-- 오른쪽 리사이즈 핸들 -->
+          <div 
+            class="absolute right-0 top-0 bottom-0 w-2.5 z-20 cursor-e-resize hover:bg-white/30"
+            @pointerdown.stop="onResizePointerDown($event, clip, 'right')"
+            @pointermove.stop="onResizePointerMove"
+            @pointerup.stop="onResizePointerUp"
+            @pointercancel.stop="onResizePointerUp"
+          ></div>
+        
           <div 
             aria-hidden="true"
             class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
@@ -547,6 +670,17 @@ const handleDelete = () => {
       </template>
 
       <!-- 클립 우클릭 시 활성화되는 메뉴들 -->
+
+      <button
+        @click="handleSplit"
+        class="flex w-full items-center justify-between px-4 py-1.5"
+        :class="menuState.type === 'clip' ? 'hover:bg-white/10' : 'opacity-40 cursor-not-allowed'"
+        :disabled="menuState.type !== 'clip'"
+      >
+        <span class="flex items-center gap-2"><ScissorsIcon class="h-4 w-4" /> 재생바에서 분할</span>
+        <span class="text-[10px] text-gray-500">⌘E</span>
+      </button>
+
       <button
         @click="handleDuplicate"
         class="flex w-full items-center justify-between px-4 py-1.5"

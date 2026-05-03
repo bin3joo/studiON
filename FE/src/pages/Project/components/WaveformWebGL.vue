@@ -19,7 +19,7 @@ let observer: IntersectionObserver | null = null;
 let isVisible = false; 
 
 const renderWaveform = async () => {
-    // 🌟 offscreen 변수 체크 삭제 (워커 내부에서 관리하므로)
+    // offscreen 변수 체크 삭제 (워커 내부에서 관리하므로)
     if (!canvasRef.value || !props.clip.audio?.cdnUrl || !worker) return;
 
     if (!isVisible) return;
@@ -29,7 +29,7 @@ const renderWaveform = async () => {
 
     if (width <= 0 || height <= 0) return;
 
-    // 🌟 핵심 수정: 메인 스레드에서 canvasRef.width 조작 금지!
+    // 핵심 수정: 메인 스레드에서 canvasRef.width 조작 금지!
     // 대신 상위 div(TrackItem.vue)에서 크기를 잡아주므로 캔버스는 가만히 두면 됩니다.
 
     const audioUrl = props.clip.audio.cdnUrl;
@@ -72,9 +72,18 @@ const handleVisibilityChange = () => {
     }
 };
 
+//트랙의 줌레벨 감지
 watch(() => trackStore.pixelPerBar, () => {
     renderWaveform();
 });
+
+//클립 자체의 길이, 잘린 지점 변경 감지 클립이나 오디오 시작점이 변하면 파형을 다시 그리도록 함
+watch(
+  () => [props.clip.duration, props.clip.audioStartMs],
+  () => {
+    renderWaveform();
+  }
+)
 
 onMounted(async () => {
   await nextTick(); 

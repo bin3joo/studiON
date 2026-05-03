@@ -46,6 +46,30 @@ export const useTrackStore = defineStore('track', () => {
     watch(bpm, (newBpm) => {
         Tone.getTransport().bpm.value = newBpm;
     })
+
+    // 현재 선택된 클립과 해당 트랙 ID
+    const selectedClip = ref<ClipUIState | null>(null);
+    const selectedTrackId = ref<number | null>(null);
+
+    // 클립 선택 함수
+    const selectClip = (clip: ClipUIState, trackId: number) => {
+        // 기존 선택된 클립이 있으면 해제
+        if (selectedClip.value) {
+            selectedClip.value.isSelected = false;
+        }
+        clip.isSelected = true;
+        selectedClip.value = clip;
+        selectedTrackId.value = trackId;
+    };
+    
+    //  빈 공간 클릭 시 선택 해제 함수
+    const deselectClip = () => {
+        if (selectedClip.value) {
+            selectedClip.value.isSelected = false;
+        }
+        selectedClip.value = null;
+        selectedTrackId.value = null;
+    };
     //1마디당 걸리는 시간 계산
     const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
@@ -789,6 +813,10 @@ const resizeClip = async (clipId: number, trackId: number, newStart: number, new
         stopPlay,
         updatePlayheadLoop,
         resyncClip,
+        selectedClip,
+        selectedTrackId,
+        selectClip,
+        deselectClip,
         
         // 클립보드
         clipboardClip,

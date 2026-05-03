@@ -532,6 +532,7 @@ const handleSplit = () => {
       <div 
           class="absolute inset-0 z-0 cursor-context-menu"
           @contextmenu.prevent.stop="onTrackRightClick($event, track.trackId)"
+          @pointerdown.stop="trackStore.deselectClip"
         ></div>
 
       <!--마디 세로줄 렌더링-->
@@ -557,13 +558,16 @@ const handleSplit = () => {
         </div>
         
         <!--실제 클립 렌더링 및  클립 전용 우클릭 이벤트(z-10)-->
-       <!-- 🌟 수정: key를 clip.clipId로 고정하여 드래그 중 파괴 방지 -->
+       <!--  key를 clip.clipId로 고정하여 드래그 중 파괴 방지 -->
         <div 
           v-for="clip in track.clips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
-          :class="[clip.isDragging ? 'opacity-80 brightness-125 shadow-2xl z-50!' : 'transition duration-200']"
+          :class="[
+            clip.isDragging ? 'opacity-80 brightness-125 shadow-2xl z-50!' : 'transition duration-200',
+            clip.isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
+          ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
@@ -572,7 +576,7 @@ const handleSplit = () => {
             boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : '0 2px 8px rgba(0,0,0,0.4)',
             transform: clip.isDragging ? `translateY(${dragoffsetY}px)` : 'none'
           }"
-          @pointerdown="onClipPointerDown($event, clip)"
+          @pointerdown="onClipPointerDown($event, clip); trackStore.selectClip(clip, track.trackId);"
           @pointermove="onClipPointerMove"
           @pointerup="onClipPointerUp"
           @pointercancel="onClipPointerUp"
@@ -664,7 +668,7 @@ const handleSplit = () => {
       <template v-if="menuState.type === 'track'">
         <button class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
           <span class="flex items-center gap-2"><UploadIcon class="h-4 w-4" /> 오디오 불러오기</span>
-          <span class="text-[10px] text-gray-500">⌘I</span>
+          <span class="text-[10px] text-gray-500">Ctrl+I</span>
         </button>
         <div class="my-1 h-px w-full bg-[#393C45]"></div>
       </template>
@@ -678,7 +682,7 @@ const handleSplit = () => {
         :disabled="menuState.type !== 'clip'"
       >
         <span class="flex items-center gap-2"><ScissorsIcon class="h-4 w-4" /> 재생바에서 분할</span>
-        <span class="text-[10px] text-gray-500">⌘E</span>
+        <span class="text-[10px] text-gray-500">Ctrl+E</span>
       </button>
 
       <button
@@ -688,7 +692,7 @@ const handleSplit = () => {
         :disabled="menuState.type !== 'clip'"
       >
         <span class="flex items-center gap-2"><CopyPlusIcon class="h-4 w-4" /> 클립 복제</span>
-        <span class="text-[10px] text-gray-500">⌘D</span>
+        <span class="text-[10px] text-gray-500">Ctrl+D</span>
       </button>
 
       <div class="my-1 h-px w-full bg-[#393C45]"></div>
@@ -700,7 +704,7 @@ const handleSplit = () => {
         :disabled="menuState.type !== 'clip'"
       >
         <span class="flex items-center gap-2"><CopyIcon class="h-4 w-4" /> 복사</span>
-        <span class="text-[10px] text-gray-500">⌘C</span>
+        <span class="text-[10px] text-gray-500">Ctrl+C</span>
       </button>
 
       <button 
@@ -710,7 +714,7 @@ const handleSplit = () => {
         :disabled="menuState.type !== 'clip'"
       >
         <span class="flex items-center gap-2"><ScissorsIcon class="h-4 w-4" /> 잘라내기</span>
-        <span class="text-[10px] text-gray-500">⌘X</span>
+        <span class="text-[10px] text-gray-500">Ctrl+X</span>
       </button>
 
       <!-- 붙여넣기는 클립보드에 데이터가 있을 때만 활성화 -->
@@ -721,7 +725,7 @@ const handleSplit = () => {
         :disabled="!trackStore.clipboardClip"
       >
         <span class="flex items-center gap-2"><ClipboardIcon class="h-4 w-4" /> 붙여넣기</span>
-        <span class="text-[10px] text-gray-500">⌘V</span>
+        <span class="text-[10px] text-gray-500">Ctrl+V</span>
       </button>
 
       <div class="my-1 h-px w-full bg-[#393C45]"></div>

@@ -67,13 +67,123 @@ const handleKeyDown = (e: KeyboardEvent) => {
   if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
     return;
   }
+  //재생/정지
   if(e.code === 'Space'){
     e.preventDefault();
     trackStore.togglePlay();
   }
-}
+
+// 삭제 (Delete / Backspace)
+  if (e.code === 'Delete' || e.code === 'Backspace') {
+    e.preventDefault();
+    if (trackStore.selectedClip && trackStore.selectedTrackId) {
+      trackStore.deleteClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
+      trackStore.deselectClip(); // 지운 후 선택 해제
+    }
+    return;
+  }
+
+  // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
+  if (e.ctrlKey || e.metaKey) {
+    switch (e.code) {
+      case 'KeyC': // 복사
+        e.preventDefault();
+        if (trackStore.selectedClip) {
+          trackStore.copyClip(trackStore.selectedClip);
+        }
+        break;
+        
+      case 'KeyX': // 잘라내기
+        e.preventDefault();
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.cutClip(trackStore.selectedClip, trackStore.selectedTrackId);
+          trackStore.deselectClip();
+        }
+        break;
+        
+      case 'KeyV': // 붙여넣기
+        e.preventDefault();
+        // 붙여넣기는 '현재 선택된 트랙'의 '현재 재생바 위치'에 붙여넣기 된다.
+        // 클립을 선택한 상태라면 그 트랙에, 아니면 1번 트랙을 기본으로 넣기
+      if (trackStore.clipboardClip) {
+          // 1. 기본 타겟: 선택된 트랙 또는 1번 트랙
+          let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
+
+          // 2. 마우스가 위치한 곳의 트랙 ID 감지
+          const elementsUnderMouse = document.elementsFromPoint(currentMouseX, currentMouseY);
+          const targetTrackEl = elementsUnderMouse.find((el) => el.hasAttribute('data-track-id'));
+
+          if (targetTrackEl) {
+            targetTrackId = Number(targetTrackEl.getAttribute('data-track-id'));
+          }
+
+          if (targetTrackId) {
+            //3. 마우스 X 좌표를 마디(Bar) 단위로 역산
+            let targetBar = trackStore.playheadPosition; // 혹시라도 마우스 위치 계산에 실패하면 재생바로 폴백(Fallback)
+
+            if (timelineContainerRef.value) {
+              const scrollLeft = timelineContainerRef.value.scrollLeft;
+              
+              // 현재 마우스 X 좌표에서 왼쪽 컨트롤 패널 너비(224px)를 빼고, 스크롤된 양을 더함 = 절대 픽셀 위치
+              const absoluteX = currentMouseX - 224 + scrollLeft; 
+              
+              // 픽셀을 마디(Bar)로 변환
+              let calculatedBar = absoluteX / trackStore.pixelPerBar;
+              
+              // 현재 스냅(1/4 박자, 1/8 박자 등) 설정에 맞춰서 깔끔하게 자석처럼 붙게 반올림
+              const snap = trackStore.subDivision;
+              targetBar = Math.max(0, Math.round(calculatedBar * snap) / snap); // 0마디 이하 뚫고 나가지 않게 방지
+            }
+
+            // 계산된 최종 위치(targetBar)에 붙여넣기 실행!
+            trackStore.pasteClip(targetTrackId, targetBar);
+          }
+        }
+        break;
+        
+      case 'KeyE': //  분할(Split)
+        e.preventDefault();
+        const currentBar = trackStore.playheadPosition;
+
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          // 1. 선택된 클립이 명확히 있으면 그 클립만 안전하게 분할
+          trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
+        } else {
+          // 2. 선택된 클립이 없다면? -> 재생바(Playhead) 선에 닿아있는 모든 트랙의 클립을 동시 분할
+          let hasSplit = false;
+          
+          trackStore.trackList.forEach(track => {
+            const clipUnderPlayhead = track.clips.find(c => 
+              currentBar > c.start && currentBar < c.start + c.duration
+            );
+            
+            // 재생바 아래에 깔린 클립이 발견되면 즉시 분할 스토어 액션 호출
+            if (clipUnderPlayhead) {
+              trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
+              hasSplit = true;
+            }
+          });
+
+          if (!hasSplit) {
+            console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
+          }
+        }
+        break;
+    }
+  }
+};
 //사용자가 기존에 사용하던 테마 임시 저장
 let previousTheme = '';
+
+//  현재 마우스 좌표를 기억하는 변수
+let currentMouseX = 0;
+let currentMouseY = 0;
+
+const updateMousePos = (e: MouseEvent) => {
+  currentMouseX = e.clientX;
+  currentMouseY = e.clientY;
+};
+
 
 
 // 프로젝트 시작 시 트랙 정보 불러오기
@@ -95,6 +205,8 @@ onMounted(async () => {
   }
   //키보드 이벤트 리스너 등록
   window.addEventListener('keydown', handleKeyDown);
+  //  마우스 이동 감지
+  window.addEventListener('mousemove', updateMousePos);
 
 //브라우저 기본 줌을 막기 위해 수동으로 이벤트 리스너 등록
 if(timelineContainerRef.value) {
@@ -109,6 +221,8 @@ if(timelineContainerRef.value) {
 onUnmounted(()=>{
   //키보드 이벤트 제거
   window.removeEventListener('keydown',handleKeyDown);
+  // 마우스 감지해제
+  window.removeEventListener('mousemove', updateMousePos);
   //오디오 제한 해제 리스너 제거
   window.removeEventListener('pointerdown', unlockAudioEngine);
   window.removeEventListener('keydown', unlockAudioEngine);

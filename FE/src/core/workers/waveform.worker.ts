@@ -2,30 +2,42 @@
 //오디오 파형, 색상, 도화지, 1픽셀당 들어가는 오디오 샘플 개수등
 
 interface WorkerMessage {
-  channelData: Float32Array;
-  color: string;
-  canvas: OffscreenCanvas;
-  width: number;
-  height: number;
-  samplesPerPixel: number;    
-  startSampleOffset: number;  
+  channelData?: Float32Array;
+  color?: string;
+  canvas?: OffscreenCanvas;
+  width?: number;
+  height?: number;
+  samplesPerPixel?: number;    
+  startSampleOffset?: number;
 }
+
+let targetCanvas : OffscreenCanvas | null = null; //캔버스를 전역을로 기억하기
 
 //메인 스레드에서 worker.postMessage로 던저준 데이터를 받아서 해체한 후 변수에 담는다.
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const { channelData, color, canvas, width, height, samplesPerPixel, startSampleOffset } = e.data;
+// 최초 로딩 시 캔버스 제어권을 받아 전역 변수에 저장
+  if (canvas) {
+    targetCanvas = canvas;
+    return; // 캔버스만 받았을 때는 그리지 않고 대기
+  }
 
-  if (!channelData) return;
+  // 데이터 검증
+  if (!targetCanvas || !channelData || width === undefined || height === undefined || samplesPerPixel === undefined || startSampleOffset === undefined) return;
 
   //2d 컨텍스트를 가져온다.이 컨텍스트 객체에 그려라(그리기 명령을 수행할 주체)
-  const ctx = canvas.getContext('2d');
+  const ctx = targetCanvas.getContext('2d');
   if (!ctx) return;
+
+  // 워커 내부에서 직접 오프스크린 캔버스의 크기를 변경!
+  targetCanvas.width = width;
+  targetCanvas.height = height;
 
   // 1. 도화지 초기화
   ctx.clearRect(0, 0, width, height);
 
   // 2. 펜 설정 (색상과 두께 지정)
-  ctx.strokeStyle = color;
+  ctx.strokeStyle = color || '#D4CED2';
   ctx.lineWidth = 1;
   
   // 3. 선 그리기 시작

@@ -4,6 +4,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon} from 'lucide-vue-next';
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
@@ -131,6 +132,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
   //3.클립을 놓았을때 (Pointer Up)
   const onClipPointerUp = (e: PointerEvent) => {
+    const currentClip = activeClip.value as ClipUIState;//변수의 타입을 CLIPUIState로 확정
     if(!activeClip.value) return;
 
     //오토 스크롤 엔진 종료
@@ -142,13 +144,83 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     const elementsUnderMouse = document.elementsFromPoint(e.clientX, e.clientY);
     //검사된 요소 중 'data-track-id'속성을 가진 트랙 박스를 찾는다 (트랙이라고 선언된 녀석 찾기)
     const targetTrackEl = elementsUnderMouse.find((el) => el.hasAttribute('data-track-id'));
+
+    let finalTrackId = props.track.trackId; //기본은 현재 트랙 
     //만약 해당 요소를 찾았다면,
     if(targetTrackEl) {
       const targetTrackId = Number(targetTrackEl.getAttribute('data-track-id'));
       //놓은 곳이 현재 트랙이 아니라 다른 트랙이라면 이사를 실행한다.
       if(targetTrackId && targetTrackId !== props.track.trackId) {
         trackStore.moveClipToTrack(activeClip.value.clipId, props.track.trackId, targetTrackId);
+        finalTrackId = targetTrackId; // 이사간 트랙 아이디
+      }
+    }
 
+    //겹침 방지로직
+    const finalTrack = trackStore.trackList.find(t => t.trackId === finalTrackId);
+    if (finalTrack) {
+      let hasOverlap = true;
+      const epsilon = 0.001; // 미세한 소수점 오차로 인한 무한루프 방지
+      let safetyCounter = 0; // 무한 루프 방지용
+
+    //  현재 짚은 위치의 앞에 들어갈 수 있는지 빈 공간을 미리 검사하는 헬퍼 함수
+      const isSpaceClear = (targetStart: number, duration: number) => {
+        if (targetStart < 0) return false; // 0마디 이전은 벽이므로 공간 없음
+        const targetEnd = targetStart + duration;
+        
+        for (const c of finalTrack.clips) {
+          if (c.clipId === currentClip.clipId) continue;
+          if (targetStart < c.start + c.duration - epsilon && targetEnd > c.start + epsilon) {
+            return false; // 다른 클립에 부딪히면 좁은 것
+          }
+        }
+        return true; // 안전한 빈 공간
+      };
+
+      // 겹치는 클립이 없을 때까지 계속 뒤로 밀어냅니다. (연쇄 밀어내기 지원)
+      while (hasOverlap && safetyCounter < 100) {
+        hasOverlap = false;
+        safetyCounter++;
+        
+        for (const otherClip of finalTrack.clips) {
+          // 자기 자신은 비교 대상에서 제외
+          if (otherClip.clipId === activeClip.value.clipId) continue;
+
+          const existingStart = otherClip.start;
+          const existingEnd = otherClip.start + otherClip.duration;
+          
+          const activeStart = activeClip.value.start;
+          const activeEnd = activeClip.value.start + activeClip.value.duration;
+          const activeDuration = activeClip.value.duration;
+
+          // 겹침 판별 공식: (A의 시작 < B의 끝) && (A의 끝 > B의 시작)
+          if (activeStart < existingEnd - epsilon && activeEnd > existingStart + epsilon) {
+            hasOverlap = true;
+
+            // 마우스를 놓은 위치(클립의 중심점)와 기존 클립의 중심점을 비교
+            const dropCenter = activeStart + (activeDuration / 2);
+            const existingCenter = existingStart + (otherClip.duration / 2);
+
+            let placedFront = false;
+
+            // 1. 기존 클립의 '앞쪽' 절반에 놓았을 경우
+            if (dropCenter <= existingCenter) {
+              const proposedStart = existingStart - activeDuration;
+              
+              // 바로 앞에 끼워 넣을 공간이 충분한지 검사!
+              if (isSpaceClear(proposedStart, activeDuration)) {
+                activeClip.value.start = proposedStart; // 쏙! 앞으로 당겨짐
+                placedFront = true;
+              }
+            }
+
+            // 2. '뒤쪽'에 놓았거나, 앞쪽에 놓고 싶었지만 다른 클립이 가로막고 있는 경우
+            if (!placedFront) {
+              activeClip.value.start = existingEnd; // 안전하게 뒤로 밀어냄
+            }
+            break;
+          }
+        }
       }
     }
 
@@ -168,13 +240,108 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch(err) {
-      console.warn("Pointer release failed", err);
+      console.warn("releasePointerCapture 오류 발생", err);
     }
 
     //드래그가 끝나면 드래그 상태를 복원하여 이후의 이벤트가 정상적으로 작동하도록 함
     (e.currentTarget as HTMLElement).onpointerup = null;
     (e.currentTarget as HTMLElement).onpointermove = null;
   };
+
+ // ==========================================
+// 우클릭 컨텍스트 메뉴 상태 관리
+// ==========================================
+const menuState = ref({
+  isOpen: false,
+  x: 0,
+  y: 0,
+  type: 'track' as 'track' | 'clip',
+  targetTrackId: -1,
+  targetClip: null as ClipUIState | null,
+  targetBar: 0 // 마우스 커서가 가리키고 있는 타임라인 마디 위치
+});
+
+// 1. 트랙(빈 공간) 우클릭
+const onTrackRightClick = (e: MouseEvent, trackId: number) => {
+  // 현재 스크롤 위치와 왼쪽 패널 너비(224px)를 계산하여, 마우스가 위치한 '마디(Bar)'를 역산
+  const scrollContainer = document.querySelector('.overflow-auto') as HTMLElement;
+  const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+  
+  // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표
+  const absoluteX = e.clientX - 224 + scrollLeft; 
+  
+  // 스냅 해상도(subDivision)에 맞춰서 위치 보정
+  let targetBar = absoluteX / trackStore.pixelPerBar;
+  const snap = trackStore.subDivision;
+  targetBar = Math.max(0, Math.round(targetBar * snap) / snap);
+
+  menuState.value = {
+    isOpen: true,
+    x: e.clientX,
+    y: e.clientY,
+    type: 'track',
+    targetTrackId: trackId,
+    targetClip: null,
+    targetBar: targetBar
+  };
+};
+
+// 2. 클립 우클릭
+const onClipRightClick = (e: MouseEvent, clip: ClipUIState, trackId: number) => {
+  menuState.value = {
+    isOpen: true,
+    x: e.clientX,
+    y: e.clientY,
+    type: 'clip',
+    targetTrackId: trackId,
+    targetClip: clip,
+    targetBar: clip.start
+  };
+};
+
+// 메뉴 닫기
+const closeMenu = () => {
+  menuState.value.isOpen = false;
+};
+
+// ==========================================
+// 메뉴 실행 액션들
+// ==========================================
+
+// 복제
+const handleDuplicate = () => {
+  if (menuState.value.targetClip) {
+    trackStore.duplicateClip(menuState.value.targetClip, menuState.value.targetTrackId);
+  }
+  closeMenu();
+};
+
+//복사
+const handleCopy = () => {
+  if (menuState.value.targetClip) trackStore.copyClip(menuState.value.targetClip);
+  closeMenu();
+};
+
+//자르기
+const handleCut = () => {
+  if (menuState.value.targetClip) trackStore.cutClip(menuState.value.targetClip, menuState.value.targetTrackId);
+  closeMenu();
+};
+
+//붙여넣기
+const handlePaste = () => {
+  if (trackStore.clipboardClip) {
+    trackStore.pasteClip(menuState.value.targetTrackId, menuState.value.targetBar);
+  }
+  closeMenu();
+};
+
+//삭제
+const handleDelete = () => {
+  if (menuState.value.targetClip) trackStore.deleteClip(menuState.value.targetClip.clipId, menuState.value.targetTrackId);
+  closeMenu();
+};
+
 
 </script>
 
@@ -262,7 +429,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
         </div>
       </div>
     </div> 
-
+    <!--타임라인 우측 작업 영역-->
     <div 
       aria-label="오디오 클립 작업 영역" 
       class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
@@ -270,7 +437,14 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
       @wheel.ctrl.prevent="trackStore.updateZoom($event.deltaY)"
     >
       <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
-        
+      
+      <!--트랙 빈 공간 우클릭 감지용 투명 레이어 가장 바닥에 깔림 z-0-->
+      <div 
+          class="absolute inset-0 z-0 cursor-context-menu"
+          @contextmenu.prevent.stop="onTrackRightClick($event, track.trackId)"
+        ></div>
+
+      <!--마디 세로줄 렌더링-->
         <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">
           <div 
             v-for="bar in trackStore.projectInfo.totalBarCount" 
@@ -292,9 +466,10 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           </div>
         </div>
         
+        <!--실제 클립 렌더링 및  클립 전용 우클릭 이벤트(z-10)-->
         <div 
           v-for="clip in track.clips" 
-          :key="clip.clipId"
+          :key="`${clip.clipId}-${clip.start}`"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
           :class="[clip.isDragging? 'opacity-80 brightness-125 shadow-2xl z-50!': 'transition duration-200']"
@@ -310,6 +485,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           @pointermove="onClipPointerMove"
           @pointerup="onClipPointerUp"
           @pointercancel="onClipPointerUp"
+          @contextmenu.prevent.stop="onClipRightClick($event, clip, track.trackId)"
         >
           <div 
             aria-hidden="true"
@@ -322,12 +498,15 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
           <!--GPU 파형 컴포넌트-->
           <WaveformWebGL 
             v-if="clip.audio?.cdnUrl" 
+            :key="`wave-${clip.clipId}-${clip.start}`"
             :clip="clip"
           />
 
         </div>
 
       </div> 
+
+      <!--재생바-->
       <div 
         class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
         :style="{ 
@@ -339,6 +518,92 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
     </div>
     </div>
+
+    <!-- ========================================== -->
+  <!-- 우클릭 컨텍스트 메뉴 UI (화면 최상단에 렌더링) -->
+  <!-- ========================================== -->
+  <Teleport to="body">
+    <!-- 배경 클릭 시 메뉴 닫기용 투명 오버레이 -->
+    <div 
+      v-if="menuState.isOpen" 
+      class="fixed inset-0 z-9998" 
+      @mousedown="closeMenu" 
+      @contextmenu.prevent.stop="closeMenu"
+    ></div>
+
+    <!-- 메뉴 본체 -->
+    <div 
+      v-if="menuState.isOpen"
+      class="fixed z-9999 w-56 rounded-md border border-[#393C45] bg-[#1E1E21] py-1.5 shadow-2xl text-[13px] text-[#D4CED2]"
+      :style="{ top: `${menuState.y}px`, left: `${menuState.x}px` }"
+    >
+      <!-- 트랙 우클릭 시에만 보여줄 메뉴 (클립 우클릭 시엔 비활성화/숨김) -->
+      <template v-if="menuState.type === 'track'">
+        <button class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
+          <span class="flex items-center gap-2"><UploadIcon class="h-4 w-4" /> 오디오 불러오기</span>
+          <span class="text-[10px] text-gray-500">⌘I</span>
+        </button>
+        <div class="my-1 h-px w-full bg-[#393C45]"></div>
+      </template>
+
+      <!-- 클립 우클릭 시 활성화되는 메뉴들 -->
+      <button
+        @click="handleDuplicate"
+        class="flex w-full items-center justify-between px-4 py-1.5"
+        :class="menuState.type === 'clip' ? 'hover:bg-white/10' : 'opacity-40 cursor-not-allowed'"
+        :disabled="menuState.type !== 'clip'"
+      >
+        <span class="flex items-center gap-2"><CopyPlusIcon class="h-4 w-4" /> 클립 복제</span>
+        <span class="text-[10px] text-gray-500">⌘D</span>
+      </button>
+
+      <div class="my-1 h-px w-full bg-[#393C45]"></div>
+
+      <button 
+        @click="handleCopy"
+        class="flex w-full items-center justify-between px-4 py-1.5"
+        :class="menuState.type === 'clip' ? 'hover:bg-white/10' : 'opacity-40 cursor-not-allowed'"
+        :disabled="menuState.type !== 'clip'"
+      >
+        <span class="flex items-center gap-2"><CopyIcon class="h-4 w-4" /> 복사</span>
+        <span class="text-[10px] text-gray-500">⌘C</span>
+      </button>
+
+      <button 
+        @click="handleCut"
+        class="flex w-full items-center justify-between px-4 py-1.5"
+        :class="menuState.type === 'clip' ? 'hover:bg-white/10' : 'opacity-40 cursor-not-allowed'"
+        :disabled="menuState.type !== 'clip'"
+      >
+        <span class="flex items-center gap-2"><ScissorsIcon class="h-4 w-4" /> 잘라내기</span>
+        <span class="text-[10px] text-gray-500">⌘X</span>
+      </button>
+
+      <!-- 붙여넣기는 클립보드에 데이터가 있을 때만 활성화 -->
+      <button 
+        @click="handlePaste"
+        class="flex w-full items-center justify-between px-4 py-1.5"
+        :class="trackStore.clipboardClip ? 'hover:bg-white/10' : 'opacity-40 cursor-not-allowed'"
+        :disabled="!trackStore.clipboardClip"
+      >
+        <span class="flex items-center gap-2"><ClipboardIcon class="h-4 w-4" /> 붙여넣기</span>
+        <span class="text-[10px] text-gray-500">⌘V</span>
+      </button>
+
+      <div class="my-1 h-px w-full bg-[#393C45]"></div>
+
+      <button 
+        @click="handleDelete"
+        class="flex w-full items-center justify-between px-4 py-1.5"
+        :class="menuState.type === 'clip' ? 'hover:bg-red-500/20 text-red-400' : 'opacity-40 cursor-not-allowed'"
+        :disabled="menuState.type !== 'clip'"
+      >
+        <span class="flex items-center gap-2"><TrashIcon class="h-4 w-4" /> 삭제</span>
+        <span class="text-[10px] text-gray-500">DEL</span>
+      </button>
+    </div>
+  </Teleport>
+
 </template>
 <style scoped>
 </style>

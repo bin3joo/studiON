@@ -52,6 +52,11 @@ export const useTrackStore = defineStore('track', () => {
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
 
+    //복사/잘라내기 한 클립 데이터를 보관할 클립보드
+    const clipboardClip = ref<ClipUIState | null>(null);
+    const isCutAction = ref(false); //현재 보관된 데이터가 '잘라내기'로 들어왔는지 여부
+
+
     // ==========================================
     // 2. 계산된 상태(Getters) - 타임라인 픽셀 계산기
     // ==========================================
@@ -79,8 +84,202 @@ export const useTrackStore = defineStore('track', () => {
         return 1; //안쪼갬
     })
 
+    // 타임라인 자동 확장 헬퍼 함수
+    const checkAndExpandTimeline = (endBar: number) => {
+        const currentTotalBars = projectInfo.value.totalBarCount;
+        // 클립의 끝부분이 전체 타임라인의 90% 지점을 넘어가거나 아예 뚫고 나갔을 때
+        if (endBar > currentTotalBars * 0.9) {
+            // 기본 50마디를 늘려주되, 만약 클립이 너무 길어서 50마디로도 부족하면 그 클립 길이에 맞춰서 넉넉하게 늘려줍니다.
+            const extendAmount = Math.max(50, Math.ceil(endBar - currentTotalBars) + 10);
+            projectInfo.value.totalBarCount += extendAmount;
+            console.log(`타임라인이 자동으로 ${projectInfo.value.totalBarCount}마디로 확장되었습니다.`);
+        }
+    };
 
 
+   // 1. 복사
+const copyClip = (clip: ClipUIState) => {
+    // 깊은 복사(Deep Copy)를 통해 원본과의 참조를 완전히 끊어줍니다.
+    clipboardClip.value = JSON.parse(JSON.stringify(clip));
+    isCutAction.value = false;
+};
+
+// 2. 잘라내기
+const cutClip = (clip: ClipUIState, trackId: number) => {
+    const generatedId = () => Math.floor(Math.random() * 4294967296);
+    
+    // 깊은 복사 + 새로운 고유 ID 부여
+    const clonedData = JSON.parse(JSON.stringify(clip));
+    clipboardClip.value = {
+        ...clonedData,
+        clipId: generatedId() 
+    };
+    
+    isCutAction.value = true;
+    deleteClip(clip.clipId, trackId); 
+};
+// 3. 붙여넣기
+const pasteClip = (targetTrackId: number, startBar: number) => {
+    if (!clipboardClip.value) return;
+
+    const targetTrack = trackList.value.find(t => t.trackId === targetTrackId);
+    if (!targetTrack) return;
+
+    // 붙여넣기 겹침 방지
+    let resolvedStart = startBar;
+    const duration = clipboardClip.value.duration; //미래를 위해 복사
+    let hasOverlap = true;
+    const epsilon = 0.001;
+    let safetyCounter = 0;
+
+    // 빈 공간 검사 헬퍼 함수
+    const isSpaceClear = (targetStart: number, dur: number) => {
+        if (targetStart < 0) return false;
+        const targetEnd = targetStart + dur;
+        for (const c of targetTrack.clips) {
+            if (targetStart < c.start + c.duration - epsilon && targetEnd > c.start + epsilon) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // 붙여넣을 위치에 다른 클립이 있다면 빈 공간이 나올 때까지 뒤로 밀어냅니다.
+    while (hasOverlap && safetyCounter < 100) {
+        hasOverlap = false;
+        safetyCounter++;
+        for (const clip of targetTrack.clips) {
+            const existingStart = clip.start;
+            const existingEnd = clip.start + clip.duration;
+            const desiredEnd = resolvedStart + clipboardClip.value.duration;
+
+            if (resolvedStart < existingEnd - epsilon && desiredEnd > existingStart + epsilon) {
+                hasOverlap = true;
+                
+                const dropCenter = resolvedStart + (duration / 2);
+                const existingCenter = existingStart + (clip.duration / 2);
+
+                let placedFront = false;
+
+                // 붙여넣기 위치가 앞쪽이면 앞 공간을 먼저 찾음
+                if (dropCenter <= existingCenter) {
+                    const proposedStart = existingStart - duration;
+                    if (isSpaceClear(proposedStart, duration)) {
+                        resolvedStart = proposedStart;
+                        placedFront = true;
+                    }
+                }
+
+                // 앞 공간이 꽉 찼거나 뒤쪽에 붙여넣었으면 뒤로 밀어냄
+                if (!placedFront) {
+                    resolvedStart = existingEnd;
+                }
+                break;
+            }
+        }
+    }
+    //무작위 고유 번호 생성기
+    const generatedId = () => Math.floor(Math.random() * 4294967296);
+
+    //임시 가짜 ID 생성/ 백엔드 진짜 ID와 겹치지 않게 음수로 생성한다.
+    const tempClipId = - generatedId();
+
+    // 붙여넣을 새로운 클립 생성 (고유한 ID 부여)
+    const tempClip: ClipUIState = {
+        ...clipboardClip.value,
+        clipId: generatedId(), 
+        start: resolvedStart,    //보정된 위치
+        isSelected: false,
+        isDragging: false
+    };
+    //화면에 렌더링하기 전에 타임라인 길이가 부족한지 검사하고 늘려줍니다!
+    checkAndExpandTimeline(resolvedStart + tempClip.duration);
+
+    // 화면에 일단 렌더링 한다.
+    targetTrack.clips.push(tempClip);
+
+    //오디오 엔진에도 새로운 클립을 스케줄링 해준다(필요시)
+    resyncClip(tempClipId, resolvedStart);
+
+    //백엔드로 WebSocket 이벤트 송신 (명세서 규격에 맞춘다.)
+    // socket.emit('CLIP_PASTE', {
+    //     projectId: projectInfo.value.projectId,
+    //     targetTrackId: targetTrackId,
+    //     targetStartBar: startBar
+    // });
+
+    // 잘라내기(Cut) 였을 경우, 한 번 붙여넣으면 클립보드를 비운다..
+    if (isCutAction.value) {
+        clipboardClip.value = null;
+        isCutAction.value = false;
+    }
+};
+
+// 백엔드에서 성공 응답이 왔을 때 실행할 리스너 함수
+// socket.on('CLIP_PASTE_SUCCESS', (response) => {
+//     const track = trackList.value.find(t => t.trackId === response.targetTrackId);
+//     const clip = track.clips.find(c => c.clipId === tempClipId); // tempClipId로 임시 클립 찾기
+//     if (clip) {
+//         clip.clipId = response.clipId; // 진짜 백엔드 ID로 교체
+//     }
+// });
+
+// 삭제
+const deleteClip = (clipId: number, trackId: number) => {
+    const track = trackList.value.find(t => t.trackId === trackId);
+    if (track) {
+        const index = track.clips.findIndex(c => c.clipId === clipId);
+        if (index !== -1) track.clips.splice(index, 1);
+    }
+};
+
+// 4. 클립 복제 (Duplicate)
+const duplicateClip = (clip: ClipUIState, trackId: number) => {
+    const targetTrack = trackList.value.find(t => t.trackId === trackId);
+    if (!targetTrack) return;
+
+    // 복제될 기본 위치: 원본 클립이 끝나는 바로 뒷자리!
+    let resolvedStart = clip.start + clip.duration;
+    const duration = clip.duration;
+    let hasOverlap = true;
+    const epsilon = 0.001;
+    let safetyCounter = 0;
+
+    // 겹침 방지 (그 자리에 다른 클립이 있으면 빈자리가 나올 때까지 뒤로 밀어냄)
+    while (hasOverlap && safetyCounter < 100) {
+        hasOverlap = false;
+        safetyCounter++;
+
+        for (const existingClip of targetTrack.clips) {
+            const existingStart = existingClip.start;
+            const existingEnd = existingClip.start + existingClip.duration;
+            const desiredEnd = resolvedStart + duration;
+
+            if (resolvedStart < existingEnd - epsilon && desiredEnd > existingStart + epsilon) {
+                hasOverlap = true;
+                resolvedStart = existingEnd; // 무조건 뒤로 밀어냄
+                break;
+            }
+        }
+    }
+
+    const generatedId = () => Math.floor(Math.random() * 4294967296);
+    const tempClipId = -generatedId();
+
+    const duplicatedClip: ClipUIState = {
+        ...JSON.parse(JSON.stringify(clip)), // 원본과 독립되도록 깊은 복사
+        clipId: generatedId(), 
+        start: resolvedStart,
+        isSelected: false,
+        isDragging: false
+    };
+
+    // 복제할 때도 타임라인 길이가 부족한지 검사하고 늘려줌
+    checkAndExpandTimeline(resolvedStart + duplicatedClip.duration);
+    
+    targetTrack.clips.push(duplicatedClip);
+    resyncClip(tempClipId, resolvedStart);
+};
     // ==========================================
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
@@ -373,5 +572,13 @@ export const useTrackStore = defineStore('track', () => {
         stopPlay,
         updatePlayheadLoop,
         resyncClip,
+        
+        // 클립보드
+        clipboardClip,
+        copyClip,
+        cutClip,
+        pasteClip,
+        deleteClip,
+        duplicateClip,
     };
 });

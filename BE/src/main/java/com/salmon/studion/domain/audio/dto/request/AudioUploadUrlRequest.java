@@ -14,9 +14,6 @@ public class AudioUploadUrlRequest {
 
     public static final int MAX_AUDIO_SIZE_BYTES = 50 * 1024 * 1024;
 
-    @NotNull(message = "프로젝트ID는 필수입니다.")
-    private Integer projectId;
-
     @NotBlank(message = "파일의 이름은 필수입니다.")
     private String originalName;
 

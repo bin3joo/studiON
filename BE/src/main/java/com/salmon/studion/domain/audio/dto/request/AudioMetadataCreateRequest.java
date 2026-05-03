@@ -11,9 +11,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AudioMetadataCreateRequest {
 
-    @NotNull(message = "프로젝트ID는 필수입니다.")
-    private Integer projectId;
-
     @NotBlank(message = "S3 objectKey는 필수입니다.")
     private String objectKey;
 

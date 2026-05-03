@@ -48,6 +48,7 @@ public enum ErrorCode {
     S3_OBJECT_VALIDATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "A_010", "S3 오디오 파일 검증 중 오류가 발생했습니다."),
     AUDIO_INVALID_PROJECT_SCOPE(HttpStatus.BAD_REQUEST, "A_011", "오디오 파일의 프로젝트 정보가 올바르지 않습니다."),
     AUDIO_OBJECT_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "A_012", "오디오 파일 식별 정보가 올바르지 않습니다."),
+    AUDIO_METADATA_NOT_FOUND(HttpStatus.NOT_FOUND, "A_013", "오디오 메타데이터를 찾을 수 없습니다."),
 
 
     // 코멘트 C_000

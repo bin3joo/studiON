@@ -30,6 +30,12 @@ public class AudioService {
         return audioMetadataRepository.save(audioMetadata);
     }
 
+    @Transactional(readOnly = true)
+    public AudioMetadata getAudioMetadata(Integer audioMetadataId) {
+        return audioMetadataRepository.findById(audioMetadataId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.AUDIO_METADATA_NOT_FOUND));
+    }
+
     public void validateMimeTypeAndExtension(String originalName, MimeType mimeType) {
         int dotIndex = originalName.lastIndexOf('.');
         if (dotIndex == -1 || dotIndex == originalName.length() - 1) {

@@ -2,11 +2,13 @@ package com.salmon.studion.domain.audio.facade;
 
 import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.dto.request.AudioUploadUrlRequest;
+import com.salmon.studion.domain.audio.dto.response.AudioDetailResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioMetadataCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioUploadUrlResponse;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.service.AudioService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
+import com.salmon.studion.global.infrastructure.cdn.CdnUrlService;
 import com.salmon.studion.global.infrastructure.s3.S3StorageService;
 import com.salmon.studion.global.infrastructure.s3.dto.PresignedUrlResult;
 import lombok.RequiredArgsConstructor;
@@ -20,15 +22,16 @@ public class AudioFacade {
 
     private final AudioService audioService;
     private final S3StorageService s3StorageService;
+    private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
 
-    public AudioUploadUrlResponse getAudioUploadUrl(AudioUploadUrlRequest audioUploadUrlRequest, Integer userId) {
-        projectMemberService.validateProjectMember(audioUploadUrlRequest.getProjectId(), userId);
+    public AudioUploadUrlResponse getAudioUploadUrl(Integer projectId, AudioUploadUrlRequest audioUploadUrlRequest, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
 
         audioService.validateMimeTypeAndExtension(audioUploadUrlRequest.getOriginalName(), audioUploadUrlRequest.getMimeType());
 
         PresignedUrlResult result = s3StorageService.createUploadUrl(
-                audioUploadUrlRequest.getProjectId(),
+                projectId,
                 audioUploadUrlRequest.getOriginalName(),
                 audioUploadUrlRequest.getMimeType().getValue(),
                 audioUploadUrlRequest.getSizeBytes()
@@ -37,12 +40,12 @@ public class AudioFacade {
         return AudioUploadUrlResponse.of(result.getObjectKey(), result.getStoredName(), result.getUploadUrl());
     }
 
-    public AudioMetadataCreateResponse createAudioMetadata(AudioMetadataCreateRequest request, Integer userId) {
-        projectMemberService.validateProjectMember(request.getProjectId(), userId);
+    public AudioMetadataCreateResponse createAudioMetadata(Integer projectId, AudioMetadataCreateRequest request, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
 
         audioService.validateMimeTypeAndExtension(request.getOriginalName(), request.getMimeType());
 
-        audioService.validateObjectKey(request.getProjectId(), request.getObjectKey());
+        audioService.validateObjectKey(projectId, request.getObjectKey());
 
         audioService.validateStoredName(request.getObjectKey(), request.getStoredName());
 
@@ -51,5 +54,17 @@ public class AudioFacade {
         AudioMetadata audioMetadata = audioService.createAudioMetadata(request);
 
         return AudioMetadataCreateResponse.from(audioMetadata);
+    }
+
+    public AudioDetailResponse getAudioDetail(Integer projectId, Integer audioMetadataId, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        AudioMetadata audioMetadata = audioService.getAudioMetadata(audioMetadataId);
+
+        audioService.validateObjectKey(projectId, audioMetadata.getObjectKey());
+
+        String audioUrl = cdnUrlService.createAudioUrl(audioMetadata.getObjectKey());
+
+        return AudioDetailResponse.of(audioMetadata, audioUrl);
     }
 }

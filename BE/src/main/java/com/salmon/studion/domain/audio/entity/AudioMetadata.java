@@ -44,4 +44,22 @@ public class AudioMetadata extends BaseEntity {
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
+
+    public static AudioMetadata create(
+            String objectKey,
+            String originalName,
+            String storedName,
+            MimeType mimeType,
+            Integer sizeBytes,
+            Integer durationMs
+    ) {
+        AudioMetadata audioMetadata = new AudioMetadata();
+        audioMetadata.objectKey = objectKey;
+        audioMetadata.originalName = originalName;
+        audioMetadata.storedName = storedName;
+        audioMetadata.mimeType = mimeType;
+        audioMetadata.sizeBytes = sizeBytes;
+        audioMetadata.durationMs = durationMs;
+        return audioMetadata;
+    }
 }

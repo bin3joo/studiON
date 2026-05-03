@@ -41,6 +41,7 @@ public enum ErrorCode {
     AUDIO_DOWNLOAD_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "A_003", "오디오 다운로드에 실패했습니다."),
     AUDIO_INVALID_FORMAT(HttpStatus.BAD_REQUEST, "A_004", "지원하지 않는 오디오 형식입니다."),
     AUDIO_FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "A_005", "오디오 파일 크기가 너무 큽니다."),
+    AUDIO_INVALID_FILE_NAME(HttpStatus.BAD_REQUEST, "A_006", "오디오 파일명 또는 확장자가 올바르지 않습니다."),
 
     // 코멘트 C_000
     COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "C_001", "댓글을 찾을 수 없습니다."),

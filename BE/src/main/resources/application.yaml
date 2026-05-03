@@ -56,6 +56,7 @@ cloud:
       static: ap-northeast-2
     s3:
       bucket: ${AWS_S3_BUCKET}
+      upload-url-expiration-minutes: 10
 
 websocket:
   endpoint: /ws/projects

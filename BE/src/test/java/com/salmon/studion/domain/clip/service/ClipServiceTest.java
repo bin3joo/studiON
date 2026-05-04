@@ -7,11 +7,13 @@ import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipDuplicateResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipSplitResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
@@ -889,6 +891,156 @@ class ClipServiceTest {
                 req.setClipId(CLIP_ID);
 
                 assertThatThrownBy(() -> clipService.splitClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("duplicateClip")
+    class DuplicateClipTest {
+
+        private static final Double ORIGINAL_START = 2.0;
+        private static final Double ORIGINAL_DURATION = 4.0;
+        private static final Integer ORIGINAL_TRACK_ID = 1;
+        private static final Integer NEW_CLIP_ID = 200;
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+            lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+
+            lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                    .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+        }
+
+        private ClipDuplicateRequest duplicateRequest(Integer clipId) {
+            ClipDuplicateRequest req = new ClipDuplicateRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(clipId);
+            return req;
+        }
+
+        private String clipStateJson() throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(ORIGINAL_TRACK_ID).start(ORIGINAL_START).duration(ORIGINAL_DURATION)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("복제 성공 시 원본 클립 끝에 동일한 duration의 새 클립이 생성된다")
+        void duplicateSuccess_fromRedis() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            ClipDuplicateResponse response = clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+            assertThat(response.getNewClipId()).isEqualTo(NEW_CLIP_ID);
+            assertThat(response.getTargetTrackId()).isEqualTo(ORIGINAL_TRACK_ID);
+            assertThat(response.getTargetStartBar()).isEqualTo(ORIGINAL_START + ORIGINAL_DURATION);
+
+            ClipState newClipState = objectMapper.readValue(store.get(String.valueOf(NEW_CLIP_ID)), ClipState.class);
+            assertThat(newClipState.getStart()).isEqualTo(ORIGINAL_START + ORIGINAL_DURATION);
+            assertThat(newClipState.getDuration()).isEqualTo(ORIGINAL_DURATION);
+            assertThat(newClipState.getTrackId()).isEqualTo(ORIGINAL_TRACK_ID);
+        }
+
+        @Test
+        @DisplayName("Redis에 상태가 없을 때 MySQL에서 로드 후 복제 성공한다")
+        void duplicateSuccess_lazyInit() throws JsonProcessingException {
+            Track mockTrack = mock(Track.class);
+            Clip mockClip = mock(Clip.class);
+            when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
+            when(mockClip.getId()).thenReturn(CLIP_ID);
+            when(mockClip.getTrack()).thenReturn(mockTrack);
+            when(mockClip.getStart()).thenReturn(ORIGINAL_START);
+            when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
+
+            ClipDuplicateResponse response = clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getTargetStartBar()).isEqualTo(ORIGINAL_START + ORIGINAL_DURATION);
+            assertThat(response.getTargetTrackId()).isEqualTo(ORIGINAL_TRACK_ID);
+        }
+
+        @Test
+        @DisplayName("복제 후 락 이전이 MULTI/EXEC 트랜잭션으로 원자적으로 실행된다")
+        void duplicateTransfersLockAtomically() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID);
+
+            verify(redisTemplate).execute(any(org.springframework.data.redis.core.SessionCallback.class));
+        }
+
+        @Test
+        @DisplayName("클립이 잠겨있지 않으면 CLIP_LOCKED 예외를 던진다")
+        void duplicateFailWhenNotLocked() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(null);
+
+            assertThatThrownBy(() -> clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("다른 사용자가 잠근 클립에 복제 요청 시 CLIP_LOCKED 예외를 던진다")
+        void duplicateFailWhenLockedByOtherUser() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(OTHER_USER_ID));
+
+            assertThatThrownBy(() -> clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("Redis에 없고 MySQL에도 없는 클립 복제 시 CLIP_NOT_FOUND 예외를 던진다")
+        void duplicateFailWhenClipNotFound() {
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipDuplicateRequest req = new ClipDuplicateRequest();
+                req.setClipId(CLIP_ID);
+
+                assertThatThrownBy(() -> clipService.duplicateClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("clipId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void clipIdNull() {
+                ClipDuplicateRequest req = new ClipDuplicateRequest();
+                req.setProjectId(PROJECT_ID);
+
+                assertThatThrownBy(() -> clipService.duplicateClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

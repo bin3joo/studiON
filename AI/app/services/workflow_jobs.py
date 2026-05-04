@@ -7,15 +7,19 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.graph.state import UserDecision, WorkflowDispatchType, WorkflowState
+from app.services.workflow_artifacts import (
+    WorkflowArtifactDocument,
+    get_workflow_artifact_store,
+)
 
 
-# API와 worker 사이에서 오가는 최소 실행 지시서다.
-# 큰 상태 전체를 큐에 싣지 않고, 어떤 job을 어떤 dispatch_type으로 실행/재개할지만 담아서 전달한다.
+# API와 worker 사이에는 최소 dispatch payload만 넘기고,
+# 재개에 필요한 큰 상태는 MySQL row + Mongo artifact 조합으로 복원한다.
 class WorkflowDispatchMessage(BaseModel):
     job_id: int
     project_id: int
@@ -24,7 +28,6 @@ class WorkflowDispatchMessage(BaseModel):
     selected_region_id: str | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
-    selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
 
 
@@ -42,7 +45,103 @@ class WorkflowJobRecord(BaseModel):
     completed_at: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    state_artifact_id: str | None = None
     state_snapshot: dict = Field(default_factory=dict)
+
+
+COMPACT_STATE_KEYS = {
+    "job_id",
+    "project_id",
+    "dispatch_type",
+    "phase",
+    "current_node",
+    "progress",
+    "heartbeat_at",
+    "transition_log",
+    "runtime_status",
+    "durable_status",
+    "langgraph_thread_id",
+    "timeline_snapshot_id",
+    "project_duration_ms",
+    "bpm",
+    "numerator",
+    "denominator",
+    "track_ids",
+    "sampled_clip_ids",
+    "role_candidate_track_ids",
+    "inferred_roles",
+    "track_role_scores",
+    "track_role_confidences",
+    "issue_types",
+    "detected_issues",
+    "analysis_region_ids",
+    "selected_region_id",
+    "preserve_clip_id",
+    "user_feedback_message",
+    "clip_feature_artifact_id",
+    "vocal_detected",
+    "clap_required",
+    "clap_artifact_id",
+    "clipping_fix_applied",
+    "clipping_fix_log_id",
+    "sibilance_fix_applied",
+    "sibilance_fix_log_id",
+    "high_band_harshness_fix_applied",
+    "auto_fix_log_artifact_id",
+    "auto_fix_recipe_artifact_id",
+    "plan_status",
+    "suggestion_group_id",
+    "preview_id",
+    "preview_action_ids",
+    "user_decision",
+    "user_action_required",
+    "validator_mode",
+    "validator_result",
+    "critic_mode",
+    "critic_result",
+    "revise_count",
+    "max_revise_count",
+    "apply_result_id",
+    "feedback_event_id",
+    "latest_artifact_id",
+    "mongo_artifact_ids",
+    "failure_code",
+    "failure_message",
+    "requested_by",
+    "started_at",
+    "completed_at",
+    "notes",
+}
+
+SPILLOVER_STATE_KEYS = {
+    "bar_mapping",
+    "clip_index",
+    "track_representative_specs",
+    "analysis_regions",
+    "master_clipping_candidates",
+    "master_clipping_contributors",
+    "promoted_track_clipping_regions",
+    "ranked_candidate_ids",
+    "ranking_scores",
+    "dsp_scan_summary",
+    "rule_candidate_payload",
+    "plan_payload",
+    "plan_revision_notes",
+    "suggestion_payload",
+}
+
+LEGACY_TO_SNAKE_COLUMNS = {
+    "projectId": "project_id",
+    "currentNode": "current_node",
+    "langgraphThreadId": "langgraph_thread_id",
+    "timelineSnapshotId": "timeline_snapshot_id",
+    "requestedBy": "requested_by",
+    "startedAt": "started_at",
+    "completedAt": "completed_at",
+    "errorCode": "error_code",
+    "errorMessage": "error_message",
+    "stateJson": "state_json",
+}
 
 
 class WorkflowJobStore(Protocol):
@@ -73,7 +172,14 @@ class InMemoryWorkflowJobStore:
     def get_job(self, job_id: int) -> WorkflowJobRecord | None:
         with self._lock:
             record = self._jobs.get(job_id)
-            return record.model_copy(deep=True) if record else None
+            if record is None:
+                return None
+            restored = record.model_copy(deep=True)
+            restored.state_snapshot = _inflate_state_snapshot(
+                restored.state_snapshot,
+                restored.state_artifact_id,
+            )
+            return restored
 
     def save_graph_state(self, state: WorkflowState) -> WorkflowJobRecord:
         with self._lock:
@@ -105,13 +211,37 @@ class MySQLWorkflowJobStore:
                     text(
                         """
                         INSERT INTO ai_analysis_job (
-                            id, projectId, status, phase, currentNode, progress,
-                            langgraphThreadId, timelineSnapshotId, requestedBy,
-                            startedAt, completedAt, errorCode, errorMessage, stateJson
+                            id,
+                            project_id,
+                            status,
+                            phase,
+                            current_node,
+                            progress,
+                            langgraph_thread_id,
+                            timeline_snapshot_id,
+                            requested_by,
+                            started_at,
+                            completed_at,
+                            error_code,
+                            error_message,
+                            state_artifact_id,
+                            state_json
                         ) VALUES (
-                            :id, :projectId, :status, :phase, :currentNode, :progress,
-                            :langgraphThreadId, :timelineSnapshotId, :requestedBy,
-                            :startedAt, :completedAt, :errorCode, :errorMessage, :stateJson
+                            :id,
+                            :project_id,
+                            :status,
+                            :phase,
+                            :current_node,
+                            :progress,
+                            :langgraph_thread_id,
+                            :timeline_snapshot_id,
+                            :requested_by,
+                            :started_at,
+                            :completed_at,
+                            :error_code,
+                            :error_message,
+                            :state_artifact_id,
+                            :state_json
                         )
                         """
                     ),
@@ -128,9 +258,21 @@ class MySQLWorkflowJobStore:
                 text(
                     """
                     SELECT
-                        id, projectId, status, phase, currentNode, progress,
-                        langgraphThreadId, timelineSnapshotId, requestedBy,
-                        startedAt, completedAt, errorCode, errorMessage, stateJson
+                        id,
+                        project_id,
+                        status,
+                        phase,
+                        current_node,
+                        progress,
+                        langgraph_thread_id,
+                        timeline_snapshot_id,
+                        requested_by,
+                        started_at,
+                        completed_at,
+                        error_code,
+                        error_message,
+                        state_artifact_id,
+                        state_json
                     FROM ai_analysis_job
                     WHERE id = :job_id
                     """
@@ -150,19 +292,20 @@ class MySQLWorkflowJobStore:
                     """
                     UPDATE ai_analysis_job
                     SET
-                        projectId = :projectId,
+                        project_id = :project_id,
                         status = :status,
                         phase = :phase,
-                        currentNode = :currentNode,
+                        current_node = :current_node,
                         progress = :progress,
-                        langgraphThreadId = :langgraphThreadId,
-                        timelineSnapshotId = :timelineSnapshotId,
-                        requestedBy = :requestedBy,
-                        startedAt = :startedAt,
-                        completedAt = :completedAt,
-                        errorCode = :errorCode,
-                        errorMessage = :errorMessage,
-                        stateJson = :stateJson
+                        langgraph_thread_id = :langgraph_thread_id,
+                        timeline_snapshot_id = :timeline_snapshot_id,
+                        requested_by = :requested_by,
+                        started_at = :started_at,
+                        completed_at = :completed_at,
+                        error_code = :error_code,
+                        error_message = :error_message,
+                        state_artifact_id = :state_artifact_id,
+                        state_json = :state_json
                     WHERE id = :id
                     """
                 ),
@@ -179,40 +322,78 @@ class MySQLWorkflowJobStore:
             if self._schema_ready:
                 return
             with self._engine.begin() as conn:
-                # 실행 중인 API와 worker가 같은 MySQL row를 바라보도록 최소 durable
-                # workflow job 테이블을 여기서 보장한다.
                 conn.execute(
                     text(
                         """
                         CREATE TABLE IF NOT EXISTS ai_analysis_job (
-                            id INT NOT NULL PRIMARY KEY,
-                            projectId INT NOT NULL,
+                            id VARCHAR(64) NOT NULL PRIMARY KEY,
+                            project_id VARCHAR(64) NOT NULL,
                             status VARCHAR(32) NOT NULL,
                             phase VARCHAR(64) NOT NULL,
-                            currentNode VARCHAR(64) NULL,
+                            current_node VARCHAR(64) NULL,
                             progress TINYINT NOT NULL DEFAULT 0,
-                            langgraphThreadId VARCHAR(128) NOT NULL,
-                            timelineSnapshotId VARCHAR(128) NULL,
-                            requestedBy INT NULL,
-                            startedAt VARCHAR(64) NULL,
-                            completedAt VARCHAR(64) NULL,
-                            errorCode VARCHAR(64) NULL,
-                            errorMessage VARCHAR(255) NULL,
-                            stateJson JSON NOT NULL
+                            langgraph_thread_id VARCHAR(128) NOT NULL,
+                            timeline_snapshot_id VARCHAR(128) NULL,
+                            requested_by INT NULL,
+                            started_at VARCHAR(64) NULL,
+                            completed_at VARCHAR(64) NULL,
+                            error_code VARCHAR(64) NULL,
+                            error_message VARCHAR(255) NULL,
+                            state_artifact_id VARCHAR(128) NULL,
+                            state_json JSON NOT NULL
                         )
                         """
                     )
                 )
-                conn.execute(text("ALTER TABLE ai_analysis_job MODIFY COLUMN id INT NOT NULL"))
-                conn.execute(text("ALTER TABLE ai_analysis_job MODIFY COLUMN projectId INT NOT NULL"))
+                self._ensure_snake_case_columns(conn)
+                self._backfill_from_legacy_columns(conn)
             self._schema_ready = True
+
+    def _ensure_snake_case_columns(self, conn: Connection) -> None:
+        existing_columns = _get_table_columns(conn, "ai_analysis_job")
+        desired_columns = {
+            "project_id": "ALTER TABLE ai_analysis_job ADD COLUMN project_id VARCHAR(64) NULL",
+            "current_node": "ALTER TABLE ai_analysis_job ADD COLUMN current_node VARCHAR(64) NULL",
+            "langgraph_thread_id": (
+                "ALTER TABLE ai_analysis_job "
+                "ADD COLUMN langgraph_thread_id VARCHAR(128) NULL"
+            ),
+            "timeline_snapshot_id": (
+                "ALTER TABLE ai_analysis_job "
+                "ADD COLUMN timeline_snapshot_id VARCHAR(128) NULL"
+            ),
+            "requested_by": "ALTER TABLE ai_analysis_job ADD COLUMN requested_by INT NULL",
+            "started_at": "ALTER TABLE ai_analysis_job ADD COLUMN started_at VARCHAR(64) NULL",
+            "completed_at": "ALTER TABLE ai_analysis_job ADD COLUMN completed_at VARCHAR(64) NULL",
+            "error_code": "ALTER TABLE ai_analysis_job ADD COLUMN error_code VARCHAR(64) NULL",
+            "error_message": (
+                "ALTER TABLE ai_analysis_job ADD COLUMN error_message VARCHAR(255) NULL"
+            ),
+            "state_artifact_id": (
+                "ALTER TABLE ai_analysis_job ADD COLUMN state_artifact_id VARCHAR(128) NULL"
+            ),
+            "state_json": "ALTER TABLE ai_analysis_job ADD COLUMN state_json JSON NULL",
+        }
+        for column_name, ddl in desired_columns.items():
+            if column_name not in existing_columns:
+                conn.execute(text(ddl))
+
+    def _backfill_from_legacy_columns(self, conn: Connection) -> None:
+        existing_columns = _get_table_columns(conn, "ai_analysis_job")
+        assignments = []
+        for legacy_name, snake_name in LEGACY_TO_SNAKE_COLUMNS.items():
+            if legacy_name in existing_columns and snake_name in existing_columns:
+                assignments.append(f"{snake_name} = COALESCE({snake_name}, {legacy_name})")
+        if assignments:
+            conn.execute(text(f"UPDATE ai_analysis_job SET {', '.join(assignments)}"))
 
 
 def _build_record(state: WorkflowState) -> WorkflowJobRecord:
+    compact_state, state_artifact_id = _sanitize_state_snapshot(state)
     return WorkflowJobRecord(
-        id=int(state["job_id"]),
-        project_id=int(state["project_id"]),
-        status=state.get("durable_status", "REQUESTED"),
+        id=state["job_id"],
+        project_id=state["project_id"],
+        status=state.get("durable_status", "PENDING"),
         phase=state.get("phase", "queued"),
         current_node=state.get("current_node"),
         progress=state.get("progress", 0),
@@ -223,70 +404,120 @@ def _build_record(state: WorkflowState) -> WorkflowJobRecord:
         completed_at=state.get("completed_at"),
         error_code=state.get("failure_code"),
         error_message=state.get("failure_message"),
-        # 현재 resume에 필요한 오케스트레이션 상태만 저장하며, 큰 artifact 본문은
-        # MySQL에 넣지 않고 기존 ID/참조만 상태 안에 남긴다.
-        state_snapshot=_sanitize_state_snapshot(state),
+        state_artifact_id=state_artifact_id,
+        state_snapshot=compact_state,
     )
 
 
 def _record_params(record: WorkflowJobRecord) -> dict:
     return {
         "id": record.id,
-        "projectId": record.project_id,
+        "project_id": record.project_id,
         "status": record.status,
         "phase": record.phase,
-        "currentNode": record.current_node,
+        "current_node": record.current_node,
         "progress": record.progress,
-        "langgraphThreadId": record.langgraph_thread_id,
-        "timelineSnapshotId": record.timeline_snapshot_id,
-        "requestedBy": record.requested_by,
-        "startedAt": record.started_at,
-        "completedAt": record.completed_at,
-        "errorCode": record.error_code,
-        "errorMessage": record.error_message,
-        "stateJson": dumps(record.state_snapshot, ensure_ascii=False),
+        "langgraph_thread_id": record.langgraph_thread_id,
+        "timeline_snapshot_id": record.timeline_snapshot_id,
+        "requested_by": record.requested_by,
+        "started_at": record.started_at,
+        "completed_at": record.completed_at,
+        "error_code": record.error_code,
+        "error_message": record.error_message,
+        "state_artifact_id": record.state_artifact_id,
+        "state_json": dumps(record.state_snapshot, ensure_ascii=False),
     }
 
 
 def _row_to_record(row: dict) -> WorkflowJobRecord:
-    state_json = row.get("stateJson")
+    state_json = row.get("state_json")
     if isinstance(state_json, str):
         state_snapshot = loads(state_json)
     elif isinstance(state_json, dict):
         state_snapshot = state_json
     else:
         state_snapshot = {}
+    state_artifact_id = row.get("state_artifact_id")
+    state_snapshot = _inflate_state_snapshot(state_snapshot, state_artifact_id)
     return WorkflowJobRecord(
-        id=int(row["id"]),
-        project_id=int(row["projectId"]),
+        id=row["id"],
+        project_id=row["project_id"],
         status=row["status"],
         phase=row["phase"],
-        current_node=row.get("currentNode"),
+        current_node=row.get("current_node"),
         progress=int(row.get("progress", 0)),
-        langgraph_thread_id=row["langgraphThreadId"],
-        timeline_snapshot_id=row.get("timelineSnapshotId"),
-        requested_by=row.get("requestedBy"),
-        started_at=row.get("startedAt"),
-        completed_at=row.get("completedAt"),
-        error_code=row.get("errorCode"),
-        error_message=row.get("errorMessage"),
+        langgraph_thread_id=row["langgraph_thread_id"],
+        timeline_snapshot_id=row.get("timeline_snapshot_id"),
+        requested_by=row.get("requested_by"),
+        started_at=row.get("started_at"),
+        completed_at=row.get("completed_at"),
+        error_code=row.get("error_code"),
+        error_message=row.get("error_message"),
+        state_artifact_id=state_artifact_id,
         state_snapshot=state_snapshot,
     )
 
 
-def _sanitize_state_snapshot(state: WorkflowState) -> dict:
+def _sanitize_state_snapshot(state: WorkflowState) -> tuple[dict, str | None]:
     snapshot = deepcopy(dict(state))
-    # 큰 snapshot 원문은 Mongo에만 두고, MySQL에는 복구용 요약 상태만 남긴다.
     snapshot.pop("project_snapshot", None)
-    return snapshot
+
+    compact_state = {key: snapshot[key] for key in COMPACT_STATE_KEYS if key in snapshot}
+    spillover_state = {key: snapshot[key] for key in SPILLOVER_STATE_KEYS if key in snapshot}
+    if not spillover_state:
+        return compact_state, None
+
+    state_artifact_id = _build_state_artifact_id(state)
+    get_workflow_artifact_store().upsert_artifact(
+        WorkflowArtifactDocument(
+            id=state_artifact_id,
+            job_id=state["job_id"],
+            artifact_type="durable_state_payload",
+            payload={"state_fields": spillover_state},
+        )
+    )
+    return compact_state, state_artifact_id
+
+
+def _inflate_state_snapshot(compact_state: dict, state_artifact_id: str | None) -> dict:
+    inflated = deepcopy(compact_state)
+    if not state_artifact_id:
+        return inflated
+    artifact = get_workflow_artifact_store().get_artifact(state_artifact_id)
+    if artifact is None:
+        return inflated
+    state_fields = artifact.payload.get("state_fields")
+    if isinstance(state_fields, dict):
+        inflated.update(deepcopy(state_fields))
+    return inflated
+
+
+def _build_state_artifact_id(state: WorkflowState) -> str:
+    return f"{state['job_id']}:durable-state"
+
+
+def _get_table_columns(conn: Connection, table_name: str) -> set[str]:
+    return {
+        row["COLUMN_NAME"]
+        for row in conn.execute(
+            text(
+                """
+                SELECT COLUMN_NAME
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        ).mappings()
+    }
 
 
 _memory_store = InMemoryWorkflowJobStore()
 _mysql_store: MySQLWorkflowJobStore | None = None
 
 
-# worker나 orchestration 코드가 저장소 구현을 직접 고르지 않게 해주는 접근 함수다.
-# MySQL 설정이 있으면 영속 저장소를, 없으면 개발용 in-memory 저장소를 반환한다.
+# MySQL 설정이 있으면 durable 저장소를, 없으면 개발용 in-memory 저장소를 반환한다.
 def get_workflow_job_store() -> WorkflowJobStore:
     global _mysql_store
     mysql_url = get_settings().resolved_mysql_url

@@ -6,7 +6,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from typing_extensions import TypedDict
 
-IssueType = Literal["band_overlap", "clipping", "sibilance", "high_band_harshness"]
+IssueType = Literal[
+    "band_overlap",
+    "track_clipping",
+    "master_clipping",
+    "sibilance",
+    "high_band_harshness",
+]
 ValidatorOutcome = Literal["PASS", "REVISE", "REJECT"]
 CriticOutcome = Literal["PASS", "REVISE", "REJECT"]
 # worker dispatch 메시지가 이번 실행을 어떤 종류로 처리해야 하는지 나타내는 제어 값이다.
@@ -14,7 +20,6 @@ CriticOutcome = Literal["PASS", "REVISE", "REJECT"]
 WorkflowDispatchType = Literal[
     "start",
     "resume_plan_input",
-    "resume_selection",
     "resume_confirm",
 ]
 RuntimeStatus = Literal[
@@ -33,7 +38,7 @@ DurableJobStatus = Literal[
     "CANCELLED",
     "EXPIRED",
 ]
-UserDecision = Literal["confirm", "retry", "cancel"]
+UserDecision = Literal["confirm", "cancel"]
 
 
 class WorkflowState(TypedDict, total=False):
@@ -67,6 +72,9 @@ class WorkflowState(TypedDict, total=False):
     detected_issues: list[IssueType]
     analysis_region_ids: list[str]
     analysis_regions: list[dict]
+    master_clipping_candidates: list[dict]
+    master_clipping_contributors: list[dict]
+    promoted_track_clipping_regions: list[dict]
     ranked_candidate_ids: list[str]
     ranking_scores: dict[str, float]
     selected_region_id: str | None
@@ -81,6 +89,8 @@ class WorkflowState(TypedDict, total=False):
     clipping_fix_log_id: str | None
     sibilance_fix_applied: bool
     sibilance_fix_log_id: str | None
+    high_band_harshness_fix_applied: bool
+    auto_fix_log_artifact_id: str | None
     auto_fix_recipe_artifact_id: str | None
     plan_payload: dict
     plan_status: str | None
@@ -89,7 +99,6 @@ class WorkflowState(TypedDict, total=False):
     suggestion_group_id: str | None
     preview_id: str | None
     preview_action_ids: list[str]
-    selected_action_ids: list[str]
     user_decision: UserDecision | None
     user_action_required: bool
     validator_mode: str
@@ -127,6 +136,7 @@ def build_workflow_initial_state(
     project_id: int,
     **overrides: object,
 ) -> WorkflowState:
+    issue_types = overrides.pop("issue_types", None)
     state: WorkflowState = {
         "job_id": job_id,
         "project_id": project_id,
@@ -153,10 +163,19 @@ def build_workflow_initial_state(
         "inferred_roles": {},
         "track_role_scores": {},
         "track_role_confidences": {},
-        "issue_types": ["band_overlap", "clipping"],
+        "issue_types": [
+            "band_overlap",
+            "track_clipping",
+            "master_clipping",
+            "sibilance",
+            "high_band_harshness",
+        ],
         "detected_issues": [],
         "analysis_region_ids": [],
         "analysis_regions": [],
+        "master_clipping_candidates": [],
+        "master_clipping_contributors": [],
+        "promoted_track_clipping_regions": [],
         "ranked_candidate_ids": [],
         "ranking_scores": {},
         "selected_region_id": None,
@@ -171,6 +190,8 @@ def build_workflow_initial_state(
         "clipping_fix_log_id": None,
         "sibilance_fix_applied": False,
         "sibilance_fix_log_id": None,
+        "high_band_harshness_fix_applied": False,
+        "auto_fix_log_artifact_id": None,
         "auto_fix_recipe_artifact_id": None,
         "plan_payload": {},
         "plan_status": None,
@@ -179,7 +200,6 @@ def build_workflow_initial_state(
         "suggestion_group_id": None,
         "preview_id": None,
         "preview_action_ids": [],
-        "selected_action_ids": [],
         "user_decision": None,
         "user_action_required": False,
         "validator_mode": "PASS",
@@ -199,6 +219,8 @@ def build_workflow_initial_state(
         "completed_at": None,
         "notes": [],
     }
+    if issue_types is not None:
+        state["issue_types"] = _normalize_issue_types(issue_types)
     state.update(overrides)
     return state
 
@@ -219,8 +241,28 @@ def build_apply_initial_state(
         project_id=project_id,
         preview_id=preview_id,
         suggestion_group_id=suggestion_group_id,
-        phase="waiting_for_user_selection",
+        phase="waiting_for_user_confirm",
         runtime_status="waiting_for_user",
         durable_status="WAITING_USER",
         **overrides,
     )
+
+
+def _normalize_issue_types(issue_types: object) -> list[IssueType]:
+    normalized: list[IssueType] = []
+    for issue in issue_types or []:
+        issue_name = str(issue)
+        if issue_name == "clipping":
+            for alias in ("track_clipping", "master_clipping"):
+                if alias not in normalized:
+                    normalized.append(alias)  # type: ignore[arg-type]
+            continue
+        if issue_name in {
+            "band_overlap",
+            "track_clipping",
+            "master_clipping",
+            "sibilance",
+            "high_band_harshness",
+        } and issue_name not in normalized:
+            normalized.append(issue_name)  # type: ignore[arg-type]
+    return normalized

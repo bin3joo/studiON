@@ -31,7 +31,15 @@ class WorkflowStartPayload(BaseModel):
     job_id: int
     project_id: int
     project_snapshot: ProjectSnapshot
-    issue_types: list[str] = Field(default_factory=lambda: ["band_overlap", "clipping"])
+    issue_types: list[str] = Field(
+        default_factory=lambda: [
+            "band_overlap",
+            "track_clipping",
+            "master_clipping",
+            "sibilance",
+            "high_band_harshness",
+        ]
+    )
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
     requested_by: int | None = None
@@ -43,7 +51,6 @@ class WorkflowResumePayload(BaseModel):
     selected_region_id: str | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
-    selected_action_ids: list[str] = Field(default_factory=list)
     user_decision: UserDecision | None = None
     requested_by: int | None = None
 
@@ -128,7 +135,6 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
         selected_region_id=payload.selected_region_id,
         preserve_clip_id=payload.preserve_clip_id,
         user_feedback_message=payload.user_feedback_message,
-        selected_action_ids=payload.selected_action_ids,
         user_decision=payload.user_decision,
     )
     # API는 enqueue만 담당하고, durable 복원과 그래프 실행 책임은 worker가 가진다.
@@ -198,8 +204,6 @@ def get_workflow_job_status(job_id: int) -> dict[str, object]:
 def _dispatch_type_for_phase(phase: str) -> WorkflowDispatchType:
     if phase == "waiting_for_user_plan_input":
         return "resume_plan_input"
-    if phase == "waiting_for_user_selection":
-        return "resume_selection"
     if phase == "waiting_for_user_confirm":
         return "resume_confirm"
     raise HTTPException(
@@ -218,11 +222,6 @@ def _validate_resume_inputs(dispatch_type: WorkflowDispatchType, payload: dict[s
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="preserve_clip_id is required for plan-input resume.",
-        )
-    if dispatch_type == "resume_selection" and not payload.get("selected_action_ids"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="selected_action_ids is required for selection resume.",
         )
     if dispatch_type == "resume_confirm" and payload.get("user_decision") is None:
         raise HTTPException(

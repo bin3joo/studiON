@@ -50,6 +50,10 @@ cloud:
       static: ap-northeast-2
     s3:
       bucket: ${AWS_S3_BUCKET}
+      upload-url-expiration-minutes: 10
+
+cdn:
+  domain: ${CDN_DOMAIN:https://your-cloudfront-domain.cloudfront.net}
 
 websocket:
   endpoint: /ws/projects

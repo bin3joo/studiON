@@ -10,8 +10,6 @@ from app.services.plan_critic_llm import (
 
 ISSUE_ALLOWED_ACTIONS = {
     "band_overlap": {"DYNAMIC_EQ"},
-    "clipping": {"GAIN_TRIM", "TRUE_PEAK_LIMITER"},
-    "high_band_harshness": {"DYNAMIC_EQ"},
 }
 
 
@@ -143,9 +141,7 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
         return "TRACK-scoped actions must include targetTrackId."
     if target_scope == "MASTER" and target_track_id is not None:
         return "MASTER-scoped actions must not include targetTrackId."
-    if issue_type == "clipping" and target_scope != "MASTER":
-        return "Clipping plans must use MASTER scope."
-    if issue_type in {"band_overlap", "high_band_harshness"} and target_scope != "TRACK":
+    if issue_type == "band_overlap" and target_scope != "TRACK":
         return f"{issue_type} plans must use TRACK scope."
 
     start_ms = action.get("startMs")

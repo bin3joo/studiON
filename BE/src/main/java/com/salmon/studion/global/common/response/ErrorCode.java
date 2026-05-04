@@ -41,11 +41,24 @@ public enum ErrorCode {
     AUDIO_DOWNLOAD_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "A_003", "오디오 다운로드에 실패했습니다."),
     AUDIO_INVALID_FORMAT(HttpStatus.BAD_REQUEST, "A_004", "지원하지 않는 오디오 형식입니다."),
     AUDIO_FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "A_005", "오디오 파일 크기가 너무 큽니다."),
+    AUDIO_INVALID_FILE_NAME(HttpStatus.BAD_REQUEST, "A_006", "오디오 파일명 또는 확장자가 올바르지 않습니다."),
+    AUDIO_FILE_NOT_FOUND(HttpStatus.NOT_FOUND, "A_007", "업로드된 오디오 파일을 찾을 수 없습니다."),
+    AUDIO_FILE_SIZE_MISMATCH(HttpStatus.BAD_REQUEST, "A_008", "업로드된 오디오 파일 크기가 요청 정보와 일치하지 않습니다."),
+    AUDIO_CONTENT_TYPE_MISMATCH(HttpStatus.BAD_REQUEST, "A_009", "업로드된 오디오 파일 타입이 요청 정보와 일치하지 않습니다."),
+    S3_OBJECT_VALIDATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "A_010", "S3 오디오 파일 검증 중 오류가 발생했습니다."),
+    AUDIO_INVALID_PROJECT_SCOPE(HttpStatus.BAD_REQUEST, "A_011", "오디오 파일의 프로젝트 정보가 올바르지 않습니다."),
+    AUDIO_OBJECT_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "A_012", "오디오 파일 식별 정보가 올바르지 않습니다."),
+    AUDIO_METADATA_NOT_FOUND(HttpStatus.NOT_FOUND, "A_013", "오디오 메타데이터를 찾을 수 없습니다."),
+
 
     // 코멘트 C_000
     COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "C_001", "댓글을 찾을 수 없습니다."),
     COMMENT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "C_002", "댓글 접근 권한이 없습니다."),
-    COMMENT_ALREADY_RESOLVED(HttpStatus.CONFLICT, "C_003", "이미 해결된 댓글입니다.");
+    COMMENT_ALREADY_RESOLVED(HttpStatus.CONFLICT, "C_003", "이미 해결된 댓글입니다."),
+
+    // 클립 CL_000
+    CLIP_NOT_FOUND(HttpStatus.NOT_FOUND, "CL_001", "클립을 찾을 수 없습니다."),
+    CLIP_LOCKED(HttpStatus.CONFLICT, "CL_002", "다른 사용자가 편집 중인 클립입니다.");
 
 
     private final HttpStatus status;

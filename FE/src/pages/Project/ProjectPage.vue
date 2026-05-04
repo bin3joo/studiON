@@ -6,15 +6,13 @@ import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
 import ProjectHeader from './components/ProjectHeader.vue'
 import TrackList from './components/TrackList.vue' //트랙 리스트 컴포넌트
 import InviteCodeModal from './components/InviteCodeModal.vue'
-import ProjectPlaybar from './components/ProjectPlaybar.vue'
-import ProjectEditSection from './components/ProjectEditSection.vue'
 import ProjectAiSection from './components/ProjectAiSection.vue'
 import ProjectSidePanel from './components/ProjectSidePanel.vue'
 import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금자
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
- 
+import * as Tone from 'tone' //오디오 엔진
+import AiConflictOverlay from './components/AiConflictOverlay.vue'
 type SidePanelType = 'comments' | 'history' | 'ai' | null
-
 
 const route = useRoute()
 const projectId = route.params.projectId as string
@@ -69,30 +67,165 @@ const handleKeyDown = (e: KeyboardEvent) => {
   if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
     return;
   }
+  //재생/정지
   if(e.code === 'Space'){
     e.preventDefault();
     trackStore.togglePlay();
   }
-}
+
+// 삭제 (Delete / Backspace)
+  if (e.code === 'Delete' || e.code === 'Backspace') {
+    e.preventDefault();
+    if (trackStore.selectedClip && trackStore.selectedTrackId) {
+      trackStore.deleteClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
+      trackStore.deselectClip(); // 지운 후 선택 해제
+    }
+    return;
+  }
+
+  // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
+  if (e.ctrlKey || e.metaKey) {
+    switch (e.code) {
+      case 'KeyC': // 복사
+        e.preventDefault();
+        if (trackStore.selectedClip) {
+          trackStore.copyClip(trackStore.selectedClip);
+        }
+        break;
+        
+      case 'KeyX': // 잘라내기
+        e.preventDefault();
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.cutClip(trackStore.selectedClip, trackStore.selectedTrackId);
+          trackStore.deselectClip();
+        }
+        break;
+        
+      case 'KeyV': // 붙여넣기
+        e.preventDefault();
+        // 붙여넣기는 '현재 선택된 트랙'의 '현재 재생바 위치'에 붙여넣기 된다.
+        // 클립을 선택한 상태라면 그 트랙에, 아니면 1번 트랙을 기본으로 넣기
+      if (trackStore.clipboardClip) {
+          // 1. 기본 타겟: 선택된 트랙 또는 1번 트랙
+          let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
+
+          // 2. 마우스가 위치한 곳의 트랙 ID 감지
+          const elementsUnderMouse = document.elementsFromPoint(currentMouseX, currentMouseY);
+          const targetTrackEl = elementsUnderMouse.find((el) => el.hasAttribute('data-track-id'));
+
+          if (targetTrackEl) {
+            targetTrackId = Number(targetTrackEl.getAttribute('data-track-id'));
+          }
+
+          if (targetTrackId) {
+            //3. 마우스 X 좌표를 마디(Bar) 단위로 역산
+            let targetBar = trackStore.playheadPosition; // 혹시라도 마우스 위치 계산에 실패하면 재생바로 폴백(Fallback)
+
+            if (timelineContainerRef.value) {
+              const scrollLeft = timelineContainerRef.value.scrollLeft;
+              
+              // 현재 마우스 X 좌표에서 왼쪽 컨트롤 패널 너비(224px)를 빼고, 스크롤된 양을 더함 = 절대 픽셀 위치
+              const absoluteX = currentMouseX - 224 + scrollLeft; 
+              
+              // 픽셀을 마디(Bar)로 변환
+              let calculatedBar = absoluteX / trackStore.pixelPerBar;
+              
+              // 현재 스냅(1/4 박자, 1/8 박자 등) 설정에 맞춰서 깔끔하게 자석처럼 붙게 반올림
+              const snap = trackStore.subDivision;
+              targetBar = Math.max(0, Math.round(calculatedBar * snap) / snap); // 0마디 이하 뚫고 나가지 않게 방지
+            }
+
+            // 계산된 최종 위치(targetBar)에 붙여넣기 실행!
+            trackStore.pasteClip(targetTrackId, targetBar);
+          }
+        }
+        break;
+        
+      case 'KeyE': //  분할(Split)
+        e.preventDefault();
+        const currentBar = trackStore.playheadPosition;
+
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          // 1. 선택된 클립이 명확히 있으면 그 클립만 안전하게 분할
+          trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
+        } else {
+          // 2. 선택된 클립이 없다면? -> 재생바(Playhead) 선에 닿아있는 모든 트랙의 클립을 동시 분할
+          let hasSplit = false;
+          
+          trackStore.trackList.forEach(track => {
+            const clipUnderPlayhead = track.clips.find(c => 
+              currentBar > c.start && currentBar < c.start + c.duration
+            );
+            
+            // 재생바 아래에 깔린 클립이 발견되면 즉시 분할 스토어 액션 호출
+            if (clipUnderPlayhead) {
+              trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
+              hasSplit = true;
+            }
+          });
+
+          if (!hasSplit) {
+            console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
+          }
+        }
+        break;
+    }
+  }
+};
+//사용자가 기존에 사용하던 테마 임시 저장
+let previousTheme = '';
+
+//  현재 마우스 좌표를 기억하는 변수
+let currentMouseX = 0;
+let currentMouseY = 0;
+
+const updateMousePos = (e: MouseEvent) => {
+  currentMouseX = e.clientX;
+  currentMouseY = e.clientY;
+};
+
+
 
 // 프로젝트 시작 시 트랙 정보 불러오기
 onMounted(async () => {
+  //페이지 진입 시 무조건 다크 모드로 강제 전환
+  const rootElement = document.documentElement;
+  // 사용자가 원래 쓰고 있던 테마가 라이트 모드(클래스에 'dark'가 없음)인지 확인
+  if (!rootElement.classList.contains('dark')) {
+      previousTheme = 'light';
+      rootElement.classList.add('dark'); // 강제로 다크 모드 켜기
+  } else {
+      previousTheme = 'dark';
+  }
+  
+
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
   }
   //키보드 이벤트 리스너 등록
   window.addEventListener('keydown', handleKeyDown);
+  //  마우스 이동 감지
+  window.addEventListener('mousemove', updateMousePos);
 
 //브라우저 기본 줌을 막기 위해 수동으로 이벤트 리스너 등록
 if(timelineContainerRef.value) {
   timelineContainerRef.value.addEventListener('wheel', handleWheel, {passive: false}) 
   }
+
+  //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
+  window.addEventListener('pointerdown', unlockAudioEngine);
+  window.addEventListener('keydown', unlockAudioEngine);
 })
 
 onUnmounted(()=>{
   //키보드 이벤트 제거
   window.removeEventListener('keydown',handleKeyDown);
+  // 마우스 감지해제
+  window.removeEventListener('mousemove', updateMousePos);
+  //오디오 제한 해제 리스너 제거
+  window.removeEventListener('pointerdown', unlockAudioEngine);
+  window.removeEventListener('keydown', unlockAudioEngine);
 })
 
 const isInviteModalOpen = ref(false)
@@ -242,11 +375,60 @@ function handleResolveComment(payload: {
   }
 }
 
+const aiAnalyzing = ref(false)
+
+const aiConflict = ref<null | {
+  startPercent: number
+  endPercent: number
+  barStart: number
+  barEnd: number
+  title: string
+  summary: string
+  bullets: string[]
+}>(null)
+
+const runAiAnalysis = () => {
+  if (aiAnalyzing.value) return
+
+  aiAnalyzing.value = true
+  aiConflict.value = null
+
+  setTimeout(() => {
+    aiConflict.value = {
+      startPercent: 18.3,
+      endPercent: 23.3,
+      barStart: 12,
+      barEnd: 14,
+      title: '12마디에서 14마디 사이',
+      summary: '중음역대에서 충돌이 발생해요.',
+      bullets: [
+        '트랙을 선택해 충돌 구간을 확인해보세요.',
+        '리드 신스 1과 리듬 기타 L의 200Hz~800Hz 대역이 겹쳐요.',
+        '각 트랙 EQ에서 -3dB 정도 컷을 제안합니다.',
+      ],
+    }
+
+    aiAnalyzing.value = false
+  }, 1200)
+}
+
+//브라우저 오디오 제한 강제 해제
+const unlockAudioEngine = async () => {
+  if(Tone.getContext().state !== 'running') {
+    await Tone.start();
+    console.log('브라우저 오디오 제한 해제 완료')
+  }
+
+  //한번 풀렸으면 더 이상 이벤트 감지 필요 없으므로 리스너 삭제
+  window.removeEventListener('pointerdown', unlockAudioEngine);
+  window.removeEventListener('keydown', unlockAudioEngine);
+}
 
 </script>
 
 <template>
   <!--플랙스, 플랙스 콜 -> 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
+  
   <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground" >
     <ProjectHeader
       :project-name="projectName"
@@ -262,13 +444,20 @@ function handleResolveComment(payload: {
       @open-history="handleOpenHistory"
     />
     <!-- 재생 컨트롤러 컴포넌트 추가 -->
-    <PlayController />
+    <PlayController
+  :ai-analyzing="aiAnalyzing"
+  @run-ai-analysis="runAiAnalysis"
+/>
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
       <!-- flex-1 -> 남은 공간 차지, overflow-auto -> 넘치는 부분 스크롤 -->
       <div ref="timelineContainerRef" class="flex-1 overflow-auto relative flex flex-col">
         <!--눈금자 컴포넌트 추가 -->
         <TimelineRuler />
+        <AiConflictOverlay
+    v-if="aiConflict"
+    :conflict="aiConflict"
+  />
         <!--트랙리스트-->
         <TrackList />
       </div>

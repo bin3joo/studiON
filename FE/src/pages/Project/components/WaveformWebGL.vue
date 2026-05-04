@@ -53,6 +53,13 @@ const renderWaveform = async () => {
     const samplesPerPixel = secondsPerPixel * cached.sampleRate;
     const startSampleOffset = (props.clip.audioStartMs / 1000) * cached.sampleRate;
 
+    // audioStartMs가 오디오 파일 총 길이를 초과하는 에러 데이터일 경우 렌더링 스킵[cite: 24]
+    const totalSamples = cached.channelData.length;
+    if (startSampleOffset >= totalSamples) {
+        console.warn(`[Waveform] audioStartMs(${props.clip.audioStartMs}ms)가 오디오 파일 길이를 초과하여 렌더링을 생략합니다.`);
+        return;
+    }
+
     // 워커에게 새 크기 정보와 함께 다시 그리라고 명령만 내림
     worker.postMessage({
         channelData: cached.channelData, 

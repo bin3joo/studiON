@@ -389,12 +389,21 @@ export const useTrackStore = defineStore('track', () => {
             if (targetChannel && newClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
                 newPlayer.load("/test2.mp3").then(() => {
-                    const exactStartTimeSec = newClip.start * secondsPerBar.value;
-                    const audioOffsetSec = (clipDataToPaste.audioStartMs || 0) / 1000;
-                    const audioDurationSec = clipDataToPaste.duration * secondsPerBar.value;
+                    // 새로 생성된 Context 상태 동기화
+                    if (Tone.getContext().state !== 'running') Tone.getContext().resume();
 
-                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec);
-                    clipPlayers.set(newClip.clipId, newPlayer); // ID(Key)로 안전하게 저장
+                    const exactStartTimeSec = newClip.start * secondsPerBar.value;
+                    const audioOffsetSec = (newClip.audioStartMs || 0) / 1000;
+
+                    // 버퍼 길이를 초과하는 스케줄링 원천 차단
+                    const maxDuration = newPlayer.buffer.duration - audioOffsetSec;
+                    const requestedDuration = newClip.duration * secondsPerBar.value;
+                    const safeDurationSec = Math.max(0.01, Math.min(requestedDuration, maxDuration));
+
+                    if (safeDurationSec > 0) {
+                        newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, safeDurationSec);
+                    }
+                    clipPlayers.set(newClip.clipId, newPlayer);
                 });
             }
         } catch (error) {
@@ -493,56 +502,77 @@ export const useTrackStore = defineStore('track', () => {
         const originalClip = track.clips[clipIndex];
         if (!originalClip) return;
 
-        const currentBar = playheadPosition.value; // 현재 재생바 위치 기준
+        const currentBar = playheadPosition.value;
 
-        // 재생바가 클립 영역 안에 있는지 검사
         if (currentBar <= originalClip.start || currentBar >= originalClip.start + originalClip.duration) {
             alert("재생바(Playhead)가 클립 위에 있어야 분할할 수 있습니다.");
             return;
         }
 
-        console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 중...`);
-
         try {
             const response = await mockServerAPI.emitSplit(projectInfo.value.projectId, clipId, currentBar);
-            console.log(`[통신 성공] 새 클립 ID 발급됨: ${response.newClipId}`);
 
-            // 분할 기준점 계산
+            //  1. 재생 상태 캡처 및 Transport 정지 (한 곳에서만 제어)[cite: 24]
+            const wasPlaying = isPlaying.value;
+            if (wasPlaying) {
+                Tone.getTransport().pause();
+                isPlaying.value = false; // 상태를 끄면 resyncClip에서 중복 조작 안 함[cite: 24]
+                if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            }
+
             const splitOffsetBars = currentBar - originalClip.start;
             const splitOffsetMs = splitOffsetBars * secondsPerBar.value * 1000;
 
-            // 1. 오른쪽 클립 (새로 생성됨)
+            const rightClipDuration = originalClip.duration - splitOffsetBars;
+            const rightAudioStartMs = originalClip.audioStartMs + splitOffsetMs;
+
+            // 오른쪽 클립 정보 세팅
             const rightClip: ClipUIState = {
                 ...JSON.parse(JSON.stringify(originalClip)),
                 clipId: response.newClipId,
                 start: currentBar,
-                duration: originalClip.duration - splitOffsetBars,
-                audioStartMs: originalClip.audioStartMs + splitOffsetMs, // 오디오 시작점 뒤로 밀림
-                audioDurationMs: originalClip.audioDurationMs - splitOffsetMs
+                duration: rightClipDuration,
+                audioStartMs: rightAudioStartMs,
+                audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs)
             };
 
-            // 2. 왼쪽 클립 (원본 수정)
+            // 왼쪽 클립(원본) 정보 수정
             originalClip.duration = splitOffsetBars;
             originalClip.audioDurationMs = splitOffsetMs;
 
-            // 화면 갱신
             track.clips.push(rightClip);
 
-            // 오디오 엔진 재설정 (왼쪽 갱신, 오른쪽 새로 생성)
+            //  2. 왼쪽 클립 안전하게 재설정 (내부적으로 pause/start 안 됨)
             resyncClip(originalClip.clipId, originalClip.start);
 
+            // 3. 오른쪽 클립 동기(await) 로딩 및 스케줄링[cite: 24]
             const targetChannel = trackChannels.get(trackId);
             if (targetChannel && rightClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
-                newPlayer.load("/test2.mp3").then(() => {
-                    const exactStartTimeSec = rightClip.start * secondsPerBar.value;
-                    const audioOffsetSec = (rightClip.audioStartMs || 0) / 1000;
-                    const audioDurationSec = rightClip.duration * secondsPerBar.value;
+                await newPlayer.load(rightClip.audio.cdnUrl); // 🌟 동기 대기![cite: 24]
 
-                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec);
-                    clipPlayers.set(rightClip.clipId, newPlayer);
-                });
+                if (Tone.getContext().state !== 'running') Tone.getContext().resume();
+
+                const exactStartTimeSec = rightClip.start * secondsPerBar.value;
+                const audioOffsetSec = rightClip.audioStartMs / 1000;
+
+                const maxDuration = newPlayer.buffer.duration - audioOffsetSec;
+                const safeDurationSec = Math.max(0.01, Math.min(rightClip.duration * secondsPerBar.value, maxDuration));
+
+                if (safeDurationSec > 0) {
+                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, safeDurationSec);
+                }
+                clipPlayers.set(rightClip.clipId, newPlayer);
             }
+
+            // 4. 모든 작업이 끝난 후 한 번만 재개![cite: 24]
+            if (wasPlaying) {
+                const currentOffset = playheadPosition.value * secondsPerBar.value;
+                Tone.getTransport().start("+0.01", currentOffset);
+                isPlaying.value = true;
+                updatePlayheadLoop();
+            }
+
         } catch (e) {
             console.error("분할 실패", e);
         }
@@ -646,6 +676,10 @@ export const useTrackStore = defineStore('track', () => {
             }
             trackList.value.push(newTrack);
 
+            // 새 트랙의 오디오 믹서 채널을 즉시 생성하여 등록 (이동된 클립이 소리를 낼 수 있도록)
+            const channel = new Tone.Channel(newTrack.volume, newTrack.pan).toDestination();
+            trackChannels.set(newTrack.trackId, channel);
+
             console.log(`[통신 성공] 새 트랙 ID 발급됨: ${response.newTrackId}`);
         } catch (e) {
             console.error("트랙 추가 실패", e);
@@ -714,8 +748,22 @@ export const useTrackStore = defineStore('track', () => {
         const clipIndex = fromTrack.clips.findIndex(c => c.clipId === clipId);
         if (clipIndex !== -1) {
             const [clip] = fromTrack.clips.splice(clipIndex, 1);
-            //vue의 반응성으로 즉시 이동
             toTrack.clips.push(clip);
+
+            // 오디오 Player를 새 트랙의 Channel에 재연결
+            const player = clipPlayers.get(clipId);
+            let toChannel = trackChannels.get(toTrackId);
+
+            // 대상 트랙에 Channel이 없으면 새로 생성
+            if (!toChannel) {
+                toChannel = new Tone.Channel(toTrack.volume, toTrack.pan).toDestination();
+                trackChannels.set(toTrackId, toChannel);
+            }
+
+            if (player) {
+                player.disconnect(); // 이전 트랙 Channel과의 연결 해제
+                player.connect(toChannel); // 새 트랙 Channel에 재연결
+            }
         }
     };
     // 디버그용 변수 (로그 폭탄 방지용)
@@ -853,21 +901,20 @@ export const useTrackStore = defineStore('track', () => {
             // ms 단위를 초(sec) 단위로 변환해서 넣어줍니다.
             const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
 
-            // 3. 얼마나 길게 재생할 것인가? (Duration)
-            const audioDurationSec = targetClip.duration * secondsPerBar.value;
+            //자르거나 줄인 클립의 길이가 원본 파일의 남은 길이를 초과하면 안 됨!
+            const maxDuration = player.buffer.duration - audioOffsetSec;
+            const requestedDuration = targetClip.duration * secondsPerBar.value;
 
-            // Tone.js에게 3가지 정보를 모두 넘겨서 예약
-            // 파라미터 순서: start(time, offset, duration)
-            player.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec);
+            // 더 작은 값을 택해서 Tone.js 엔진 에러 원천 차단
+            const safeDurationSec = Math.max(0.01, Math.min(requestedDuration, maxDuration));
 
-            console.log(`🎵 클립 ${clipId} 오디오 재설정 완료:
-            - 타임라인 시작: ${exactStartTimeSec.toFixed(2)}초
-            - 파일 재생 위치(Offset): ${audioOffsetSec.toFixed(2)}초부터
-            - 재생 길이(Duration): ${audioDurationSec.toFixed(2)}초 동안`);
+            if (safeDurationSec > 0) {
+                player.sync().start(exactStartTimeSec, audioOffsetSec, safeDurationSec);
+            }
 
-            // 재생 중이었다면 다시 시계 돌리기
             if (wasPlaying) {
-                Tone.getTransport().start("+0.05");
+                const currentOffset = playheadPosition.value * secondsPerBar.value;
+                Tone.getTransport().start("+0.01", currentOffset);
             }
         }
     };

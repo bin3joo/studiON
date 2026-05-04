@@ -607,9 +607,9 @@ const handleSplit = () => {
           </div>
 
           <!--GPU 파형 컴포넌트-->
-          <WaveformWebGL
+         <WaveformWebGL
           v-if="clip.audio?.cdnUrl"
-          :key="clip.clipId"
+          :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 
           <!-- 오른쪽 리사이즈 핸들 -->

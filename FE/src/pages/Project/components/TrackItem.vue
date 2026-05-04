@@ -456,13 +456,15 @@ const handleSplit = () => {
     :data-track-id="track.trackId" 
     :class="{ 'relative z-50': track.clips.some(c => c.isDragging) }"
   >
-    <div 
+   <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-[#282828]"
+      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828] cursor-pointer"
+      :class="track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border'"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
       }"
+      @pointerdown.stop="trackStore.selectTrack(track.trackId)"
     >
     <!--빈틈 막는거-->
     <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
@@ -537,7 +539,7 @@ const handleSplit = () => {
       <div 
           class="absolute inset-0 z-0 cursor-context-menu"
           @contextmenu.prevent.stop="onTrackRightClick($event, track.trackId)"
-          @pointerdown.stop="trackStore.deselectClip"
+          @pointerdown.stop="trackStore.selectTrack(track.trackId)"
         ></div>
 
       <!--마디 세로줄 렌더링-->
@@ -570,15 +572,15 @@ const handleSplit = () => {
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
           :class="[
-            clip.isDragging ? 'opacity-80 brightness-125 shadow-2xl z-50!' : 'transition duration-200',
-            clip.isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
+            clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
+            clip.isSelected && !clip.isDragging ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
           ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
-            borderColor: `${clip.color}80`, 
-            backgroundColor: `${clip.color}33`, 
-            boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : '0 2px 8px rgba(0,0,0,0.4)',
+            borderColor: clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`, 
+            backgroundColor: clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`, 
+            boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)',
             transform: clip.isDragging ? `translateY(${dragoffsetY}px)` : 'none'
           }"
           @pointerdown="onClipPointerDown($event, clip); trackStore.selectClip(clip, track.trackId);"
@@ -627,9 +629,9 @@ const handleSplit = () => {
       <div 
         class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
         :style="{ 
-            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
-            transform: 'translateX(-50%)',
-            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)'
+           transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
+            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)',
+            willChange: 'transform'
         }"
       ></div>
 

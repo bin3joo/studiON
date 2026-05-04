@@ -64,13 +64,12 @@ const handleWheel = (e: WheelEvent) => {
 };
 
 //스페이스바 단축키 핸들러
-const handleKeyDown = (e: KeyboardEvent) => {
-  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-    return;
-  }
-  //재생/정지
+const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
+  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
   if(e.code === 'Space'){
     e.preventDefault();
+    await Tone.start(); // 사용자 제스처 직후 가장 먼저 오디오 권한 획득!
     trackStore.togglePlay();
   }
 
@@ -79,7 +78,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
     e.preventDefault();
     if (trackStore.selectedClip && trackStore.selectedTrackId) {
       trackStore.deleteClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
-      trackStore.deselectClip(); // 지운 후 선택 해제
+      trackStore.deselectAll(); // 지운 후 선택 해제
+    } else if (trackStore.selectedTrackId && !trackStore.selectedClip) {
+      // 클립 없이 트랙만 선택된 경우 트랙 자체를 삭제
+      trackStore.deleteTrack(trackStore.selectedTrackId);
     }
     return;
   }
@@ -98,7 +100,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
         e.preventDefault();
         if (trackStore.selectedClip && trackStore.selectedTrackId) {
           trackStore.cutClip(trackStore.selectedClip, trackStore.selectedTrackId);
-          trackStore.deselectClip();
+          trackStore.deselectAll();
         }
         break;
         
@@ -215,8 +217,8 @@ if(timelineContainerRef.value) {
   }
 
   //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
-  window.addEventListener('pointerdown', unlockAudioEngine);
-  window.addEventListener('keydown', unlockAudioEngine);
+  window.addEventListener('pointerdown', unlockAudioEngine, {capture: true});
+  window.addEventListener('keydown', unlockAudioEngine, {capture: true});
 })
 
 onUnmounted(()=>{
@@ -225,8 +227,8 @@ onUnmounted(()=>{
   // 마우스 감지해제
   window.removeEventListener('mousemove', updateMousePos);
   //오디오 제한 해제 리스너 제거
-  window.removeEventListener('pointerdown', unlockAudioEngine);
-  window.removeEventListener('keydown', unlockAudioEngine);
+  window.removeEventListener('pointerdown', unlockAudioEngine, {capture: true});
+  window.removeEventListener('keydown', unlockAudioEngine, {capture: true});
 })
 
 const isInviteModalOpen = ref(false)
@@ -454,6 +456,7 @@ const unlockAudioEngine = async () => {
       <div 
         ref="timelineContainerRef" 
         class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
+        @pointerdown="trackStore.deselectAll()"
       >
         <!-- 눈금자 -->
         <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">

@@ -35,8 +35,15 @@ const updatePlayhead = (clientX: number) => {
   trackStore.playheadPosition = newPositionBar;
 
   //오디오 엔진 시간 동기화
-  const secondsPerBar = (4*60) / trackStore.bpm;
-  Tone.getTransport().seconds = newPositionBar * secondsPerBar;
+try {
+    // 스토어에 이미 계산된 안전한 computed 값을 사용하여 NaN(에러) 방지
+    const exactTime = newPositionBar * trackStore.secondsPerBar;
+    if (!isNaN(exactTime) && isFinite(exactTime)) {
+      Tone.getTransport().seconds = exactTime;
+    }
+  } catch (e) {
+    console.warn("오디오 엔진 시간 동기화 중 에러 방어:", e);
+  }
 
 }
 
@@ -45,6 +52,7 @@ const updatePlayhead = (clientX: number) => {
 
 //눈금을 더블클릭 했을때 해당 위치로 이동하도록 하는 함수
 const onClick = (e: MouseEvent) => {
+  e.stopPropagation(); // 부모의 클릭 해제(deselect) 이벤트와 충돌 차단
   updatePlayhead(e.clientX);
 };
 
@@ -53,6 +61,9 @@ const onPointerDown = (e: PointerEvent) => {
   //마우스 좌클릭(버튼 번호 0)일때만 작동하도록 방어
   //마우스 우클릭이나 휠을 방어
   if(e.button !== 0) return;
+
+  e.stopPropagation(); // 부모의 클릭 해제(deselect) 이벤트와 충돌 차단
+  
   //드래그모드 시작임
   isScrubbing.value = true;
 
@@ -161,7 +172,7 @@ onUnmounted(() => {
       aria-label="시간 축 탐색 영역"
       class="relative shrink-0 cursor-pointer touch-none"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
-      @click="onClick"
+      @click.stop="onClick"
     >
       
       <div
@@ -198,10 +209,10 @@ onUnmounted(() => {
           aria-label="현재 재생 위치 표시 바"
           class="absolute top-0 bottom-0 z-40 w-3.5 cursor-pointer pointer-events-auto"
           :style="{ 
-            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
-            transform: 'translateX(-50%)'
+            transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
+            willChange: 'transform'
           }"
-          @pointerdown="onPointerDown"
+          @pointerdown.stop="onPointerDown"
           @pointermove="onPointerMove"
           @pointerup="onPointerUp"
           @pointercancel="onPointerUp"

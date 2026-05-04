@@ -828,20 +828,20 @@ export const useTrackStore = defineStore('track', () => {
                         isSoloed: false,
                         pan: 0,
                         clips: [
-                            // {
-                            //     clipId: 1,
-                            //     start: 1,
-                            //     duration: 120,
-                            //     color: "#FF3DCB",
-                            //     audioStartMs: 0,
-                            //     audioDurationMs: 200000,
-                            //     audio: {
-                            //         audioMetadataId: 1,
-                            //         cdnUrl: "/test.mp3",
-                            //         originalName: "test.mp3",
-                            //         durationMs: 200000
-                            //     }
-                            // }
+                            {
+                                clipId: 1,
+                                start: 1,
+                                duration: 120,
+                                color: "#FF3DCB",
+                                audioStartMs: 0,
+                                audioDurationMs: 200000,
+                                audio: {
+                                    audioMetadataId: 1,
+                                    cdnUrl: "/test.mp3",
+                                    originalName: "test.mp3",
+                                    durationMs: 200000
+                                }
+                            }
                         ] as any[]
                     },
                 ]

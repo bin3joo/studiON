@@ -108,7 +108,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   clip.isDragging = true; // 시각적으로 피드백을 주기 위한 상태 변경
 
   // 가장 가까운 스크롤 영역('.overflow-auto')을 찾아 오토 스크롤 셋팅
-  scrollContainer = (e.currentTarget as HTMLElement).closest('.overflow-auto');
+  scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
   currentClientX = e.clientX; // 좌표 초기화
 
@@ -351,7 +351,7 @@ const menuState = ref({
 const onTrackRightClick = (e: MouseEvent, trackId: number) => {
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   // 현재 스크롤 위치와 왼쪽 패널 너비(224px)를 계산하여, 마우스가 위치한 '마디(Bar)'를 역산
-  const scrollContainer = document.querySelector('.overflow-auto') as HTMLElement;
+  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
   // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표
@@ -618,21 +618,6 @@ const handleSplit = () => {
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
           ></div>
-        
-          <div 
-            aria-hidden="true"
-            class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
-            :style="{ color: clip.color }"
-          >
-            {{ clip.audio?.originalName || track.name }}
-          </div>
-
-          <!--GPU 파형 컴포넌트-->
-          <WaveformWebGL 
-            v-if="clip.audio?.cdnUrl" 
-            :key="`wave-${clip.clipId}-${clip.start}`"
-            :clip="clip"
-          />
 
         </div>
 

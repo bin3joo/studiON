@@ -111,7 +111,7 @@ const handleWheel = (e: WheelEvent) => {
     e.preventDefault(); // 브라우저 기본 줌 방지
     
     // 가장 가까운 스크롤 컨테이너(ProjectTimeline.vue에 있는 최상단 div)를 찾습니다.
-    const container = timelineCanvasRef.value?.closest('.overflow-auto') as HTMLElement;
+   const container = document.querySelector('.custom-scrollbar') as HTMLElement;
     if (!container) return;
 
     // 1. 마우스의 컨테이너 내 상대적 X 픽셀 위치

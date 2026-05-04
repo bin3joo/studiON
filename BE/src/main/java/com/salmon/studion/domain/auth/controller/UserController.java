@@ -35,18 +35,10 @@ public class UserController {
     @Value("${spring.jwt.refresh-expiration}")
     long refreshTokenExpiration;
 
-    // 포지션 목록 조회
-    @GetMapping("/positions/groups")
-    public ResponseEntity<ApiResponse<List<PositionGroup>>> getPositionGroups() {
-        return ResponseEntity.ok(ApiResponse.success(userService.getPositionGroups()));
-    }
-
     // 선택한 그룹의 포지션 상세 목록 조회
     @GetMapping("/positions")
-    public ResponseEntity<ApiResponse<List<PositionDetail>>> getPositions(
-            @RequestParam Integer groupCode
-    ) {
-        return ResponseEntity.ok(ApiResponse.success(userService.getPositionsByGroup(groupCode)));
+    public ResponseEntity<ApiResponse<List<PositionDetail>>> getPositions() {
+        return ResponseEntity.ok(ApiResponse.success(userService.getPositions()));
     }
 
     // 온보딩 완료 (ONBOARDING_SESSION 쿠키로 임시 OAuth 정보를 조회한 뒤 정식 토큰 발급)

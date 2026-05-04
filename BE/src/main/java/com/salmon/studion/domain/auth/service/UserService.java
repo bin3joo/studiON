@@ -34,17 +34,9 @@ public class UserService {
     private final PositionGroupRepository positionGroupRepository;
     private final ObjectMapper objectMapper;
 
-    // 모든 포지션 그룹 조회
-    public List<PositionGroup> getPositionGroups() {
-        return positionGroupRepository.findAllByOrderByOrderAsc();
-    }
-
-    // 특정 그룹의 포지션 상세 목록 조회
-    public List<PositionDetail> getPositionsByGroup(Integer groupCode) {
-        if(!positionGroupRepository.existsById(groupCode)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "존재하지 않는 그룹 코드입니다: " + groupCode);
-        }
-        return positionDetailRepository.findByPositionGroup_CodeOrderByOrderAsc(groupCode);
+    // 포지션 상세 조회
+    public List<PositionDetail> getPositions() {
+        return positionDetailRepository.findAllByOrderByPositionGroup_OrderAscOrderAsc();
     }
 
     @Transactional

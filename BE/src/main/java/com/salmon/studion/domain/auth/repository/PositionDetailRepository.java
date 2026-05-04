@@ -7,6 +7,6 @@ import java.util.List;
 
 public interface PositionDetailRepository extends JpaRepository<PositionDetail, Integer> {
 
-    // 특정 그룹의 포지션만 조회
-    List<PositionDetail> findByPositionGroup_CodeOrderByOrderAsc(Integer groupCode);
+    // 모든 포지션 조회
+    List<PositionDetail> findAllByOrderByPositionGroup_OrderAscOrderAsc();
 }

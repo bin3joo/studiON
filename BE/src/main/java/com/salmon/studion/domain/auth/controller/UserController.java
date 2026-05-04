@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.auth.controller;
 
 import com.salmon.studion.domain.auth.dto.request.OnboardingRequest;
+import com.salmon.studion.domain.auth.dto.response.PositionDetailResponse;
 import com.salmon.studion.domain.auth.dto.response.TokenResponse;
 import com.salmon.studion.domain.auth.entity.PositionDetail;
 import com.salmon.studion.domain.auth.entity.PositionGroup;
@@ -37,7 +38,7 @@ public class UserController {
 
     // 선택한 그룹의 포지션 상세 목록 조회
     @GetMapping("/positions")
-    public ResponseEntity<ApiResponse<List<PositionDetail>>> getPositions() {
+    public ResponseEntity<ApiResponse<List<PositionDetailResponse>>> getPositions() {
         return ResponseEntity.ok(ApiResponse.success(userService.getPositions()));
     }
 

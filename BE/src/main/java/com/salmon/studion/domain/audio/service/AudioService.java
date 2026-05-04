@@ -3,6 +3,8 @@ package com.salmon.studion.domain.audio.service;
 import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.clip.entity.Clip;
+import com.salmon.studion.domain.clip.repository.ClipRepository;
 import com.salmon.studion.global.common.enums.MimeType;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -10,11 +12,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 @Service
 @RequiredArgsConstructor
 public class AudioService {
 
     private final AudioMetadataRepository audioMetadataRepository;
+    private final ClipRepository clipRepository;
 
     @Transactional
     public AudioMetadata createAudioMetadata(AudioMetadataCreateRequest request) {
@@ -63,4 +70,21 @@ public class AudioService {
         }
     }
 
+    public List<Clip> getClipsWithAudioMetadata(Integer projectId, List<Integer> clipIds) {
+        List<Clip> clips = clipRepository.findAllByIdsAndProjectIdWithAudioMetadata(clipIds, projectId);
+
+        validateAllClipsFound(clipIds, clips);
+
+        return clips;
+    }
+
+    private void validateAllClipsFound(List<Integer> requestClipIds, List<Clip> foundClips) {
+        Set<Integer> foundClipIds = foundClips.stream().map(Clip::getId).collect(Collectors.toSet());
+
+        boolean hasMissingClip = requestClipIds.stream().anyMatch(clipId -> !foundClipIds.contains(clipId));
+
+        if (hasMissingClip) {
+            throw new BusinessException(ErrorCode.CLIP_NOT_FOUND);
+        }
+    }
 }

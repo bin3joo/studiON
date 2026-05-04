@@ -1,18 +1,23 @@
 package com.salmon.studion.domain.audio.facade;
 
+import com.salmon.studion.domain.audio.dto.request.AudioListRequest;
 import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.dto.request.AudioUploadUrlRequest;
 import com.salmon.studion.domain.audio.dto.response.AudioDetailResponse;
+import com.salmon.studion.domain.audio.dto.response.AudioListResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioMetadataCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioUploadUrlResponse;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.service.AudioService;
+import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.infrastructure.cdn.CdnUrlService;
 import com.salmon.studion.global.infrastructure.s3.S3StorageService;
 import com.salmon.studion.global.infrastructure.s3.dto.PresignedUrlResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -66,5 +71,22 @@ public class AudioFacade {
         String audioUrl = cdnUrlService.createAudioUrl(audioMetadata.getObjectKey());
 
         return AudioDetailResponse.of(audioMetadata, audioUrl);
+    }
+
+    public AudioListResponse getAudiosForClips(Integer projectId, AudioListRequest audioListRequest, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        List<Clip> clips = audioService.getClipsWithAudioMetadata(projectId, audioListRequest.getClipIds());
+
+        List<AudioListResponse.AudioListItemResponse> audios = clips.stream()
+                .map( clip -> {
+                    AudioMetadata audioMetadata = clip.getAudioMetadata();
+                    String audioUrl = cdnUrlService.createAudioUrl(audioMetadata.getObjectKey());
+
+                    return AudioListResponse.AudioListItemResponse.of(clip.getId(), audioMetadata, audioUrl);
+                })
+                .toList();
+
+        return AudioListResponse.of(audios);
     }
 }

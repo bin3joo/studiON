@@ -2,9 +2,11 @@ package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.service.ClipService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,7 @@ public class ClipEventHandler {
     private final ClipService clipService;
 
     public void handleClipEvent(WebSocketSession session, Integer projectId, String event, WsMessage<Map> raw) throws IOException {
+        // TODO: 인증 구현 후 SecurityContext에서 userId 추출
         Integer userId = 0;
 
         Object response = null;
@@ -40,8 +43,12 @@ public class ClipEventHandler {
                 response = clipService.resizeClip(resizeRequest, userId);
                 break;
             case "CLIP_SPLIT":
+                ClipSplitRequest splitRequest = objectMapper.convertValue(raw.getPayload(), ClipSplitRequest.class);
+                response = clipService.splitClip(splitRequest, userId);
                 break;
             case "CLIP_DUPLICATE":
+                ClipDuplicateRequest duplicateRequest = objectMapper.convertValue(raw.getPayload(), ClipDuplicateRequest.class);
+                response = clipService.duplicateClip(duplicateRequest, userId);
                 break;
             case "CLIP_PASTE":
                 break;

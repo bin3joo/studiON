@@ -3,12 +3,11 @@ package com.salmon.studion.domain.auth.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.auth.dto.request.OnboardingRequest;
+import com.salmon.studion.domain.auth.dto.response.PositionDetailResponse;
 import com.salmon.studion.domain.auth.entity.PositionDetail;
-import com.salmon.studion.domain.auth.entity.PositionGroup;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.entity.UserPosition;
 import com.salmon.studion.domain.auth.repository.PositionDetailRepository;
-import com.salmon.studion.domain.auth.repository.PositionGroupRepository;
 import com.salmon.studion.domain.auth.repository.UserPositionRepository;
 import com.salmon.studion.domain.auth.repository.UserRepository;
 import com.salmon.studion.global.auth.PendingOAuthUserInfo;
@@ -31,12 +30,18 @@ public class UserService {
     private final UserPositionRepository userPositionRepository;
     private final UserRepository userRepository;
     private final PositionDetailRepository positionDetailRepository;
-    private final PositionGroupRepository positionGroupRepository;
     private final ObjectMapper objectMapper;
 
     // 포지션 상세 조회
-    public List<PositionDetail> getPositions() {
-        return positionDetailRepository.findAllByOrderByPositionGroup_OrderAscOrderAsc();
+    public List<PositionDetailResponse> getPositions() {
+        return positionDetailRepository.findAllByOrderByPositionGroup_OrderAscOrderAsc()
+                .stream()
+                .map(positionDetail -> new PositionDetailResponse(
+                        positionDetail.getCode(),
+                        positionDetail.getName(),
+                        positionDetail.getOrder()
+                ))
+                .toList();
     }
 
     @Transactional

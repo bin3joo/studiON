@@ -30,7 +30,9 @@ pnpm-debug.log*
 .codex/
 
 
-.wav
-.mp3
+AI/*.png
+AI/*.wav
+AI/*.mp3
+AI/generated-audio/
 
 AI/docs

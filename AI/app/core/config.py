@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     mongo_database: str = "studion_ai"
     mongo_snapshot_collection: str = "timeline_snapshots"
     mongo_artifact_collection: str = "workflow_artifacts"
+    mongo_heartbeat_frequency_ms: int = 180000
     audio_root: str | None = None
     clap_enabled: bool = True
     clap_inference_url: str | None = None

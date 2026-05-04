@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.graph.state import ApplyState, RuntimeState, UserDecision, WorkflowState
@@ -124,7 +126,8 @@ class ApplyRunResponse(BaseModel):
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
-
+# langgraph workflow의 메타정보 제공
+# 시작 노드, 종료 노드 후보, 컴파일된 그래프 이름
 @router.get("/graph/workflow")
 def workflow_graph_summary() -> dict[str, Any]:
     return {
@@ -167,20 +170,126 @@ def workflow_graph_run(request: WorkflowRunRequest) -> WorkflowRunResponse:
 # 프론트의 "AI 분석 시작" 버튼이 직접 호출하는 진입 API다.
 # 여기서는 그래프를 바로 실행하지 않고 start_workflow_job으로 넘겨
 # 비동기 워크플로우 시작만 요청한다.
-@router.post("/workflow/jobs/start")
+@router.post("/internal/workflow/jobs/start")
 def workflow_job_start(request: WorkflowStartPayload) -> WorkflowDispatchResponse:
     return WorkflowDispatchResponse(job=start_workflow_job(request))
 
 
-@router.post("/workflow/jobs/resume")
+@router.post("/internal/workflow/jobs/resume")
 def workflow_job_resume(request: WorkflowResumePayload) -> WorkflowDispatchResponse:
     return WorkflowDispatchResponse(job=resume_workflow_job(request))
 
 
-@router.get("/workflow/jobs/{job_id}")
+@router.get("/internal/workflow/jobs/{job_id}")
 def workflow_job_status(job_id: int) -> WorkflowJobStatusResponse:
     # 프론트 polling은 이 조회 하나로 job 상태와 projection을 함께 받는다.
     return WorkflowJobStatusResponse.model_validate(get_workflow_job_status(job_id))
+
+
+@router.get("/internal/workflow/jobs/{job_id}/preview/audio")
+def workflow_job_preview_audio(job_id: int) -> FileResponse:
+    # preview가 READY 상태가 되면 문제 구간 master-context after excerpt wav를 재생 가능하게 노출한다.
+    status_payload = get_workflow_job_status(job_id)
+    preview_render = status_payload["projections"].get("preview_render")
+    if not isinstance(preview_render, dict):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview render was not found for this workflow job.",
+        )
+    if preview_render.get("status") != "READY":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Preview audio is not ready yet.",
+        )
+
+    object_key = preview_render.get("object_key")
+    if not isinstance(object_key, str) or not object_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview audio file path is missing.",
+        )
+
+    preview_path = Path(object_key)
+    if not preview_path.exists() or not preview_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview audio file could not be found on disk.",
+        )
+    return FileResponse(
+        path=preview_path,
+        media_type="audio/wav",
+        filename=preview_path.name,
+    )
+
+
+@router.get("/internal/workflow/jobs/{job_id}/preview/before/audio")
+def workflow_job_preview_before_audio(job_id: int) -> FileResponse:
+    status_payload = get_workflow_job_status(job_id)
+    preview_render = status_payload["projections"].get("preview_render")
+    if not isinstance(preview_render, dict):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview render was not found for this workflow job.",
+        )
+    if preview_render.get("status") != "READY":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Preview before audio is not ready yet.",
+        )
+
+    object_key = preview_render.get("before_object_key")
+    if not isinstance(object_key, str) or not object_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview before audio file path is missing.",
+        )
+
+    before_path = Path(object_key)
+    if not before_path.exists() or not before_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview before audio file could not be found on disk.",
+        )
+    return FileResponse(
+        path=before_path,
+        media_type="audio/wav",
+        filename=before_path.name,
+    )
+
+
+@router.get("/internal/workflow/jobs/{job_id}/master/audio")
+def workflow_job_master_audio(job_id: int) -> FileResponse:
+    status_payload = get_workflow_job_status(job_id)
+    master_audio = status_payload["projections"].get("master_audio")
+    if not isinstance(master_audio, dict):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master audio was not found for this workflow job.",
+        )
+    if master_audio.get("status") != "READY":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Master audio is not ready yet.",
+        )
+
+    object_key = master_audio.get("object_key")
+    if not isinstance(object_key, str) or not object_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master audio file path is missing.",
+        )
+
+    master_path = Path(object_key)
+    if not master_path.exists() or not master_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Master audio file could not be found on disk.",
+        )
+    return FileResponse(
+        path=master_path,
+        media_type="audio/wav",
+        filename=master_path.name,
+    )
 
 
 @router.post("/graph/runtime/run")
@@ -200,3 +309,5 @@ def apply_graph_run(request: ApplyRunRequest) -> ApplyRunResponse:
     }
     result = run_apply_graph(state)
     return ApplyRunResponse.model_validate(build_apply_response(result))
+
+

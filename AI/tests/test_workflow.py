@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import gettempdir
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -16,7 +17,14 @@ from app.services.clap_inference import CLAPInferenceError, CLAPTrackPrediction
 from app.services.plan_critic_llm import PlanCriticLLMResponse
 from app.services.planning_llm import PlanningLLMError, PlanningLLMResponse
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
+from app.services.workflow_audio_metadata import AudioMetadataRecord
+from app.services.workflow_preview_renderer import (
+    PREVIEW_CONTEXT_PADDING_MS,
+    render_preview_audio,
+)
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
+
+_TEST_AUDIO_METADATA: dict[int, AudioMetadataRecord] = {}
 
 
 def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
@@ -45,6 +53,59 @@ def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
 
 def _clip_id(track_id: int, ordinal: int) -> int:
     return (track_id * 1000) + ordinal
+
+
+def _audio_metadata_id(track_id: int, ordinal: int) -> int:
+    return (track_id * 1000) + ordinal
+
+
+def _register_audio_metadata(metadata_id: int, audio_path: str, *, duration_ms: int = 4800) -> int:
+    _TEST_AUDIO_METADATA[metadata_id] = AudioMetadataRecord(
+        id=metadata_id,
+        object_key=audio_path,
+        duration_ms=duration_ms,
+    )
+    return metadata_id
+
+
+def _write_sine_audio(
+    name: str,
+    *,
+    frequency_hz: float,
+    amplitude: float,
+    duration_ms: int,
+    sample_rate: int = 44100,
+) -> str:
+    sample_count = int(round((duration_ms / 1000.0) * sample_rate))
+    time_axis = np.arange(sample_count, dtype=np.float32) / float(sample_rate)
+    signal = (amplitude * np.sin(2 * np.pi * frequency_hz * time_axis)).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / f"{name}.wav"
+    sf.write(audio_path, signal, sample_rate)
+    return str(audio_path)
+
+
+def _band_magnitude(
+    waveform: np.ndarray,
+    *,
+    sample_rate: int,
+    frequency_hz: float,
+) -> float:
+    mono = waveform[:, 0] if waveform.ndim == 2 else waveform
+    spectrum = np.fft.rfft(mono)
+    frequencies = np.fft.rfftfreq(mono.shape[0], d=1.0 / sample_rate)
+    index = int(np.argmin(np.abs(frequencies - frequency_hz)))
+    return float(np.abs(spectrum[index]))
+
+
+class _FakeAudioMetadataStore:
+    def get_by_ids(self, audio_metadata_ids: list[int]) -> dict[int, AudioMetadataRecord]:
+        return {
+            int(audio_metadata_id): _TEST_AUDIO_METADATA[int(audio_metadata_id)]
+            for audio_metadata_id in audio_metadata_ids
+            if int(audio_metadata_id) in _TEST_AUDIO_METADATA
+        }
 
 
 class _FakeCLAPInferenceClient:
@@ -173,16 +234,48 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
+    _TEST_AUDIO_METADATA.clear()
+    settings = SimpleNamespace(
+        mongo_url=None,
+        mongo_database="studion_ai",
+        mongo_snapshot_collection="timeline_snapshots",
+        mongo_artifact_collection="workflow_artifacts",
+        audio_root=None,
+    )
+    monkeypatch.setattr("app.services.workflow_artifacts.get_settings", lambda: settings)
+    monkeypatch.setattr("app.services.workflow_snapshots.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.services.workflow_snapshots.get_workflow_audio_metadata_store",
+        lambda: _FakeAudioMetadataStore(),
+    )
+    monkeypatch.setattr("app.services.workflow_artifacts._mongo_store", None)
+    monkeypatch.setattr("app.services.workflow_snapshots._mongo_store", None)
+    artifact_store = get_workflow_artifact_store()
+    snapshot_store = analysis_nodes.get_workflow_snapshot_store()
+    artifact_store.reset()
+    snapshot_store.reset()
+    yield
+    artifact_store.reset()
+    snapshot_store.reset()
+    _TEST_AUDIO_METADATA.clear()
+
+
 def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
     clips = []
     for index, track_id in enumerate(track_ids, start=1):
+        metadata_id = _register_audio_metadata(
+            _audio_metadata_id(track_id, index),
+            _ensure_test_audio_file(track_id, vocal_like=index == 1),
+        )
         clips.append(
             {
                 "clip_id": _clip_id(track_id, index),
                 "track_id": track_id,
                 "start_ms": (index - 1) * 900,
                 "end_ms": ((index - 1) * 900) + 2200,
-                "audio_path": _ensure_test_audio_file(track_id, vocal_like=index == 1),
+                "audio_metadata_id": metadata_id,
                 "audio_start_ms": 0,
                 "audio_duration_ms": 4800,
             }
@@ -222,7 +315,11 @@ def build_project_snapshot_with_audio(
                     "track_id": track_id,
                     "start_ms": 0,
                     "end_ms": duration_ms,
-                    "audio_path": audio_path,
+                    "audio_metadata_id": _register_audio_metadata(
+                        _audio_metadata_id(track_id, 1),
+                        audio_path,
+                        duration_ms=duration_ms,
+                    ),
                     "audio_start_ms": 0,
                     "audio_duration_ms": duration_ms,
                 }
@@ -304,10 +401,21 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     assert result["current_node"] == "wait_user_confirm"
     assert result["plan_status"] == "APPROVED"
     assert result["preview_action_ids"] == ["10003-action-1"]
+    assert result["preview_status"] == "READY"
+    assert result["preview_suggestion_id"] == "10003-group-suggestion-1"
+    assert result["preview_duration_ms"] is not None
+    assert result["preview_duration_ms"] > 0
+    assert result["preview_object_key"] is not None
+    assert Path(result["preview_object_key"]).exists()
     assert execution_plan_artifact is not None
     assert execution_plan_artifact.artifact_type == "execution_plan"
     assert execution_plan_artifact.payload["previewActionIds"] == ["10003-action-1"]
-    assert execution_plan_artifact.payload["suggestionPayload"]["suggestions"][0]["actions"][0]["actionId"] == "10003-action-1"
+    preview_action_id = (
+        execution_plan_artifact.payload["suggestionPayload"]["suggestions"][0]["actions"][0][
+            "actionId"
+        ]
+    )
+    assert preview_action_id == "10003-action-1"
 
 
 def test_materialize_execution_plan_fails_before_internal_approval() -> None:
@@ -619,6 +727,10 @@ def test_workflow_auto_applies_representative_preview_action() -> None:
     assert selected["runtime_status"] == "waiting_for_user"
     assert selected["apply_result_id"] == "10037-apply"
     assert selected["preview_action_ids"] == ["10037-action-1"]
+    assert selected["preview_requested_at"] is not None
+    assert selected["preview_started_at"] is not None
+    assert selected["preview_completed_at"] is not None
+    assert selected["preview_status"] == "READY"
 
 
 def test_workflow_confirm_commits_and_finalizes() -> None:
@@ -709,6 +821,171 @@ def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
     assert failed["failure_code"] == "INVALID_PREVIEW_ACTION_COUNT"
 
 
+def test_render_preview_fails_when_audio_source_cannot_be_resolved() -> None:
+    failed = nodes.render_preview(
+        build_workflow_initial_state(
+            job_id=10019,
+            project_id=20019,
+            selected_region_id="region-1",
+            preview_id="10019-preview",
+            preview_action_ids=["10019-action-1"],
+            suggestion_group_id="10019-group",
+            analysis_regions=[
+                {
+                    "id": "region-1",
+                    "issue_type": "band_overlap",
+                    "start_ms": 0,
+                    "end_ms": 800,
+                    "measure_start": 1,
+                    "measure_end": 1,
+                }
+            ],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "rank": 1,
+                        "summary": "preview",
+                        "actions": [
+                            {
+                                "actionId": "10019-action-1",
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 10,
+                                "startMs": 0,
+                                "endMs": 800,
+                                "bandLowHz": 180,
+                                "bandHighHz": 420,
+                                "gainDeltaDb": -2.0,
+                                "params": {"threshold": -19, "ratio": 2.0},
+                            }
+                        ],
+                    }
+                ]
+            },
+            clip_index=[
+                {
+                    "clip_id": _clip_id(10, 1),
+                    "track_id": 10,
+                    "start_ms": 0,
+                    "end_ms": 1200,
+                    "audio_path": str(Path(gettempdir()) / "missing-preview-source.wav"),
+                    "audio_start_ms": 0,
+                    "audio_duration_ms": 1200,
+                }
+            ],
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["runtime_status"] == "failed"
+    assert failed["failure_code"] == "PREVIEW_AUDIO_NOT_FOUND"
+    assert failed["preview_status"] == "FAILED"
+
+
+def test_render_preview_audio_generates_preview_wav() -> None:
+    preview_id = "10043-preview"
+    duration_ms = 2200
+    target_path = _write_sine_audio(
+        "preview-target-10043",
+        frequency_hz=220.0,
+        amplitude=0.5,
+        duration_ms=duration_ms,
+    )
+    support_path = _write_sine_audio(
+        "preview-support-10043",
+        frequency_hz=1000.0,
+        amplitude=0.2,
+        duration_ms=duration_ms,
+    )
+    result = render_preview_audio(
+        job_id=10043,
+        preview_id=preview_id,
+        clip_index=[
+            {
+                "clip_id": _clip_id(12, 1),
+                "track_id": 12,
+                "start_ms": 0,
+                "end_ms": duration_ms,
+                "audio_path": target_path,
+                "audio_start_ms": 0,
+                "audio_duration_ms": duration_ms,
+            },
+            {
+                "clip_id": _clip_id(24, 1),
+                "track_id": 24,
+                "start_ms": 0,
+                "end_ms": duration_ms,
+                "audio_path": support_path,
+                "audio_start_ms": 0,
+                "audio_duration_ms": duration_ms,
+            },
+        ],
+        action={
+            "actionType": "DYNAMIC_EQ",
+            "targetScope": "TRACK",
+            "targetTrackId": 12,
+            "startMs": 100,
+            "endMs": 700,
+            "bandLowHz": 180,
+            "bandHighHz": 420,
+            "gainDeltaDb": -2.5,
+            "params": {"threshold": -19, "ratio": 2.0},
+        },
+        focus_region={
+            "id": "region-10043",
+            "start_ms": 100,
+            "end_ms": 700,
+            "measure_start": 1,
+            "measure_end": 1,
+        },
+        project_duration_ms=duration_ms,
+    )
+
+    assert result.duration_ms > 0
+    assert result.duration_ms == duration_ms
+    assert result.excerpt_start_ms == 0
+    assert result.excerpt_end_ms == duration_ms
+    assert Path(result.object_key).exists()
+    waveform, sample_rate = sf.read(result.object_key, always_2d=True)
+    assert sample_rate == 44100
+    assert waveform.shape[0] == int(round((duration_ms / 1000.0) * sample_rate))
+
+    effect_start_frame = int(round((100 / 1000.0) * sample_rate))
+    effect_end_frame = int(round((700 / 1000.0) * sample_rate))
+    rendered_effect = waveform[effect_start_frame:effect_end_frame]
+
+    baseline_target, _ = sf.read(target_path, always_2d=True)
+    baseline_support, _ = sf.read(support_path, always_2d=True)
+    baseline_effect = (
+        baseline_target[effect_start_frame:effect_end_frame]
+        + baseline_support[effect_start_frame:effect_end_frame]
+    )
+
+    rendered_target_band = _band_magnitude(
+        rendered_effect,
+        sample_rate=sample_rate,
+        frequency_hz=220.0,
+    )
+    baseline_target_band = _band_magnitude(
+        baseline_effect,
+        sample_rate=sample_rate,
+        frequency_hz=220.0,
+    )
+    rendered_support_band = _band_magnitude(
+        rendered_effect,
+        sample_rate=sample_rate,
+        frequency_hz=1000.0,
+    )
+    baseline_support_band = _band_magnitude(
+        baseline_effect,
+        sample_rate=sample_rate,
+        frequency_hz=1000.0,
+    )
+
+    assert rendered_target_band < baseline_target_band * 0.9
+    assert rendered_support_band == pytest.approx(baseline_support_band, rel=0.05)
+
+
 def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
     waiting = run_workflow_graph(
         {
@@ -748,6 +1025,29 @@ def test_workflow_response_contains_unified_projections() -> None:
     }
     assert response["projections"]["suggestion_group"]["id"] == "10042-group"
     assert response["projections"]["preview_render"]["id"] == "10042-preview"
+    assert response["projections"]["preview_render"]["status"] == "READY"
+    assert response["projections"]["preview_render"]["object_key"] is not None
+    assert response["projections"]["preview_render"]["before_object_key"] is not None
+    assert Path(response["projections"]["preview_render"]["object_key"]).exists()
+    assert Path(response["projections"]["preview_render"]["before_object_key"]).exists()
+    assert response["projections"]["preview_render"]["duration_ms"] > 0
+    assert (
+        response["projections"]["preview_render"]["before_duration_ms"]
+        == response["projections"]["preview_render"]["duration_ms"]
+    )
+    assert response["projections"]["preview_render"]["preview_target_region"] == (
+        result["selected_region_id"]
+    )
+    assert response["projections"]["preview_render"]["preview_action_track"] is not None
+    assert response["projections"]["preview_render"]["preview_excerpt_range"]["start_ms"] == max(
+        0,
+        next(
+            region["start_ms"]
+            for region in result["analysis_regions"]
+            if region["id"] == result["selected_region_id"]
+        )
+        - PREVIEW_CONTEXT_PADDING_MS,
+    )
     assert response["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert response["projections"]["analysis_regions"][0]["affected_clip_ids"]
 
@@ -766,7 +1066,10 @@ def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
     assert result["clipping_fix_applied"] is True
     assert result["preview_id"] is None
     assert result["preview_action_ids"] == []
-    assert "track_clipping" in result["detected_issues"] or "master_clipping" in result["detected_issues"]
+    assert (
+        "track_clipping" in result["detected_issues"]
+        or "master_clipping" in result["detected_issues"]
+    )
 
 
 def test_workflow_analysis_regions_include_detector_metadata() -> None:
@@ -1554,6 +1857,9 @@ def test_workflow_fails_when_audio_source_is_missing() -> None:
                             "track_id": 1,
                             "start_ms": 0,
                             "end_ms": 2400,
+                            "audio_metadata_id": _audio_metadata_id(1, 1),
+                            "audio_start_ms": 0,
+                            "audio_duration_ms": 2400,
                         }
                     ],
                 }
@@ -2115,7 +2421,9 @@ def test_clipping_autofix_materializes_master_true_peak_limiter_recipe() -> None
 
     assert recipe_artifact is not None
     master_group = next(
-        group for group in recipe_artifact.payload["groups"] if group["issueType"] == "master_clipping"
+        group
+        for group in recipe_artifact.payload["groups"]
+        if group["issueType"] == "master_clipping"
     )
     action = master_group["recipes"][0]
 

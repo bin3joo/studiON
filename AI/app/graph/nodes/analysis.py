@@ -22,6 +22,7 @@ from app.services.workflow_artifacts import (
     WorkflowArtifactDocument,
     get_workflow_artifact_store,
 )
+from app.services.workflow_audio_paths import resolve_clip_audio_path
 from app.services.workflow_snapshots import get_workflow_snapshot_store
 
 # 실제 DSP는 프로젝트 전체 타임라인을 기준으로 STFT를 계산한다.
@@ -119,7 +120,9 @@ def sample_track_clips(state: WorkflowState) -> WorkflowState:
       "source_format": ".wav",
     }
     """
-    representative_specs = _build_track_representative_specs(state)     # 트랙별 CLAP 판정에 들어갈 원본 파일 중간 데이터
+    representative_specs = _build_track_representative_specs(
+        state
+    )  # 트랙별 CLAP 판정에 들어갈 원본 파일 중간 데이터
     sampled_clip_ids = [int(spec["clip_id"]) for spec in representative_specs]
     return workflow_update(
         state,
@@ -136,7 +139,8 @@ def sample_track_clips(state: WorkflowState) -> WorkflowState:
 # 프로젝트 전체 타임라인 signal을 복원한 뒤 track별 full STFT를 계산한다.
 # 결과는 frame 요약 artifact로 저장하고, state에는 작은 summary만 남긴다.
 """
-- analysis_regions : 최종적으로 workflow state에 저장되는 분석 구간 목록, 하나의 원소는 region 하나를 뜻함
+- analysis_regions :
+  최종적으로 workflow state에 저장되는 분석 구간 목록, 하나의 원소는 region 하나를 뜻함
 - detected_issues : 이번 job에서 실제로 발견된 이슈 타입들의 목록 (예시 : ["clipping", "sibilance"])
 - materialized_regions : state에 넣기 직전의 완성된 region 리스트
 """
@@ -541,7 +545,7 @@ def _build_track_representative_specs(
         )
         selected_clip: dict[str, object] | None = None
         for clip in ranked_clips:
-            resolved_audio_path = _resolve_audio_path(clip)
+            resolved_audio_path = resolve_clip_audio_path(clip)
             if resolved_audio_path is None:
                 continue
             selected_clip = {**clip, "resolved_audio_path": resolved_audio_path}
@@ -680,7 +684,7 @@ def _resolve_all_clip_audio(clip_index: list[dict[str, object]]) -> list[dict[st
     resolved_clips: list[dict[str, object]] = []
     missing_clip_ids: list[int] = []
     for clip in clip_index:
-        audio_path = _resolve_audio_path(clip)
+        audio_path = resolve_clip_audio_path(clip)
         if audio_path is None:
             missing_clip_ids.append(int(clip["clip_id"]))
             continue
@@ -730,29 +734,6 @@ def _build_clap_track_payloads(
         )
         excerpt_metadata.append(metadata)
     return excerpt_payloads, excerpt_metadata
-
-
-def _resolve_audio_path(clip: dict[str, object]) -> str | None:
-    direct_path = clip.get("audio_path")
-    if isinstance(direct_path, str) and direct_path.strip():
-        path = Path(direct_path).expanduser()
-        if path.exists():
-            return str(path)
-
-    object_key = clip.get("object_key")
-    if not isinstance(object_key, str) or not object_key.strip():
-        return None
-
-    object_key_path = Path(object_key)
-    if object_key_path.exists():
-        return str(object_key_path)
-
-    audio_root = get_settings().audio_root
-    if audio_root:
-        rooted_path = Path(audio_root) / object_key
-        if rooted_path.exists():
-            return str(rooted_path)
-    return None
 
 
 def _load_audio_clip(path: str) -> tuple[np.ndarray, int]:
@@ -1159,7 +1140,8 @@ def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
     if "sibilance" not in state.get("issue_types", []):
         return []
     inferred_roles = state.get("inferred_roles", {})
-    # 치찰음은 보컬 계열 트랙에서만 의미가 있으므로 CLAP이 보컬 track을 확정하지 못하면 탐지를 진행하지 않는다.
+    # 치찰음은 보컬 계열 트랙에서만 의미가 있으므로
+    # CLAP이 보컬 track을 확정하지 못하면 탐지를 진행하지 않는다.
     if not state.get("vocal_detected") or not inferred_roles:
         return []
     artifact = _load_dsp_feature_artifact(state)
@@ -1285,21 +1267,25 @@ def _detect_residual_master_clipping(state: WorkflowState) -> WorkflowState:
             continue
         residual_regions.append(_build_residual_master_region(candidate, contributor, []))
 
-    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = _append_materialized_regions(
-        state,
-        analysis_regions=analysis_regions,
-        detected_issues=detected_issues,
-        issue="track_clipping",
-        raw_regions=promoted_regions,
+    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = (
+        _append_materialized_regions(
+            state,
+            analysis_regions=analysis_regions,
+            detected_issues=detected_issues,
+            issue="track_clipping",
+            raw_regions=promoted_regions,
+        )
     )
-    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = _append_materialized_regions(
-        state,
-        analysis_regions=analysis_regions,
-        detected_issues=detected_issues,
-        issue="master_clipping",
-        raw_regions=residual_regions,
-        mongo_artifact_ids=mongo_artifact_ids,
-        latest_artifact_id=latest_artifact_id,
+    analysis_regions, detected_issues, mongo_artifact_ids, latest_artifact_id = (
+        _append_materialized_regions(
+            state,
+            analysis_regions=analysis_regions,
+            detected_issues=detected_issues,
+            issue="master_clipping",
+            raw_regions=residual_regions,
+            mongo_artifact_ids=mongo_artifact_ids,
+            latest_artifact_id=latest_artifact_id,
+        )
     )
     return workflow_update(
         state,
@@ -1362,7 +1348,9 @@ def _find_master_clipping_candidate_regions(state: WorkflowState) -> list[dict[s
                 "start_ms": window["start_ms"],
                 "end_ms": window["end_ms"],
                 "score": score,
-                "summary": "Detected master true-peak overflow candidate before contributor routing.",
+                "summary": (
+                    "Detected master true-peak overflow candidate before contributor routing."
+                ),
                 "true_peak_dbfs": true_peak_dbfs,
                 "mix_peak_dbfs": float(window["peak_dbfs"]),
                 "clip_ratio": float(window["clip_ratio"]),
@@ -1394,7 +1382,9 @@ def _analyze_master_clipping_candidate_contributors(
             ]
             if not overlapping:
                 continue
-            overlap_energy = float(sum(float(frame.get("window_energy", 0.0)) for frame in overlapping))
+            overlap_energy = float(
+                sum(float(frame.get("window_energy", 0.0)) for frame in overlapping)
+            )
             if overlap_energy <= 0.0:
                 continue
             energy_by_track[track_id] = overlap_energy
@@ -1408,12 +1398,16 @@ def _analyze_master_clipping_candidate_contributors(
                 and int(frame["end_ms"]) > int(candidate["start_ms"])
             ]
             energy_share = overlap_energy / max(total_overlap_energy, 1e-6)
-            avg_peak_dbfs = float(np.mean([float(frame.get("peak_dbfs", -120.0)) for frame in overlapping]))
+            avg_peak_dbfs = float(
+                np.mean([float(frame.get("peak_dbfs", -120.0)) for frame in overlapping])
+            )
             peak_near_ceiling = min(max((avg_peak_dbfs + 0.3) / 0.6, 0.0), 1.0)
             avg_low_mid = float(
                 np.mean([float(frame.get("low_mid_energy", 0.0)) for frame in overlapping])
             )
-            avg_body = float(np.mean([float(frame.get("body_energy", 0.0)) for frame in overlapping]))
+            avg_body = float(
+                np.mean([float(frame.get("body_energy", 0.0)) for frame in overlapping])
+            )
             avg_high = float(
                 np.mean([float(frame.get("high_band_ratio", 0.0)) for frame in overlapping])
             )
@@ -1513,7 +1507,9 @@ def _promote_master_contributors(
                 "start_ms": candidate["start_ms"],
                 "end_ms": candidate["end_ms"],
                 "score": max(float(candidate["score"]), score),
-                "summary": "Promoted track clipping fix from master true-peak contributor analysis.",
+                "summary": (
+                    "Promoted track clipping fix from master true-peak contributor analysis."
+                ),
                 "source_master_candidate_id": candidate["candidate_id"],
                 "auto_fix_source": "promoted_master_contributor",
                 "contributing_track_ids": contributor.get("contributing_track_ids", []),
@@ -1537,7 +1533,10 @@ def _should_keep_residual_master_region(
     if not contributors:
         return True
     top_score = float(contributors[0]["contributor_score"])
-    if len(contributors) >= MASTER_CLIPPING_DISTRIBUTED_COUNT and top_score < MASTER_CLIPPING_DISTRIBUTED_TOP_SCORE:
+    if (
+        len(contributors) >= MASTER_CLIPPING_DISTRIBUTED_COUNT
+        and top_score < MASTER_CLIPPING_DISTRIBUTED_TOP_SCORE
+    ):
         return True
     if len(promoted_tracks) < len(contributors) and float(candidate.get("window_count", 1)) >= 4:
         return True

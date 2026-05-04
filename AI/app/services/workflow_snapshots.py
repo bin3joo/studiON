@@ -23,9 +23,7 @@ class ProjectClip(BaseModel):
     track_id: int
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
-    audio_metadata_id: int | None = None
-    object_key: str | None = None
-    audio_path: str | None = None
+    audio_metadata_id: int = Field(gt=0)
     audio_start_ms: int = Field(default=0, ge=0)
     audio_duration_ms: int | None = Field(default=None, gt=0)
 
@@ -110,8 +108,18 @@ class InMemoryWorkflowSnapshotStore:
 
 
 class MongoWorkflowSnapshotStore:
-    def __init__(self, mongo_url: str, database_name: str, collection_name: str) -> None:
-        self._client = MongoClient(mongo_url)
+    def __init__(
+        self,
+        mongo_url: str,
+        database_name: str,
+        collection_name: str,
+        *,
+        heartbeat_frequency_ms: int,
+    ) -> None:
+        self._client = MongoClient(
+            mongo_url,
+            heartbeatFrequencyMS=heartbeat_frequency_ms,
+        )
         self._collection = self._client[database_name][collection_name]
 
     def reset(self) -> None:
@@ -211,13 +219,7 @@ def _build_bar_mapping(
 
 def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, object | None]]:
     audio_metadata_store = get_workflow_audio_metadata_store()
-    audio_metadata_ids = [
-        clip.audio_metadata_id
-        for clip in snapshot.clips
-        if clip.audio_metadata_id is not None
-        and clip.object_key is None
-        and clip.audio_path is None
-    ]
+    audio_metadata_ids = [clip.audio_metadata_id for clip in snapshot.clips]
     audio_metadata_map = (
         audio_metadata_store.get_by_ids(
             [int(audio_metadata_id) for audio_metadata_id in audio_metadata_ids]
@@ -232,14 +234,11 @@ def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, object | None
             "start_ms": clip.start_ms,
             "end_ms": clip.end_ms,
             "audio_metadata_id": clip.audio_metadata_id,
-            "object_key": clip.object_key
-            or (
+            "object_key": (
                 audio_metadata_map[int(clip.audio_metadata_id)].object_key
-                if clip.audio_metadata_id is not None
-                and int(clip.audio_metadata_id) in audio_metadata_map
+                if int(clip.audio_metadata_id) in audio_metadata_map
                 else None
             ),
-            "audio_path": clip.audio_path,
             "audio_start_ms": clip.audio_start_ms,
             "audio_duration_ms": clip.audio_duration_ms or (clip.end_ms - clip.start_ms),
         }
@@ -264,5 +263,6 @@ def get_workflow_snapshot_store() -> WorkflowSnapshotStore:
             mongo_url=settings.mongo_url,
             database_name=settings.mongo_database,
             collection_name=settings.mongo_snapshot_collection,
+            heartbeat_frequency_ms=settings.mongo_heartbeat_frequency_ms,
         )
     return _mongo_store

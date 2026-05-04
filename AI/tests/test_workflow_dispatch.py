@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from tempfile import gettempdir
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from app.services.workflow_artifacts import (
     WorkflowArtifactDocument,
     get_workflow_artifact_store,
 )
+from app.services.workflow_audio_metadata import AudioMetadataRecord
 from app.services.workflow_jobs import (
     WorkflowDispatchMessage,
     _build_record,
@@ -36,6 +38,8 @@ from app.services.workflow_snapshots import (
     get_workflow_snapshot_store,
 )
 from app.services.workflow_worker import run_workflow_dispatch
+
+_TEST_AUDIO_METADATA: dict[int, AudioMetadataRecord] = {}
 
 
 def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
@@ -64,6 +68,33 @@ def _ensure_test_audio_file(track_id: int, *, vocal_like: bool) -> str:
 
 def _clip_id(track_id: int, ordinal: int) -> int:
     return (track_id * 1000) + ordinal
+
+
+def _audio_metadata_id(track_id: int, ordinal: int) -> int:
+    return (track_id * 1000) + ordinal
+
+
+def _register_audio_metadata(metadata_id: int, audio_path: str) -> int:
+    _TEST_AUDIO_METADATA[metadata_id] = AudioMetadataRecord(
+        id=metadata_id,
+        object_key=audio_path,
+        duration_ms=4800,
+    )
+    return metadata_id
+
+
+def _wav_duration_ms_from_bytes(payload: bytes) -> int:
+    waveform, sample_rate = sf.read(io.BytesIO(payload), always_2d=True)
+    return int(round((waveform.shape[0] / sample_rate) * 1000))
+
+
+class _FakeAudioMetadataStore:
+    def get_by_ids(self, audio_metadata_ids: list[int]) -> dict[int, AudioMetadataRecord]:
+        return {
+            int(audio_metadata_id): _TEST_AUDIO_METADATA[int(audio_metadata_id)]
+            for audio_metadata_id in audio_metadata_ids
+            if int(audio_metadata_id) in _TEST_AUDIO_METADATA
+        }
 
 
 class _FakeCLAPInferenceClient:
@@ -102,15 +133,32 @@ class _CaptureCollection:
 
 @pytest.fixture(autouse=True)
 def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    _TEST_AUDIO_METADATA.clear()
+    settings = SimpleNamespace(
+        resolved_mysql_url=None,
+        mongo_url=None,
+        mongo_database="studion_ai",
+        mongo_snapshot_collection="timeline_snapshots",
+        mongo_artifact_collection="workflow_artifacts",
+        audio_root=None,
+    )
     monkeypatch.setattr(
         "app.services.workflow_jobs.get_settings",
-        lambda: SimpleNamespace(resolved_mysql_url=None),
+        lambda: settings,
+    )
+    monkeypatch.setattr("app.services.workflow_artifacts.get_settings", lambda: settings)
+    monkeypatch.setattr("app.services.workflow_snapshots.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.services.workflow_snapshots.get_workflow_audio_metadata_store",
+        lambda: _FakeAudioMetadataStore(),
     )
     monkeypatch.setattr(
         "app.graph.nodes.analysis.get_clap_inference_client",
         lambda: _FakeCLAPInferenceClient(),
     )
     monkeypatch.setattr("app.services.workflow_jobs._mysql_store", None)
+    monkeypatch.setattr("app.services.workflow_artifacts._mongo_store", None)
+    monkeypatch.setattr("app.services.workflow_snapshots._mongo_store", None)
     store = get_workflow_job_store()
     snapshot_store = get_workflow_snapshot_store()
     artifact_store = get_workflow_artifact_store()
@@ -121,6 +169,7 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     store.reset()
     snapshot_store.reset()
     artifact_store.reset()
+    _TEST_AUDIO_METADATA.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -204,13 +253,17 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
 def build_project_snapshot(*, track_ids: list[int]) -> dict:
     clips = []
     for index, track_id in enumerate(track_ids, start=1):
+        metadata_id = _register_audio_metadata(
+            _audio_metadata_id(track_id, index),
+            _ensure_test_audio_file(track_id, vocal_like=index == 1),
+        )
         clips.append(
             {
                 "clip_id": _clip_id(track_id, index),
                 "track_id": track_id,
                 "start_ms": (index - 1) * 900,
                 "end_ms": ((index - 1) * 900) + 2200,
-                "audio_path": _ensure_test_audio_file(track_id, vocal_like=index == 1),
+                "audio_metadata_id": metadata_id,
                 "audio_start_ms": 0,
                 "audio_duration_ms": 4800,
             }
@@ -405,7 +458,10 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
                         "track_id": 8,
                         "start_ms": 0,
                         "end_ms": 4800,
-                        "audio_path": str(audio_path),
+                        "audio_metadata_id": _register_audio_metadata(
+                            _audio_metadata_id(8, 1),
+                            str(audio_path),
+                        ),
                         "audio_start_ms": 0,
                         "audio_duration_ms": 4800,
                     }
@@ -479,7 +535,10 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
                         "track_id": 8,
                         "start_ms": 0,
                         "end_ms": 4800,
-                        "audio_path": str(audio_path),
+                        "audio_metadata_id": _register_audio_metadata(
+                            _audio_metadata_id(8, 1),
+                            str(audio_path),
+                        ),
                         "audio_start_ms": 0,
                         "audio_duration_ms": 4800,
                     },
@@ -488,7 +547,10 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
                         "track_id": 9,
                         "start_ms": 900,
                         "end_ms": 3100,
-                        "audio_path": _ensure_test_audio_file(9, vocal_like=False),
+                        "audio_metadata_id": _register_audio_metadata(
+                            _audio_metadata_id(9, 2),
+                            _ensure_test_audio_file(9, vocal_like=False),
+                        ),
                         "audio_start_ms": 0,
                         "audio_duration_ms": 4800,
                     },
@@ -517,6 +579,10 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
 
     assert result["current_node"] == "wait_user_confirm"
     assert result["preview_action_ids"] == ["20015-action-1"]
+    assert result["preview_status"] == "READY"
+    assert result["preview_object_key"] is not None
+    assert Path(result["preview_object_key"]).exists()
+    assert result["preview_duration_ms"] >= 2000
     assert result["sibilance_fix_applied"] is True
     assert recipe_artifact is not None
     assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
@@ -749,6 +815,10 @@ def test_worker_rejects_confirm_resume_without_user_decision(
         )
     )
     assert preview_wait["phase"] == "waiting_for_user_confirm"
+    assert preview_wait["preview_status"] == "READY"
+    assert preview_wait["preview_object_key"] is not None
+    assert Path(preview_wait["preview_object_key"]).exists()
+    assert preview_wait["preview_duration_ms"] >= 2000
 
     failed = run_workflow_dispatch(
         WorkflowDispatchMessage(
@@ -772,7 +842,7 @@ def test_start_api_enqueues_without_running_worker(monkeypatch: pytest.MonkeyPat
     client = TestClient(create_app())
 
     response = client.post(
-        "/api/v1/workflow/jobs/start",
+        "/api/v1/internal/workflow/jobs/start",
         json={
             "job_id": 20009,
             "project_id": 30009,
@@ -797,7 +867,7 @@ def test_start_api_allows_cors_preflight() -> None:
     client = TestClient(create_app())
 
     response = client.options(
-        "/api/v1/workflow/jobs/start",
+        "/api/v1/internal/workflow/jobs/start",
         headers={
             "Origin": "http://127.0.0.1:5500",
             "Access-Control-Request-Method": "POST",
@@ -832,6 +902,9 @@ def test_start_api_persists_snapshot_only_in_snapshot_store(
     assert stored.timeline_snapshot_id == snapshot.id
     assert "project_snapshot" not in stored.state_snapshot
     assert snapshot.snapshot["clips"][0]["clip_id"] == _clip_id(3, 1)
+    assert stored.state_snapshot["master_audio_status"] == "READY"
+    assert stored.state_snapshot["master_audio_object_key"] is not None
+    assert Path(stored.state_snapshot["master_audio_object_key"]).exists()
 
 
 def test_resume_api_infers_dispatch_type_from_waiting_phase(
@@ -863,7 +936,7 @@ def test_resume_api_infers_dispatch_type_from_waiting_phase(
     client = TestClient(create_app())
 
     response = client.post(
-        "/api/v1/workflow/jobs/resume",
+        "/api/v1/internal/workflow/jobs/resume",
         json={
             "job_id": 20011,
             "project_id": 30011,
@@ -900,16 +973,168 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     )
     client = TestClient(create_app())
 
-    response = client.get("/api/v1/workflow/jobs/20012")
+    response = client.get("/api/v1/internal/workflow/jobs/20012")
 
     assert response.status_code == 200
     body = response.json()
     assert body["job"]["id"] == 20012
     assert body["projections"]["analysis_job"]["id"] == 20012
+    assert body["projections"]["master_audio"]["status"] == "READY"
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert body["projections"]["suggestion_group"] is None
 
 
+def test_master_audio_api_serves_generated_master(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20021,
+            project_id=30021,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20021/master/audio")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.content[:4] == b"RIFF"
+    assert _wav_duration_ms_from_bytes(response.content) == 4800
+
+
+def test_preview_audio_api_serves_generated_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20018,
+            project_id=30018,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20018,
+            project_id=30018,
+            dispatch_type="start",
+        )
+    )
+    preview_wait = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20018,
+            project_id=30018,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+    assert preview_wait["preview_status"] == "READY"
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20018/preview/audio")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.content[:4] == b"RIFF"
+    assert _wav_duration_ms_from_bytes(response.content) >= 2000
+
+
+def test_preview_before_audio_api_serves_generated_before_excerpt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20023,
+            project_id=30023,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20023,
+            project_id=30023,
+            dispatch_type="start",
+        )
+    )
+    preview_wait = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20023,
+            project_id=30023,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+    assert preview_wait["preview_status"] == "READY"
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20023/preview/before/audio")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/wav")
+    assert response.content[:4] == b"RIFF"
+    assert _wav_duration_ms_from_bytes(response.content) == preview_wait["preview_duration_ms"]
+
+
+def test_job_status_api_exposes_master_context_preview_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20022,
+            project_id=30022,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20022,
+            project_id=30022,
+            dispatch_type="start",
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20022,
+            project_id=30022,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20022")
+
+    assert response.status_code == 200
+    preview = response.json()["projections"]["preview_render"]
+    assert preview["status"] == "READY"
+    assert preview["preview_target_region"] is not None
+    assert preview["preview_action_track"] is not None
+    assert preview["preview_action_type"] == "DYNAMIC_EQ"
+    assert preview["before_object_key"] is not None
+    assert preview["before_duration_ms"] == preview["duration_ms"]
+    assert preview["preview_excerpt_range"]["start_ms"] <= preview["preview_region_start_ms"]
+    assert preview["preview_excerpt_range"]["end_ms"] >= preview["preview_region_end_ms"]
 def test_job_record_spills_large_state_into_artifact_store() -> None:
     state = build_workflow_initial_state(job_id=20014, project_id=30014)
     state.update(
@@ -972,3 +1197,34 @@ def test_workflow_start_payload_defaults_include_clipping() -> None:
         "sibilance",
         "high_band_harshness",
     ]
+
+
+def test_start_api_rejects_clip_without_audio_metadata_id() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/v1/internal/workflow/jobs/start",
+        json={
+            "job_id": 20020,
+            "project_id": 30020,
+            "project_snapshot": {
+                "duration_ms": 4800,
+                "bpm": 120,
+                "numerator": 4,
+                "denominator": 4,
+                "tracks": [{"track_id": 1, "name": "Track 1"}],
+                "clips": [
+                    {
+                        "clip_id": 1001,
+                        "track_id": 1,
+                        "start_ms": 0,
+                        "end_ms": 4800,
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 4800,
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 422

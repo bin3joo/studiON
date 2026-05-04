@@ -137,11 +137,30 @@ class PreviewRenderProjection(BaseModel):
     render_no: int = 1
     object_key: str | None = None
     duration_ms: int | None = None
+    before_object_key: str | None = None
+    before_duration_ms: int | None = None
+    preview_target_region: str | None = None
+    preview_region_start_ms: int | None = None
+    preview_region_end_ms: int | None = None
+    preview_measure_start: int | None = None
+    preview_measure_end: int | None = None
+    preview_action_type: str | None = None
+    preview_action_track: int | None = None
+    preview_excerpt_range: dict[str, int] | None = None
     requested_by: int | None = None
     requested_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
     expired_at: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class MasterAudioProjection(BaseModel):
+    job_id: int
+    status: str
+    object_key: str | None = None
+    duration_ms: int | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -174,6 +193,7 @@ class WorkflowGraphProjections(BaseModel):
     plan_state: PlanStateProjection | None = None
     suggestion_group: SuggestionGroupProjection | None = None
     preview_render: PreviewRenderProjection | None = None
+    master_audio: MasterAudioProjection | None = None
     applied_suggestion: AppliedSuggestionProjection | None = None
     feedback_event: FeedbackEventProjection | None = None
 
@@ -213,6 +233,7 @@ def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections
         plan_state=_build_plan_state(state),
         suggestion_group=suggestion_group,
         preview_render=_build_preview_render(state, suggestion_group),
+        master_audio=_build_master_audio(state),
         applied_suggestion=_build_applied_suggestion(state, suggestion_group),
         feedback_event=_build_feedback_event(state),
     )
@@ -423,6 +444,8 @@ def _build_preview_render(
 ) -> PreviewRenderProjection | None:
     if not state.get("preview_id"):
         return None
+    preview_action = _resolve_preview_action_projection(state, suggestion_group)
+    preview_region = _resolve_preview_region_projection(state)
     suggestion_id = (
         suggestion_group.suggestions[0].id
         if suggestion_group and suggestion_group.suggestions
@@ -431,14 +454,85 @@ def _build_preview_render(
     return PreviewRenderProjection(
         id=state["preview_id"],
         job_id=state["job_id"],
-        suggestion_id=suggestion_id,
-        status="READY" if state.get("phase") != "failed" else "FAILED",
+        suggestion_id=state.get("preview_suggestion_id") or suggestion_id,
+        status=state.get("preview_status")
+        or ("FAILED" if state.get("phase") == "failed" else "PROCESSING"),
+        render_no=int(state.get("preview_render_no", 1) or 1),
+        object_key=state.get("preview_object_key"),
+        duration_ms=state.get("preview_duration_ms"),
+        before_object_key=state.get("preview_before_object_key"),
+        before_duration_ms=state.get("preview_before_duration_ms"),
+        preview_target_region=preview_region.get("id") if preview_region else None,
+        preview_region_start_ms=preview_region.get("start_ms") if preview_region else None,
+        preview_region_end_ms=preview_region.get("end_ms") if preview_region else None,
+        preview_measure_start=preview_region.get("measure_start") if preview_region else None,
+        preview_measure_end=preview_region.get("measure_end") if preview_region else None,
+        preview_action_type=preview_action.get("action_type") if preview_action else None,
+        preview_action_track=preview_action.get("target_track_id") if preview_action else None,
+        preview_excerpt_range=_build_preview_excerpt_range(state),
         requested_by=state.get("requested_by"),
-        requested_at=state.get("started_at"),
-        started_at=state.get("started_at"),
-        completed_at=state.get("completed_at"),
-        error_code=state.get("failure_code"),
-        error_message=state.get("failure_message"),
+        requested_at=state.get("preview_requested_at"),
+        started_at=state.get("preview_started_at"),
+        completed_at=state.get("preview_completed_at"),
+        expired_at=state.get("preview_expired_at"),
+        error_code=state.get("preview_error_code") or state.get("failure_code"),
+        error_message=state.get("preview_error_message") or state.get("failure_message"),
+    )
+
+
+def _resolve_preview_region_projection(state: WorkflowState) -> dict[str, Any] | None:
+    selected_region_id = state.get("selected_region_id")
+    if selected_region_id is None:
+        return None
+    for region in state.get("analysis_regions", []):
+        if str(region.get("id")) == str(selected_region_id):
+            return region
+    return None
+
+
+def _resolve_preview_action_projection(
+    state: WorkflowState,
+    suggestion_group: SuggestionGroupProjection | None,
+) -> dict[str, Any] | None:
+    preview_action_ids = [str(action_id) for action_id in state.get("preview_action_ids", [])]
+    if not preview_action_ids or suggestion_group is None:
+        return None
+    preview_action_id = preview_action_ids[0]
+    for suggestion in suggestion_group.suggestions:
+        for action in suggestion.actions:
+            if action.id == preview_action_id:
+                return action.model_dump(mode="python")
+    return None
+
+
+def _build_preview_excerpt_range(state: WorkflowState) -> dict[str, int] | None:
+    excerpt_start_ms = state.get("preview_excerpt_start_ms")
+    excerpt_end_ms = state.get("preview_excerpt_end_ms")
+    if excerpt_start_ms is None or excerpt_end_ms is None:
+        return None
+    return {
+        "start_ms": int(excerpt_start_ms),
+        "end_ms": int(excerpt_end_ms),
+    }
+
+
+def _build_master_audio(state: WorkflowState) -> MasterAudioProjection | None:
+    if not any(
+        [
+            state.get("master_audio_status"),
+            state.get("master_audio_object_key"),
+            state.get("master_audio_error_code"),
+            state.get("master_audio_error_message"),
+        ]
+    ):
+        return None
+    return MasterAudioProjection(
+        job_id=state["job_id"],
+        status=state.get("master_audio_status") or "PROCESSING",
+        object_key=state.get("master_audio_object_key"),
+        duration_ms=state.get("master_audio_duration_ms"),
+        error_code=state.get("master_audio_error_code"),
+        error_message=state.get("master_audio_error_message"),
     )
 
 

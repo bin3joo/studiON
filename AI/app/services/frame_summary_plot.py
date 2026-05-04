@@ -46,13 +46,28 @@ def build_frame_summary_svg(
             )
         )
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#fcfcfd" />
-  <text x="{margin}" y="{margin}" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700" fill="#0f172a">{escape(title)}</text>
-  <text x="{margin}" y="{margin + 26}" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#475569">Duration: {duration_ms} ms | Lanes: {len(series_list)}</text>
-  {''.join(lanes)}
-</svg>
-"""
+    svg_lines = [
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
+            f'height="{height}" viewBox="0 0 {width} {height}">'
+        ),
+        f'  <rect x="0" y="0" width="{width}" height="{height}" fill="#fcfcfd" />',
+        (
+            f'  <text x="{margin}" y="{margin}" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            'font-size="26" font-weight="700" fill="#0f172a">'
+            f"{escape(title)}</text>"
+        ),
+        (
+            f'  <text x="{margin}" y="{margin + 26}" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            'font-size="13" fill="#475569">'
+            f"Duration: {duration_ms} ms | Lanes: {len(series_list)}</text>"
+        ),
+        *lanes,
+        "</svg>",
+    ]
+    return "\n".join(svg_lines) + "\n"
 
 
 def _build_series_list(artifact_payload: dict[str, Any]) -> list[FrameSeries]:
@@ -124,23 +139,61 @@ def _build_lane_svg(
     top_y = lane_top + 24
     metric_min, metric_max = _metric_range(series.metric_name, series.points)
     polyline_points = " ".join(
-        f"{_scale_x(point_ms, chart_left, chart_width, duration_ms):.1f},{_scale_y(value, top_y, baseline_y, metric_min, metric_max):.1f}"
+        (
+            f"{_scale_x(point_ms, chart_left, chart_width, duration_ms):.1f},"
+            f"{_scale_y(value, top_y, baseline_y, metric_min, metric_max):.1f}"
+        )
         for point_ms, value in series.points
     )
     tick_labels = _build_tick_labels(chart_left, chart_width, baseline_y + 18, duration_ms)
-    return f"""
-  <g>
-    <text x="{chart_left}" y="{lane_top + 10}" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="600" fill="#111827">{escape(series.label)}</text>
-    <text x="{chart_left + 86}" y="{lane_top + 10}" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#64748b">{escape(series.metric_name)}</text>
-    <rect x="{chart_left}" y="{lane_top + 18}" width="{chart_width}" height="{lane_height - 34}" rx="10" fill="#ffffff" stroke="#e2e8f0" />
-    <line x1="{chart_left}" y1="{baseline_y}" x2="{chart_left + chart_width}" y2="{baseline_y}" stroke="#cbd5e1" stroke-width="1" />
-    <line x1="{chart_left}" y1="{top_y}" x2="{chart_left + chart_width}" y2="{top_y}" stroke="#f1f5f9" stroke-width="1" />
-    <polyline fill="none" stroke="{series.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="{polyline_points}" />
-    <text x="{chart_left + chart_width - 120}" y="{lane_top + 36}" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#64748b">min {metric_min:.3f}</text>
-    <text x="{chart_left + chart_width - 120}" y="{lane_top + 52}" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#64748b">max {metric_max:.3f}</text>
-    {tick_labels}
-  </g>
-"""
+    lane_lines = [
+        "  <g>",
+        (
+            f'    <text x="{chart_left}" y="{lane_top + 10}" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            'font-size="15" font-weight="600" fill="#111827">'
+            f"{escape(series.label)}</text>"
+        ),
+        (
+            f'    <text x="{chart_left + 86}" y="{lane_top + 10}" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            'font-size="12" fill="#64748b">'
+            f"{escape(series.metric_name)}</text>"
+        ),
+        (
+            f'    <rect x="{chart_left}" y="{lane_top + 18}" width="{chart_width}" '
+            f'height="{lane_height - 34}" rx="10" fill="#ffffff" stroke="#e2e8f0" />'
+        ),
+        (
+            f'    <line x1="{chart_left}" y1="{baseline_y}" '
+            f'x2="{chart_left + chart_width}" y2="{baseline_y}" '
+            'stroke="#cbd5e1" stroke-width="1" />'
+        ),
+        (
+            f'    <line x1="{chart_left}" y1="{top_y}" '
+            f'x2="{chart_left + chart_width}" y2="{top_y}" '
+            'stroke="#f1f5f9" stroke-width="1" />'
+        ),
+        (
+            '    <polyline fill="none" '
+            f'stroke="{series.color}" stroke-width="2.5" '
+            'stroke-linejoin="round" stroke-linecap="round" '
+            f'points="{polyline_points}" />'
+        ),
+        (
+            f'    <text x="{chart_left + chart_width - 120}" y="{lane_top + 36}" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            f'font-size="11" fill="#64748b">min {metric_min:.3f}</text>'
+        ),
+        (
+            f'    <text x="{chart_left + chart_width - 120}" y="{lane_top + 52}" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            f'font-size="11" fill="#64748b">max {metric_max:.3f}</text>'
+        ),
+        f"    {tick_labels}",
+        "  </g>",
+    ]
+    return "\n".join(lane_lines)
 
 
 def _metric_range(metric_name: str, points: list[tuple[int, float]]) -> tuple[float, float]:
@@ -177,6 +230,8 @@ def _build_tick_labels(chart_left: int, chart_width: int, tick_y: int, duration_
         x = chart_left + (chart_width * fraction)
         tick_ms = int(duration_ms * fraction)
         ticks.append(
-            f'<text x="{x:.1f}" y="{tick_y}" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#94a3b8">{tick_ms} ms</text>'
+            f'<text x="{x:.1f}" y="{tick_y}" text-anchor="middle" '
+            'font-family="Segoe UI, Arial, sans-serif" '
+            f'font-size="11" fill="#94a3b8">{tick_ms} ms</text>'
         )
     return "".join(ticks)

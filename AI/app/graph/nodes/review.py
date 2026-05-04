@@ -166,9 +166,9 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
             return "Plan action bandLowHz must not exceed bandHighHz."
 
     gain_delta_db = action.get("gainDeltaDb")
-    if gain_delta_db is not None and not isinstance(gain_delta_db, (int, float)):
+    if gain_delta_db is not None and not isinstance(gain_delta_db, int | float):
         return "Plan action gainDeltaDb must be numeric when present."
-    if isinstance(gain_delta_db, (int, float)) and abs(float(gain_delta_db)) > 12.0:
+    if isinstance(gain_delta_db, int | float) and abs(float(gain_delta_db)) > 12.0:
         return "Plan action gainDeltaDb exceeded the allowed safety range."
 
     params = action.get("params")
@@ -187,8 +187,16 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
         return "Plan payload preserveClipId did not match the selected preserve clip."
 
     if issue_type == "band_overlap":
-        preserve_track_id = _resolve_clip_track_id(state, int(preserve_clip_id)) if preserve_clip_id else None
-        if preserve_track_id is not None and target_track_id is not None and int(target_track_id) == preserve_track_id:
+        preserve_track_id = (
+            _resolve_clip_track_id(state, int(preserve_clip_id))
+            if preserve_clip_id
+            else None
+        )
+        if (
+            preserve_track_id is not None
+            and target_track_id is not None
+            and int(target_track_id) == preserve_track_id
+        ):
             return "Band-overlap plans must not target the preserved clip track."
     return None
 

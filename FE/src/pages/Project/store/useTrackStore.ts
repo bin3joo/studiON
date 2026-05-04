@@ -567,28 +567,31 @@ export const useTrackStore = defineStore('track', () => {
         pan: 0,
         isMuted: false,
         isSoloed: false,
-        clips: [
-            {
-                clipId: 9999991,
-                start: 0,
-                duration: projectInfo.value.totalBarCount,
-                color: '#ffffff', // 마스터 트랙은 흰색 계열로 렌더링
-                audioStartMs: 0,
-                audioDurationMs: 200000,
-                isSelected: false,
-                isDragging: false,
-                // 타입스크립트 에러 해결을 위한 오디오 객체
-                audio: {
-                    audioMetadataId: 9999,
-                    cdnUrl: "/test.mp3",
-                    originalName: "MASTER - 합산 출력",
-                    durationMs: 200000
-                }
-            }
-        ],
+        clips: [],
         height: 100,
         isSelected: false
     });
+
+    // 일반 트랙에 변화가 생길 때마다 마스터 트랙에 실시간 병합!
+    watch(() => trackList.value, (newTrackList) => {
+        const mergedClips: ClipUIState[] = [];
+
+        newTrackList.forEach(track => {
+            track.clips.forEach(clip => {
+                mergedClips.push({
+                    ...JSON.parse(JSON.stringify(clip)), // 깊은 복사로 원본과 참조 분리
+                    // 렌더링 성능(프리징) 방지를 위해 기존 ID를 기반으로 고정된 새 ID 부여
+                    clipId: clip.clipId + 9000000,
+                    // 여러 트랙이 겹쳤을 때 보기 좋도록 마스터 트랙 클립 색상을 차분한 회색으로 통일
+                    color: '#4b4b4b',
+                    isSelected: false,
+                    isDragging: false
+                });
+            });
+        });
+
+        masterTrack.value.clips = mergedClips;
+    }, { deep: true, immediate: true }); // deep:true로 클립 이동/길이 변화까지 모두 감지
 
     //새로운 트랙 추가 액션
     const addTrack = async () => {

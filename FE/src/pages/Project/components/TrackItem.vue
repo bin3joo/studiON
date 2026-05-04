@@ -9,6 +9,7 @@ import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIc
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
   track: TrackUIState
+  isMaster?: boolean //마스터 트랙인지 확인하는 용도
 }>();
 
 //스토어 사용
@@ -91,8 +92,10 @@ function autoScrollLoop() {
 // ==========================================
 // 3. 마우스 조작 이벤트 핸들러
 // ==========================================
+
 //1.클립을 쥐었을 때 (Pointer Down)
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
+  if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return; // 좌클릭만 허용하기
   e.stopPropagation(); //이벤트를 부모로 전달 안하기 (트랙의 빈 공간 클릭 방지)
 
@@ -105,7 +108,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   clip.isDragging = true; // 시각적으로 피드백을 주기 위한 상태 변경
 
   // 가장 가까운 스크롤 영역('.overflow-auto')을 찾아 오토 스크롤 셋팅
-  scrollContainer = (e.currentTarget as HTMLElement).closest('.overflow-auto');
+  scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
   currentClientX = e.clientX; // 좌표 초기화
 
@@ -263,6 +266,7 @@ const resizeState = ref({
 
 // 리사이즈 핸들 잡기
 const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 'right') => {
+  if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return;
   e.stopPropagation(); // 일반 클립 이동(드래그) 이벤트 방지
 
@@ -345,8 +349,9 @@ const menuState = ref({
 
 // 1. 트랙(빈 공간) 우클릭
 const onTrackRightClick = (e: MouseEvent, trackId: number) => {
+  if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   // 현재 스크롤 위치와 왼쪽 패널 너비(224px)를 계산하여, 마우스가 위치한 '마디(Bar)'를 역산
-  const scrollContainer = document.querySelector('.overflow-auto') as HTMLElement;
+  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
   // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표
@@ -451,13 +456,15 @@ const handleSplit = () => {
     :data-track-id="track.trackId" 
     :class="{ 'relative z-50': track.clips.some(c => c.isDragging) }"
   >
-    <div 
+   <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-20 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-[#282828]"
+      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828] cursor-pointer"
+      :class="track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border'"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
       }"
+      @pointerdown.stop="trackStore.selectTrack(track.trackId)"
     >
     <!--빈틈 막는거-->
     <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
@@ -532,7 +539,7 @@ const handleSplit = () => {
       <div 
           class="absolute inset-0 z-0 cursor-context-menu"
           @contextmenu.prevent.stop="onTrackRightClick($event, track.trackId)"
-          @pointerdown.stop="trackStore.deselectClip"
+          @pointerdown.stop="trackStore.selectTrack(track.trackId)"
         ></div>
 
       <!--마디 세로줄 렌더링-->
@@ -565,15 +572,15 @@ const handleSplit = () => {
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
           :class="[
-            clip.isDragging ? 'opacity-80 brightness-125 shadow-2xl z-50!' : 'transition duration-200',
-            clip.isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
+            clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
+            clip.isSelected && !clip.isDragging ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
           ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
-            borderColor: `${clip.color}80`, 
-            backgroundColor: `${clip.color}33`, 
-            boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : '0 2px 8px rgba(0,0,0,0.4)',
+            borderColor: clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`, 
+            backgroundColor: clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`, 
+            boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)',
             transform: clip.isDragging ? `translateY(${dragoffsetY}px)` : 'none'
           }"
           @pointerdown="onClipPointerDown($event, clip); trackStore.selectClip(clip, track.trackId);"
@@ -613,21 +620,6 @@ const handleSplit = () => {
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
           ></div>
-        
-          <div 
-            aria-hidden="true"
-            class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
-            :style="{ color: clip.color }"
-          >
-            {{ clip.audio?.originalName || track.name }}
-          </div>
-
-          <!--GPU 파형 컴포넌트-->
-          <WaveformWebGL 
-            v-if="clip.audio?.cdnUrl" 
-            :key="`wave-${clip.clipId}-${clip.start}`"
-            :clip="clip"
-          />
 
         </div>
 
@@ -637,9 +629,9 @@ const handleSplit = () => {
       <div 
         class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
         :style="{ 
-            left: `${trackStore.playheadPosition * trackStore.pixelPerBar}px`,
-            transform: 'translateX(-50%)',
-            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)'
+           transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
+            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)',
+            willChange: 'transform'
         }"
       ></div>
 

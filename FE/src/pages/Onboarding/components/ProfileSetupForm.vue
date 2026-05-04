@@ -1,102 +1,123 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Check, X } from 'lucide-vue-next'
-
-type Position =
-  | '작곡가'
-  | '프로듀서'
-  | 'DJ'
-  | '사운드 엔지니어'
-  | '보컬'
-  | '건반'
-  | '기타'
-  | '베이스'
-  | '드럼'
-  | '퍼커션'
-  | '스트링'
-  | '목관'
-  | '금관'
-  | '기타 포지션'
-
-const POSITIONS: Position[] = [
-  '작곡가',
-  '프로듀서',
-  'DJ',
-  '사운드 엔지니어',
-  '보컬',
-  '건반',
-  '기타',
-  '베이스',
-  '드럼',
-  '퍼커션',
-  '스트링',
-  '목관',
-  '금관',
-  '기타 포지션',
-]
-
-const SUB_OPTIONS: Partial<Record<Position, string[]>> = {
-  건반: ['피아노', '키보드', '오르간', '기타'],
-  기타: ['클래식 기타', '일렉 기타', '어쿠스틱 기타', '기타'],
-  베이스: ['콘트라베이스', '일렉 베이스', '기타'],
-  스트링: ['바이올린', '비올라', '첼로', '더블베이스', '하프', '기타'],
-  목관: ['피콜로', '플루트', '오보에', '클라리넷', '바순', '색소폰', '기타'],
-  금관: ['호른', '트럼펫', '트롬본', '튜바', '기타'],
-}
+import { completeOnboarding, fetchPositions } from '../api/onboarding.api'
+import { useAuthStore } from '../stores/auth.store'
+import type { Position } from '../types/onboarding.types'
 
 const MAX_SELECTIONS = 3
 
 const router = useRouter()
-const activePosition = ref<Position | null>('기타')
-const activeSub = ref<string | null>('클래식 기타')
-const selections = ref<string[]>([])
-const done = ref(false)
+const authStore = useAuthStore()
 
-const subOptions = computed(() => {
-  return activePosition.value ? SUB_OPTIONS[activePosition.value] ?? [] : []
+const positions = ref<Position[]>([])
+const selectedPositionCodes = ref<number[]>([])
+
+const done = ref(false)
+const isLoading = ref(false)
+const errorMessage = ref('')
+
+const canSubmit = computed(() => {
+  return selectedPositionCodes.value.length > 0 && !isLoading.value
 })
 
-const canSubmit = computed(() => selections.value.length > 0)
+const groupedPositions = computed(() => {
+  const groupMap = new Map<number, {
+    code: number
+    name: string
+    order: number
+    positions: Position[]
+  }>()
 
-function addSelection(label: string) {
-  if (selections.value.includes(label))
-    return
+  positions.value.forEach((position) => {
+    const group = position.positionGroup
 
-  if (selections.value.length >= MAX_SELECTIONS)
-    return
+    if (!groupMap.has(group.code)) {
+      groupMap.set(group.code, {
+        code: group.code,
+        name: group.name,
+        order: group.order,
+        positions: [],
+      })
+    }
 
-  selections.value.push(label)
-}
+    groupMap.get(group.code)?.positions.push(position)
+  })
 
-function handlePositionClick(position: Position) {
-  activePosition.value = position
+  return Array.from(groupMap.values())
+    .map(group => ({
+      ...group,
+      positions: group.positions.sort((a, b) => a.order - b.order),
+    }))
+    .sort((a, b) => a.order - b.order)
+})
 
-  const subs = SUB_OPTIONS[position]
+const selectedPositions = computed(() => {
+  return selectedPositionCodes.value
+    .map(code => positions.value.find(position => position.code === code))
+    .filter((position): position is Position => Boolean(position))
+})
 
-  if (subs && subs.length > 0) {
-    activeSub.value = null
+onMounted(async () => {
+  try {
+    const response = await fetchPositions()
+
+    if (!response.isSuccess) {
+      throw new Error(response.message)
+    }
+
+    positions.value = response.data
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = '포지션 목록을 불러오지 못했습니다.'
+  }
+})
+
+function togglePosition(positionCode: number) {
+  if (selectedPositionCodes.value.includes(positionCode)) {
+    selectedPositionCodes.value = selectedPositionCodes.value.filter(code => code !== positionCode)
     return
   }
 
-  activeSub.value = null
-  addSelection(position)
+  if (selectedPositionCodes.value.length >= MAX_SELECTIONS) {
+    errorMessage.value = `포지션은 최대 ${MAX_SELECTIONS}개까지 선택할 수 있습니다.`
+    return
+  }
+
+  errorMessage.value = ''
+  selectedPositionCodes.value.push(positionCode)
 }
 
-function handleSubClick(sub: string) {
-  activeSub.value = sub
-  addSelection(sub)
+function removeSelection(positionCode: number) {
+  selectedPositionCodes.value = selectedPositionCodes.value.filter(code => code !== positionCode)
 }
 
-function removeSelection(label: string) {
-  selections.value = selections.value.filter(item => item !== label)
-}
-
-function handleSubmit() {
+async function handleSubmit() {
   if (!canSubmit.value)
     return
 
-  done.value = true
+  try {
+    isLoading.value = true
+    errorMessage.value = ''
+
+    const response = await completeOnboarding({
+      positionCodes: selectedPositionCodes.value,
+    })
+
+    if (!response.isSuccess) {
+      throw new Error(response.message)
+    }
+
+    authStore.setAccessToken(response.data.accessToken)
+
+    done.value = true
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = '온보딩 처리 중 오류가 발생했습니다.'
+  } finally {
+    isLoading.value = false
+  }
 }
 
 function handleSkip() {
@@ -150,68 +171,68 @@ function handleEditAgain() {
           포지션
         </span>
 
-        <div class="mt-4 flex flex-wrap gap-2.5">
-          <button
-            v-for="position in POSITIONS"
-            :key="position"
-            type="button"
-            class="rounded-full px-5 py-2 text-sm transition"
-            :class="activePosition === position || selections.includes(position)
-              ? 'bg-foreground text-background shadow-[0_0_20px_hsl(0_0%_100%/0.15)]'
-              : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
-            @click="handlePositionClick(position)"
-          >
-            {{ position }}
-          </button>
+        <p
+          v-if="positions.length === 0 && !errorMessage"
+          class="mt-4 text-sm text-muted-foreground"
+        >
+          포지션 목록을 불러오는 중입니다.
+        </p>
+
+        <div
+          v-for="group in groupedPositions"
+          :key="group.code"
+          class="mt-6"
+        >
+          <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">
+            {{ group.name }}
+          </span>
+
+          <div class="mt-4 flex flex-wrap gap-2.5">
+            <button
+              v-for="position in group.positions"
+              :key="position.code"
+              type="button"
+              class="rounded-full px-5 py-2 text-sm transition"
+              :class="selectedPositionCodes.includes(position.code)
+                ? 'bg-foreground text-background shadow-[0_0_20px_hsl(0_0%_100%/0.15)]'
+                : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
+              @click="togglePosition(position.code)"
+            >
+              {{ position.name }}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div
-        v-if="activePosition && subOptions.length > 0"
-        class="mt-10 animate-fade-in"
+      <p
+        v-if="errorMessage"
+        class="mt-6 text-sm text-red-500"
       >
-        <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">
-          {{ activePosition }}
-        </span>
-
-        <div class="mt-4 space-y-2.5">
-          <button
-            v-for="sub in subOptions"
-            :key="sub"
-            type="button"
-            class="block w-full rounded-full px-6 py-3 text-left text-sm transition"
-            :class="activeSub === sub || selections.includes(sub)
-              ? 'bg-foreground text-background shadow-[0_0_24px_hsl(0_0%_100%/0.12)]'
-              : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
-            @click="handleSubClick(sub)"
-          >
-            {{ sub }}
-          </button>
-        </div>
-      </div>
+        {{ errorMessage }}
+      </p>
 
       <div class="mt-12 border-t border-border/60 pt-6">
         <div class="flex flex-wrap gap-2.5">
           <span
-            v-if="selections.length === 0"
+            v-if="selectedPositions.length === 0"
             class="text-xs text-muted-foreground/60"
           >
             포지션을 선택해주세요
           </span>
 
           <span
-            v-for="selection in selections"
+            v-for="selection in selectedPositions"
             v-else
-            :key="selection"
+            :key="selection.code"
             class="inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5 text-sm text-foreground dark:bg-[hsl(230_20%_14%)]"
           >
-            {{ selection }}
+            {{ selection.name }}
 
             <button
               type="button"
               class="text-muted-foreground transition hover:text-fuchsia-500 dark:hover:text-fuchsia-400"
-              :aria-label="`${selection} 제거`"
-              @click="removeSelection(selection)"
+              :aria-label="`${selection.name} 제거`"
+              @click="removeSelection(selection.code)"
             >
               <X class="h-3.5 w-3.5" />
             </button>
@@ -229,7 +250,7 @@ function handleEditAgain() {
             class="rounded-full bg-fuchsia-500 px-7 py-2.5 text-sm font-medium text-white shadow-[0_0_24px_rgba(217,70,239,0.35)] transition hover:bg-fuchsia-500/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
             @click="handleSubmit"
           >
-            완료하기
+            {{ isLoading ? '처리 중...' : '완료하기' }}
           </button>
         </div>
       </div>

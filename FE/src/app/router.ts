@@ -3,6 +3,7 @@ import DashboardPage from '@/pages/Dashboard/DashboardPage.vue'
 import ProjectPage from '@/pages/Project/ProjectPage.vue'
 import OnboardingPage from '@/pages/Onboarding/OnboardingPage.vue'
 import ProfileSetupPage from '@/pages/Onboarding/ProfileSetupPage.vue'
+import AuthCallbackPage from '@/pages/Auth/AuthCallbackPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -20,6 +21,11 @@ const router = createRouter({
     path: '/onboarding/profile-setup',
     name: 'profile-setup',
     component: ProfileSetupPage,
+    },
+    {
+    path: '/auth/callback',
+    name: 'AuthCallback',
+    component: AuthCallbackPage,
     },
     {
       path: '/dashboard',

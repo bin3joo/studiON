@@ -40,12 +40,14 @@ export const useTrackStore = defineStore('track', () => {
     const isPlaying = ref(false); //재생중인지 아닌지
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
-    Tone.getTransport().bpm.value = bpm.value; // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
+    Tone.getTransport().bpm.value = bpm.value;
+    // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
 
     //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
     watch(bpm, (newBpm) => {
         Tone.getTransport().bpm.value = newBpm;
     })
+
 
     // 현재 선택된 클립과 해당 트랙 ID
     const selectedClip = ref<ClipUIState | null>(null);
@@ -60,15 +62,27 @@ export const useTrackStore = defineStore('track', () => {
         clip.isSelected = true;
         selectedClip.value = clip;
         selectedTrackId.value = trackId;
+        // 클립 선택 시 트랙의 시각적 선택 상태는 해제
+        trackList.value.forEach(t => t.isSelected = false);
+    };
+
+    // 트랙 선택 함수 (클립 선택은 해제됨)
+    const selectTrack = (trackId: number) => {
+        if (trackId === 999999) return; // 마스터 트랙은 선택/삭제 방지
+        if (selectedClip.value) {
+            selectedClip.value.isSelected = false;
+            selectedClip.value = null;
+        }
+        selectedTrackId.value = trackId;
+        trackList.value.forEach(t => t.isSelected = (t.trackId === trackId));
     };
 
     //  빈 공간 클릭 시 선택 해제 함수
-    const deselectClip = () => {
-        if (selectedClip.value) {
-            selectedClip.value.isSelected = false;
-        }
+    const deselectAll = () => {
+        if (selectedClip.value) selectedClip.value.isSelected = false;
         selectedClip.value = null;
         selectedTrackId.value = null;
+        trackList.value.forEach(t => t.isSelected = false);
     };
     //1마디당 걸리는 시간 계산
     const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
@@ -223,6 +237,39 @@ export const useTrackStore = defineStore('track', () => {
             });
         },
 
+        //8. 트랙 추가(TRACK_ADD)
+        emitAddTrack: async (projectId: number, name: string) => {
+            return new Promise<any>((resolve) => {
+                setTimeout(() => {
+                    resolve({
+                        event: "TRACK_ADD",
+                        trackId: Math.floor(Math.random() * 10000) + 1,
+                        name: name,
+                        type: "audio",
+                        preTrackId: null,
+                        postTrackId: null,
+                        isMuted: false,
+                        isSoloed: false,
+                        volume: 0,
+                        pan: 0
+                    });
+                }, 300);
+            })
+        },
+
+        //9. 트랙 삭제(TRACK_DELETE)
+        emitDeleteTrack: async (projectId: number, trackId: number) => {
+            return new Promise<any>((resolve) => {
+                setTimeout(() => {
+                    resolve({
+                        event: "TRACK_DELETE",
+                        trackId: trackId,
+                        preTrackId: null,
+                        postTrackId: null
+                    });
+                }, 300);
+            })
+        },
     };
 
     // 1. 복사
@@ -341,7 +388,7 @@ export const useTrackStore = defineStore('track', () => {
             const targetChannel = trackChannels.get(targetTrackId);
             if (targetChannel && newClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
-                newPlayer.load("/test.mp3").then(() => {
+                newPlayer.load("/test2.mp3").then(() => {
                     const exactStartTimeSec = newClip.start * secondsPerBar.value;
                     const audioOffsetSec = (clipDataToPaste.audioStartMs || 0) / 1000;
                     const audioDurationSec = clipDataToPaste.duration * secondsPerBar.value;
@@ -424,7 +471,7 @@ export const useTrackStore = defineStore('track', () => {
             const targetChannel = trackChannels.get(response.targetTrackId);
             if (targetChannel && duplicatedClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
-                newPlayer.load("/test.mp3").then(() => {
+                newPlayer.load("/test2.mp3").then(() => {
                     const exactStartTimeSec = duplicatedClip.start * secondsPerBar.value;
                     const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
                     const audioDurationSec = clip.duration * secondsPerBar.value;
@@ -487,7 +534,7 @@ export const useTrackStore = defineStore('track', () => {
             const targetChannel = trackChannels.get(trackId);
             if (targetChannel && rightClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
-                newPlayer.load("/test.mp3").then(() => {
+                newPlayer.load("/test2.mp3").then(() => {
                     const exactStartTimeSec = rightClip.start * secondsPerBar.value;
                     const audioOffsetSec = (rightClip.audioStartMs || 0) / 1000;
                     const audioDurationSec = rightClip.duration * secondsPerBar.value;
@@ -533,6 +580,110 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+
+    // ==========================================
+    // 트랙 관련 액션
+    // ==========================================
+    //마스터 트랙 (수정 불가, 고정 렌더링)
+    const masterTrack = ref<TrackUIState>({
+        trackId: 999999,
+        name: "마스터 트랙",
+        type: "AUDIO",
+        preTrackId: null,
+        postTrackId: null,
+        volume: 0,
+        pan: 0,
+        isMuted: false,
+        isSoloed: false,
+        clips: [],
+        height: 100,
+        isSelected: false
+    });
+
+    // 일반 트랙에 변화가 생길 때마다 마스터 트랙에 실시간 병합!
+    watch(() => trackList.value, (newTrackList) => {
+        const mergedClips: ClipUIState[] = [];
+
+        newTrackList.forEach(track => {
+            track.clips.forEach(clip => {
+                mergedClips.push({
+                    ...JSON.parse(JSON.stringify(clip)), // 깊은 복사로 원본과 참조 분리
+                    // 렌더링 성능(프리징) 방지를 위해 기존 ID를 기반으로 고정된 새 ID 부여
+                    clipId: clip.clipId + 9000000,
+                    // 여러 트랙이 겹쳤을 때 보기 좋도록 마스터 트랙 클립 색상을 차분한 회색으로 통일
+                    color: '#4b4b4b',
+                    isSelected: false,
+                    isDragging: false
+                });
+            });
+        });
+
+        masterTrack.value.clips = mergedClips;
+    }, { deep: true, immediate: true }); // deep:true로 클립 이동/길이 변화까지 모두 감지
+
+    //새로운 트랙 추가 액션
+    const addTrack = async () => {
+        const newTrackName = `트랙 ${trackList.value.length + 1}`;
+
+        console.log(`[통신] 트랙 추가(ADD_TRACK) 요청 중...`);
+        try {
+            const response: any = await mockServerAPI.emitAddTrack(projectInfo.value.projectId, newTrackName);
+            //객체타입임을 명시한다/
+            const newTrack: TrackUIState = {
+                trackId: response.trackId,
+                name: response.name,
+                type: response.type,
+                preTrackId: response.preTrackId,
+                postTrackId: response.postTrackId,
+                isMuted: response.isMuted,
+                isSoloed: response.isSoloed,
+                volume: response.volume,
+                pan: response.pan,
+                // UI 전용 확장 속성들
+                clips: [],
+                height: 100,
+                isSelected: false
+            }
+            trackList.value.push(newTrack);
+
+            console.log(`[통신 성공] 새 트랙 ID 발급됨: ${response.newTrackId}`);
+        } catch (e) {
+            console.error("트랙 추가 실패", e);
+        }
+    };
+
+    //트랙 삭제 기능
+    const deleteTrack = async (trackId: number) => {
+        if (trackId === 999999) return; // 마스터 트랙 삭제 방지
+        console.log(`[통신] 백엔드에 트랙 삭제(TRACK_DELETE) 요청 중...`);
+        try {
+            await mockServerAPI.emitDeleteTrack(projectInfo.value.projectId, trackId);
+
+            const index = trackList.value.findIndex(t => t.trackId === trackId);
+            if (index !== -1) {
+                // 트랙 내 모든 클립의 오디오 플레이어 정지 및 메모리 해제
+                trackList.value[index].clips.forEach(clip => {
+                    const player = clipPlayers.get(clip.clipId);
+                    if (player) {
+                        player.unsync().stop().dispose();
+                        clipPlayers.delete(clip.clipId);
+                    }
+                });
+
+                // 트랙 믹서 채널 해제
+                const channel = trackChannels.get(trackId);
+                if (channel) channel.dispose();
+                trackChannels.delete(trackId);
+
+                trackList.value.splice(index, 1); // 트랙 제거
+            }
+            if (selectedTrackId.value === trackId) deselectAll();
+            console.log(`[통신 성공] 트랙 삭제 완료: ${trackId}`);
+        } catch (error) {
+            console.error("트랙 삭제 통신 실패", error);
+        }
+    };
+
     // ==========================================
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
@@ -567,42 +718,51 @@ export const useTrackStore = defineStore('track', () => {
             toTrack.clips.push(clip);
         }
     };
+    // 디버그용 변수 (로그 폭탄 방지용)
+    let debugLoopCount = 0;
 
     //재생 상태 토글 함수
-    const togglePlay = async () => {
-        //첫 클릭 시 오디오 컨텍스트 시작
-        if (Tone.getContext().state !== 'running') {
-            await Tone.start();
-        }
+    const togglePlay = () => { // async 제거 (더 이상 여기서 대기하지 않음)
+        try {
+            if (!isPlaying.value) {
+                const offsetTime = playheadPosition.value * secondsPerBar.value;
 
-        if (!isPlaying.value) {
-            // 정지 상태일 때 -> 재생 시작
-            // 1. 현재 재생바 위치를 Tone.js 시간으로 변환하여 세팅
-            Tone.getTransport().seconds = playheadPosition.value * secondsPerBar.value;
-            // 2. 오디오 엔진 재생 시작
-            Tone.getTransport().start("+0.05");
-            isPlaying.value = true;
-            // 3. UI 업데이트 루프 시작
-            updatePlayheadLoop();
-        } else {
-            //  재생 중일 때 -> 일시정지
-            Tone.getTransport().pause();
-            isPlaying.value = false;
-            cancelAnimationFrame(animationFrameId);
+                // 절대 시간(Tone.now()) 대신 상대 시간("+0.01")과 오프셋을 결합하여 스케줄링
+                if (!isNaN(offsetTime) && isFinite(offsetTime)) {
+                    Tone.getTransport().start("+0.01", offsetTime);
+                } else {
+                    Tone.getTransport().start("+0.01");
+                }
+
+                isPlaying.value = true;
+                updatePlayheadLoop();
+            } else {
+                Tone.getTransport().pause();
+                isPlaying.value = false;
+                if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            }
+        } catch (e) {
+            console.error("재생 에러:", e);
         }
     };
 
-    //실시간 재생바 UI 업데이트 루프
+    // 시간 재생바 UI 업데이트 루프 (루프 감시 로그 추가)
     const updatePlayheadLoop = () => {
-        if (!isPlaying.value) return; //재생중이 아닐때는 루프 멈춤
-        //정밀한 현재 시간 가져오기
+        if (!isPlaying.value) return;
+
         playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
-        //재생바 프로젝트 전체 길이에 도달하면 자동 정지
+
+        // 너무 많은 로그가 찍히면 브라우저가 멈출 수 있으니, 재생 직후 5번의 프레임(약 0.1초)만 검사합니다.
+        if (debugLoopCount < 5) {
+            console.log(`🔄 [루프 확인 ${debugLoopCount + 1}/5] 시계가 흐르고 있나요? -> Transport 초: ${Tone.getTransport().seconds.toFixed(4)}, 재생바 마디: ${playheadPosition.value.toFixed(4)}`);
+            debugLoopCount++;
+        }
+
         if (playheadPosition.value >= projectInfo.value.totalBarCount) {
+            console.log("⏹️ [재생 종료] 끝까지 도달하여 정지합니다.");
             stopPlay();
             return;
         }
-        //모니터 주사율에 맞춰 부드럽게 반복
         animationFrameId = requestAnimationFrame(updatePlayheadLoop);
     }
 
@@ -630,7 +790,7 @@ export const useTrackStore = defineStore('track', () => {
     //오디오 파일 로딩 및 Transport 조절 함수
     const setupAudioEngine = async (tracks: TrackUIState[]) => {
         //테스트용 드럼 루프 파일 (CORS 허용)
-        const sampleUrl = "/test.mp3";
+        const sampleUrl = "/test2.mp3";
 
         for (const track of tracks) {
             //1.트랙 믹서 채널 생성 및 마스터 스피커(Destination)에 연결
@@ -748,25 +908,13 @@ export const useTrackStore = defineStore('track', () => {
                                 audioDurationMs: 200000,
                                 audio: {
                                     audioMetadataId: 1,
-                                    cdnUrl: "/test.mp3",
-                                    originalName: "test.mp3",
+                                    cdnUrl: "/test2.mp3",
+                                    originalName: "test2.mp3",
                                     durationMs: 200000
                                 }
                             }
-                        ]
+                        ] as any[]
                     },
-                    {
-                        trackId: 2,
-                        name: "드럼 비트",
-                        volume: -5,
-                        type: "AUDIO",
-                        preTrackId: 1,
-                        postTrackId: null,
-                        isMuted: false,
-                        isSoloed: false,
-                        pan: 0,
-                        clips: []
-                    }
                 ]
             };//테스트 목데이터
 
@@ -796,7 +944,19 @@ export const useTrackStore = defineStore('track', () => {
                         isDragging: false
                     }))
                 }));
+                // 불러온 모든 클립을 뒤져서 '가장 꼬리가 긴(멀리 있는) 클립'의 마디 위치를 찾습니다.
+                let maxClipEnd = 0;
+                trackList.value.forEach(track => {
+                    track.clips.forEach(clip => {
+                        const clipEnd = clip.start + clip.duration;
+                        if (clipEnd > maxClipEnd) {
+                            maxClipEnd = clipEnd;
+                        }
+                    });
+                });
 
+                // 찾은 가장 먼 클립의 꼬리를 기준으로 도화지(Timeline)를 즉시 늘려줍니다!
+                checkAndExpandTimeline(maxClipEnd);
                 //데이터 세팅 이후에 오디오 로딩 및 스케줄링 시작
                 setupAudioEngine(trackList.value);
             }
@@ -867,7 +1027,7 @@ export const useTrackStore = defineStore('track', () => {
         selectedClip,
         selectedTrackId,
         selectClip,
-        deselectClip,
+        deselectAll,
 
         // 클립보드
         clipboardClip,
@@ -879,5 +1039,11 @@ export const useTrackStore = defineStore('track', () => {
         splitClip,
         resizeClip,
         confirmMoveClip,
+        masterTrack,
+        addTrack,
+        deleteTrack,
+
+        //트랙 선택 기능
+        selectTrack
     };
 });

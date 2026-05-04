@@ -5,9 +5,10 @@ import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
 import Waveform from './components/Waveform.vue'
 
+import { redirectToGoogleLogin } from './api/onboarding.api'
+
 function handleLoginClick() {
-  // TODO: 구글 OAuth 연결 예정
-  console.log('google login placeholder')
+  redirectToGoogleLogin()
 }
 
 const isDark = ref(document.documentElement.classList.contains('dark'))

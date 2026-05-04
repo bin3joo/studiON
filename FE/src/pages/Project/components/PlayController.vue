@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import { Play, Pause, Square, Sparkles, ChevronDown } from 'lucide-vue-next';
+import * as Tone from 'tone';
 
 const trackStore = useTrackStore();
 
@@ -38,10 +39,11 @@ const handleKeyChange = (newNote: string, newMode: string) => {
 };
 
 // 3. 재생 제어 함수
-const handlePlay = () => {
+const handlePlay = async() => {
+  await Tone.start();
   if(!trackStore.isPlaying) trackStore.togglePlay();
 };
-const handlePause = () => {
+const handlePause = async() => {
   if(trackStore.isPlaying) trackStore.togglePlay();
 };
 const handleStop = () => {

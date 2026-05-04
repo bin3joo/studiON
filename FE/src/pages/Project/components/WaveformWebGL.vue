@@ -6,6 +6,7 @@ const audioCache = new Map<string, { channelData: Float32Array, sampleRate: numb
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
+import * as Tone from 'tone';
 
 const props = defineProps<{ 
   clip: ClipUIState;
@@ -38,17 +39,14 @@ const renderWaveform = async () => {
     if (!cached) {
       const response = await fetch(audioUrl);
       const arrayBuffer = await response.arrayBuffer();
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioContextClass();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      
-      cached = {
-        channelData: new Float32Array(audioBuffer.getChannelData(0)),
-        sampleRate: audioBuffer.sampleRate
-      };
-      audioCache.set(audioUrl, cached);
-
-      if(audioCtx.state !== 'closed') audioCtx.close();
+     const audioCtx = Tone.getContext().rawContext as AudioContext;
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    
+    cached = {
+      channelData: new Float32Array(audioBuffer.getChannelData(0)),
+      sampleRate: audioBuffer.sampleRate
+    };
+    audioCache.set(audioUrl, cached);
     }
 
     const secondsPerPixel = trackStore.secondsPerBar / trackStore.pixelPerBar;
@@ -59,8 +57,8 @@ const renderWaveform = async () => {
     worker.postMessage({
         channelData: cached.channelData, 
         color: '#D4CED2',
-        width: width,      // 🌟 워커 내부에서 이 값을 받아 캔버스 크기를 조절할 것임
-        height: height,    // 🌟
+        width: width,      //  워커 내부에서 이 값을 받아 캔버스 크기를 조절할 것임
+        height: height,    // 
         samplesPerPixel: samplesPerPixel,      
         startSampleOffset: startSampleOffset   
     });
@@ -92,7 +90,7 @@ onMounted(async () => {
   const workerUrl = new URL('@/core/workers/waveform.worker.ts', import.meta.url).href;
   worker = new Worker(workerUrl, { type: 'module' });
 
-  // 🌟 최초 1회만 제어권을 워커로 넘김 (offscreen 변수 저장 X)
+  //  최초 1회만 제어권을 워커로 넘김 (offscreen 변수 저장 X)
   const offscreenCanvas = canvasRef.value.transferControlToOffscreen();
   worker.postMessage({ canvas: offscreenCanvas }, [offscreenCanvas]); 
 

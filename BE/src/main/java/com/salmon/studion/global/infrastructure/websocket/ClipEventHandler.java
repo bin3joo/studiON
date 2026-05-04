@@ -2,6 +2,7 @@ package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
@@ -46,6 +47,8 @@ public class ClipEventHandler {
                 response = clipService.splitClip(splitRequest, userId);
                 break;
             case "CLIP_DUPLICATE":
+                ClipDuplicateRequest duplicateRequest = objectMapper.convertValue(raw.getPayload(), ClipDuplicateRequest.class);
+                response = clipService.duplicateClip(duplicateRequest, userId);
                 break;
             case "CLIP_PASTE":
                 break;

@@ -8,11 +8,13 @@ import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
+import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
+import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
 import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
@@ -303,6 +305,35 @@ public class TrackService {
                 .isSoloed(request.getIsSoloed())
                 .build();
     }
+
+    /*
+        트랙의 뮤트 상태를 변경하는 메서드
+     */
+    public TrackMuteResponse muteTrack(TrackMuteRequest request) {
+        request.validate();
+
+        TrackState track = findTrack(request.getProjectId(), request.getTrackId());
+
+        TrackState updated = TrackState.builder()
+                .trackId(track.getTrackId())
+                .name(track.getName())
+                .type(track.getType())
+                .preTrackId(track.getPreTrackId())
+                .postTrackId(track.getPostTrackId())
+                .isMuted(request.getIsMuted())
+                .isSoloed(track.getIsSoloed())
+                .volume(track.getVolume())
+                .pan(track.getPan())
+                .build();
+
+        saveTrackToRedis(request.getProjectId(), updated);
+
+        return TrackMuteResponse.builder()
+                .trackId(request.getTrackId())
+                .isMuted(request.getIsMuted())
+                .build();
+    }
+
 
     /*
         Redis에서 트랙을 조회한다.

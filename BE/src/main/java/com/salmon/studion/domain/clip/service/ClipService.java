@@ -7,15 +7,18 @@ import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipSplitResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.entity.ClipDeleteEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipMoveEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
+import com.salmon.studion.domain.clip.entity.ClipSplitEventDocument;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
 import com.salmon.studion.domain.clip.repository.ClipRepository;
 import com.salmon.studion.domain.project.service.ProjectService;
@@ -37,6 +40,7 @@ public class ClipService {
     private static final String CLIP_LOCK_KEY = "project:%d:clip:%d:lock";
     private static final String CLIP_EVENT_SEQ_KEY = "project:%d:clip:event:seq";
     private static final String CLIP_STATE_KEY = "project:%d:clips";
+    private static final String CLIP_ID_SEQ_KEY = "project:%d:clip:id_seq";
 
     private final ProjectService projectService;
     private final ClipRepository clipRepository;
@@ -45,7 +49,7 @@ public class ClipService {
     private final ObjectMapper objectMapper;
 
     /*
-        Clip Lock 실행/해제
+        Clip Lock 실행/해제 메서드
         Redis 분산 락으로 구현
      */
     public ClipLockResponse lockClip(ClipLockRequest request, Integer userId) {
@@ -99,7 +103,7 @@ public class ClipService {
     }
 
     /*
-        Clip 이동 기능 구현
+        클립의 위치를 이동하는 메서드
      */
     public ClipMoveResponse moveClip(ClipMoveRequest request, Integer userId) {
         request.validate();
@@ -164,6 +168,9 @@ public class ClipService {
                 .build();
     }
 
+    /*
+        클립을 리사이징하는 메서드
+     */
     public ClipResizeResponse resizeClip(ClipResizeRequest request, Integer userId) {
         request.validate();
 
@@ -227,6 +234,9 @@ public class ClipService {
                 .build();
     }
 
+    /*
+        클립을 삭제하는 메서드
+     */
     public ClipDeleteResponse deleteClip(ClipDeleteRequest request, Integer userId) {
         request.validate();
 
@@ -264,6 +274,84 @@ public class ClipService {
 
         return ClipDeleteResponse.builder()
                 .clipId(request.getClipId())
+                .build();
+    }
+
+    /*
+        클립을 분할하는 메서드
+        splitBar 위치를 기준으로 원본 클립의 duration을 줄이고, 나머지 구간을 새 클립으로 생성한다.
+     */
+    public ClipSplitResponse splitClip(ClipSplitRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
+        String currentLocker = redisTemplate.opsForValue().get(lockKey);
+        if (!String.valueOf(userId).equals(currentLocker)) {
+            throw new BusinessException(ErrorCode.CLIP_LOCKED);
+        }
+
+        ClipState original = getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        Double originalStart = original.getStart();
+        Double originalEnd = originalStart + original.getDuration();
+        Double splitBar = request.getSplitBar();
+
+        if (splitBar <= originalStart || splitBar >= originalEnd) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+
+        Integer newClipId = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+
+        Double newOriginalDuration = splitBar - originalStart;
+        ClipState updatedOriginal = ClipState.builder()
+                .clipId(original.getClipId())
+                .trackId(original.getTrackId())
+                .start(originalStart)
+                .duration(newOriginalDuration)
+                .build();
+        saveClipStateToRedis(request.getProjectId(), updatedOriginal);
+
+        Double newClipDuration = originalEnd - splitBar;
+        ClipState newClip = ClipState.builder()
+                .clipId(newClipId)
+                .trackId(original.getTrackId())
+                .start(splitBar)
+                .duration(newClipDuration)
+                .build();
+        saveClipStateToRedis(request.getProjectId(), newClip);
+
+        String newLockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), newClipId);
+        redisTemplate.opsForValue().set(newLockKey, String.valueOf(userId));
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            clipEventRepository.save(ClipSplitEventDocument.builder()
+                    .event("CLIP_SPLIT")
+                    .projectId(request.getProjectId())
+                    .clipId(request.getClipId())
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .splitBar(splitBar)
+                    .newClipId(newClipId)
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_SPLIT, clipId={}", request.getClipId(), e);
+        }
+
+        return ClipSplitResponse.builder()
+                .clipId(request.getClipId())
+                .splitBar(splitBar)
+                .originalDuration(newOriginalDuration)
+                .newClipId(newClipId)
+                .newClipDuration(newClipDuration)
                 .build();
     }
 

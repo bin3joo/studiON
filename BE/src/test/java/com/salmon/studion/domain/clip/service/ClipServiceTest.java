@@ -7,10 +7,12 @@ import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipSplitResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
 import com.salmon.studion.domain.clip.repository.ClipRepository;
@@ -681,6 +683,212 @@ class ClipServiceTest {
                 req.setProjectId(PROJECT_ID);
 
                 assertThatThrownBy(() -> clipService.deleteClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("splitClip")
+    class SplitClipTest {
+
+        private static final Double ORIGINAL_START = 1.0;
+        private static final Double ORIGINAL_DURATION = 6.0;
+        private static final Double SPLIT_BAR = 4.0;
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+        private static final Integer NEW_CLIP_ID = 100;
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+            lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+
+            lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                    .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+        }
+
+        private ClipSplitRequest splitRequest(Integer clipId, Double splitBar) {
+            ClipSplitRequest req = new ClipSplitRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(clipId);
+            req.setSplitBar(splitBar);
+            return req;
+        }
+
+        private String clipStateJson(Double start, Double duration) throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(1).start(start).duration(duration)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("분할 성공 시 원본 클립 duration이 줄고 새 클립이 생성된다")
+        void splitSuccess_fromRedis() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START, ORIGINAL_DURATION));
+
+            ClipSplitResponse response = clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+            assertThat(response.getSplitBar()).isEqualTo(SPLIT_BAR);
+            assertThat(response.getOriginalDuration()).isEqualTo(SPLIT_BAR - ORIGINAL_START);
+            assertThat(response.getNewClipId()).isEqualTo(NEW_CLIP_ID);
+            assertThat(response.getNewClipDuration()).isEqualTo(ORIGINAL_START + ORIGINAL_DURATION - SPLIT_BAR);
+
+            ClipState updatedOriginal = objectMapper.readValue(store.get(String.valueOf(CLIP_ID)), ClipState.class);
+            assertThat(updatedOriginal.getStart()).isEqualTo(ORIGINAL_START);
+            assertThat(updatedOriginal.getDuration()).isEqualTo(SPLIT_BAR - ORIGINAL_START);
+
+            ClipState newClip = objectMapper.readValue(store.get(String.valueOf(NEW_CLIP_ID)), ClipState.class);
+            assertThat(newClip.getStart()).isEqualTo(SPLIT_BAR);
+            assertThat(newClip.getDuration()).isEqualTo(ORIGINAL_START + ORIGINAL_DURATION - SPLIT_BAR);
+            assertThat(newClip.getTrackId()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Redis에 상태가 없을 때 MySQL에서 로드 후 분할 성공한다")
+        void splitSuccess_lazyInit() throws JsonProcessingException {
+            Track mockTrack = mock(Track.class);
+            Clip mockClip = mock(Clip.class);
+            when(mockTrack.getId()).thenReturn(1);
+            when(mockClip.getId()).thenReturn(CLIP_ID);
+            when(mockClip.getTrack()).thenReturn(mockTrack);
+            when(mockClip.getStart()).thenReturn(ORIGINAL_START);
+            when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
+
+            ClipSplitResponse response = clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID);
+
+            assertThat(response.getOriginalDuration()).isEqualTo(SPLIT_BAR - ORIGINAL_START);
+            assertThat(response.getNewClipDuration()).isEqualTo(ORIGINAL_START + ORIGINAL_DURATION - SPLIT_BAR);
+        }
+
+        @Test
+        @DisplayName("분할 후 새 클립에 요청 사용자 락이 설정된다")
+        void splitLocksNewClip() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START, ORIGINAL_DURATION));
+            String newLockKey = String.format("project:%d:clip:%d:lock", PROJECT_ID, NEW_CLIP_ID);
+
+            clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID);
+
+            verify(valueOperations).set(eq(newLockKey), eq(String.valueOf(USER_ID)));
+        }
+
+        @Test
+        @DisplayName("splitBar가 클립 시작과 같으면 INVALID_REQUEST 예외를 던진다")
+        void splitBarEqualsStart() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START, ORIGINAL_DURATION));
+
+            assertThatThrownBy(() -> clipService.splitClip(splitRequest(CLIP_ID, ORIGINAL_START), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.INVALID_REQUEST));
+        }
+
+        @Test
+        @DisplayName("splitBar가 클립 끝과 같으면 INVALID_REQUEST 예외를 던진다")
+        void splitBarEqualsEnd() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START, ORIGINAL_DURATION));
+            Double originalEnd = ORIGINAL_START + ORIGINAL_DURATION;
+
+            assertThatThrownBy(() -> clipService.splitClip(splitRequest(CLIP_ID, originalEnd), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.INVALID_REQUEST));
+        }
+
+        @Test
+        @DisplayName("splitBar가 클립 범위 밖이면 INVALID_REQUEST 예외를 던진다")
+        void splitBarOutOfRange() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START, ORIGINAL_DURATION));
+
+            assertThatThrownBy(() -> clipService.splitClip(splitRequest(CLIP_ID, 0.5), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.INVALID_REQUEST));
+        }
+
+        @Test
+        @DisplayName("클립이 잠겨있지 않으면 CLIP_LOCKED 예외를 던진다")
+        void splitFailWhenNotLocked() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(null);
+
+            assertThatThrownBy(() -> clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("다른 사용자가 잠근 클립에 분할 요청 시 CLIP_LOCKED 예외를 던진다")
+        void splitFailWhenLockedByOtherUser() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(OTHER_USER_ID));
+
+            assertThatThrownBy(() -> clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("Redis에 없고 MySQL에도 없는 클립 분할 시 CLIP_NOT_FOUND 예외를 던진다")
+        void splitFailWhenClipNotFound() {
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipSplitRequest req = new ClipSplitRequest();
+                req.setClipId(CLIP_ID);
+                req.setSplitBar(SPLIT_BAR);
+
+                assertThatThrownBy(() -> clipService.splitClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("clipId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void clipIdNull() {
+                ClipSplitRequest req = new ClipSplitRequest();
+                req.setProjectId(PROJECT_ID);
+                req.setSplitBar(SPLIT_BAR);
+
+                assertThatThrownBy(() -> clipService.splitClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("splitBar가 null이면 INVALID_REQUEST 예외를 던진다")
+            void splitBarNull() {
+                ClipSplitRequest req = new ClipSplitRequest();
+                req.setProjectId(PROJECT_ID);
+                req.setClipId(CLIP_ID);
+
+                assertThatThrownBy(() -> clipService.splitClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

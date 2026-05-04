@@ -471,7 +471,7 @@ const unlockAudioEngine = async () => {
         </div>
 
         <!-- 마스터 트랙 -->
-        <div class="mt-auto shrink-0 sticky bottom-0 z-50 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
+        <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
           <TrackItem :track="trackStore.masterTrack" :is-master="true" />
         </div>
         

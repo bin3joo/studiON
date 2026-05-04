@@ -9,11 +9,13 @@ import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
+import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
+import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
 import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.global.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
@@ -124,6 +126,14 @@ class TrackServiceTest {
         req.setProjectId(PROJECT_ID);
         req.setTrackId(trackId);
         req.setIsSoloed(isSoloed);
+        return req;
+    }
+
+    private TrackMuteRequest muteRequest(Integer trackId, Boolean isMuted) {
+        TrackMuteRequest req = new TrackMuteRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        req.setIsMuted(isMuted);
         return req;
     }
 
@@ -404,6 +414,61 @@ class TrackServiceTest {
         void soloNotFoundTrack() {
             org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
                     trackService.soloTrack(soloRequest(99, true))
+            );
+        }
+    }
+
+    @Nested
+    @DisplayName("muteTrack")
+    class MuteTrackTest {
+
+        @Test
+        @DisplayName("isMuted를 true로 변경하면 Redis 상태에 반영된다")
+        void muteTrackOn() throws JsonProcessingException {
+            store.put("1", trackJson(1, null, null));
+
+            TrackMuteResponse response = trackService.muteTrack(muteRequest(1, true));
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getIsMuted()).isTrue();
+            assertThat(fromStore(1).getIsMuted()).isTrue();
+        }
+
+        @Test
+        @DisplayName("isMuted를 false로 변경하면 Redis 상태에 반영된다")
+        void muteTrackOff() throws JsonProcessingException {
+            store.put("1", objectMapper.writeValueAsString(TrackState.builder()
+                    .trackId(1).name("track1").type("audio")
+                    .preTrackId(null).postTrackId(null)
+                    .isMuted(true).isSoloed(false).volume(0.0).pan(0)
+                    .build()));
+
+            TrackMuteResponse response = trackService.muteTrack(muteRequest(1, false));
+
+            assertThat(response.getIsMuted()).isFalse();
+            assertThat(fromStore(1).getIsMuted()).isFalse();
+        }
+
+        @Test
+        @DisplayName("뮤트 변경 시 다른 필드는 변경되지 않는다")
+        void muteDoesNotAffectOtherFields() throws JsonProcessingException {
+            store.put("2", trackJson(2, 1, 3));
+
+            trackService.muteTrack(muteRequest(2, true));
+
+            TrackState result = fromStore(2);
+            assertThat(result.getIsMuted()).isTrue();
+            assertThat(result.getPreTrackId()).isEqualTo(1);
+            assertThat(result.getPostTrackId()).isEqualTo(3);
+            assertThat(result.getName()).isEqualTo("track2");
+            assertThat(result.getIsSoloed()).isFalse();
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 트랙 뮤트 변경 시 TRACK_NOT_FOUND 예외가 발생한다")
+        void muteNotFoundTrack() {
+            org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
+                    trackService.muteTrack(muteRequest(99, true))
             );
         }
     }

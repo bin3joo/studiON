@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -451,22 +451,24 @@ const unlockAudioEngine = async () => {
 />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
-     <!-- 1️⃣ [가로 스크롤 도화지] -->
-      <div class="flex-1 flex flex-col overflow-x-auto overflow-y-hidden relative custom-scrollbar">
+      <div 
+        ref="timelineContainerRef" 
+        class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
+      >
         <!-- 눈금자 -->
-        <div class="sticky top-0 z-30 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
+        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
           <TimelineRuler />
         </div>
 
         <AiConflictOverlay v-if="aiConflict" :conflict="aiConflict" />
 
-        <!-- 2️⃣ [세로 스크롤 도화지] -->
-        <div class="flex-1 flex flex-col overflow-y-auto overflow-x-hidden w-max min-w-full relative custom-scrollbar">
+        <!--  [세로 스크롤] -->
+        <div class="w-max min-w-full pb-[100px] flex-1">
           <TrackList /> 
         </div>
 
-        <!-- 3️⃣ 마스터 트랙 -->
-        <div class="shrink-0 sticky bottom-0 z-40 w-max min-w-full shadow-[0_-8px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
+        <!-- 마스터 트랙 -->
+        <div class="mt-auto shrink-0 sticky bottom-0 z-50 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
           <TrackItem :track="trackStore.masterTrack" :is-master="true" />
         </div>
         
@@ -503,3 +505,35 @@ const unlockAudioEngine = async () => {
     />
   </div>
 </template>
+
+<style scoped>
+/*  1. 핵심: 세로 스크롤바는 두께 0으로 완벽 삭제, 가로는 12px 유지 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 0px !important;  /* 세로 스크롤바 공간 자체를 할당하지 않음! */
+  height: 12px !important; /* 가로 스크롤바는 두께 유지 */
+}
+
+/* 2. 가로 스크롤바 배경(트랙) */
+.custom-scrollbar::-webkit-scrollbar-track:horizontal {
+  background: #131313;
+  border-radius: 8px;
+}
+
+/* 3. 가로 스크롤바 손잡이(썸) */
+.custom-scrollbar::-webkit-scrollbar-thumb:horizontal {
+  background-color: #FF8F1A;
+  border-radius: 8px;
+  border: 3px solid #131313; /* 배경색으로 테두리를 깎아서 얇게 만듦 */
+}
+
+/* 4. 마우스 올렸을 때 살짝 밝아짐 */
+.custom-scrollbar::-webkit-scrollbar-thumb:horizontal:hover {
+  background-color: #ff9f3b;
+}
+
+/* 파이어폭스(Firefox) 대응 - 파이어폭스는 0px 조절이 안되어서 얇게 렌더링 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #FF8F1A #131313;
+}
+</style>

@@ -9,6 +9,7 @@ import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIc
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
   track: TrackUIState
+  isMaster?: boolean //마스터 트랙인지 확인하는 용도
 }>();
 
 //스토어 사용
@@ -91,8 +92,10 @@ function autoScrollLoop() {
 // ==========================================
 // 3. 마우스 조작 이벤트 핸들러
 // ==========================================
+
 //1.클립을 쥐었을 때 (Pointer Down)
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
+  if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return; // 좌클릭만 허용하기
   e.stopPropagation(); //이벤트를 부모로 전달 안하기 (트랙의 빈 공간 클릭 방지)
 
@@ -263,6 +266,7 @@ const resizeState = ref({
 
 // 리사이즈 핸들 잡기
 const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 'right') => {
+  if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return;
   e.stopPropagation(); // 일반 클립 이동(드래그) 이벤트 방지
 
@@ -345,6 +349,7 @@ const menuState = ref({
 
 // 1. 트랙(빈 공간) 우클릭
 const onTrackRightClick = (e: MouseEvent, trackId: number) => {
+  if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   // 현재 스크롤 위치와 왼쪽 패널 너비(224px)를 계산하여, 마우스가 위치한 '마디(Bar)'를 역산
   const scrollContainer = document.querySelector('.overflow-auto') as HTMLElement;
   const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;

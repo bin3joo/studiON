@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {ref} from 'vue';
+import {ref, onMounted, onUnmounted} from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import * as Tone from 'tone';
 
@@ -102,6 +102,48 @@ const onPointerUp = (e:PointerEvent) => {
   }
 };
 
+// ==========================================
+// 스크롤 로직 추가
+// ==========================================
+const handleWheel = (e: WheelEvent) => {
+  // 컨트롤이나 메타 키를 누른 상태에서 휠을 굴릴 때만 줌으로 동작
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault(); // 브라우저 기본 줌 방지
+    
+    // 가장 가까운 스크롤 컨테이너(ProjectTimeline.vue에 있는 최상단 div)를 찾습니다.
+    const container = timelineCanvasRef.value?.closest('.overflow-auto') as HTMLElement;
+    if (!container) return;
+
+    // 1. 마우스의 컨테이너 내 상대적 X 픽셀 위치
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+
+    // 2. 줌하기 전의 스크롤 위치와 마디당 픽셀 가져오기
+    const oldScrollLeft = container.scrollLeft;
+    const oldPixelPerBar = trackStore.pixelPerBar;
+
+    // 3. 현재 마우스가 위치한 음악적 타임라인 위치(마디) 계산
+    const mouseBarPos = (oldScrollLeft + mouseX) / oldPixelPerBar;
+
+    // 4. 스토어의 줌 배율 업데이트
+    trackStore.updateZoom(e.deltaY);
+
+ // 새로운 배율 적용 후 스크롤 위치 보정
+    const newPixelPerBar = trackStore.pixelPerBar;
+    container.scrollLeft = (mouseBarPos * newPixelPerBar) - mouseX;
+  }
+};
+
+
+onMounted(() => {
+  // 윈도우 전체에 휠 이벤트를 감지하여 줌 기능 구현
+  window.addEventListener('wheel', handleWheel, {passive: false});
+});
+
+onUnmounted(() => {
+  // 컴포넌트 파괴 시 이벤트 리스너 제거 (메모리 누수 방지)
+  window.removeEventListener('wheel', handleWheel,);
+});
 
 </script>
 

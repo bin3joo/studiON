@@ -12,6 +12,7 @@ import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
 import * as Tone from 'tone' //오디오 엔진
 import AiConflictOverlay from './components/AiConflictOverlay.vue'
+import TrackItem from './components/TrackItem.vue'//트랙 아이템 마스터 트랙 렌더링용 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 const route = useRoute()
@@ -450,18 +451,26 @@ const unlockAudioEngine = async () => {
 />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
-      <!-- flex-1 -> 남은 공간 차지, overflow-auto -> 넘치는 부분 스크롤 -->
-      <div ref="timelineContainerRef" class="flex-1 overflow-auto relative flex flex-col">
-        <!--눈금자 컴포넌트 추가 -->
-        <TimelineRuler />
-        <AiConflictOverlay
-    v-if="aiConflict"
-    :conflict="aiConflict"
-  />
-        <!--트랙리스트-->
-        <TrackList />
-      </div>
+     <!-- 1️⃣ [가로 스크롤 도화지] -->
+      <div class="flex-1 flex flex-col overflow-x-auto overflow-y-hidden relative custom-scrollbar">
+        <!-- 눈금자 -->
+        <div class="sticky top-0 z-30 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
+          <TimelineRuler />
+        </div>
 
+        <AiConflictOverlay v-if="aiConflict" :conflict="aiConflict" />
+
+        <!-- 2️⃣ [세로 스크롤 도화지] -->
+        <div class="flex-1 flex flex-col overflow-y-auto overflow-x-hidden w-max min-w-full relative custom-scrollbar">
+          <TrackList /> 
+        </div>
+
+        <!-- 3️⃣ 마스터 트랙 -->
+        <div class="shrink-0 sticky bottom-0 z-40 w-max min-w-full shadow-[0_-8px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
+          <TrackItem :track="trackStore.masterTrack" :is-master="true" />
+        </div>
+        
+      </div>
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
 
     <section class="px-6 py-4">

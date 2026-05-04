@@ -223,6 +223,25 @@ export const useTrackStore = defineStore('track', () => {
             });
         },
 
+        //8. 트랙 추가(TRACK_ADD)
+        emitAddTrack: async (projectId: number, name: string) => {
+            return new Promise<any>((resolve) => {
+                setTimeout(() => {
+                    resolve({
+                        event: "TRACK_ADD",
+                        trackId: Math.floor(Math.random() * 10000) + 1,
+                        name: name,
+                        type: "audio",
+                        preTrackId: null,
+                        postTrackId: null,
+                        isMuted: false,
+                        isSoloed: false,
+                        volume: 0,
+                        pan: 0
+                    });
+                }, 300);
+            })
+        }
     };
 
     // 1. 복사
@@ -533,6 +552,76 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+
+    // ==========================================
+    // 트랙 관련 액션
+    // ==========================================
+    //마스터 트랙 (수정 불가, 고정 렌더링)
+    const masterTrack = ref<TrackUIState>({
+        trackId: 999999,
+        name: "마스터 트랙",
+        type: "AUDIO",
+        preTrackId: null,
+        postTrackId: null,
+        volume: 0,
+        pan: 0,
+        isMuted: false,
+        isSoloed: false,
+        clips: [
+            {
+                clipId: 9999991,
+                start: 0,
+                duration: projectInfo.value.totalBarCount,
+                color: '#ffffff', // 마스터 트랙은 흰색 계열로 렌더링
+                audioStartMs: 0,
+                audioDurationMs: 200000,
+                isSelected: false,
+                isDragging: false,
+                // 타입스크립트 에러 해결을 위한 오디오 객체
+                audio: {
+                    audioMetadataId: 9999,
+                    cdnUrl: "/test.mp3",
+                    originalName: "MASTER - 합산 출력",
+                    durationMs: 200000
+                }
+            }
+        ],
+        height: 100,
+        isSelected: false
+    });
+
+    //새로운 트랙 추가 액션
+    const addTrack = async () => {
+        const newTrackName = `트랙 ${trackList.value.length + 1}`;
+
+        console.log(`[통신] 트랙 추가(ADD_TRACK) 요청 중...`);
+        try {
+            const response: any = await mockServerAPI.emitAddTrack(projectInfo.value.projectId, newTrackName);
+            //객체타입임을 명시한다/
+            const newTrack: TrackUIState = {
+                trackId: response.trackId,
+                name: response.name,
+                type: response.type,
+                preTrackId: response.preTrackId,
+                postTrackId: response.postTrackId,
+                isMuted: response.isMuted,
+                isSoloed: response.isSoloed,
+                volume: response.volume,
+                pan: response.pan,
+                // UI 전용 확장 속성들
+                clips: [],
+                height: 100,
+                isSelected: false
+            }
+            trackList.value.push(newTrack);
+
+            console.log(`[통신 성공] 새 트랙 ID 발급됨: ${response.newTrackId}`);
+        } catch (e) {
+            console.error("트랙 추가 실패", e);
+        }
+    };
+
+
     // ==========================================
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
@@ -739,34 +828,22 @@ export const useTrackStore = defineStore('track', () => {
                         isSoloed: false,
                         pan: 0,
                         clips: [
-                            {
-                                clipId: 1,
-                                start: 1,
-                                duration: 120,
-                                color: "#FF3DCB",
-                                audioStartMs: 0,
-                                audioDurationMs: 200000,
-                                audio: {
-                                    audioMetadataId: 1,
-                                    cdnUrl: "/test.mp3",
-                                    originalName: "test.mp3",
-                                    durationMs: 200000
-                                }
-                            }
-                        ]
+                            // {
+                            //     clipId: 1,
+                            //     start: 1,
+                            //     duration: 120,
+                            //     color: "#FF3DCB",
+                            //     audioStartMs: 0,
+                            //     audioDurationMs: 200000,
+                            //     audio: {
+                            //         audioMetadataId: 1,
+                            //         cdnUrl: "/test.mp3",
+                            //         originalName: "test.mp3",
+                            //         durationMs: 200000
+                            //     }
+                            // }
+                        ] as any[]
                     },
-                    {
-                        trackId: 2,
-                        name: "드럼 비트",
-                        volume: -5,
-                        type: "AUDIO",
-                        preTrackId: 1,
-                        postTrackId: null,
-                        isMuted: false,
-                        isSoloed: false,
-                        pan: 0,
-                        clips: []
-                    }
                 ]
             };//테스트 목데이터
 
@@ -879,5 +956,7 @@ export const useTrackStore = defineStore('track', () => {
         splitClip,
         resizeClip,
         confirmMoveClip,
+        masterTrack,
+        addTrack,
     };
 });

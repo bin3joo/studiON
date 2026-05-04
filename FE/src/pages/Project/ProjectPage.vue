@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -12,6 +12,7 @@ import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
 import * as Tone from 'tone' //오디오 엔진
 import AiConflictOverlay from './components/AiConflictOverlay.vue'
+import TrackItem from './components/TrackItem.vue'//트랙 아이템 마스터 트랙 렌더링용 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 const route = useRoute()
@@ -63,13 +64,12 @@ const handleWheel = (e: WheelEvent) => {
 };
 
 //스페이스바 단축키 핸들러
-const handleKeyDown = (e: KeyboardEvent) => {
-  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-    return;
-  }
-  //재생/정지
+const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
+  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
   if(e.code === 'Space'){
     e.preventDefault();
+    await Tone.start(); // 사용자 제스처 직후 가장 먼저 오디오 권한 획득!
     trackStore.togglePlay();
   }
 
@@ -78,7 +78,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
     e.preventDefault();
     if (trackStore.selectedClip && trackStore.selectedTrackId) {
       trackStore.deleteClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
-      trackStore.deselectClip(); // 지운 후 선택 해제
+      trackStore.deselectAll(); // 지운 후 선택 해제
+    } else if (trackStore.selectedTrackId && !trackStore.selectedClip) {
+      // 클립 없이 트랙만 선택된 경우 트랙 자체를 삭제
+      trackStore.deleteTrack(trackStore.selectedTrackId);
     }
     return;
   }
@@ -97,7 +100,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
         e.preventDefault();
         if (trackStore.selectedClip && trackStore.selectedTrackId) {
           trackStore.cutClip(trackStore.selectedClip, trackStore.selectedTrackId);
-          trackStore.deselectClip();
+          trackStore.deselectAll();
         }
         break;
         
@@ -214,8 +217,8 @@ if(timelineContainerRef.value) {
   }
 
   //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
-  window.addEventListener('pointerdown', unlockAudioEngine);
-  window.addEventListener('keydown', unlockAudioEngine);
+  window.addEventListener('pointerdown', unlockAudioEngine, {capture: true});
+  window.addEventListener('keydown', unlockAudioEngine, {capture: true});
 })
 
 onUnmounted(()=>{
@@ -224,8 +227,8 @@ onUnmounted(()=>{
   // 마우스 감지해제
   window.removeEventListener('mousemove', updateMousePos);
   //오디오 제한 해제 리스너 제거
-  window.removeEventListener('pointerdown', unlockAudioEngine);
-  window.removeEventListener('keydown', unlockAudioEngine);
+  window.removeEventListener('pointerdown', unlockAudioEngine, {capture: true});
+  window.removeEventListener('keydown', unlockAudioEngine, {capture: true});
 })
 
 const isInviteModalOpen = ref(false)
@@ -450,18 +453,29 @@ const unlockAudioEngine = async () => {
 />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
-      <!-- flex-1 -> 남은 공간 차지, overflow-auto -> 넘치는 부분 스크롤 -->
-      <div ref="timelineContainerRef" class="flex-1 overflow-auto relative flex flex-col">
-        <!--눈금자 컴포넌트 추가 -->
-        <TimelineRuler />
-        <AiConflictOverlay
-    v-if="aiConflict"
-    :conflict="aiConflict"
-  />
-        <!--트랙리스트-->
-        <TrackList />
-      </div>
+      <div 
+        ref="timelineContainerRef" 
+        class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
+        @pointerdown="trackStore.deselectAll()"
+      >
+        <!-- 눈금자 -->
+        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
+          <TimelineRuler />
+        </div>
 
+        <AiConflictOverlay v-if="aiConflict" :conflict="aiConflict" />
+
+        <!--  [세로 스크롤] -->
+        <div class="w-max min-w-full pb-[100px] flex-1">
+          <TrackList /> 
+        </div>
+
+        <!-- 마스터 트랙 -->
+        <div class="mt-auto shrink-0 sticky bottom-0 z-50 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
+          <TrackItem :track="trackStore.masterTrack" :is-master="true" />
+        </div>
+        
+      </div>
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
 
     <section class="px-6 py-4">
@@ -494,3 +508,35 @@ const unlockAudioEngine = async () => {
     />
   </div>
 </template>
+
+<style scoped>
+/*  1. 핵심: 세로 스크롤바는 두께 0으로 완벽 삭제, 가로는 12px 유지 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 0px !important;  /* 세로 스크롤바 공간 자체를 할당하지 않음! */
+  height: 12px !important; /* 가로 스크롤바는 두께 유지 */
+}
+
+/* 2. 가로 스크롤바 배경(트랙) */
+.custom-scrollbar::-webkit-scrollbar-track:horizontal {
+  background: #131313;
+  border-radius: 8px;
+}
+
+/* 3. 가로 스크롤바 손잡이(썸) */
+.custom-scrollbar::-webkit-scrollbar-thumb:horizontal {
+  background-color: #FF8F1A;
+  border-radius: 8px;
+  border: 3px solid #131313; /* 배경색으로 테두리를 깎아서 얇게 만듦 */
+}
+
+/* 4. 마우스 올렸을 때 살짝 밝아짐 */
+.custom-scrollbar::-webkit-scrollbar-thumb:horizontal:hover {
+  background-color: #ff9f3b;
+}
+
+/* 파이어폭스(Firefox) 대응 - 파이어폭스는 0px 조절이 안되어서 얇게 렌더링 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #FF8F1A #131313;
+}
+</style>

@@ -9,12 +9,14 @@ import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
+import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
 import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
+import com.salmon.studion.domain.track.dto.response.TrackVolumeResponse;
 import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
@@ -47,6 +49,19 @@ public class TrackService {
     private final TrackEventRepository trackEventRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+
+    //////////////////////// RDB ////////////////////////
+
+    /*
+        프로젝트에 포함된 트랙들을 조회한다.
+     */
+    public List<Track> getTracksByProjectId(Integer projectId) {
+        return trackRepository.findByProject_Id(projectId);
+    }
+
+
+
+    //////////////////////// Redis ////////////////////////
 
     /*
         트랙을 추가하는 메서드
@@ -334,6 +349,33 @@ public class TrackService {
                 .build();
     }
 
+    /*
+        트랙의 볼륨을 변경하는 메서드
+     */
+    public TrackVolumeResponse changeVolume(TrackVolumeRequest request) {
+        request.validate();
+
+        TrackState track = findTrack(request.getProjectId(), request.getTrackId());
+
+        TrackState updated = TrackState.builder()
+                .trackId(track.getTrackId())
+                .name(track.getName())
+                .type(track.getType())
+                .preTrackId(track.getPreTrackId())
+                .postTrackId(track.getPostTrackId())
+                .isMuted(track.getIsMuted())
+                .isSoloed(track.getIsSoloed())
+                .volume(request.getVolume())
+                .pan(track.getPan())
+                .build();
+
+        saveTrackToRedis(request.getProjectId(), updated);
+
+        return TrackVolumeResponse.builder()
+                .trackId(request.getTrackId())
+                .volume(request.getVolume())
+                .build();
+    }
 
     /*
         Redis에서 트랙을 조회한다.
@@ -467,7 +509,4 @@ public class TrackService {
                 .build());
     }
 
-    public List<Track> getTracksByProjectId(Integer projectId) {
-        return trackRepository.findByProject_Id(projectId);
-    }
 }

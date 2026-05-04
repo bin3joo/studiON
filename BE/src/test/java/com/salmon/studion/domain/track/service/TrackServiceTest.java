@@ -10,12 +10,14 @@ import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
+import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
 import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
+import com.salmon.studion.domain.track.dto.response.TrackVolumeResponse;
 import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.global.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
@@ -134,6 +136,14 @@ class TrackServiceTest {
         req.setProjectId(PROJECT_ID);
         req.setTrackId(trackId);
         req.setIsMuted(isMuted);
+        return req;
+    }
+
+    private TrackVolumeRequest volumeRequest(Integer trackId, Double volume) {
+        TrackVolumeRequest req = new TrackVolumeRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        req.setVolume(volume);
         return req;
     }
 
@@ -469,6 +479,47 @@ class TrackServiceTest {
         void muteNotFoundTrack() {
             org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
                     trackService.muteTrack(muteRequest(99, true))
+            );
+        }
+    }
+
+    @Nested
+    @DisplayName("changeVolume")
+    class ChangeVolumeTest {
+
+        @Test
+        @DisplayName("볼륨이 요청한 값으로 변경된다")
+        void changeVolume() throws JsonProcessingException {
+            store.put("1", trackJson(1, null, null));
+
+            TrackVolumeResponse response = trackService.changeVolume(volumeRequest(1, 80.0));
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getVolume()).isEqualTo(80.0);
+            assertThat(fromStore(1).getVolume()).isEqualTo(80.0);
+        }
+
+        @Test
+        @DisplayName("볼륨 변경 시 다른 필드는 변경되지 않는다")
+        void changeVolumeDoesNotAffectOtherFields() throws JsonProcessingException {
+            store.put("2", trackJson(2, 1, 3));
+
+            trackService.changeVolume(volumeRequest(2, 50.0));
+
+            TrackState result = fromStore(2);
+            assertThat(result.getVolume()).isEqualTo(50.0);
+            assertThat(result.getPreTrackId()).isEqualTo(1);
+            assertThat(result.getPostTrackId()).isEqualTo(3);
+            assertThat(result.getName()).isEqualTo("track2");
+            assertThat(result.getIsMuted()).isFalse();
+            assertThat(result.getIsSoloed()).isFalse();
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 트랙 볼륨 변경 시 TRACK_NOT_FOUND 예외가 발생한다")
+        void changeVolumeNotFoundTrack() {
+            org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
+                    trackService.changeVolume(volumeRequest(99, 80.0))
             );
         }
     }

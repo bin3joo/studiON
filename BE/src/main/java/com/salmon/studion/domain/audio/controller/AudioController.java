@@ -1,11 +1,13 @@
 package com.salmon.studion.domain.audio.controller;
 
+import com.salmon.studion.domain.audio.dto.request.AudioListRequest;
 import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.dto.request.AudioUploadUrlRequest;
 import com.salmon.studion.domain.audio.dto.response.AudioDetailResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioMetadataCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioUploadUrlResponse;
 import com.salmon.studion.domain.audio.facade.AudioFacade;
+import com.salmon.studion.domain.audio.dto.response.AudioListResponse;
 import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.common.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -47,5 +49,14 @@ public class AudioController {
             @AuthenticationPrincipal CustomOAuth2User user
     ) {
         return ResponseEntity.ok(ApiResponse.success(audioFacade.getAudioDetail(projectId, audioMetadataId, user.getUserId())));
+    }
+
+    @PostMapping("/batch")
+    public ResponseEntity<ApiResponse<AudioListResponse>> getAudiosForClips(
+            @PathVariable Integer projectId,
+            @Valid @RequestBody AudioListRequest audioListRequest,
+            @AuthenticationPrincipal CustomOAuth2User user
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(audioFacade.getAudiosForClips(projectId, audioListRequest, user.getUserId())));
     }
 }

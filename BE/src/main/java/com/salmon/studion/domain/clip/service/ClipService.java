@@ -29,7 +29,9 @@ import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -393,8 +395,16 @@ public class ClipService {
         saveClipStateToRedis(request.getProjectId(), newClip);
 
         String newLockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), newClipId);
-        redisTemplate.opsForValue().set(newLockKey, String.valueOf(userId));
-        redisTemplate.delete(lockKey);
+        String userIdStr = String.valueOf(userId);
+        redisTemplate.execute(new SessionCallback<>() {
+            @Override
+            public Object execute(RedisOperations operations) {
+                operations.multi();
+                operations.delete(lockKey);
+                operations.opsForValue().set(newLockKey, userIdStr);
+                return operations.exec();
+            }
+        });
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));

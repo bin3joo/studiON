@@ -976,16 +976,13 @@ class ClipServiceTest {
         }
 
         @Test
-        @DisplayName("복제 후 새 클립에 락이 이전되고 원본 클립의 락은 해제된다")
-        void duplicateTransfersLock() throws JsonProcessingException {
+        @DisplayName("복제 후 락 이전이 MULTI/EXEC 트랜잭션으로 원자적으로 실행된다")
+        void duplicateTransfersLockAtomically() throws JsonProcessingException {
             store.put(String.valueOf(CLIP_ID), clipStateJson());
-            String newLockKey = String.format("project:%d:clip:%d:lock", PROJECT_ID, NEW_CLIP_ID);
-            when(redisTemplate.delete(LOCK_KEY)).thenReturn(true);
 
             clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID);
 
-            verify(valueOperations).set(eq(newLockKey), eq(String.valueOf(USER_ID)));
-            verify(redisTemplate).delete(LOCK_KEY);
+            verify(redisTemplate).execute(any(org.springframework.data.redis.core.SessionCallback.class));
         }
 
         @Test

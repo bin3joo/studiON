@@ -5,6 +5,7 @@ import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
+import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.service.TrackService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,10 @@ public class TrackEventHandler {
             case "TRACK_RENAME":
                 TrackRenameRequest renameRequest = objectMapper.convertValue(raw.getPayload(), TrackRenameRequest.class);
                 response = trackService.renameTrack(renameRequest, userId);
+                break;
+            case "TRACK_SOLO_CHANGE":
+                TrackSoloRequest soloRequest = objectMapper.convertValue(raw.getPayload(), TrackSoloRequest.class);
+                response = trackService.soloTrack(soloRequest);
                 break;
             default:
                 webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다.");

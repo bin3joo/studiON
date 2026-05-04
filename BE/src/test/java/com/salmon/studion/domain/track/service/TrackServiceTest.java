@@ -9,14 +9,13 @@ import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
+import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
-import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.global.exception.BusinessException;
-import com.salmon.studion.domain.track.repository.TrackEventRepository;
-import com.salmon.studion.domain.track.repository.TrackRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -41,9 +40,7 @@ import static org.mockito.Mockito.*;
 class TrackServiceTest {
 
     @Mock private ProjectService projectService;
-    @Mock private TrackEventRepository trackEventRepository;
     @Mock private RedisTemplate<String, String> redisTemplate;
-    @Mock private TrackRepository trackRepository;
     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks private TrackService trackService;
@@ -119,6 +116,14 @@ class TrackServiceTest {
         req.setProjectId(PROJECT_ID);
         req.setTrackId(trackId);
         req.setName(name);
+        return req;
+    }
+
+    private TrackSoloRequest soloRequest(Integer trackId, Boolean isSoloed) {
+        TrackSoloRequest req = new TrackSoloRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        req.setIsSoloed(isSoloed);
         return req;
     }
 
@@ -344,6 +349,61 @@ class TrackServiceTest {
         void renameNotFoundTrack() {
             org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
                     trackService.renameTrack(renameRequest(99, "없는트랙"), 0)
+            );
+        }
+    }
+
+    @Nested
+    @DisplayName("soloTrack")
+    class SoloTrackTest {
+
+        @Test
+        @DisplayName("isSoloed를 true로 변경하면 Redis 상태에 반영된다")
+        void soloTrackOn() throws JsonProcessingException {
+            store.put("1", trackJson(1, null, null));
+
+            TrackSoloResponse response = trackService.soloTrack(soloRequest(1, true));
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getIsSoloed()).isTrue();
+            assertThat(fromStore(1).getIsSoloed()).isTrue();
+        }
+
+        @Test
+        @DisplayName("isSoloed를 false로 변경하면 Redis 상태에 반영된다")
+        void soloTrackOff() throws JsonProcessingException {
+            store.put("1", objectMapper.writeValueAsString(TrackState.builder()
+                    .trackId(1).name("track1").type("audio")
+                    .preTrackId(null).postTrackId(null)
+                    .isMuted(false).isSoloed(true).volume(0.0).pan(0)
+                    .build()));
+
+            TrackSoloResponse response = trackService.soloTrack(soloRequest(1, false));
+
+            assertThat(response.getIsSoloed()).isFalse();
+            assertThat(fromStore(1).getIsSoloed()).isFalse();
+        }
+
+        @Test
+        @DisplayName("솔로 변경 시 다른 필드는 변경되지 않는다")
+        void soloDoesNotAffectOtherFields() throws JsonProcessingException {
+            store.put("2", trackJson(2, 1, 3));
+
+            trackService.soloTrack(soloRequest(2, true));
+
+            TrackState result = fromStore(2);
+            assertThat(result.getIsSoloed()).isTrue();
+            assertThat(result.getPreTrackId()).isEqualTo(1);
+            assertThat(result.getPostTrackId()).isEqualTo(3);
+            assertThat(result.getName()).isEqualTo("track2");
+            assertThat(result.getIsMuted()).isFalse();
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 트랙 솔로 변경 시 TRACK_NOT_FOUND 예외가 발생한다")
+        void soloNotFoundTrack() {
+            org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
+                    trackService.soloTrack(soloRequest(99, true))
             );
         }
     }

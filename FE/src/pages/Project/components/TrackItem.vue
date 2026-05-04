@@ -458,7 +458,7 @@ const handleSplit = () => {
   >
     <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-30 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-[#282828]"
+      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r border-border bg-[#1c1c1c] py-2 px-3 transition-colors group-hover:bg-[#282828]"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 

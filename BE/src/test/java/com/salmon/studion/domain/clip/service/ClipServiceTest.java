@@ -774,14 +774,14 @@ class ClipServiceTest {
         }
 
         @Test
-        @DisplayName("분할 후 새 클립에 요청 사용자 락이 설정된다")
-        void splitLocksNewClip() throws JsonProcessingException {
+        @DisplayName("분할 후 새 클립에는 락이 설정되지 않는다")
+        void splitDoesNotLockNewClip() throws JsonProcessingException {
             store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START, ORIGINAL_DURATION));
             String newLockKey = String.format("project:%d:clip:%d:lock", PROJECT_ID, NEW_CLIP_ID);
 
             clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID);
 
-            verify(valueOperations).set(eq(newLockKey), eq(String.valueOf(USER_ID)));
+            verify(valueOperations, never()).set(eq(newLockKey), anyString());
         }
 
         @Test

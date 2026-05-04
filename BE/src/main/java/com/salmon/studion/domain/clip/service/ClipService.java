@@ -286,6 +286,7 @@ public class ClipService {
 
         projectService.getProjectOrThrow(request.getProjectId());
 
+        // 접근 권한 확인
         String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
         String currentLocker = redisTemplate.opsForValue().get(lockKey);
         if (!String.valueOf(userId).equals(currentLocker)) {
@@ -298,6 +299,7 @@ public class ClipService {
         Double originalEnd = originalStart + original.getDuration();
         Double splitBar = request.getSplitBar();
 
+        // 클립 영역 밖에서 split 요청 시 (정상적인 경우 실행되지 않지만 방어용으로 추가)
         if (splitBar <= originalStart || splitBar >= originalEnd) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
@@ -305,6 +307,7 @@ public class ClipService {
         Integer newClipId = redisTemplate.opsForValue()
                 .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
 
+        // 기존 클립 수정 (split 기준 왼쪽이 기존 클립, 락은 기존 클립만 유지)
         Double newOriginalDuration = splitBar - originalStart;
         ClipState updatedOriginal = ClipState.builder()
                 .clipId(original.getClipId())
@@ -314,6 +317,7 @@ public class ClipService {
                 .build();
         saveClipStateToRedis(request.getProjectId(), updatedOriginal);
 
+        // 새로운 클립 생성 (split 기준 오른쪽이 신규 클립)
         Double newClipDuration = originalEnd - splitBar;
         ClipState newClip = ClipState.builder()
                 .clipId(newClipId)
@@ -323,12 +327,10 @@ public class ClipService {
                 .build();
         saveClipStateToRedis(request.getProjectId(), newClip);
 
-        String newLockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), newClipId);
-        redisTemplate.opsForValue().set(newLockKey, String.valueOf(userId));
-
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
 
+        // MongoDB에 이벤트 저장
         try {
             clipEventRepository.save(ClipSplitEventDocument.builder()
                     .event("CLIP_SPLIT")

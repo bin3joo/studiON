@@ -1,51 +1,33 @@
-export interface GoogleLoginData {
-  isNewUser: boolean
-  accessToken: string | null
-  refreshToken: string | null
-  tmpToken: string | null
-}
-
-export interface GoogleLoginResponse {
-  code: number
-  message: string
+export interface ApiResponse<T> {
   isSuccess: boolean
-  data: GoogleLoginData
-}
-
-export interface PositionItem {
-  positionId: number
-  positionName: string
-  order: number
+  code: string
+  message: string
+  data: T
 }
 
 export interface PositionGroup {
-  groupCode: number
-  groupName: string
-  position: PositionItem[]
-}
-
-export interface FetchPositionsResponse {
   code: number
-  message: string
-  isSuccess: boolean
-  data: {
-    group: PositionGroup[]
-  }
+  name: string
+  order: number
 }
 
-export interface RegisterRequest {
-  nickname: string
-  positionIds: number[]
+export interface Position {
+  code: number
+  positionGroup: PositionGroup
+  name: string
+  order: number
 }
 
-export interface RegisterData {
+export type FetchPositionsResponse = ApiResponse<Position[]>
+
+export interface OnboardingRequest {
+  positionCodes: number[]
+}
+
+export interface AuthTokenData {
+  isNewUser: boolean
   accessToken: string
-  refreshToken: string
 }
 
-export interface RegisterResponse {
-  code: number
-  message: string
-  isSuccess: boolean
-  data: RegisterData
-}
+export type OnboardingResponse = ApiResponse<AuthTokenData>
+export type TokenExchangeResponse = ApiResponse<AuthTokenData>

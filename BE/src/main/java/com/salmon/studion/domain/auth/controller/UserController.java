@@ -8,13 +8,17 @@ import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.global.auth.JwtTokenProvider;
 import com.salmon.studion.global.common.response.ApiResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -45,34 +49,122 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(userService.getPositionsByGroup(groupCode)));
     }
 
-    // 온보딩 완료 (tmp token -> access token + refresh token 교환)
+    // 온보딩 완료 (ONBOARDING_SESSION 쿠키로 임시 OAuth 정보를 조회한 뒤 정식 토큰 발급)
     @PostMapping("/onboarding")
     public ResponseEntity<ApiResponse<TokenResponse>> completeOnboarding(
-            @RequestHeader("Authorization") String authorization,
-            Authentication authentication, // SecurityContext에서 자동 주입
-            @RequestBody @Valid OnboardingRequest request
+            @CookieValue("ONBOARDING_SESSION") String onboardingSessionId,
+            @RequestBody @Valid OnboardingRequest request,
+            HttpServletResponse servletResponse
             ) {
-        String onboardingSessionId = (String) authentication.getPrincipal();
-
         User user = userService.completeOnboarding(onboardingSessionId, request);
 
         String accessToken = jwtTokenProvider.generateAccessToken(user.getId());
         String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId());
 
-        // 정식 토큰 발급
-        TokenResponse response = TokenResponse.builder()
-                .isNewUser(false)
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .tmpToken(null)
-                .build();
-
+        // refresh token을 Redis에 저장하면서 만료 시간 TTL 설정
         redisTemplate.opsForValue().set(
                 "refresh:" + user.getId(),
                 refreshToken,
                 refreshTokenExpiration,
                 TimeUnit.MILLISECONDS
         );
+
+        ResponseCookie deleteOnboardingCookie =
+                ResponseCookie.from("ONBOARDING_SESSION", "")
+                        .httpOnly(true)
+                        .secure(true)
+                        .sameSite("Lax")
+                        .path("/api/v1/auth/onboarding")
+                        .maxAge(0)
+                        .build();
+
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, deleteOnboardingCookie.toString());
+
+        ResponseCookie refreshCookie = ResponseCookie.from("REFRESH_TOKEN", refreshToken)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/api/v1/auth")
+                .maxAge(refreshTokenExpiration / 1000)
+                .build();
+
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+
+        // 정식 토큰 발급
+        TokenResponse response = TokenResponse.builder()
+                .isNewUser(false)
+                .accessToken(accessToken)
+                .build();
+
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // 프론트 => url에서 code 읽고 이 API 호출 -> access token 발급받음
+    @PostMapping("/exchange")
+    public ResponseEntity<ApiResponse<TokenResponse>> exchangeLoginCode(
+            @RequestParam String code
+    ) {
+
+        String redisKey = "login-code:" + code;
+
+        String userIdValue = redisTemplate.opsForValue().getAndDelete(redisKey);
+        if(userIdValue == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "만료되었거나 잘못된 로그인 코드입니다.");
+        }
+
+        Integer userId = Integer.valueOf(userIdValue);
+        String accessToken = jwtTokenProvider.generateAccessToken(userId);
+
+        TokenResponse response = TokenResponse.builder()
+                .isNewUser(false)
+                .accessToken(accessToken)
+                .build();
+
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // access token 재발급
+    @PostMapping("/reissue")
+    public ResponseEntity<ApiResponse<TokenResponse>> reissue(
+            @CookieValue("REFRESH_TOKEN") String refreshToken,
+            HttpServletResponse servletResponse
+    ) {
+        jwtTokenProvider.validateTokenType(refreshToken, "REFRESH");
+
+        Integer userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
+
+        String redisKey = "refresh:" + userId;
+        String storedRefreshToken = redisTemplate.opsForValue().get(redisKey);
+
+        if(storedRefreshToken == null || !storedRefreshToken.equals(refreshToken)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 refresh token입니다.");
+        }
+
+        String newAccessToken = jwtTokenProvider.generateAccessToken(userId);
+        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
+
+        // refresh token rotation: access token 재발급 시 refresh token도 새 값으로 교체
+        redisTemplate.opsForValue().set(
+                redisKey,
+                newRefreshToken,
+                refreshTokenExpiration,
+                TimeUnit.MILLISECONDS
+        );
+
+        ResponseCookie refreshCookie = ResponseCookie.from("REFRESH_TOKEN", newRefreshToken)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/api/v1/auth")
+                .maxAge(refreshTokenExpiration / 1000)
+                .build();
+
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+
+        TokenResponse response = TokenResponse.builder()
+                .isNewUser(false)
+                .accessToken(newAccessToken)
+                .build();
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

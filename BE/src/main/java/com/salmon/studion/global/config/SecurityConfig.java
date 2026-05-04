@@ -46,8 +46,11 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/oauth2/**",
                                 "/login/oauth2/**",
-                                "api/v1/auth/positions/groups",
-                                "api/v1/auth/positions"
+                                "/api/v1/auth/onboarding",
+                                "/api/v1/auth/positions/groups",
+                                "/api/v1/auth/positions",
+                                "/api/v1/auth/exchange",
+                                "/api/v1/auth/reissue"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

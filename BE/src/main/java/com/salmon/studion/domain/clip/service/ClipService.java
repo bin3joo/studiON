@@ -7,14 +7,17 @@ import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipDuplicateResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipSplitResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.entity.ClipDeleteEventDocument;
+import com.salmon.studion.domain.clip.entity.ClipDuplicateEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipMoveEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
@@ -354,6 +357,71 @@ public class ClipService {
                 .originalDuration(newOriginalDuration)
                 .newClipId(newClipId)
                 .newClipDuration(newClipDuration)
+                .build();
+    }
+
+    /*
+        클립을 복제하는 메서드
+        원본 클립의 바로 뒤(같은 트랙)에 동일한 duration의 새 클립을 생성한다.
+        복제 후 새 클립에 락이 이전되고, 원본 클립의 락은 해제된다.
+     */
+    public ClipDuplicateResponse duplicateClip(ClipDuplicateRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
+        String currentLocker = redisTemplate.opsForValue().get(lockKey);
+        if (!String.valueOf(userId).equals(currentLocker)) {
+            throw new BusinessException(ErrorCode.CLIP_LOCKED);
+        }
+
+        ClipState original = getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        Integer targetTrackId = original.getTrackId();
+        Double targetStartBar = original.getStart() + original.getDuration();
+
+        Integer newClipId = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+
+        ClipState newClip = ClipState.builder()
+                .clipId(newClipId)
+                .trackId(targetTrackId)
+                .start(targetStartBar)
+                .duration(original.getDuration())
+                .build();
+        saveClipStateToRedis(request.getProjectId(), newClip);
+
+        String newLockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), newClipId);
+        redisTemplate.opsForValue().set(newLockKey, String.valueOf(userId));
+        redisTemplate.delete(lockKey);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            clipEventRepository.save(ClipDuplicateEventDocument.builder()
+                    .event("CLIP_DUPLICATE")
+                    .projectId(request.getProjectId())
+                    .clipId(request.getClipId())
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .newClipId(newClipId)
+                    .targetTrackId(targetTrackId)
+                    .targetStartBar(targetStartBar)
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_DUPLICATE, clipId={}", request.getClipId(), e);
+        }
+
+        return ClipDuplicateResponse.builder()
+                .clipId(request.getClipId())
+                .newClipId(newClipId)
+                .targetTrackId(targetTrackId)
+                .targetStartBar(targetStartBar)
                 .build();
     }
 

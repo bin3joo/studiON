@@ -6,6 +6,7 @@ import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
+import com.salmon.studion.domain.track.dto.request.TrackPanRequest;
 import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.service.TrackService;
@@ -59,6 +60,10 @@ public class TrackEventHandler {
             case "TRACK_VOLUME_CHANGE":
                 TrackVolumeRequest volumeRequest = objectMapper.convertValue(raw.getPayload(), TrackVolumeRequest.class);
                 response = trackService.changeVolume(volumeRequest);
+                break;
+            case "TRACK_PAN_CHANGE":
+                TrackPanRequest panRequest = objectMapper.convertValue(raw.getPayload(), TrackPanRequest.class);
+                response = trackService.changePan(panRequest);
                 break;
             default:
                 webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다.");

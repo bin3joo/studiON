@@ -3,6 +3,7 @@ package com.salmon.studion.global.infrastructure.websocket;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
+import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.service.TrackService;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,10 @@ public class TrackEventHandler {
             case "TRACK_REORDER":
                 TrackReorderRequest reorderRequest = objectMapper.convertValue(raw.getPayload(), TrackReorderRequest.class);
                 response = trackService.reorderTrack(reorderRequest, userId);
+                break;
+            case "TRACK_RENAME":
+                TrackRenameRequest renameRequest = objectMapper.convertValue(raw.getPayload(), TrackRenameRequest.class);
+                response = trackService.renameTrack(renameRequest, userId);
                 break;
             default:
                 webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다.");

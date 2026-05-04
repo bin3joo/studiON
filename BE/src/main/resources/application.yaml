@@ -40,12 +40,6 @@ spring:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_CLIENT_SECRET}
             scope: email, profile
-        provider:
-          google:
-            authorization-uri: https://accounts.google.com/o/oauth2/auth
-            token-uri: https://oauth2.googleapis.com/token
-            user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
-            user-name-attribute: sub
 
 cloud:
   aws:
@@ -73,3 +67,6 @@ logging:
     com.salmon.studion: DEBUG
     org.springframework.web.socket: DEBUG
     org.springframework.security: DEBUG
+
+app:
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}

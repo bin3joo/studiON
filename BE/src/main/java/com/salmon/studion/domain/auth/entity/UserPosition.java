@@ -28,6 +28,17 @@ public class UserPosition extends BaseEntity {
     @JoinColumn(name = "position_code")
     private PositionDetail positionDetail;
 
+    public static UserPosition of(User user, PositionDetail positionDetail) {
+        UserPosition userPosition = new UserPosition();
+        UserPositionId id = new UserPositionId();
+        id.userId = user.getId();
+        id.positionCode = positionDetail.getCode();
+        userPosition.id = id;
+        userPosition.user = user;
+        userPosition.positionDetail = positionDetail;
+        return userPosition;
+    }
+
     @Embeddable
     @EqualsAndHashCode
     @Getter

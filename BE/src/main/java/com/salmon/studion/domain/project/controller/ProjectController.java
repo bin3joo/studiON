@@ -1,5 +1,6 @@
 package com.salmon.studion.domain.project.controller;
 
+import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;

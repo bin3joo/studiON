@@ -4,16 +4,20 @@ import com.salmon.studion.domain.auth.dto.request.OnboardingRequest;
 import com.salmon.studion.domain.auth.dto.response.TokenResponse;
 import com.salmon.studion.domain.auth.entity.PositionDetail;
 import com.salmon.studion.domain.auth.entity.PositionGroup;
+import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.global.auth.JwtTokenProvider;
 import com.salmon.studion.global.common.response.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -22,6 +26,10 @@ public class UserController {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserService userService;
+    private final StringRedisTemplate redisTemplate;
+
+    @Value("${spring.jwt.refresh-expiration}")
+    long refreshTokenExpiration;
 
     // 포지션 목록 조회
     @GetMapping("/positions/groups")
@@ -44,19 +52,27 @@ public class UserController {
             Authentication authentication, // SecurityContext에서 자동 주입
             @RequestBody @Valid OnboardingRequest request
             ) {
-        String tmpToken = authorization.substring(7);
-        Integer userId = (Integer) authentication.getPrincipal();
+        String onboardingSessionId = (String) authentication.getPrincipal();
 
-        // 포지션 저장 + redis tmp token 삭제
-        userService.completeOnboarding(userId, tmpToken, request);
+        User user = userService.completeOnboarding(onboardingSessionId, request);
+
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId());
+        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId());
 
         // 정식 토큰 발급
         TokenResponse response = TokenResponse.builder()
                 .isNewUser(false)
-                .accessToken(jwtTokenProvider.generateAccessToken(userId))
-                .refreshToken(jwtTokenProvider.generateRefreshToken(userId))
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .tmpToken(null)
                 .build();
+
+        redisTemplate.opsForValue().set(
+                "refresh:" + user.getId(),
+                refreshToken,
+                refreshTokenExpiration,
+                TimeUnit.MILLISECONDS
+        );
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

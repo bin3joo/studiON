@@ -39,13 +39,15 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/**",
-                                "/api/v1/**", // [개발 단계] 모두 통과
-                                "/api/v1/auth/**",
+//                                "/**",
+//                                "/api/v1/**", // [개발 단계] 모두 통과
+//                                "/api/v1/auth/**",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/oauth2/**",
-                                "/login/oauth2/**"
+                                "/login/oauth2/**",
+                                "api/v1/auth/positions/groups",
+                                "api/v1/auth/positions"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

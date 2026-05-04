@@ -34,25 +34,19 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         // 기존 회원인지 DB에서 조회
         Optional<User> optionalUser = userRepository.findByProviderAndProviderId(provider, providerId);
 
-        // 기존 회원인 경우
+        if(optionalUser.isPresent()) {
+            User existingUser = optionalUser.get();
+            existingUser.updateLastLoginAt();
+            return CustomOAuth2User.existingUser(existingUser, oAuth2User.getAttributes());
+        }
 
-        boolean isNewUser = optionalUser.isEmpty();
-
-        User user = optionalUser
-                .map(existingUser -> {
-                    existingUser.updateLastLoginAt();
-                    return existingUser;
-                })
-                .orElseGet(() -> userRepository.save(
-                        User.builder()
-                                .email(email)
-                                .provider(provider)
-                                .providerId(providerId)
-                                .profileImgUrl(profileImgUrl)
-                                .nickname(nickname)
-                                .build()
-                ));
-
-        return new CustomOAuth2User(user, oAuth2User.getAttributes(), isNewUser);
+        PendingOAuthUserInfo pendingOAuthUserInfo = new PendingOAuthUserInfo(
+                email,
+                provider,
+                providerId,
+                profileImgUrl,
+                nickname
+        );
+        return CustomOAuth2User.newUser(pendingOAuthUserInfo, oAuth2User.getAttributes());
     }
 }

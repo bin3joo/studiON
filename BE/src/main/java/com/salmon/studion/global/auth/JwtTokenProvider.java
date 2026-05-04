@@ -30,23 +30,23 @@ public class JwtTokenProvider {
     }
 
     public String generateAccessToken(Integer userId) {
-        return generateToken(userId, "ACCESS", accessTokenExpiration);
+        return generateToken(String.valueOf(userId), "ACCESS", accessTokenExpiration);
     }
 
     public String generateRefreshToken(Integer userId) {
-        return generateToken(userId, "REFRESH", refreshTokenExpiration);
+        return generateToken(String.valueOf(userId), "REFRESH", refreshTokenExpiration);
     }
 
-    public String generateTmpToken(Integer userId) {
-        return generateToken(userId, "TMP", tmpTokenExpiration);
+    public String generateTmpToken(String onboardingSessionId) {
+        return generateToken(onboardingSessionId, "TMP", tmpTokenExpiration);
     }
 
-    private String generateToken(Integer userId, String tokenType, long expiration) {
+    private String generateToken(String subject, String tokenType, long expiration) {
         Date now = new Date();
         Date expiredAt = new Date(now.getTime() + expiration);
 
         return Jwts.builder()
-                .subject(String.valueOf(userId))
+                .subject(subject)
                 .claim("tokenType", tokenType)
                 .issuedAt(now)
                 .expiration(expiredAt)
@@ -55,7 +55,7 @@ public class JwtTokenProvider {
     }
 
     // 토큰에서 userId 받아오기
-    public Integer getUserIdFromToken(String token) {
+    public String getSubjectFromToken(String token) {
         String subject = Jwts.parser()
                 .verifyWith(secretKey)
                 .build()
@@ -63,7 +63,7 @@ public class JwtTokenProvider {
                 .getPayload()
                 .getSubject();
 
-        return Integer.valueOf(subject);
+        return subject;
     }
 
     // 토큰 타입 가져오기
@@ -74,6 +74,10 @@ public class JwtTokenProvider {
                 .parseSignedClaims(token)
                 .getPayload()
                 .get("tokenType", String.class);
+    }
+
+    public Integer getUserIdFromToken(String token) {
+        return Integer.valueOf(getSubjectFromToken(token));
     }
 
     // 토큰 타입 검증

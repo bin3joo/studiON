@@ -1,5 +1,9 @@
 package com.salmon.studion.global.auth.filter;
 
+import com.salmon.studion.domain.auth.entity.User;
+import com.salmon.studion.domain.auth.repository.UserRepository;
+import com.salmon.studion.global.auth.CustomOAuth2User;
+import com.salmon.studion.global.auth.CustomOAuth2UserService;
 import com.salmon.studion.global.auth.JwtTokenProvider;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
@@ -7,13 +11,16 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -21,6 +28,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     // JWT 생성, 파싱, 검증 담당
     private final JwtTokenProvider jwtTokenProvider;
+    private final UserRepository userRepository;
 
     // TMP 토큰으로 접근 허용할 유일한 API 경로
     // 신규 OAuth 유저가 온보딩 완료할 때에만 TMP 토큰 사용할 수 있도록 제한
@@ -49,13 +57,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = header.substring(7);  // "Bearer " 이후
 
         try {
-            // 토큰에서 userId 꺼냄
-            Integer userId = jwtTokenProvider.getUserIdFromToken(token);
+            String subject = jwtTokenProvider.getSubjectFromToken(token);
             String tokenType = jwtTokenProvider.getTokenType(token);
 
             // 현재 요청 URI 가져옴
             // TMP 토큰이 온보딩 API에만 사용되었는지 확인 위함
             String requestUri = request.getRequestURI();
+
+            Object principal;
 
             // 토큰 타입이 TMP인지 확인
             if(TOKEN_TYPE_TMP.equals(tokenType)) {
@@ -64,8 +73,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     response.sendError(HttpServletResponse.SC_FORBIDDEN, "포지션을 입력해주세요.");
                     return;
                 }
-            // 토큰 타입이 TMP도 아니고 ACCESS도 아닌 경우
-            } else if (!TOKEN_TYPE_ACCESS.equals(tokenType)) {
+
+                principal = subject;  // onboardingSessionId
+            } else if (TOKEN_TYPE_ACCESS.equals(tokenType)) {
+                Integer userId = Integer.valueOf(subject);
+
+                User user = userRepository.findById(userId).orElse(null);
+                if(user == null) {
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "사용자를 찾을 수 없습니다.");
+                    return;
+            }
+                principal = CustomOAuth2User.existingUser(user, Map.of());
+            } else {
                 // 잘못된 토큰 타입 => 아무데도 접근 불가
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "잘못된 토큰 타입입니다.");
                 return;
@@ -76,7 +95,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // credentials는 JWT 인증에서 별도 필요 없으므로 null
             // authorities는 현재 코드 상 권한/역할 하지 않으므로 빈 리스트
             UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(userId, null, List.of());
+                    new UsernamePasswordAuthenticationToken(principal, null, List.of());
 
             // 이후 컨트롤러나 다른 필터에서 인증된 사용자로 인식할 수 있도록 SecurityContextHolder에 Authentication 저장
             SecurityContextHolder.getContext().setAuthentication(authentication);

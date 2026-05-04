@@ -13,9 +13,11 @@ export interface PositionGroup {
 
 export interface Position {
   code: number
-  positionGroup: PositionGroup
   name: string
   order: number
+  groupCode: number
+  groupName: string
+  groupOrder: number
 }
 
 export type FetchPositionsResponse = ApiResponse<Position[]>

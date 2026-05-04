@@ -7,10 +7,14 @@ import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
+import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
+import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
+import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.global.exception.BusinessException;
 import com.salmon.studion.domain.track.repository.TrackEventRepository;
 import com.salmon.studion.domain.track.repository.TrackRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,9 +62,9 @@ class TrackServiceTest {
     void setUp() {
         store = new HashMap<>();
 
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
-        when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mock(Project.class));
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        lenient().when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mock(Project.class));
 
         lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
                 .when(hashOperations).get(eq(TRACKS_KEY), any());
@@ -107,6 +111,14 @@ class TrackServiceTest {
         req.setTrackId(trackId);
         req.setTargetPreTrackId(targetPre);
         req.setTargetPostTrackId(targetPost);
+        return req;
+    }
+
+    private TrackRenameRequest renameRequest(Integer trackId, String name) {
+        TrackRenameRequest req = new TrackRenameRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        req.setName(name);
         return req;
     }
 
@@ -284,6 +296,55 @@ class TrackServiceTest {
             assertThat(fromStore(4).getPostTrackId()).isEqualTo(3);
             assertThat(fromStore(3).getPreTrackId()).isEqualTo(4);
             assertThat(fromStore(3).getPostTrackId()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("renameTrack")
+    class RenameTrackTest {
+
+        @Test
+        @DisplayName("트랙명이 요청한 이름으로 변경된다")
+        void renameTrack() throws JsonProcessingException {
+            store.put("1", trackJson(1, null, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackRenameResponse response = trackService.renameTrack(renameRequest(1, "피아노 메인"), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getName()).isEqualTo("피아노 메인");
+
+            assertThat(fromStore(1).getName()).isEqualTo("피아노 메인");
+        }
+
+        @Test
+        @DisplayName("이름 변경 시 preTrackId, postTrackId 등 다른 필드는 변경되지 않는다")
+        void renameDoesNotAffectOtherFields() throws JsonProcessingException {
+            // A(1) → B(2) → C(3), 중간 트랙 B의 이름 변경
+            store.put("1", trackJson(1, null, 2));
+            store.put("2", trackJson(2, 1, 3));
+            store.put("3", trackJson(3, 2, null));
+
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            trackService.renameTrack(renameRequest(2, "드럼"), 0);
+
+            TrackState renamed = fromStore(2);
+            assertThat(renamed.getName()).isEqualTo("드럼");
+            assertThat(renamed.getPreTrackId()).isEqualTo(1);
+            assertThat(renamed.getPostTrackId()).isEqualTo(3);
+            assertThat(renamed.getType()).isEqualTo("audio");
+            assertThat(renamed.getIsMuted()).isFalse();
+            assertThat(renamed.getIsSoloed()).isFalse();
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 트랙 이름 변경 시 TRACK_NOT_FOUND 예외가 발생한다")
+        void renameNotFoundTrack() {
+            org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
+                    trackService.renameTrack(renameRequest(99, "없는트랙"), 0)
+            );
         }
     }
 }

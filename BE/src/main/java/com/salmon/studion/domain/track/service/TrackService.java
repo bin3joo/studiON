@@ -6,12 +6,15 @@ import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
+import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
+import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
+import com.salmon.studion.domain.track.entity.TrackRenameEventDocument;
 import com.salmon.studion.domain.track.entity.TrackReorderEventDocument;
 import com.salmon.studion.domain.track.repository.TrackEventRepository;
 import com.salmon.studion.domain.track.repository.TrackRepository;
@@ -214,6 +217,58 @@ public class TrackService {
                 .trackId(request.getTrackId())
                 .preTrackId(request.getTargetPreTrackId())
                 .postTrackId(request.getTargetPostTrackId())
+                .build();
+    }
+
+    /*
+        트랙명을 변경하는 메서드
+    */
+    public TrackRenameResponse renameTrack(TrackRenameRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        TrackState track = findTrack(request.getProjectId(), request.getTrackId());
+
+        String beforeName = track.getName();
+
+        TrackState updated = TrackState.builder()
+                .trackId(track.getTrackId())
+                .name(request.getName())
+                .type(track.getType())
+                .preTrackId(track.getPreTrackId())
+                .postTrackId(track.getPostTrackId())
+                .isMuted(track.getIsMuted())
+                .isSoloed(track.getIsSoloed())
+                .volume(track.getVolume())
+                .pan(track.getPan())
+                .build();
+
+        saveTrackToRedis(request.getProjectId(), updated);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            trackEventRepository.save(TrackRenameEventDocument.builder()
+                    .event("TRACK_RENAME")
+                    .projectId(request.getProjectId())
+                    .trackId(request.getTrackId())
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .beforeTrackName(beforeName)
+                    .afterTrackName(request.getName())
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=TRACK_RENAME, trackId={}", request.getTrackId(), e);
+        }
+
+        return TrackRenameResponse.builder()
+                .trackId(request.getTrackId())
+                .name(request.getName())
                 .build();
     }
 

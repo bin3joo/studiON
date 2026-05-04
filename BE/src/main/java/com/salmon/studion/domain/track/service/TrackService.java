@@ -8,10 +8,12 @@ import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
+import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
+import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
 import com.salmon.studion.domain.track.entity.TrackRenameEventDocument;
@@ -224,8 +226,10 @@ public class TrackService {
         트랙명을 변경하는 메서드
     */
     public TrackRenameResponse renameTrack(TrackRenameRequest request, Integer userId) {
+        // NPE 방어
         request.validate();
 
+        // 프로젝트 존재 확인
         projectService.getProjectOrThrow(request.getProjectId());
 
         TrackState track = findTrack(request.getProjectId(), request.getTrackId());
@@ -269,6 +273,34 @@ public class TrackService {
         return TrackRenameResponse.builder()
                 .trackId(request.getTrackId())
                 .name(request.getName())
+                .build();
+    }
+
+    /*
+        트랙의 솔로 상태를 변경하는 메서드
+     */
+    public TrackSoloResponse soloTrack(TrackSoloRequest request) {
+        request.validate();
+
+        TrackState track = findTrack(request.getProjectId(), request.getTrackId());
+
+        TrackState updated = TrackState.builder()
+                .trackId(track.getTrackId())
+                .name(track.getName())
+                .type(track.getType())
+                .preTrackId(track.getPreTrackId())
+                .postTrackId(track.getPostTrackId())
+                .isMuted(track.getIsMuted())
+                .isSoloed(request.getIsSoloed())
+                .volume(track.getVolume())
+                .pan(track.getPan())
+                .build();
+
+        saveTrackToRedis(request.getProjectId(), updated);
+
+        return TrackSoloResponse.builder()
+                .trackId(request.getTrackId())
+                .isSoloed(request.getIsSoloed())
                 .build();
     }
 

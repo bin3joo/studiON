@@ -39,7 +39,10 @@ public class UserService {
                 .map(positionDetail -> new PositionDetailResponse(
                         positionDetail.getCode(),
                         positionDetail.getName(),
-                        positionDetail.getOrder()
+                        positionDetail.getOrder(),
+                        positionDetail.getPositionGroup().getCode(),
+                        positionDetail.getPositionGroup().getName(),
+                        positionDetail.getPositionGroup().getOrder()
                 ))
                 .toList();
     }

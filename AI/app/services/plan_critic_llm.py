@@ -86,7 +86,8 @@ class HTTPPlanCriticLLMClient:
             "system": (
                 "항상 한국어로만 답하라. 반드시 JSON object 하나만 반환하라. "
                 '반환 형식은 {"result":"PASS|REVISE|REJECT","note":"string"} 이다. '
-                "의미 없는 칭찬은 금지하고, 계획의 안정성, 사용자 의도 적합성, 과도한 보정 여부를 비평하라."
+                "의미 없는 칭찬은 금지하고, 계획의 안정성, "
+                "사용자 의도 적합성, 과도한 보정 여부를 비평하라."
             ),
         }
         headers = {

@@ -283,6 +283,74 @@
       font-size: 12px;
     }
 
+    .preview-box {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.85);
+    }
+
+    .preview-meta {
+      display: grid;
+      gap: 8px;
+    }
+
+    .preview-compare {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .preview-card {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .preview-audio {
+      width: 100%;
+    }
+
+    .accordion {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.82);
+      overflow: hidden;
+    }
+
+    .accordion summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 16px 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .accordion summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .accordion summary::after {
+      content: "+";
+      font-size: 20px;
+      line-height: 1;
+      color: var(--accent);
+    }
+
+    .accordion[open] summary::after {
+      content: "−";
+    }
+
+    .accordion-body {
+      padding: 0 18px 18px;
+    }
+
     @media (max-width: 960px) {
       .grid,
       .row,
@@ -362,32 +430,75 @@
           </div>
           <div class="regions" id="regions"></div>
         </section>
+
+        <section class="panel">
+          <h2>3. Preview</h2>
+          <p>before는 같은 문제 구간의 master, after는 대표 action이 반영된 master-context excerpt입니다.</p>
+          <div class="buttons">
+            <button id="pollPreviewBtn" class="secondary" type="button">Preview Poll</button>
+            <button id="autoplayPreviewBtn" class="ghost" type="button">Poll Until Ready</button>
+            <button id="confirmBtn" type="button">Confirm</button>
+            <button id="cancelBtn" class="warn" type="button">Cancel</button>
+          </div>
+          <div id="previewBox" class="preview-box" style="margin-top: 12px;">
+            <div class="preview-meta muted">preview_render가 아직 없습니다.</div>
+            <div class="preview-compare">
+              <article class="preview-card">
+                <strong>Before</strong>
+                <div class="muted" style="margin: 6px 0 10px;">snapshot-based reconstructed master excerpt reference</div>
+                <audio id="masterAudio" class="preview-audio" controls preload="none"></audio>
+              </article>
+              <article class="preview-card">
+                <strong>After</strong>
+                <div class="muted" style="margin: 6px 0 10px;">master-context preview excerpt after representative action</div>
+                <audio id="previewAudio" class="preview-audio" controls preload="none"></audio>
+              </article>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div class="stack">
         <section class="panel">
-          <h2>Latest Status</h2>
-          <div id="summaryPills"></div>
-          <pre id="summaryText">아직 응답이 없습니다.</pre>
+          <details class="accordion">
+            <summary>Latest Status</summary>
+            <div class="accordion-body">
+              <div id="summaryPills"></div>
+              <pre id="summaryText">아직 응답이 없습니다.</pre>
+            </div>
+          </details>
         </section>
 
         <section class="panel">
-          <h2>Agent Plan</h2>
-          <div id="planBoard" class="plan-board">
-            <div class="plan-empty">planner/critic가 만든 계획이 아직 없습니다. Start 후 Poll 하거나 Plan Input Resume 뒤 다시 Poll 하세요.</div>
-          </div>
+          <details class="accordion">
+            <summary>Agent Plan</summary>
+            <div class="accordion-body">
+              <div id="planBoard" class="plan-board">
+                <div class="plan-empty">planner/critic가 만든 계획이 아직 없습니다. Start 후 Poll 하거나 Plan Input Resume 뒤 다시 Poll 하세요.</div>
+              </div>
+            </div>
+          </details>
         </section>
 
         <section class="panel">
-          <h2>Latest Response JSON</h2>
-          <pre id="responseJson">{}</pre>
+          <details class="accordion">
+            <summary>Latest Response JSON</summary>
+            <div class="accordion-body">
+              <pre id="responseJson">{}</pre>
+            </div>
+          </details>
         </section>
 
         <section class="panel">
-          <h2>Quick API Guide</h2>
-          <pre>POST /workflow/jobs/start
-GET  /workflow/jobs/{job_id}
-POST /workflow/jobs/resume
+          <details class="accordion">
+            <summary>Quick API Guide</summary>
+            <div class="accordion-body">
+              <pre>POST /internal/workflow/jobs/start
+GET  /internal/workflow/jobs/{job_id}
+GET  /internal/workflow/jobs/{job_id}/preview/before/audio
+GET  /internal/workflow/jobs/{job_id}/master/audio
+GET  /internal/workflow/jobs/{job_id}/preview/audio
+POST /internal/workflow/jobs/resume
 
 resume payload required fields:
 - job_id
@@ -395,6 +506,8 @@ resume payload required fields:
 - selected_region_id
 - preserve_clip_id
 - user_feedback_message (optional)</pre>
+            </div>
+          </details>
         </section>
       </div>
     </div>
@@ -416,11 +529,17 @@ resume payload required fields:
       summaryPills: document.getElementById("summaryPills"),
       planBoard: document.getElementById("planBoard"),
       regions: document.getElementById("regions"),
+      previewBox: document.getElementById("previewBox"),
+      previewAudio: document.getElementById("previewAudio"),
       fillSampleBtn: document.getElementById("fillSampleBtn"),
       startBtn: document.getElementById("startBtn"),
       pollBtn: document.getElementById("pollBtn"),
       autofillBtn: document.getElementById("autofillBtn"),
       resumeBtn: document.getElementById("resumeBtn"),
+      pollPreviewBtn: document.getElementById("pollPreviewBtn"),
+      autoplayPreviewBtn: document.getElementById("autoplayPreviewBtn"),
+      confirmBtn: document.getElementById("confirmBtn"),
+      cancelBtn: document.getElementById("cancelBtn"),
     };
 
     let latestStatus = null;
@@ -451,10 +570,11 @@ resume payload required fields:
 
     function setResponse(data) {
       latestStatus = data;
-      els.responseJson.textContent = pretty(data);
+      els.responseJson.textContent = pretty(buildCompactDebugPayload(data));
       renderSummary(data);
       renderPlan(data);
       renderRegions(data);
+      renderPreviewWithMaster(data);
     }
 
     function renderSummary(data) {
@@ -462,15 +582,20 @@ resume payload required fields:
       const projections = data?.projections ?? {};
       const planState = projections.plan_state ?? {};
       const suggestionGroup = projections.suggestion_group ?? null;
+      const master = projections.master_audio ?? null;
+      const preview = projections.preview_render ?? null;
+      const primaryAction = getPrimaryAction(data);
+      const targetRegion = getFocusRegion(data);
+      const excerptRange = preview?.preview_excerpt_range ?? null;
 
       els.summaryPills.innerHTML = "";
       [
         ["status", job.status],
         ["phase", job.phase],
         ["current_node", job.current_node],
-        ["plan_status", planState.status],
-        ["validator", planState.validator_result],
-        ["critic", planState.critic_result],
+        ["master", master?.status],
+        ["preview", preview?.status],
+        ["plan", planState.status],
       ].forEach(([label, value]) => {
         if (!value) return;
         const span = document.createElement("span");
@@ -479,11 +604,20 @@ resume payload required fields:
         els.summaryPills.appendChild(span);
       });
 
-      els.summaryText.textContent = pretty({
-        job,
-        plan_state: planState,
-        suggestion_group: suggestionGroup,
-      });
+      const lines = [
+        `job ${job.id ?? "-"} / project ${job.project_id ?? "-"}`,
+        `workflow: ${job.status ?? "-"} / ${job.phase ?? "-"}`,
+        `master: ${master?.status ?? "-"}${master?.duration_ms != null ? ` / ${master.duration_ms}ms` : ""}`,
+        `preview: ${preview?.status ?? "-"}${preview?.duration_ms != null ? ` / ${preview.duration_ms}ms` : ""}`,
+        `region: ${preview?.preview_target_region ?? targetRegion?.id ?? suggestionGroup?.region_id ?? "-"}`,
+        `master range: ${formatRange(preview?.preview_region_start_ms ?? targetRegion?.start_ms, preview?.preview_region_end_ms ?? targetRegion?.end_ms)}`,
+        `measure: ${formatMeasureRange(preview?.preview_measure_start ?? targetRegion?.measure_start, preview?.preview_measure_end ?? targetRegion?.measure_end)}`,
+        `action type: ${preview?.preview_action_type ?? primaryAction?.action_type ?? "-"}`,
+        `action track: ${preview?.preview_action_track ?? primaryAction?.target_track_id ?? "-"}`,
+        `preview excerpt: ${formatRange(excerptRange?.start_ms, excerptRange?.end_ms)}`,
+        `validator / critic: ${[planState?.validator_result, planState?.critic_result].filter(Boolean).join(" / ") || "-"}`,
+      ];
+      els.summaryText.textContent = lines.join("\n");
     }
 
     function formatActionType(actionType) {
@@ -500,6 +634,81 @@ resume payload required fields:
       if (startMs == null) return `until ${endMs}ms`;
       if (endMs == null) return `from ${startMs}ms`;
       return `${startMs}ms - ${endMs}ms`;
+    }
+
+    function formatMeasureRange(startMeasure, endMeasure) {
+      if (startMeasure == null && endMeasure == null) return "-";
+      if (startMeasure == null) return `until ${endMeasure}`;
+      if (endMeasure == null) return `from ${startMeasure}`;
+      return startMeasure === endMeasure ? `${startMeasure}` : `${startMeasure} - ${endMeasure}`;
+    }
+
+    function getPrimarySuggestion(data) {
+      const suggestions = data?.projections?.suggestion_group?.suggestions;
+      return Array.isArray(suggestions) && suggestions.length ? suggestions[0] : null;
+    }
+
+    function getPrimaryAction(data) {
+      const actions = getPrimarySuggestion(data)?.actions;
+      return Array.isArray(actions) && actions.length ? actions[0] : null;
+    }
+
+    function getFocusRegion(data) {
+      const regionId = data?.projections?.suggestion_group?.region_id
+        ?? data?.projections?.plan_state?.selected_region_id
+        ?? null;
+      const regions = data?.projections?.analysis_regions ?? [];
+      return regions.find((region) => String(region.id) === String(regionId)) ?? null;
+    }
+
+    function buildCompactDebugPayload(data) {
+      const job = data?.job ?? {};
+      const projections = data?.projections ?? {};
+      const focusRegion = getFocusRegion(data);
+      const primarySuggestion = getPrimarySuggestion(data);
+      const primaryAction = getPrimaryAction(data);
+      return {
+        job: {
+          id: job.id,
+          status: job.status,
+          phase: job.phase,
+          current_node: job.current_node,
+          error_code: job.error_code,
+          error_message: job.error_message,
+        },
+        master_audio: projections.master_audio ?? null,
+        preview_render: projections.preview_render ?? null,
+        focus_region: focusRegion ? {
+          id: focusRegion.id,
+          issue_type: focusRegion.issue_type,
+          start_ms: focusRegion.start_ms,
+          end_ms: focusRegion.end_ms,
+          measure_start: focusRegion.measure_start,
+          measure_end: focusRegion.measure_end,
+          affected_clip_ids: focusRegion.affected_clip_ids,
+          track_id: focusRegion.track_id,
+          secondary_track_id: focusRegion.secondary_track_id,
+        } : null,
+        primary_suggestion: primarySuggestion ? {
+          id: primarySuggestion.id,
+          title: data?.projections?.suggestion_group?.title ?? null,
+          summary: primarySuggestion.summary,
+          explanation: primarySuggestion.explanation,
+        } : null,
+        primary_action: primaryAction ? {
+          id: primaryAction.id,
+          action_type: primaryAction.action_type,
+          target_scope: primaryAction.target_scope,
+          target_track_id: primaryAction.target_track_id,
+          clip_id: primaryAction.clip_id,
+          start_ms: primaryAction.start_ms,
+          end_ms: primaryAction.end_ms,
+          band_low_hz: primaryAction.band_low_hz,
+          band_high_hz: primaryAction.band_high_hz,
+          gain_delta_db: primaryAction.gain_delta_db,
+          params_json: primaryAction.params_json,
+        } : null,
+      };
     }
 
     function renderActionCard(action) {
@@ -623,6 +832,7 @@ resume payload required fields:
         div.className = "region";
         const affected = Array.isArray(region.affected_clip_ids) ? region.affected_clip_ids : [];
         const isUserActionRegion = region.requires_user_action === true;
+        const canUseMaster = canBuildMasterFromRegion(region);
         div.innerHTML = `
           <strong>${escapeHtml(region.id)}</strong>
           <div class="muted">issue: ${escapeHtml(region.issue_type ?? "")}</div>
@@ -635,9 +845,11 @@ resume payload required fields:
         fillBtn.type = "button";
         fillBtn.className = "ghost";
         fillBtn.style.marginTop = "10px";
-        fillBtn.textContent = isUserActionRegion ? "Use This Region" : "Auto-Fix Region";
-        fillBtn.disabled = !isUserActionRegion;
-        if (isUserActionRegion) {
+        fillBtn.textContent = isUserActionRegion
+          ? "Use This Region"
+          : (canUseMaster ? "Use For Master" : "Auto-Fix Region");
+        fillBtn.disabled = !isUserActionRegion && !canUseMaster;
+        if (isUserActionRegion || canUseMaster) {
           fillBtn.addEventListener("click", () => fillPlanInputFromRegion(region));
         }
         div.appendChild(fillBtn);
@@ -645,10 +857,175 @@ resume payload required fields:
       }
     }
 
-    function fillPlanInputFromRegion(region) {
+      function fillPlanInputFromRegion(region) {
       els.selectedRegionId.value = region.id ?? "";
       const firstClipId = Array.isArray(region.affected_clip_ids) ? region.affected_clip_ids[0] : "";
       els.preserveClipId.value = firstClipId ?? "";
+      if (latestStatus) {
+        renderPreviewWithMaster(latestStatus);
+      }
+    }
+
+    function previewAudioPath(jobId) {
+      const base = els.apiBase.value.replace(/\/$/, "");
+      return `${base}/internal/workflow/jobs/${jobId}/preview/audio`;
+    }
+
+    function previewBeforeAudioPath(jobId) {
+      const base = els.apiBase.value.replace(/\/$/, "");
+      return `${base}/internal/workflow/jobs/${jobId}/preview/before/audio`;
+    }
+
+    function masterAudioPath(jobId) {
+      const base = els.apiBase.value.replace(/\/$/, "");
+      return `${base}/internal/workflow/jobs/${jobId}/master/audio`;
+    }
+
+    function renderPreview(data) {
+      const preview = data?.projections?.preview_render ?? null;
+      const jobId = data?.job?.id ?? Number(els.jobId.value);
+      if (!preview) {
+        els.previewBox.innerHTML = `
+          <div class="preview-meta muted">preview_render가 아직 없습니다.</div>
+          <audio id="previewAudio" class="preview-audio" controls preload="none"></audio>
+        `;
+        els.previewAudio = document.getElementById("previewAudio");
+        return;
+      }
+
+      const detailRows = [
+        ["status", preview.status ?? "-"],
+        ["suggestion_id", preview.suggestion_id ?? "-"],
+        ["duration_ms", preview.duration_ms ?? "-"],
+        ["object_key", preview.object_key ?? "-"],
+        ["error", preview.error_message ?? "-"],
+      ];
+      const canPlay = preview.status === "READY";
+      const audioSrc = canPlay ? `${previewAudioPath(jobId)}?ts=${Date.now()}` : "";
+      els.previewBox.innerHTML = `
+        <div class="preview-meta">
+          ${detailRows.map(([label, value]) => `
+            <div><strong>${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(value)}</span></div>
+          `).join("")}
+        </div>
+        <audio
+          id="previewAudio"
+          class="preview-audio"
+          controls
+          preload="none"
+          ${canPlay ? `src="${escapeHtml(audioSrc)}"` : ""}
+        ></audio>
+      `;
+      els.previewAudio = document.getElementById("previewAudio");
+    }
+
+    function renderPreviewWithMaster(data) {
+      const preview = data?.projections?.preview_render ?? null;
+      const master = data?.projections?.master_audio ?? null;
+      const focusRegion = getFocusRegion(data);
+      const excerptRange = preview?.preview_excerpt_range ?? null;
+      const jobId = data?.job?.id ?? Number(els.jobId.value);
+      if (!preview) {
+        const canPlayMaster = master?.status === "READY";
+        const masterSrc = canPlayMaster ? `${masterAudioPath(jobId)}?ts=${Date.now()}` : "";
+        const masterRows = master
+          ? [
+              ["master_status", master.status ?? "-"],
+              ["master_duration_ms", master.duration_ms ?? "-"],
+              ["master_object_key", master.object_key ?? "-"],
+              ["master_error", master.error_message ?? "-"],
+            ]
+          : [["master", "not available"]];
+        els.previewBox.innerHTML = `
+          <div class="preview-meta">
+            ${masterRows.map(([label, value]) => `
+              <div><strong>${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(value)}</span></div>
+            `).join("")}
+            ${focusRegion ? `
+              <div><strong>preview_target_region</strong> <span class="muted">${escapeHtml(focusRegion.id)}</span></div>
+              <div><strong>master_range</strong> <span class="muted">${escapeHtml(formatRange(focusRegion.start_ms, focusRegion.end_ms))}</span></div>
+              <div><strong>measure</strong> <span class="muted">${escapeHtml(formatMeasureRange(focusRegion.measure_start, focusRegion.measure_end))}</span></div>
+            ` : ""}
+          </div>
+          <div class="preview-compare">
+            <article class="preview-card">
+              <strong>Before</strong>
+              <div class="muted" style="margin: 6px 0 10px;">snapshot-based reconstructed master excerpt reference</div>
+              <audio
+                id="masterAudio"
+                class="preview-audio"
+                controls
+                preload="none"
+                ${canPlayMaster ? `src="${escapeHtml(masterSrc)}"` : ""}
+              ></audio>
+            </article>
+            <article class="preview-card">
+              <strong>After</strong>
+              <div class="muted" style="margin: 6px 0 10px;">master-context preview excerpt after representative action</div>
+              <audio id="previewAudio" class="preview-audio" controls preload="none"></audio>
+            </article>
+          </div>
+        `;
+        els.masterAudio = document.getElementById("masterAudio");
+        els.previewAudio = document.getElementById("previewAudio");
+        return;
+      }
+
+      const detailRows = [
+        ["master_status", master?.status ?? "-"],
+        ["master_duration_ms", master?.duration_ms ?? "-"],
+        ["master_object_key", master?.object_key ?? "-"],
+        ["before_duration_ms", preview?.before_duration_ms ?? "-"],
+        ["before_object_key", preview?.before_object_key ?? "-"],
+        ["preview_target_region", preview?.preview_target_region ?? focusRegion?.id ?? "-"],
+        ["master_range", formatRange(preview?.preview_region_start_ms ?? focusRegion?.start_ms, preview?.preview_region_end_ms ?? focusRegion?.end_ms)],
+        ["measure", formatMeasureRange(preview?.preview_measure_start ?? focusRegion?.measure_start, preview?.preview_measure_end ?? focusRegion?.measure_end)],
+        ["preview_action_type", preview?.preview_action_type ?? "-"],
+        ["preview_action_track", preview?.preview_action_track ?? "-"],
+        ["preview_excerpt_range", formatRange(excerptRange?.start_ms, excerptRange?.end_ms)],
+        ["status", preview.status ?? "-"],
+        ["suggestion_id", preview.suggestion_id ?? "-"],
+        ["duration_ms", preview.duration_ms ?? "-"],
+        ["object_key", preview.object_key ?? "-"],
+        ["error", preview.error_message ?? "-"],
+      ];
+      const canPlay = preview.status === "READY";
+      const cacheBuster = Date.now();
+      const previewSrc = canPlay ? `${previewAudioPath(jobId)}?ts=${cacheBuster}` : "";
+      const beforeSrc = canPlay ? `${previewBeforeAudioPath(jobId)}?ts=${cacheBuster}` : "";
+      els.previewBox.innerHTML = `
+        <div class="preview-meta">
+          ${detailRows.map(([label, value]) => `
+            <div><strong>${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(value)}</span></div>
+          `).join("")}
+        </div>
+        <div class="preview-compare">
+          <article class="preview-card">
+            <strong>Before</strong>
+            <div class="muted" style="margin: 6px 0 10px;">snapshot-based reconstructed master excerpt reference</div>
+            <audio
+              id="masterAudio"
+              class="preview-audio"
+              controls
+              preload="none"
+              ${canPlay ? `src="${escapeHtml(beforeSrc)}"` : ""}
+            ></audio>
+          </article>
+          <article class="preview-card">
+            <strong>After</strong>
+            <div class="muted" style="margin: 6px 0 10px;">master-context preview excerpt after representative action</div>
+            <audio
+              id="previewAudio"
+              class="preview-audio"
+              controls
+              preload="none"
+              ${canPlay ? `src="${escapeHtml(previewSrc)}"` : ""}
+            ></audio>
+          </article>
+        </div>
+      `;
+      els.masterAudio = document.getElementById("masterAudio");
+      els.previewAudio = document.getElementById("previewAudio");
     }
 
     async function callJson(path, payload, method = "POST") {
@@ -678,14 +1055,15 @@ resume payload required fields:
         issue_types: parseIssueTypes(),
         project_snapshot: JSON.parse(els.snapshotJson.value),
       };
-      const data = await callJson("/workflow/jobs/start", payload);
+      const data = await callJson("/internal/workflow/jobs/start", payload);
       setResponse(data);
       els.summaryText.textContent = "start accepted\n\n" + pretty(data);
     }
 
     async function pollJob() {
-      const data = await callJson(`/workflow/jobs/${Number(els.jobId.value)}`, null, "GET");
+      const data = await callJson(`/internal/workflow/jobs/${Number(els.jobId.value)}`, null, "GET");
       setResponse(data);
+      return data;
     }
 
     async function resumePlanInput() {
@@ -697,9 +1075,64 @@ resume payload required fields:
         preserve_clip_id: Number(els.preserveClipId.value),
         user_feedback_message: els.feedbackMessage.value.trim() || null,
       };
-      const data = await callJson("/workflow/jobs/resume", payload);
+      const data = await callJson("/internal/workflow/jobs/resume", payload);
       setResponse(data);
       els.summaryText.textContent = "resume accepted\n\n" + pretty(data);
+    }
+
+    async function pollPreview() {
+      const data = await pollJob();
+      const preview = data?.projections?.preview_render ?? null;
+      if (!preview) {
+        els.summaryText.textContent = "preview_render가 아직 없습니다.\n\n" + pretty(data);
+        return;
+      }
+      els.summaryText.textContent = "preview poll\n\n" + pretty(preview);
+    }
+
+    async function pollUntilPreviewReady() {
+      const maxAttempts = 12;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const data = await pollJob();
+        const preview = data?.projections?.preview_render ?? null;
+        if (preview?.status === "READY") {
+          els.summaryText.textContent = `preview ready after ${attempt} poll(s)\n\n` + pretty(preview);
+          if (els.masterAudio?.src) {
+            els.masterAudio.load();
+          }
+          if (els.previewAudio?.src) {
+            try {
+              await els.previewAudio.play();
+            } catch (error) {
+              console.warn("preview autoplay failed", error);
+            }
+          }
+          return;
+        }
+        if (preview?.status === "FAILED") {
+          els.summaryText.textContent = `preview failed\n\n` + pretty(preview);
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+      els.summaryText.textContent = "preview가 READY가 되지 않았습니다. Poll로 상태를 다시 확인하세요.";
+    }
+
+    async function resumeConfirm(decision) {
+      const payload = {
+        job_id: Number(els.jobId.value),
+        project_id: Number(els.projectId.value),
+        requested_by: Number(els.requestedBy.value),
+        user_decision: decision,
+      };
+      const data = await callJson("/internal/workflow/jobs/resume", payload);
+      setResponse(data);
+      els.summaryText.textContent = `${decision} accepted\n\n` + pretty(data);
+    }
+
+    function canBuildMasterFromRegion(region) {
+      const affected = Array.isArray(region?.affected_clip_ids) ? region.affected_clip_ids : [];
+      return affected.length > 0;
     }
 
     function findDefaultPlanRegion() {
@@ -710,8 +1143,16 @@ resume payload required fields:
       return rankedUserRegions[0] ?? null;
     }
 
+    function findDefaultSourceMixRegion() {
+      const regions = latestStatus?.projections?.analysis_regions ?? [];
+      const sourceMixRegions = regions
+        .filter((region) => canBuildMasterFromRegion(region))
+        .sort((left, right) => Number(right?.ranking_score ?? 0) - Number(left?.ranking_score ?? 0));
+      return sourceMixRegions[0] ?? null;
+    }
+
     function autofillFirstRegion() {
-      const region = findDefaultPlanRegion();
+      const region = findDefaultPlanRegion() ?? findDefaultSourceMixRegion();
       if (!region) {
         alert("analysis_regions가 아직 없습니다. 먼저 Poll 하세요.");
         return;
@@ -721,32 +1162,45 @@ resume payload required fields:
 
     function fillSampleSnapshot() {
       const payload = {
-        duration_ms: 4800,
-        bpm: 120,
+        duration_ms: 20058,
+        bpm: 96,
         numerator: 4,
         denominator: 4,
         tracks: [
-          { track_id: 10, name: "Lead Vocal" },
-          { track_id: 20, name: "Backing Track" }
+          { track_id: 10, name: "Piano Master Bed" },
+          { track_id: 20, name: "Organic Guitar Percussion" },
+          { track_id: 30, name: "Clean Guitar Hook" }
         ],
         clips: [
           {
             clip_id: 10001,
             track_id: 10,
             start_ms: 0,
-            end_ms: 4800,
-            audio_path: "C:/Users/SSAFY/Desktop/ssafy_2026/project/studion/S14P31A205/AI/tmp/conflict_stems/track4_vocal_hat_high.wav",
+            end_ms: 20058,
+            audio_metadata_id: 801,
+            audio_path: "C:/Users/SSAFY/Desktop/ssafy_2026/project/studion/S14P31A205/ai/generated-audio/shidenbeatsmusic-loop-file-positive-and-gentle-piano-song-157353.mp3",
             audio_start_ms: 0,
-            audio_duration_ms: 4800
+            audio_duration_ms: 20058
           },
           {
             clip_id: 20001,
             track_id: 20,
             start_ms: 0,
-            end_ms: 4800,
-            audio_path: "C:/Users/SSAFY/Desktop/ssafy_2026/project/studion/S14P31A205/AI/tmp/conflict_stems/track3_chords_mid.wav",
+            end_ms: 20058,
+            audio_metadata_id: 802,
+            audio_path: "C:/Users/SSAFY/Desktop/ssafy_2026/project/studion/S14P31A205/ai/generated-audio/shidenbeatsmusic-loop-acoustic-guitar-and-organic-percussion-130606.mp3",
             audio_start_ms: 0,
-            audio_duration_ms: 4800
+            audio_duration_ms: 20058
+          },
+          {
+            clip_id: 30001,
+            track_id: 30,
+            start_ms: 6000,
+            end_ms: 12904,
+            audio_metadata_id: 803,
+            audio_path: "C:/Users/SSAFY/Desktop/ssafy_2026/project/studion/S14P31A205/ai/generated-audio/shidenbeatsmusic-jingle-clean-guitar-funky-and-rock-style-21690.mp3",
+            audio_start_ms: 0,
+            audio_duration_ms: 6904
           }
         ]
       };
@@ -770,6 +1224,10 @@ resume payload required fields:
     wire(els.startBtn, startJob);
     wire(els.pollBtn, pollJob);
     wire(els.resumeBtn, resumePlanInput);
+    wire(els.pollPreviewBtn, pollPreview);
+    wire(els.autoplayPreviewBtn, pollUntilPreviewReady);
+    wire(els.confirmBtn, () => resumeConfirm("confirm"));
+    wire(els.cancelBtn, () => resumeConfirm("cancel"));
     els.fillSampleBtn.addEventListener("click", fillSampleSnapshot);
     els.autofillBtn.addEventListener("click", autofillFirstRegion);
   </script>

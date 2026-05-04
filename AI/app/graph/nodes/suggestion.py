@@ -20,7 +20,10 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "PLANNING_REGION_NOT_FOUND",
-                "failure_message": "The selected analysis region could not be restored for planning.",
+                "failure_message": (
+                    "The selected analysis region could not be restored "
+                    "for planning."
+                ),
             }
         )
 
@@ -121,7 +124,10 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "PLAN_NOT_APPROVED",
-                "failure_message": "The execution plan could not be materialized before internal approval.",
+                "failure_message": (
+                    "The execution plan could not be materialized "
+                    "before internal approval."
+                ),
             }
         )
     if selected_region is None:
@@ -129,7 +135,10 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "MATERIALIZE_REGION_NOT_FOUND",
-                "failure_message": "The selected analysis region could not be restored for execution plan materialization.",
+                "failure_message": (
+                    "The selected analysis region could not be restored "
+                    "for execution plan materialization."
+                ),
             }
         )
 
@@ -170,7 +179,9 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     mongo_artifact_ids.append(execution_plan_artifact_id)
     latest_artifact_id = execution_plan_artifact_id
     notes.append(
-        f"승인된 실행 계획을 suggestion group {suggestion_group_id}과 preview action {preview_action_ids[0]}으로 구체화했다."
+        "승인된 실행 계획을 "
+        f"suggestion group {suggestion_group_id}과 preview action "
+        f"{preview_action_ids[0]}으로 구체화했다."
     )
     return workflow_update(
         state,
@@ -247,7 +258,9 @@ def _normalize_plan_payload(
     plan_payload["preserveClipId"] = preserve_clip_id
     plan_payload["userFeedbackMessage"] = state.get("user_feedback_message")
 
-    candidate["candidateId"] = str(candidate.get("candidateId") or f"{state['job_id']}-plan-candidate-1")
+    candidate["candidateId"] = str(
+        candidate.get("candidateId") or f"{state['job_id']}-plan-candidate-1"
+    )
     candidate["issueType"] = region.get("issue_type")
     candidate["preserveClipId"] = preserve_clip_id
 
@@ -338,7 +351,11 @@ def _resolve_overlap_target_track(
     primary = int(region.get("track_id") or 0)
     involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
     if involved_track_ids:
-        clip_track_id = _resolve_clip_track_id(state, preserve_clip_id) if preserve_clip_id else None
+        clip_track_id = (
+            _resolve_clip_track_id(state, preserve_clip_id)
+            if preserve_clip_id
+            else None
+        )
         track_scores = {
             int(track_id): float(score)
             for track_id, score in (region.get("track_body_contributions") or {}).items()

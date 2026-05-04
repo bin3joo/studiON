@@ -52,8 +52,18 @@ class InMemoryWorkflowArtifactStore:
 
 
 class MongoWorkflowArtifactStore:
-    def __init__(self, mongo_url: str, database_name: str, collection_name: str) -> None:
-        self._client = MongoClient(mongo_url)
+    def __init__(
+        self,
+        mongo_url: str,
+        database_name: str,
+        collection_name: str,
+        *,
+        heartbeat_frequency_ms: int,
+    ) -> None:
+        self._client = MongoClient(
+            mongo_url,
+            heartbeatFrequencyMS=heartbeat_frequency_ms,
+        )
         self._collection = self._client[database_name][collection_name]
 
     def reset(self) -> None:
@@ -90,5 +100,6 @@ def get_workflow_artifact_store() -> WorkflowArtifactStore:
             mongo_url=settings.mongo_url,
             database_name=settings.mongo_database,
             collection_name=settings.mongo_artifact_collection,
+            heartbeat_frequency_ms=settings.mongo_heartbeat_frequency_ms,
         )
     return _mongo_store

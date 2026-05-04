@@ -99,6 +99,26 @@ class WorkflowState(TypedDict, total=False):
     suggestion_group_id: str | None
     preview_id: str | None
     preview_action_ids: list[str]
+    preview_suggestion_id: str | None
+    preview_status: str | None
+    preview_render_no: int
+    preview_object_key: str | None
+    preview_duration_ms: int | None
+    preview_before_object_key: str | None
+    preview_before_duration_ms: int | None
+    preview_excerpt_start_ms: int | None
+    preview_excerpt_end_ms: int | None
+    preview_requested_at: str | None
+    preview_started_at: str | None
+    preview_completed_at: str | None
+    preview_expired_at: str | None
+    preview_error_code: str | None
+    preview_error_message: str | None
+    master_audio_status: str | None
+    master_audio_object_key: str | None
+    master_audio_duration_ms: int | None
+    master_audio_error_code: str | None
+    master_audio_error_message: str | None
     user_decision: UserDecision | None
     user_action_required: bool
     validator_mode: str
@@ -200,6 +220,26 @@ def build_workflow_initial_state(
         "suggestion_group_id": None,
         "preview_id": None,
         "preview_action_ids": [],
+        "preview_suggestion_id": None,
+        "preview_status": None,
+        "preview_render_no": 1,
+        "preview_object_key": None,
+        "preview_duration_ms": None,
+        "preview_before_object_key": None,
+        "preview_before_duration_ms": None,
+        "preview_excerpt_start_ms": None,
+        "preview_excerpt_end_ms": None,
+        "preview_requested_at": None,
+        "preview_started_at": None,
+        "preview_completed_at": None,
+        "preview_expired_at": None,
+        "preview_error_code": None,
+        "preview_error_message": None,
+        "master_audio_status": None,
+        "master_audio_object_key": None,
+        "master_audio_duration_ms": None,
+        "master_audio_error_code": None,
+        "master_audio_error_message": None,
         "user_decision": None,
         "user_action_required": False,
         "validator_mode": "PASS",

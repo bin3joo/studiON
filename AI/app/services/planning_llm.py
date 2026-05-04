@@ -169,14 +169,18 @@ def _planner_system_prompt() -> str:
         "너는 band_overlap 문제만 다루는 오디오 편집 계획 생성기다. "
         "반드시 JSON object 하나만 반환하고, 설명 문장이나 코드펜스는 포함하지 마라. "
         "입력으로 선택된 region, preserve clip, clip context, revision notes가 주어진다. "
-        "목표는 preserve clip이 속한 트랙은 건드리지 않으면서 같은 구간의 다른 TRACK 하나에 적용할 단일 DYNAMIC_EQ 액션을 제안하는 것이다. "
+        "목표는 preserve clip이 속한 트랙은 건드리지 않으면서 "
+        "같은 구간의 다른 TRACK 하나에 적용할 단일 DYNAMIC_EQ 액션을 제안하는 것이다. "
         "반환 JSON은 다음 필드를 반드시 포함해야 한다: "
-        '{"strategyTitle": string, "strategySummary": string, "summary": string, "explanation": string, '
+        '{"strategyTitle": string, "strategySummary": string, '
+        '"summary": string, "explanation": string, '
         '"candidate": {"action": {"actionType": string, "targetScope": "TRACK|MASTER", '
         '"targetTrackId": number|null, "targetClipId": number|null, "startMs": number|null, '
         '"endMs": number|null, "bandLowHz": number|null, "bandHighHz": number|null, '
         '"gainDeltaDb": number|null, "params": object}}}. '
-        f"허용되는 actionType 목록은 {', '.join(ALLOWED_ACTION_TYPES)} 이지만 현재 이 경로에서는 DYNAMIC_EQ만 사용해야 한다. "
+        "허용되는 actionType 목록은 "
+        f"{', '.join(ALLOWED_ACTION_TYPES)} 이지만 "
+        "현재 이 경로에서는 DYNAMIC_EQ만 사용해야 한다. "
         "targetScope는 반드시 TRACK이어야 한다. "
         "targetTrackId는 preserve clip 트랙이 아닌 involved track 중 하나여야 한다. "
         "targetClipId는 null이어도 되지만 preserve clip 자체를 수정 대상으로 지정하면 안 된다. "

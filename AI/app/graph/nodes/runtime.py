@@ -6,6 +6,12 @@ from app.graph.nodes.common import append_transition, artifact_id, workflow_upda
 from app.graph.state import WorkflowState, utc_now
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
+from app.services.workflow_master_renderer import MasterRenderError, render_master_audio
+from app.services.workflow_preview_renderer import (
+    PreviewRenderError,
+    render_preview_audio,
+    render_preview_before_audio,
+)
 
 
 def load_entry_context(state: WorkflowState) -> WorkflowState:
@@ -102,7 +108,11 @@ def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
 
     if sibilance_fix_applied:
         recipes = [_build_sibilance_fix_recipe(region) for region in sibilance_regions]
-        region_ids = [str(region.get("id")) for region in sibilance_regions if region.get("id") is not None]
+        region_ids = [
+            str(region.get("id"))
+            for region in sibilance_regions
+            if region.get("id") is not None
+        ]
         track_ids = sorted(
             {
                 int(region.get("track_id") or 0)
@@ -136,7 +146,10 @@ def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
             f"Applied deterministic sibilance repair recipe to {len(sibilance_regions)} region(s)."
         )
         if applied_in_mixed_issue_flow:
-            notes.append("사용자 승인 이슈와 함께 탐지된 치찰음도 같은 run에서 자동 보정 artifact로 기록했다.")
+            notes.append(
+                "사용자 승인 이슈와 함께 탐지된 치찰음도 "
+                "같은 run에서 자동 보정 artifact로 기록했다."
+            )
 
     return workflow_update(
         state,
@@ -254,7 +267,8 @@ def auto_fix_non_user_issues(state: WorkflowState) -> WorkflowState:
         mongo_artifact_ids.append(auto_fix_recipe_artifact_id)
         latest_artifact_id = auto_fix_recipe_artifact_id
         notes.append(
-            f"Applied deterministic auto-fix recipes to {len(grouped_recipes)} non-user issue group(s)."
+            "Applied deterministic auto-fix recipes to "
+            f"{len(grouped_recipes)} non-user issue group(s)."
         )
 
     return workflow_update(
@@ -374,7 +388,10 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "MISSING_PREVIEW_ACTION",
-                "failure_message": "A preview action is required before applying the representative recipe.",
+                "failure_message": (
+                    "대표 레시피를 적용하기 전에 "
+                    "프리뷰 액션이 필요합니다."
+                ),
             }
         )
     if len(preview_action_ids) != 1:
@@ -382,13 +399,18 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "INVALID_PREVIEW_ACTION_COUNT",
-                "failure_message": "Exactly one representative preview action is required in the MVP flow.",
+                "failure_message": (
+                    "현재 MVP 흐름에서는 대표 프리뷰 액션이 "
+                    "정확히 1개여야 합니다."
+                ),
             }
         )
     notes = [*state.get("notes", [])]
     notes.append(
-        f"Automatically applied representative preview action {preview_action_ids[0]} without selection wait."
+        "Automatically applied representative preview action "
+        f"{preview_action_ids[0]} without selection wait."
     )
+    requested_at = utc_now()
     return workflow_update(
         state,
         node="apply_selected_edit_recipe",
@@ -398,20 +420,87 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         durable_status="RUNNING",
         extra={
             "apply_result_id": f"{state['job_id']}-apply",
+            "preview_suggestion_id": _resolve_preview_suggestion_id(
+                state,
+                preview_action_id=preview_action_ids[0],
+            ),
+            "preview_status": "PROCESSING",
+            "preview_render_no": max(int(state.get("preview_render_no", 1) or 1), 1),
+            "preview_object_key": None,
+            "preview_duration_ms": None,
+            "preview_before_object_key": None,
+            "preview_before_duration_ms": None,
+            "preview_excerpt_start_ms": None,
+            "preview_excerpt_end_ms": None,
+            "preview_requested_at": requested_at,
+            "preview_started_at": None,
+            "preview_completed_at": None,
+            "preview_expired_at": None,
+            "preview_error_code": None,
+            "preview_error_message": None,
             "notes": notes,
         },
     )
 
 
 def render_preview(state: WorkflowState) -> WorkflowState:
+    preview_id = state.get("preview_id") or f"{state['job_id']}-preview"
+    started_at = utc_now()
+    focus_region = _resolve_preview_focus_region(state)
+    preview_action = _resolve_preview_action(state)
+    master_audio_state: dict[str, object] = {}
+    try:
+        result = render_preview_audio(
+            job_id=state["job_id"],
+            preview_id=preview_id,
+            clip_index=state.get("clip_index", []),
+            action=preview_action,
+            focus_region=focus_region,
+            project_duration_ms=state.get("project_duration_ms"),
+        )
+        master_audio_path, master_audio_state = _ensure_master_audio_for_preview(state)
+        before_result = render_preview_before_audio(
+            job_id=state["job_id"],
+            preview_id=preview_id,
+            master_audio_path=master_audio_path,
+            excerpt_start_ms=result.excerpt_start_ms,
+            excerpt_end_ms=result.excerpt_end_ms,
+        )
+    except PreviewRenderError as exc:
+        return fail_workflow(
+            {
+                **state,
+                "preview_id": preview_id,
+                "preview_status": "FAILED",
+                "preview_started_at": started_at,
+                "preview_completed_at": utc_now(),
+                "preview_error_code": exc.code,
+                "preview_error_message": exc.message,
+                "failure_code": exc.code,
+                "failure_message": exc.message,
+            }
+        )
+
     return workflow_update(
         state,
         node="render_preview",
         phase="preview_rendered",
         progress=97,
         extra={
-            "preview_id": state.get("preview_id") or f"{state['job_id']}-preview",
+            "preview_id": preview_id,
+            "preview_status": "READY",
+            "preview_object_key": result.object_key,
+            "preview_duration_ms": result.duration_ms,
+            "preview_before_object_key": before_result.object_key,
+            "preview_before_duration_ms": before_result.duration_ms,
+            "preview_excerpt_start_ms": result.excerpt_start_ms,
+            "preview_excerpt_end_ms": result.excerpt_end_ms,
+            "preview_started_at": started_at,
+            "preview_completed_at": utc_now(),
+            "preview_error_code": None,
+            "preview_error_message": None,
             "user_decision": None,
+            **master_audio_state,
         },
     )
 
@@ -476,6 +565,22 @@ def fail_workflow(state: WorkflowState) -> WorkflowState:
             "failure_code": state.get("failure_code") or "WORKFLOW_FAILED",
             "failure_message": state.get("failure_message")
             or "The workflow could not complete successfully.",
+            "preview_id": state.get("preview_id"),
+            "preview_suggestion_id": state.get("preview_suggestion_id"),
+            "preview_status": state.get("preview_status"),
+            "preview_render_no": state.get("preview_render_no", 1),
+            "preview_object_key": state.get("preview_object_key"),
+            "preview_duration_ms": state.get("preview_duration_ms"),
+            "preview_before_object_key": state.get("preview_before_object_key"),
+            "preview_before_duration_ms": state.get("preview_before_duration_ms"),
+            "preview_excerpt_start_ms": state.get("preview_excerpt_start_ms"),
+            "preview_excerpt_end_ms": state.get("preview_excerpt_end_ms"),
+            "preview_requested_at": state.get("preview_requested_at"),
+            "preview_started_at": state.get("preview_started_at"),
+            "preview_completed_at": state.get("preview_completed_at"),
+            "preview_expired_at": state.get("preview_expired_at"),
+            "preview_error_code": state.get("preview_error_code"),
+            "preview_error_message": state.get("preview_error_message"),
         },
     )
 
@@ -643,6 +748,89 @@ def _validate_plan_input_selection(state: WorkflowState) -> tuple[str, str] | No
             "preserve_clip_id must belong to the selected region.",
         )
     return None
+
+
+def _resolve_preview_action(state: WorkflowState) -> dict[str, object]:
+    preview_action_ids = [*state.get("preview_action_ids", [])]
+    if len(preview_action_ids) != 1:
+        raise PreviewRenderError(
+            "INVALID_PREVIEW_ACTION_COUNT",
+            "프리뷰 렌더링에는 대표 프리뷰 액션이 정확히 1개 필요합니다.",
+        )
+    preview_action_id = preview_action_ids[0]
+    payload = state.get("suggestion_payload") or {}
+    for suggestion in payload.get("suggestions", []):
+        for action in suggestion.get("actions", []):
+            if action.get("actionId") == preview_action_id:
+                return action
+    raise PreviewRenderError(
+        "PREVIEW_ACTION_NOT_FOUND",
+        f"preview action {preview_action_id}를 suggestion_payload에서 찾지 못했습니다.",
+    )
+
+
+def _resolve_preview_focus_region(state: WorkflowState) -> dict[str, object]:
+    selected_region_id = state.get("selected_region_id")
+    if selected_region_id is None:
+        raise PreviewRenderError(
+            "PREVIEW_REGION_NOT_FOUND",
+            "프리뷰 렌더링에는 선택된 문제 구간 정보가 필요합니다.",
+        )
+    for region in state.get("analysis_regions", []):
+        if str(region.get("id")) == str(selected_region_id):
+            return region
+    raise PreviewRenderError(
+        "PREVIEW_REGION_NOT_FOUND",
+        f"selected region {selected_region_id}를 analysis_regions에서 찾지 못했습니다.",
+    )
+
+
+def _resolve_preview_suggestion_id(
+    state: WorkflowState,
+    *,
+    preview_action_id: str,
+) -> str | None:
+    payload = state.get("suggestion_payload") or {}
+    group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
+    for suggestion_index, suggestion in enumerate(payload.get("suggestions", []), start=1):
+        for action in suggestion.get("actions", []):
+            if action.get("actionId") == preview_action_id:
+                return f"{group_id}-suggestion-{suggestion_index}"
+    return None
+
+
+def _resolve_master_audio_path(state: WorkflowState) -> str:
+    master_audio_path = state.get("master_audio_object_key")
+    if not isinstance(master_audio_path, str) or not master_audio_path.strip():
+        raise PreviewRenderError(
+            "MASTER_AUDIO_NOT_FOUND",
+            "before excerpt를 만들기 위한 master 오디오 경로가 없습니다.",
+        )
+    return master_audio_path
+
+
+def _ensure_master_audio_for_preview(state: WorkflowState) -> tuple[str, dict[str, object]]:
+    try:
+        return _resolve_master_audio_path(state), {}
+    except PreviewRenderError:
+        pass
+
+    try:
+        result = render_master_audio(
+            job_id=state["job_id"],
+            project_duration_ms=int(state.get("project_duration_ms") or 0),
+            clip_index=[dict(clip) for clip in state.get("clip_index", [])],
+        )
+    except MasterRenderError as exc:
+        raise PreviewRenderError(exc.code, exc.message) from exc
+
+    return result.object_key, {
+        "master_audio_status": "READY",
+        "master_audio_object_key": result.object_key,
+        "master_audio_duration_ms": result.duration_ms,
+        "master_audio_error_code": None,
+        "master_audio_error_message": None,
+    }
 
 
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.graph.state import UserDecision, WorkflowDispatchType, build_workflow_initial_state
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
+from app.services.workflow_master_renderer import MasterRenderError, render_master_audio
 from app.services.workflow_queue import enqueue_workflow_dispatch
 from app.services.workflow_snapshots import (
     ProjectSnapshot,
@@ -17,6 +18,41 @@ from app.services.workflow_snapshots import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_master_audio_state(
+    *,
+    job_id: int,
+    project_duration_ms: int,
+    clip_index: list[dict[str, object | None]],
+) -> dict[str, object]:
+    try:
+        result = render_master_audio(
+            job_id=job_id,
+            project_duration_ms=project_duration_ms,
+            clip_index=[dict(clip) for clip in clip_index],
+        )
+    except MasterRenderError as exc:
+        logger.warning(
+            "snapshot master 렌더링 실패: job_id=%s code=%s message=%s",
+            job_id,
+            exc.code,
+            exc.message,
+        )
+        return {
+            "master_audio_status": "FAILED",
+            "master_audio_object_key": None,
+            "master_audio_duration_ms": None,
+            "master_audio_error_code": exc.code,
+            "master_audio_error_message": exc.message,
+        }
+    return {
+        "master_audio_status": "READY",
+        "master_audio_object_key": result.object_key,
+        "master_audio_duration_ms": result.duration_ms,
+        "master_audio_error_code": None,
+        "master_audio_error_message": None,
+    }
 
 
 class WorkflowDispatchAccepted(BaseModel):
@@ -84,6 +120,11 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
         validator_mode=payload.validator_mode,
         critic_mode=payload.critic_mode,
         requested_by=payload.requested_by,
+        **_build_master_audio_state(
+            job_id=payload.job_id,
+            project_duration_ms=snapshot_document.duration_ms,
+            clip_index=snapshot_document.clip_index,
+        ),
     )
     try:
         store.create_pending_job(initial_state)

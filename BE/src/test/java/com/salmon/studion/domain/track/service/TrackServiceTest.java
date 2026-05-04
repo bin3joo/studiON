@@ -10,6 +10,7 @@ import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
 import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
 import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
+import com.salmon.studion.domain.track.dto.request.TrackPanRequest;
 import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
@@ -17,6 +18,7 @@ import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
 import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
 import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
 import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
+import com.salmon.studion.domain.track.dto.response.TrackPanResponse;
 import com.salmon.studion.domain.track.dto.response.TrackVolumeResponse;
 import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
 import com.salmon.studion.global.exception.BusinessException;
@@ -144,6 +146,14 @@ class TrackServiceTest {
         req.setProjectId(PROJECT_ID);
         req.setTrackId(trackId);
         req.setVolume(volume);
+        return req;
+    }
+
+    private TrackPanRequest panRequest(Integer trackId, Integer pan) {
+        TrackPanRequest req = new TrackPanRequest();
+        req.setProjectId(PROJECT_ID);
+        req.setTrackId(trackId);
+        req.setPan(pan);
         return req;
     }
 
@@ -520,6 +530,48 @@ class TrackServiceTest {
         void changeVolumeNotFoundTrack() {
             org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
                     trackService.changeVolume(volumeRequest(99, 80.0))
+            );
+        }
+    }
+
+    @Nested
+    @DisplayName("changePan")
+    class ChangePanTest {
+
+        @Test
+        @DisplayName("패닝이 요청한 값으로 변경된다")
+        void changePan() throws JsonProcessingException {
+            store.put("1", trackJson(1, null, null));
+
+            TrackPanResponse response = trackService.changePan(panRequest(1, 50));
+
+            assertThat(response.getTrackId()).isEqualTo(1);
+            assertThat(response.getPan()).isEqualTo(50);
+            assertThat(fromStore(1).getPan()).isEqualTo(50);
+        }
+
+        @Test
+        @DisplayName("패닝 변경 시 다른 필드는 변경되지 않는다")
+        void changePanDoesNotAffectOtherFields() throws JsonProcessingException {
+            store.put("2", trackJson(2, 1, 3));
+
+            trackService.changePan(panRequest(2, -30));
+
+            TrackState result = fromStore(2);
+            assertThat(result.getPan()).isEqualTo(-30);
+            assertThat(result.getPreTrackId()).isEqualTo(1);
+            assertThat(result.getPostTrackId()).isEqualTo(3);
+            assertThat(result.getName()).isEqualTo("track2");
+            assertThat(result.getIsMuted()).isFalse();
+            assertThat(result.getIsSoloed()).isFalse();
+            assertThat(result.getVolume()).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 트랙 패닝 변경 시 TRACK_NOT_FOUND 예외가 발생한다")
+        void changePanNotFoundTrack() {
+            org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
+                    trackService.changePan(panRequest(99, 50))
             );
         }
     }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {ref, computed} from 'vue';
+import {ref, computed, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
@@ -522,6 +522,86 @@ const onDrop = (e: DragEvent) => {
   trackStore.uploadAndAddAudioClip(file, props.track.trackId, targetBar);
 };
 
+// ==========================================
+// 볼륨/패닝 직접 입력 로직
+// ==========================================
+const isEditingVolume = ref(false);
+const volumeInputRef = ref<HTMLInputElement | null>(null);
+const editVolumeValue = ref<number | string>(0); // 입력 중인 임시 값 저장용
+
+const startEditVolume = async () => {
+  if (props.isMaster) return; // 마스터 트랙은 조작 불가
+  isEditingVolume.value = true;
+  editVolumeValue.value = Number((props.track.volume || 0).toFixed(1)); // 현재 볼륨값을 임시 변수에 복사
+  await nextTick();
+  volumeInputRef.value?.focus();
+  volumeInputRef.value?.select();
+};
+
+const finishEditVolume = () => {
+  if (!isEditingVolume.value) return; // 엔터+Blur 중복 실행 방지
+  isEditingVolume.value = false;
+  
+  let val = parseFloat(String(editVolumeValue.value));
+  if (isNaN(val)) val = props.track.volume || 0;
+  
+  // 범위를 -60 ~ +6 dB 사이로 강제 고정
+  val = Math.max(-60, Math.min(6, val)); 
+  trackStore.setTrackVolume(props.track.trackId, Number(val.toFixed(1)));
+};
+
+const isEditingPan = ref(false);
+const panInputRef = ref<HTMLInputElement | null>(null);
+const editPanValue = ref<number | string>(0); // 입력 중인 임시 값 저장용
+
+const startEditPan = async () => {
+  if (props.isMaster) return;
+  isEditingPan.value = true;
+  editPanValue.value = props.track.pan || 0; // 현재 패닝값을 임시 변수에 복사
+  await nextTick();
+  panInputRef.value?.focus();
+  panInputRef.value?.select();
+};
+
+const finishEditPan = () => {
+  if (!isEditingPan.value) return; // 중복 실행 방지
+  isEditingPan.value = false;
+  
+  let val = parseInt(String(editPanValue.value), 10);
+  if (isNaN(val)) val = props.track.pan || 0;
+  
+  // 범위를 -100 ~ +100 사이로 강제 고정
+  val = Math.max(-100, Math.min(100, val)); 
+  trackStore.setTrackPan(props.track.trackId, val);
+};
+
+// ==========================================
+// 트랙 이름 수정 로직
+// ==========================================
+const isEditingName = ref(false);
+const nameInputRef = ref<HTMLInputElement | null>(null);
+const editNameValue = ref('');
+
+const startEditName = async () => {
+  if (props.isMaster) return; // 마스터 트랙은 수정 금지
+  isEditingName.value = true;
+  editNameValue.value = props.track.name;
+  
+  await nextTick();
+  nameInputRef.value?.focus();
+  nameInputRef.value?.select(); // 이름 전체 블록 지정 (바로 수정 가능하게)
+};
+
+const finishEditName = () => {
+  if (!isEditingName.value) return; // 중복 실행 방지
+  isEditingName.value = false;
+  
+  const trimmedName = editNameValue.value.trim();
+  // 빈 문자열이 아니고 기존 이름과 다를 때만 스토어 호출
+  if (trimmedName && trimmedName !== props.track.name) {
+    trackStore.renameTrack(props.track.trackId, trimmedName);
+  }
+};
 
 </script>
 
@@ -556,56 +636,150 @@ const onDrop = (e: DragEvent) => {
       <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 flex-1 items-center gap-1.5">
-          <span class="truncate text-sm font-bold tracking-wide text-white">
+          <!-- 수정 모드: 인풋창 -->
+          <input
+            v-if="isEditingName"
+            ref="nameInputRef"
+            type="text"
+            v-model="editNameValue"
+            @blur="finishEditName"
+            @keydown.enter="finishEditName"
+            @keydown.esc="isEditingName = false"
+            @keydown.delete.stop
+            class="w-full truncate bg-transparent text-sm font-bold tracking-wide text-white outline-none border-b border-primary/50"
+          />
+          <!-- 일반 모드: 텍스트 -->
+          <span 
+            v-else 
+            class="truncate text-sm font-bold tracking-wide text-white"
+            @dblclick="!isMaster && startEditName()"
+          >
             {{ track.name }}
           </span>
-          <button aria-label="트랙 이름 수정" class="shrink-0 text-muted-foreground transition hover:text-white">
+          
+          <!-- 연필 아이콘 (마스터 트랙이 아니고 수정 중이 아닐 때만 표시) -->
+          <button 
+            v-if="!isMaster && !isEditingName" 
+            aria-label="트랙 이름 수정" 
+            class="shrink-0 text-muted-foreground transition hover:text-white"
+            @click.stop="startEditName"
+          >
             <Pencil class="h-3 w-3" />
           </button>
         </div>
 
-        <div class="flex shrink-0 items-center gap-1">
-          <button aria-label="음소거 토글" class="grid h-6 w-7 place-items-center rounded border border-white/30 bg-white/10 text-white transition hover:bg-white/20">
+       <div class="flex shrink-0 items-center gap-1">
+          <!-- 뮤트 버튼 -->
+          <button 
+            v-if="!isMaster"
+            aria-label="음소거 토글" 
+            @click="trackStore.toggleTrackMute(track.trackId)"
+            :class="track.isMuted ? 'bg-red-500/20 text-red-500 border-red-500/50' : 'border-white/30 bg-white/10 text-white hover:bg-white/20'"
+            class="grid h-6 w-7 place-items-center rounded border transition"
+          >
             <VolumeX class="h-3.5 w-3.5" />
           </button>
-          <button aria-label="솔로 토글" class="grid h-6 w-7 place-items-center rounded border border-transparent bg-white/5 text-muted-foreground transition hover:bg-white/10 hover:text-white">
+          
+          <!-- 솔로 버튼 -->
+          <button 
+            v-if="!isMaster"
+            aria-label="솔로 토글" 
+            @click="trackStore.toggleTrackSolo(track.trackId)"
+            :class="track.isSoloed ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50' : 'border-transparent bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white'"
+            class="grid h-6 w-7 place-items-center rounded border transition"
+          >
             <span class="text-[10px] font-bold">S</span>
           </button>
         </div>
       </div>
 
+      <!-- 볼륨 / 팬 컨트롤 영역 교체 -->
       <div class="mt-auto flex flex-col gap-2">
+        
+        <!-- 볼륨 조절 -->
         <div aria-label="볼륨 조절" class="flex items-center gap-2">
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">VOL</span>
-          <div class="relative h-1.5 flex-1 rounded-full bg-black/60">
-            <div class="absolute inset-y-0 left-0 rounded-full bg-[#ff9800] shadow-[0_0_8px_#ff9800]" style="width: 50%"></div>
-            <div class="absolute top-1/2 -mt-2 ml-[50%] h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c]"></div>
+          
+          <!-- 1. 볼륨 커스텀 슬라이더 (드래그 조작용) -->
+          <div class="relative h-1.5 flex-1 rounded-full bg-black/60 flex items-center">
+            <!-- 게이지 -->
+            <div class="absolute left-0 h-full rounded-full bg-[#ff9800] shadow-[0_0_8px_#ff9800]" :style="{ width: `${trackStore.getVolumePercent(track.volume || 0)}%` }"></div>
+            <!-- 핸들 -->
+            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c] pointer-events-none" :style="{ left: `${trackStore.getVolumePercent(track.volume || 0)}%` }"></div>
+            <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
+            <input 
+              v-if="!isMaster"
+              type="range" min="0" max="100" step="0.1" 
+              :value="trackStore.getVolumePercent(track.volume || 0)" 
+              @input="e => trackStore.setTrackVolume(track.trackId, parseFloat(trackStore.getVolumeFromPercent(Number((e.target as HTMLInputElement).value)).toFixed(1)))"
+              class="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
+            />
           </div>
-          <div aria-label="현재 볼륨 수치" class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
-            <span class="font-mono text-[10px] tabular-nums text-white">
+
+          <!-- 2. 수치 입력 박스 (키보드 직접 입력용) -->
+          <div 
+            aria-label="현재 볼륨 수치" 
+            class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5 cursor-text hover:border-primary/50 transition-colors"
+            @click.stop="startEditVolume"
+          >
+            <input
+              v-if="isEditingVolume"
+              ref="volumeInputRef"
+              type="number"
+              v-model="editVolumeValue"
+              @blur="finishEditVolume"
+              @keydown.enter="finishEditVolume"
+              @keydown.delete.stop
+              class="w-full bg-transparent text-center font-mono text-[10px] tabular-nums text-white outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              style="-moz-appearance: textfield; appearance: textfield;"
+              step="0.1"
+            />
+            <span v-else class="font-mono text-[10px] tabular-nums text-white pointer-events-none">
               {{ (track.volume || 0).toFixed(1) }}
             </span>
           </div>
         </div>
 
+        <!-- 패닝 조절 -->
         <div aria-label="패닝 조절" class="flex items-center gap-2">
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">PAN</span>
-          <div class="relative h-1.5 flex-1 rounded-full bg-black/60">
-            <div 
-              class="absolute inset-y-0 rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" 
-              :style="{
-                left: (track.pan || 0) < 0 ? `${50 + (track.pan || 0) / 2}%` : '50%',
-                width: `${Math.abs(track.pan || 0) / 2}%`
-              }"
-            ></div>
-            <div 
-              class="absolute top-1/2 -mt-2 h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c]"
-              :style="{ left: `${50 + (track.pan || 0) / 2}%` }"
-            ></div>
+          
+          <!-- 1. 팬 커스텀 슬라이더 (드래그 조작용) -->
+          <div class="relative h-1.5 flex-1 rounded-full bg-black/60 flex items-center">
+            <!-- 게이지 -->
+            <div class="absolute h-full rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" :style="{ left: track.pan < 0 ? `${50 + track.pan / 2}%` : '50%', width: `${Math.abs(track.pan) / 2}%` }"></div>
+            <!-- 핸들 -->
+            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c] pointer-events-none" :style="{ left: `${50 + track.pan / 2}%` }"></div>
+            <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
+            <input 
+              v-if="!isMaster"
+              type="range" min="-100" max="100" step="1" 
+              :value="track.pan" 
+              @input="e => trackStore.setTrackPan(track.trackId, parseInt((e.target as HTMLInputElement).value))"
+              class="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
+            />
           </div>
-          <div aria-label="현재 패닝 수치" class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5">
-            <span class="font-mono text-[10px] tabular-nums text-white">
-              {{ track.pan === 0 ? 'C' : (track.pan || 0) }}
+
+          <!-- 2. 수치 입력 박스 (키보드 직접 입력용) -->
+          <div 
+            aria-label="현재 패닝 수치" 
+            class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5 cursor-text hover:border-primary/50 transition-colors"
+            @click.stop="startEditPan"
+          >
+            <input
+              v-if="isEditingPan"
+              ref="panInputRef"
+              type="number"
+              v-model="editPanValue"
+              @blur="finishEditPan"
+              @keydown.enter="finishEditPan"
+              @keydown.delete.stop
+              class="w-full bg-transparent text-center font-mono text-[10px] tabular-nums text-white outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              style="-moz-appearance: textfield; appearance: textfield;"
+              step="1"
+            />
+            <span v-else class="font-mono text-[10px] tabular-nums text-white pointer-events-none">
+              {{ track.pan === 0 ? 'C' : (track.pan > 0 ? `R${track.pan}` : `L${Math.abs(track.pan)}`) }}
             </span>
           </div>
         </div>

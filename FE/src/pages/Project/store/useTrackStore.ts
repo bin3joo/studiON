@@ -287,6 +287,42 @@ export const useTrackStore = defineStore('track', () => {
                 }, 300);
             });
         },
+        //트랙 편집하기
+        // 트랙 솔로
+        emitTrackSolo: async (projectId: number, trackId: number, isSoloed: boolean) => {
+            return new Promise<any>(resolve =>
+                setTimeout(() =>
+                    resolve({ event: "TRACK_SOLO_CHANGE", trackId, isSoloed }),
+                    300));
+        },
+        // 트랙 뮤트
+        emitTrackMute: async (projectId: number, trackId: number, isMuted: boolean) => {
+            return new Promise<any>(resolve =>
+                setTimeout(() =>
+                    resolve({ event: "TRACK_MUTE_CHANGE", trackId, isMuted }),
+                    300));
+        },
+        // 트랙 볼륨
+        emitTrackVolume: async (projectId: number, trackId: number, volume: number) => {
+            return new Promise<any>(resolve =>  
+                setTimeout(() => 
+                    resolve({ event: "TRACK_VOLUME_CHANGE", trackId, volume }),
+                300));
+        },
+        // 트랙 패닝
+        emitTrackPan: async (projectId: number, trackId: number, pan: number) => {
+            return new Promise<any>(resolve =>
+                setTimeout(() =>
+                    resolve({ event: "TRACK_PAN_CHANGE", trackId, pan }),
+                300));
+        },
+        // 트랙 이름 변경
+        emitTrackRename: async (projectId: number, trackId: number, name: string) => {
+            return new Promise<any>(resolve =>
+                setTimeout(() => resolve({ event: "TRACK_RENAME", trackId, name }), 300)
+            );
+        },
+
     };
 
     // 오디오 파일 길이(duration) 추출 헬퍼 함수
@@ -667,7 +703,7 @@ export const useTrackStore = defineStore('track', () => {
             const targetChannel = trackChannels.get(trackId);
             if (targetChannel && rightClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
-                await newPlayer.load(rightClip.audio.cdnUrl); // 🌟 동기 대기![cite: 24]
+                await newPlayer.load(rightClip.audio.cdnUrl); // 동기 대기![cite: 24]
 
                 if (Tone.getContext().state !== 'running') Tone.getContext().resume();
 
@@ -804,6 +840,138 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+   // ==========================================
+    // 오디오 출력 상태 동기화 (Solo / Mute 통합 관리)
+    // ==========================================
+    const syncEffectiveMuteStates = () => {
+        // 프로젝트 전체에 솔로가 켜진 트랙이 단 하나라도 있는지 검사합니다.
+        const isAnySoloed = trackList.value.some(t => t.isSoloed);
+
+        trackList.value.forEach(t => {
+            const channel = trackChannels.get(t.trackId);
+            if (channel) {
+                if (isAnySoloed) {
+                    // 1. 누군가 솔로를 켰다면 -> 솔로가 안 켜진 트랙은 무조건 뮤트!
+                    channel.mute = !t.isSoloed;
+                } else {
+                    // 2. 솔로가 아무도 안 켜져 있다면 -> 각자의 뮤트 버튼 상태를 존중
+                    channel.mute = t.isMuted;
+                }
+            }
+        });
+    };
+
+    // 트랙 음소거(Mute) 토글
+    const toggleTrackMute = async (trackId: number) => {
+        if (trackId === 999999) return; // 마스터 트랙 제외
+        const track = trackList.value.find(t => t.trackId === trackId);
+        if (!track) return;
+
+        track.isMuted = !track.isMuted;
+        
+        // 변경된 상태를 기준으로 전체 트랙 오디오 실제 출력 재계산
+        syncEffectiveMuteStates();
+
+        try {
+            await mockServerAPI.emitTrackMute(projectInfo.value.projectId, trackId, track.isMuted);
+        } catch (e) {
+            console.error("뮤트 통신 실패", e);
+            track.isMuted = !track.isMuted; // 실패 시 데이터 롤백
+            syncEffectiveMuteStates(); // 오디오 롤백
+        }
+    };
+
+    // 트랙 솔로(Solo) 토글
+    const toggleTrackSolo = async (trackId: number) => {
+        if (trackId === 999999) return; // 마스터 트랙 제외
+        const targetTrack = trackList.value.find(t => t.trackId === trackId);
+        if (!targetTrack) return;
+
+        const isTurningOn = !targetTrack.isSoloed; // 솔로를 키는 상황인지 판별
+
+        // 1. 솔로를 켜는 상황이라면, 다른 모든 트랙의 솔로 상태를 강제로 끈다.
+        if (isTurningOn) {
+            trackList.value.forEach(t => {
+                if (t.trackId !== trackId && t.isSoloed) {
+                    t.isSoloed = false; // UI 상태 해제
+                    const channel = trackChannels.get(t.trackId);
+                    if (channel) channel.solo = false; // 오디오 엔진 솔로 해제
+                    
+                    // 서버에도 다른 트랙들의 솔로가 꺼졌음을 알림
+                    mockServerAPI.emitTrackSolo(projectInfo.value.projectId, t.trackId, false).catch(e => console.error(e));
+                }
+            });
+        }
+
+        // 2. 내가 클릭한 트랙의 상태를 토글
+        targetTrack.isSoloed = isTurningOn;
+        const channel = trackChannels.get(trackId);
+        if (channel) channel.solo = targetTrack.isSoloed;
+
+        // 3. 전체 뮤트 상태 재계산 (방금 켠 솔로 트랙만 소리가 나고 나머지는 강제 뮤트됨)
+        syncEffectiveMuteStates();
+
+        // 4. 클릭한 트랙의 서버 통신 진행
+        try {
+            await mockServerAPI.emitTrackSolo(projectInfo.value.projectId, trackId, targetTrack.isSoloed);
+        } catch (e) {
+            console.error("솔로 통신 실패", e);
+            // 통신 실패 시 원상복구
+            targetTrack.isSoloed = !targetTrack.isSoloed; 
+            syncEffectiveMuteStates(); 
+        }
+    };
+
+    // 트랙 볼륨 조절 (-60dB ~ 6dB)
+    const setTrackVolume = (trackId: number, volume: number) => {
+        const track = trackList.value.find(t => t.trackId === trackId);
+        if (!track) return;
+
+        track.volume = volume;
+        
+        // Tone.js 엔진 반영 (단위: Decibels)
+        const channel = trackChannels.get(trackId);
+        if (channel) channel.volume.value = volume;
+
+        // 드래그할 때마다 통신을 보내면 서버가 터지므로, 실제 구현 시엔 debounce(지연) 처리가 필요합니다.
+        mockServerAPI.emitTrackVolume(projectInfo.value.projectId, trackId, volume);
+    };
+
+    // ==========================================
+// 볼륨 UI 정중앙(0dB) 비선형 매핑 로직
+// ==========================================
+// 1. 실제 볼륨(dB) -> 화면 슬라이더 위치(%)
+const getVolumePercent = (vol: number) => {
+  if (vol <= 0) {
+    return ((vol + 60) / 60) * 50; // -60~0dB 구간을 0~50% 영역에 그림
+  } else {
+    return 50 + (vol / 6) * 50;    // 0~6dB 구간을 50~100% 영역에 그림
+  }
+};
+
+// 2. 화면 슬라이더 위치(%) -> 실제 볼륨(dB)
+const getVolumeFromPercent = (percent: number) => {
+  if (percent <= 50) {
+    return (percent / 50) * 60 - 60; // 0~50% 클릭 시 -60~0dB 로 변환
+  } else {
+    return ((percent - 50) / 50) * 6; // 50~100% 클릭 시 0~6dB 로 변환
+  }
+};
+
+    // 트랙 패닝 조절 (-100 ~ 100)
+    const setTrackPan = (trackId: number, pan: number) => {
+        const track = trackList.value.find(t => t.trackId === trackId);
+        if (!track) return;
+
+        track.pan = pan;
+        
+        // Tone.js 엔진 반영 (단위: -1 ~ 1)
+        const channel = trackChannels.get(trackId);
+        if (channel) channel.pan.value = pan / 100;
+
+        mockServerAPI.emitTrackPan(projectInfo.value.projectId, trackId, pan);
+    };
+
     //트랙 삭제 기능
     const deleteTrack = async (trackId: number) => {
         if (trackId === 999999) return; // 마스터 트랙 삭제 방지
@@ -833,6 +1001,25 @@ export const useTrackStore = defineStore('track', () => {
             console.log(`[통신 성공] 트랙 삭제 완료: ${trackId}`);
         } catch (error) {
             console.error("트랙 삭제 통신 실패", error);
+        }
+    };
+
+    // 트랙 이름 변경 로직
+    const renameTrack = async (trackId: number, newName: string) => {
+        if (trackId === 999999) return; // 마스터 트랙은 변경 불가
+        const track = trackList.value.find(t => t.trackId === trackId);
+        if (!track || track.name === newName) return;
+
+        const oldName = track.name;
+        track.name = newName; // UI 즉각 반영 (Optimistic UI)
+
+        console.log(`[통신] 백엔드에 트랙 이름 변경(TRACK_RENAME) 요청 중...`);
+        try {
+            await mockServerAPI.emitTrackRename(projectInfo.value.projectId, trackId, newName);
+            console.log(`[통신 성공] 트랙 이름 변경 완료: ${newName}`);
+        } catch (error) {
+            console.error("트랙 이름 변경 통신 실패", error);
+            track.name = oldName; // 에러 시 롤백
         }
     };
 
@@ -1198,5 +1385,14 @@ export const useTrackStore = defineStore('track', () => {
 
         //오디오 업로드 추가
         uploadAndAddAudioClip,
+
+        //트랙 편집하기
+        toggleTrackMute,
+        toggleTrackSolo,
+        setTrackVolume,
+        setTrackPan,
+        getVolumePercent,
+        getVolumeFromPercent,
+        renameTrack,
     };
 });

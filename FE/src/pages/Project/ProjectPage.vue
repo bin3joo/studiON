@@ -13,6 +13,10 @@ import PlayController from './components/PlayController.vue' //재생 컨트롤�
 import * as Tone from 'tone' //오디오 엔진
 import AiConflictOverlay from './components/AiConflictOverlay.vue'
 import TrackItem from './components/TrackItem.vue'//트랙 아이템 마스터 트랙 렌더링용 
+import RemoteCursors from './components/RemoteCursors.vue' //커서 컴포넌트
+import { useCollabStore } from './store/useCollabStore';//공동 작업 스토어 
+import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
+
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 const route = useRoute()
@@ -24,6 +28,8 @@ const projectName = computed(() => {
     : '프로젝트'
 })
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
+const collabStore = useCollabStore(); //공동 작업 스토어 사용
+
 
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
@@ -188,6 +194,9 @@ let currentMouseY = 0;
 const updateMousePos = (e: MouseEvent) => {
   currentMouseX = e.clientX;
   currentMouseY = e.clientY;
+
+  // 내 마우스 좌표를 서버로 계속 쏘기
+  collabStore.sendMyCursor(e.clientX, e.clientY);
 };
 
 
@@ -208,6 +217,8 @@ onMounted(async () => {
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
+    //가상 웹소켓 연결
+    socketService.connect(Number(projectId));
   }
   //키보드 이벤트 리스너 등록
   window.addEventListener('keydown', handleKeyDown);
@@ -232,6 +243,8 @@ onUnmounted(()=>{
   //오디오 제한 해제 리스너 제거
   window.removeEventListener('pointerdown', unlockAudioEngine, {capture: true});
   window.removeEventListener('keydown', unlockAudioEngine, {capture: true});
+  // 웹소켓 연결 해제
+  socketService.disconnect();
 })
 
 const isInviteModalOpen = ref(false)
@@ -503,7 +516,8 @@ const unlockAudioEngine = async () => {
     <ProjectAiSection /> -->
     </main>
 
-
+    <!-- 협업자 커서 렌더링 -->
+    <RemoteCursors />
     <InviteCodeModal
       :open="isInviteModalOpen"
       :project-id="projectId"

@@ -65,12 +65,15 @@ const handleWheel = (e: WheelEvent) => {
 
 //스페이스바 단축키 핸들러
 const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
+  // 입력창(input, textarea)에 포커스가 있을 때는 단축키를 무시해야 합니다. (이름/볼륨 수정 중 스페이스바 띄어쓰기 보호)
   if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
+  // 스페이스바 처리
   if(e.code === 'Space'){
-    e.preventDefault();
-    await Tone.start(); // 사용자 제스처 직후 가장 먼저 오디오 권한 획득!
+    e.preventDefault(); // 여기서 브라우저 기본 스크롤 동작을 완벽히 차단.
+    await Tone.start(); 
     trackStore.togglePlay();
+    return; // 실행 후 바로 종료
   }
 
 // 삭제 (Delete / Backspace)

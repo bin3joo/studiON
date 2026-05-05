@@ -64,23 +64,22 @@ const onDragEnd = (e: DragEvent) => {
       class="flex flex-col"
     >
       <!-- 드래그 앤 드롭 이벤트 연결 -->
-      <div
+   <div
         v-for="(track, index) in trackStore.trackList"
         :key="track.trackId"
-        draggable="true"
-        @dragstart="onDragStart($event, track.trackId)"
         @dragenter="onDragEnter($event, index)"
         @dragover="onDragOver"
         @drop="onDrop($event, index)"
-        @dragend="onDragEnd"
         class="transition-transform duration-200"
         :class="{
           'border-t-2 border-t-primary': dragOverIndex === index && draggedTrackId !== track.trackId
         }"
       >
-        <TrackItem
+       <TrackItem
           :track="track"
           :is-master="false"
+          @dragstart="onDragStart($event, track.trackId)"
+          @dragend="onDragEnd"
         />
       </div>
     </div>

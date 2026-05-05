@@ -42,7 +42,10 @@ export const useTrackStore = defineStore('track', () => {
     const bpm = ref(120);
     Tone.getTransport().bpm.value = bpm.value;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
-
+    
+    //마스터 트랙의 패닝을 제어하기 위한 글로벌 마스터 패너 생성
+    const masterPanner = new Tone.Panner(0).toDestination();
+    
     //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
     watch(bpm, (newBpm) => {
         Tone.getTransport().bpm.value = newBpm;
@@ -837,8 +840,7 @@ export const useTrackStore = defineStore('track', () => {
             trackList.value.push(newTrack);
 
             // 새 트랙의 오디오 믹서 채널을 즉시 생성하여 등록 (이동된 클립이 소리를 낼 수 있도록)
-            const channel = new Tone.Channel(newTrack.volume, newTrack.pan).toDestination();
-            trackChannels.set(newTrack.trackId, channel);
+            const channel = new Tone.Channel(newTrack.volume, newTrack.pan).connect(masterPanner);
 
             console.log(`[통신 성공] 새 트랙 ID 발급됨: ${response.newTrackId}`);
         } catch (e) {
@@ -929,17 +931,20 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // 트랙 볼륨 조절 (-60dB ~ 6dB)
-    const setTrackVolume = (trackId: number, volume: number) => {
+   const setTrackVolume = (trackId: number, volume: number) => {
+        if (trackId === 999999) {
+            masterTrack.value.volume = volume;
+            Tone.getDestination().volume.value = volume; // 글로벌 마스터 볼륨 조절
+            return;
+        }
+
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) return;
 
         track.volume = volume;
-        
-        // Tone.js 엔진 반영 (단위: Decibels)
         const channel = trackChannels.get(trackId);
         if (channel) channel.volume.value = volume;
 
-        // 드래그할 때마다 통신을 보내면 서버가 터지므로, 실제 구현 시엔 debounce(지연) 처리가 필요합니다.
         mockServerAPI.emitTrackVolume(projectInfo.value.projectId, trackId, volume);
     };
 
@@ -966,12 +971,16 @@ const getVolumeFromPercent = (percent: number) => {
 
     // 트랙 패닝 조절 (-100 ~ 100)
     const setTrackPan = (trackId: number, pan: number) => {
+        if (trackId === 999999) {
+            masterTrack.value.pan = pan;
+            masterPanner.pan.value = pan / 100; // 글로벌 마스터 패닝 조절
+            return;
+        }
+
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) return;
 
         track.pan = pan;
-        
-        // Tone.js 엔진 반영 (단위: -1 ~ 1)
         const channel = trackChannels.get(trackId);
         if (channel) channel.pan.value = pan / 100;
 
@@ -1092,7 +1101,7 @@ const getVolumeFromPercent = (percent: number) => {
 
             // 대상 트랙에 Channel이 없으면 새로 생성
             if (!toChannel) {
-                toChannel = new Tone.Channel(toTrack.volume, toTrack.pan).toDestination();
+                toChannel = new Tone.Channel(toTrack.volume, toTrack.pan).connect(masterPanner);
                 trackChannels.set(toTrackId, toChannel);
             }
 
@@ -1178,7 +1187,7 @@ const getVolumeFromPercent = (percent: number) => {
 
         for (const track of tracks) {
             //1.트랙 믹서 채널 생성 및 마스터 스피커(Destination)에 연결
-            const channel = new Tone.Channel(track.volume, track.pan).toDestination();
+            const channel = new Tone.Channel(track.volume, track.pan).connect(masterPanner);
             trackChannels.set(track.trackId, channel);
 
             for (const clip of track.clips) {

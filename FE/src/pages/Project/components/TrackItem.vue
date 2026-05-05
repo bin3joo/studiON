@@ -532,7 +532,6 @@ const volumeInputRef = ref<HTMLInputElement | null>(null);
 const editVolumeValue = ref<number | string>(0); // 입력 중인 임시 값 저장용
 
 const startEditVolume = async () => {
-  if (props.isMaster) return; // 마스터 트랙은 조작 불가
   isEditingVolume.value = true;
   editVolumeValue.value = Number((props.track.volume || 0).toFixed(1)); // 현재 볼륨값을 임시 변수에 복사
   await nextTick();
@@ -557,7 +556,6 @@ const panInputRef = ref<HTMLInputElement | null>(null);
 const editPanValue = ref<number | string>(0); // 입력 중인 임시 값 저장용
 
 const startEditPan = async () => {
-  if (props.isMaster) return;
   isEditingPan.value = true;
   editPanValue.value = props.track.pan || 0; // 현재 패닝값을 임시 변수에 복사
   await nextTick();
@@ -605,6 +603,9 @@ const finishEditName = () => {
   }
 };
 
+// 부모(TrackList.vue)로 드래그 이벤트를 올려보내기 위한 정의
+defineEmits(['dragstart', 'dragend']);
+
 </script>
 
 <template>
@@ -637,8 +638,13 @@ const finishEditName = () => {
     <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
       <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
       <div class="flex items-center justify-between gap-2">
-        <div class="flex min-w-0 flex-1 items-center gap-1.5">
-          <!-- 수정 모드: 인풋창 -->
+        <div 
+          class="flex min-w-0 flex-1 items-center gap-1.5 cursor-grab active:cursor-grabbing"
+          :draggable="!isMaster"
+          @dragstart="$emit('dragstart', $event)"
+          @dragend="$emit('dragend', $event)"
+        >
+         <!-- 수정 모드: 인풋창 -->
           <input
             v-if="isEditingName"
             ref="nameInputRef"
@@ -648,6 +654,7 @@ const finishEditName = () => {
             @keydown.enter="finishEditName"
             @keydown.esc="isEditingName = false"
             @keydown.delete.stop
+            @mousedown.stop 
             class="w-full truncate bg-transparent text-sm font-bold tracking-wide text-white outline-none border-b border-primary/50"
           />
           <!-- 일반 모드: 텍스트 -->
@@ -659,12 +666,13 @@ const finishEditName = () => {
             {{ track.name }}
           </span>
           
-          <!-- 연필 아이콘 (마스터 트랙이 아니고 수정 중이 아닐 때만 표시) -->
+          <!-- 연필 아이콘 -->
           <button 
             v-if="!isMaster && !isEditingName" 
             aria-label="트랙 이름 수정" 
             class="shrink-0 text-muted-foreground transition hover:text-white"
             @click.stop="startEditName"
+            @mousedown.stop
           >
             <Pencil class="h-3 w-3" />
           </button>
@@ -699,7 +707,7 @@ const finishEditName = () => {
       <div class="mt-auto flex flex-col gap-2">
         
         <!-- 볼륨 조절 -->
-        <div aria-label="볼륨 조절" class="flex items-center gap-2">
+<div aria-label="볼륨 조절" class="flex items-center gap-2" @mousedown.stop @dragstart.prevent.stop>
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">VOL</span>
           
           <!-- 1. 볼륨 커스텀 슬라이더 (드래그 조작용) -->
@@ -710,7 +718,6 @@ const finishEditName = () => {
             <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c] pointer-events-none" :style="{ left: `${trackStore.getVolumePercent(track.volume || 0)}%` }"></div>
             <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
             <input 
-              v-if="!isMaster"
               type="range" min="0" max="100" step="0.1" 
               :value="trackStore.getVolumePercent(track.volume || 0)" 
               @input="e => trackStore.setTrackVolume(track.trackId, parseFloat(trackStore.getVolumeFromPercent(Number((e.target as HTMLInputElement).value)).toFixed(1)))"
@@ -743,7 +750,7 @@ const finishEditName = () => {
         </div>
 
         <!-- 패닝 조절 -->
-        <div aria-label="패닝 조절" class="flex items-center gap-2">
+        <div aria-label="패닝 조절" class="flex items-center gap-2" @mousedown.stop @dragstart.prevent.stop>
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">PAN</span>
           
           <!-- 1. 팬 커스텀 슬라이더 (드래그 조작용) -->
@@ -754,7 +761,6 @@ const finishEditName = () => {
             <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c] pointer-events-none" :style="{ left: `${50 + track.pan / 2}%` }"></div>
             <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
             <input 
-              v-if="!isMaster"
               type="range" min="-100" max="100" step="1" 
               :value="track.pan" 
               @input="e => trackStore.setTrackPan(track.trackId, parseInt((e.target as HTMLInputElement).value))"

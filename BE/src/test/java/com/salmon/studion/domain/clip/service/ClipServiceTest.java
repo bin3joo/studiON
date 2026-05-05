@@ -3,6 +3,7 @@ package com.salmon.studion.domain.clip.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
@@ -10,6 +11,7 @@ import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
@@ -1181,6 +1183,142 @@ class ClipServiceTest {
                 req.setProjectId(PROJECT_ID);
 
                 assertThatThrownBy(() -> clipService.cutClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("copyClip")
+    class CopyClipTest {
+
+        private static final Double ORIGINAL_START = 1.0;
+        private static final Double ORIGINAL_DURATION = 4.0;
+        private static final Integer ORIGINAL_TRACK_ID = 1;
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIPBOARD_KEY = "project:1:user:1:clipboard";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                    .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+        }
+
+        private ClipCopyRequest copyRequest(Integer clipId) {
+            ClipCopyRequest req = new ClipCopyRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(clipId);
+            return req;
+        }
+
+        private String clipStateJson() throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(ORIGINAL_TRACK_ID).start(ORIGINAL_START).duration(ORIGINAL_DURATION)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("Redis에 클립 상태가 있을 때 COPY 성공 시 clipId를 반환한다")
+        void copySuccess_fromRedis() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            ClipCopyResponse response = clipService.copyClip(copyRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+        }
+
+        @Test
+        @DisplayName("Redis에 상태가 없을 때 MySQL에서 로드 후 COPY 성공한다")
+        void copySuccess_lazyInit() {
+            Track mockTrack = mock(Track.class);
+            Clip mockClip = mock(Clip.class);
+            when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
+            when(mockClip.getId()).thenReturn(CLIP_ID);
+            when(mockClip.getTrack()).thenReturn(mockTrack);
+            when(mockClip.getStart()).thenReturn(ORIGINAL_START);
+            when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
+
+            ClipCopyResponse response = clipService.copyClip(copyRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+        }
+
+        @Test
+        @DisplayName("COPY 시 타임라인 클립은 제거되지 않는다")
+        void copyDoesNotRemoveClipFromTimeline() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            clipService.copyClip(copyRequest(CLIP_ID), USER_ID);
+
+            verify(hashOperations, never()).delete(any(), any());
+        }
+
+        @Test
+        @DisplayName("COPY 시 락이 필요하지 않아 잠겨있지 않은 클립도 복사할 수 있다")
+        void copySuccessWithoutLock() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+            lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(null);
+
+            ClipCopyResponse response = clipService.copyClip(copyRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+        }
+
+        @Test
+        @DisplayName("COPY 시 클립보드에 ClipState JSON이 저장된다")
+        void copySavesStateToClipboard() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            clipService.copyClip(copyRequest(CLIP_ID), USER_ID);
+
+            verify(valueOperations).set(eq(CLIPBOARD_KEY), anyString());
+        }
+
+        @Test
+        @DisplayName("Redis에 없고 MySQL에도 없는 클립 COPY 시 CLIP_NOT_FOUND 예외를 던진다")
+        void copyFailWhenClipNotFound() {
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clipService.copyClip(copyRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipCopyRequest req = new ClipCopyRequest();
+                req.setClipId(CLIP_ID);
+
+                assertThatThrownBy(() -> clipService.copyClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("clipId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void clipIdNull() {
+                ClipCopyRequest req = new ClipCopyRequest();
+                req.setProjectId(PROJECT_ID);
+
+                assertThatThrownBy(() -> clipService.copyClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

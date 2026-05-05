@@ -1,6 +1,7 @@
 package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
@@ -55,6 +56,11 @@ public class ClipEventHandler {
                 ClipCutRequest cutRequest = objectMapper.convertValue(raw.getPayload(), ClipCutRequest.class);
                 response = clipService.cutClip(cutRequest, userId);
                 break;
+            case "CLIP_COPY":
+                ClipCopyRequest copyRequest = objectMapper.convertValue(raw.getPayload(), ClipCopyRequest.class);
+                response = clipService.copyClip(copyRequest, userId);
+                webSocketMessageSender.sendToSession(session, event, response);
+                return;
             case "CLIP_PASTE":
                 break;
             case "CLIP_DELETE":

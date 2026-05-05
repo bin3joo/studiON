@@ -6,6 +6,7 @@ import com.salmon.studion.domain.clip.dto.ClipState;
 import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipPasteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
@@ -14,6 +15,7 @@ import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipPasteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
@@ -1319,6 +1321,142 @@ class ClipServiceTest {
                 req.setProjectId(PROJECT_ID);
 
                 assertThatThrownBy(() -> clipService.copyClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("pasteClip")
+    class PasteClipTest {
+
+        private static final Integer TARGET_TRACK_ID = 2;
+        private static final Double TARGET_START_BAR = 3.0;
+        private static final Double CLIPBOARD_DURATION = 4.0;
+        private static final Integer NEW_CLIP_ID = 300;
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+        private static final String CLIPBOARD_KEY = "project:1:user:1:clipboard";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() throws JsonProcessingException {
+            store = new HashMap<>();
+
+            lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+        }
+
+        private ClipPasteRequest pasteRequest() {
+            ClipPasteRequest req = new ClipPasteRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setTargetTrackId(TARGET_TRACK_ID);
+            req.setTargetStartBar(TARGET_START_BAR);
+            return req;
+        }
+
+        private String clipboardStateJson() throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(1).start(1.0).duration(CLIPBOARD_DURATION)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("클립보드에 상태가 있을 때 붙여넣기 성공 시 새 clipId와 위치를 반환한다")
+        void pasteSuccess() throws JsonProcessingException {
+            String clipboard = clipboardStateJson();
+            when(valueOperations.get(CLIPBOARD_KEY)).thenReturn(clipboard);
+
+            ClipPasteResponse response = clipService.pasteClip(pasteRequest(), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(NEW_CLIP_ID);
+            assertThat(response.getTargetTrackId()).isEqualTo(TARGET_TRACK_ID);
+            assertThat(response.getTargetStartBar()).isEqualTo(TARGET_START_BAR);
+        }
+
+        @Test
+        @DisplayName("붙여넣기 성공 시 클립보드 ClipState의 duration을 사용해 새 클립을 Redis에 저장한다")
+        void pasteSavesNewClipToRedisWithClipboardDuration() throws JsonProcessingException {
+            String clipboard = clipboardStateJson();
+            when(valueOperations.get(CLIPBOARD_KEY)).thenReturn(clipboard);
+
+            clipService.pasteClip(pasteRequest(), USER_ID);
+
+            ClipState saved = objectMapper.readValue(store.get(String.valueOf(NEW_CLIP_ID)), ClipState.class);
+            assertThat(saved.getClipId()).isEqualTo(NEW_CLIP_ID);
+            assertThat(saved.getTrackId()).isEqualTo(TARGET_TRACK_ID);
+            assertThat(saved.getStart()).isEqualTo(TARGET_START_BAR);
+            assertThat(saved.getDuration()).isEqualTo(CLIPBOARD_DURATION);
+        }
+
+        @Test
+        @DisplayName("붙여넣기 후 클립보드는 유지된다 (반복 paste 가능)")
+        void pasteDoesNotClearClipboard() throws JsonProcessingException {
+            String clipboard = clipboardStateJson();
+            when(valueOperations.get(CLIPBOARD_KEY)).thenReturn(clipboard);
+
+            clipService.pasteClip(pasteRequest(), USER_ID);
+
+            verify(valueOperations, never()).set(eq(CLIPBOARD_KEY), any());
+            verify(redisTemplate, never()).delete(eq(CLIPBOARD_KEY));
+        }
+
+        @Test
+        @DisplayName("클립보드가 비어있으면 CLIP_NOT_FOUND 예외를 던진다")
+        void pasteFailWhenClipboardEmpty() {
+            when(valueOperations.get(CLIPBOARD_KEY)).thenReturn(null);
+
+            assertThatThrownBy(() -> clipService.pasteClip(pasteRequest(), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipPasteRequest req = new ClipPasteRequest();
+                req.setTargetTrackId(TARGET_TRACK_ID);
+                req.setTargetStartBar(TARGET_START_BAR);
+
+                assertThatThrownBy(() -> clipService.pasteClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("targetTrackId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void targetTrackIdNull() {
+                ClipPasteRequest req = new ClipPasteRequest();
+                req.setProjectId(PROJECT_ID);
+                req.setTargetStartBar(TARGET_START_BAR);
+
+                assertThatThrownBy(() -> clipService.pasteClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("targetStartBar가 null이면 INVALID_REQUEST 예외를 던진다")
+            void targetStartBarNull() {
+                ClipPasteRequest req = new ClipPasteRequest();
+                req.setProjectId(PROJECT_ID);
+                req.setTargetTrackId(TARGET_TRACK_ID);
+
+                assertThatThrownBy(() -> clipService.pasteClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

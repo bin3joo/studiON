@@ -4,7 +4,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock} from 'lucide-vue-next';
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
@@ -122,6 +122,11 @@ function autoScrollLoop() {
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return; // 좌클릭만 허용하기
+  // 누군가(다른 사람) 이미 잠근 클립이면 아예 건드리지도 못하게 튕겨냄
+  if(clip.isLocked) {
+      alert("다른 사용자가 편집 중인 클립입니다."); // 시각적 피드백
+      return; 
+  }
   e.stopPropagation(); //이벤트를 부모로 전달 안하기 (트랙의 빈 공간 클릭 방지)
   e.preventDefault(); //이벤트를 브라우저로 전달 안하기 (새 탭으로 열기 방지)클립을 잡을 때 트랙 전체가 드래그 되는 현상 차단
 
@@ -161,9 +166,8 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
   //3.클립을 놓았을때 (Pointer Up)
   const onClipPointerUp = (e: PointerEvent) => {
-    const currentClip = activeClip.value as ClipUIState;//변수의 타입을 CLIPUIState로 확정
     if(!activeClip.value) return;
-
+    const currentClipId = activeClip.value.clipId;
     //오토 스크롤 엔진 종료
     if(autoScrollRafId) {
       cancelAnimationFrame(autoScrollRafId);
@@ -267,6 +271,7 @@ const resizeState = ref({
 const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 'right') => {
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return;
+  if(clip.isLocked) return; //클립이 잠겨있으면 리사이즈 금지
   e.stopPropagation(); // 일반 클립 이동(드래그) 이벤트 방지
   e.preventDefault(); // 클립을 잡을 때 트랙 전체가 드래그 되는 현상 차단
 
@@ -460,6 +465,7 @@ const handleFileUpload = (event: Event) => {
     target.value = '';
   }
 };
+
 
 // ==========================================
 // 파일 드래그 앤 드롭 (OS에서 트랙으로 오디오 불러오기)
@@ -888,6 +894,14 @@ defineEmits(['dragstart', 'dragend']);
           ></div>
 
           <!-- 이름표 (마스터에선 숨김) -->
+          <!-- 잠금 표시 아이콘 -->
+          <div 
+            v-if="clip.isLocked && !isMaster" 
+            class="absolute right-1 top-1 z-30 text-white drop-shadow-md"
+            title="잠긴 클립 (이동 및 수정 불가)"
+          >
+            <Lock class="h-3 w-3 opacity-80" />
+          </div>
           <div 
             v-if="!isMaster"
             aria-hidden="true"
@@ -966,7 +980,7 @@ defineEmits(['dragstart', 'dragend']);
       />
 
       <!-- 클립 우클릭 시 활성화되는 메뉴들 -->
-
+      
       <button
         @click="handleSplit"
         class="flex w-full items-center justify-between px-4 py-1.5"

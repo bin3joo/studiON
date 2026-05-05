@@ -22,4 +22,5 @@ export interface ClipUIState extends ClipDto {
     //?가 있으면 받아올 수도 있고 말수도 있고
     isSelected?: boolean;
     isDragging?: boolean;
+    isLocked?: boolean;
 }

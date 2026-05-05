@@ -9,6 +9,7 @@ import { ref, computed, watch } from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 //음원 처리를 위한 lib
 import * as Tone from 'tone';
+import { socketService } from '../../../core/services/socket.service';
 
 
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
@@ -329,6 +330,13 @@ export const useTrackStore = defineStore('track', () => {
         emitTrackReorder: async (projectId: number, trackId: number, preTrackId: number | null, postTrackId: number | null) => {
             return new Promise<any>(resolve =>
                 setTimeout(() => resolve({ event: "TRACK_REORDER", trackId, preTrackId, postTrackId }), 300)
+            );
+        },
+
+        // 클립 락(잠금/해제)
+        emitClipLock: async (projectId: number, clipId: number, isLocked: boolean) => {
+            return new Promise<any>(resolve =>
+                setTimeout(() => resolve({ event: "CLIP_LOCK", clipId, isLocked }), 300)
             );
         },
 
@@ -1345,6 +1353,37 @@ const getVolumeFromPercent = (percent: number) => {
         }
     };
 
+    socketService.subscribe('CLIP_LOCK', (data) => {
+    // 📥 서버(혹은 가상 서버)에서 누군가 클립을 잠갔다는 알림이 옴!
+    // 내 화면의 클립 자물쇠를 그에 맞게 업데이트!
+    const track = trackList.value.find(t => t.clips.some(c => c.clipId === data.clipId));
+    if (track) {
+        const clip = track.clips.find(c => c.clipId === data.clipId);
+        if (clip) {
+            clip.isLocked = data.isLocked; // 내 화면에도 자물쇠 찰칵!
+        }
+    }
+});
+
+// 2. 내가 액션을 했을 때 서버로 쏘기
+// 1. 내가 클립을 잡았을 때 서버에 Lock 요청
+    const lockClip = (clipId: number, trackId: number) => {
+        socketService.publish('CLIP_LOCK', {
+            projectId: projectInfo.value.projectId,
+            clipId: clipId,
+            isLocked: true // 잠가줘!
+        });
+    };
+
+    // 2. 내가 클립에서 마우스를 뗐을 때 서버에 Unlock 요청
+    const unlockClip = (clipId: number, trackId: number) => {
+        socketService.publish('CLIP_LOCK', {
+            projectId: projectInfo.value.projectId,
+            clipId: clipId,
+            isLocked: false // 풀어줘!
+        });
+    };
+
     // 실제 프로젝트 상세 호출 코드
     //     const fetchProject = async (projectId: number) => {
     //   try {
@@ -1438,5 +1477,8 @@ const getVolumeFromPercent = (percent: number) => {
         getVolumeFromPercent,
         renameTrack,
         reorderTrack,
+        lockClip,
+        unlockClip,
+       
     };
 });

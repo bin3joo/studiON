@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {ref} from 'vue';
+import {ref, computed} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
@@ -14,6 +14,31 @@ const props = defineProps<{
 
 //스토어 사용
 const trackStore = useTrackStore();
+
+// 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
+const masterBackgroundBlocks = computed(() => {
+  if (!props.isMaster) return [];
+  
+  const intervals = props.track.clips.map(c => ({ start: c.start, end: c.start + c.duration }));
+  intervals.sort((a, b) => a.start - b.start);
+  
+  const merged = [];
+  if (intervals.length > 0) {
+    let current = { ...intervals[0] };
+    for (let i = 1; i < intervals.length; i++) {
+      const next = intervals[i];
+      if (current.end >= next.start) {
+        current.end = Math.max(current.end, next.end); // 구간 연장
+      } else {
+        merged.push(current);
+        current = { ...next };
+      }
+    }
+    merged.push(current);
+  }
+  return merged;
+});
+
 
 // ==========================================
 // 클립 드래그 앤 드롭 로직
@@ -536,34 +561,48 @@ const handleSplit = () => {
             </template>
           </div>
         </div>
+
+        <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
+        <div v-if="isMaster">
+          <div 
+            v-for="(block, idx) in masterBackgroundBlocks" 
+            :key="'bg-'+idx"
+            class="absolute inset-y-1 z-0 rounded-md bg-[#4b4b4b]/40 border border-[#4b4b4b]"
+            :style="{
+              left: `${block.start * trackStore.pixelPerBar}px`,
+              width: `${(block.end - block.start) * trackStore.pixelPerBar}px`
+            }"
+          ></div>
+        </div>
         
-        <!--실제 클립 렌더링 및  클립 전용 우클릭 이벤트(z-10)-->
-       <!--  key를 clip.clipId로 고정하여 드래그 중 파괴 방지 -->
+     <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
           v-for="clip in track.clips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
-          class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
+          class="absolute inset-y-1 z-10 rounded-md"
           :class="[
+            isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
             clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
-            clip.isSelected && !clip.isDragging ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
+            clip.isSelected && !clip.isDragging && !isMaster ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
           ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
-            borderColor: clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`, 
-            backgroundColor: clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`, 
-            boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)',
+            borderColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`), 
+            backgroundColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`), 
+            boxShadow: isMaster ? 'none' : (clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'),
             transform: clip.isDragging ? `translateY(${dragoffsetY}px)` : 'none'
           }"
-          @pointerdown="onClipPointerDown($event, clip); trackStore.selectClip(clip, track.trackId);"
-          @pointermove="onClipPointerMove"
-          @pointerup="onClipPointerUp"
-          @pointercancel="onClipPointerUp"
-          @contextmenu.prevent.stop="onClipRightClick($event, clip, track.trackId)"
+          @pointerdown="!isMaster && onClipPointerDown($event, clip); !isMaster && trackStore.selectClip(clip, track.trackId);"
+          @pointermove="!isMaster && onClipPointerMove($event)"
+          @pointerup="!isMaster && onClipPointerUp($event)"
+          @pointercancel="!isMaster && onClipPointerUp($event)"
+          @contextmenu.prevent.stop="!isMaster && onClipRightClick($event, clip, track.trackId)"
         >
-          <!-- 왼쪽 리사이즈 핸들 -->
+          <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) -->
           <div 
+            v-if="!isMaster"
             class="absolute left-0 top-0 bottom-0 w-2.5 z-20 cursor-w-resize hover:bg-white/30"
             @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
             @pointermove.stop="onResizePointerMove"
@@ -571,7 +610,9 @@ const handleSplit = () => {
             @pointercancel.stop="onResizePointerUp"
           ></div>
 
+          <!-- 이름표 (마스터에선 숨김) -->
           <div 
+            v-if="!isMaster"
             aria-hidden="true"
             class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
             :style="{ color: clip.color }"
@@ -579,21 +620,21 @@ const handleSplit = () => {
             {{ clip.audio?.originalName || track.name }}
           </div>
 
-          <!--GPU 파형 컴포넌트-->
+          <!-- GPU 파형 컴포넌트 -->
          <WaveformWebGL
           v-if="clip.audio?.cdnUrl"
           :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 
-          <!-- 오른쪽 리사이즈 핸들 -->
+          <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) -->
           <div 
+            v-if="!isMaster"
             class="absolute right-0 top-0 bottom-0 w-2.5 z-20 cursor-e-resize hover:bg-white/30"
             @pointerdown.stop="onResizePointerDown($event, clip, 'right')"
             @pointermove.stop="onResizePointerMove"
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
           ></div>
-
         </div>
 
       </div> 

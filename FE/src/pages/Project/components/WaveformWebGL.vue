@@ -127,7 +127,7 @@ onUnmounted(() => {
 
 <template>
   <canvas ref="canvasRef"
-  class="pointer-events-none absolute inset-0 h-full w-full opacity-60 mix-blend-multiply"
+  class="pointer-events-none absolute inset-0 h-full w-full opacity-60 mix-blend-screen"
   ></canvas>
 </template>
 

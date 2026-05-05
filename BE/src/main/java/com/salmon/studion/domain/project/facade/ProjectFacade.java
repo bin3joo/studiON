@@ -17,6 +17,7 @@ import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.entity.MasterTrack;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.service.TrackService;
+import com.salmon.studion.global.infrastructure.cdn.CdnUrlService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +36,7 @@ public class ProjectFacade {
     private final UserService userService;
     private final TrackService trackService;
     private final ClipService clipService;
+    private final CdnUrlService cdnUrlService;
 
     @Transactional(readOnly = true)
     public ProjectDetailResponse getProjectDetail(Integer projectId, Integer userId) {
@@ -201,14 +203,10 @@ public class ProjectFacade {
     private ProjectDetailResponse.AudioResponse toAudioResponse(AudioMetadata audioMetadata) {
         return new ProjectDetailResponse.AudioResponse(
                 audioMetadata.getId(),
-                createCdnUrl(audioMetadata.getObjectKey()),
+                cdnUrlService.createAudioUrl(audioMetadata.getObjectKey()),
                 audioMetadata.getOriginalName(),
                 audioMetadata.getDurationMs()
         );
     }
 
-    // TODO: 임시 생성 메서드. CDN 관련 로직 구현 후 삭제 필요.
-    private String createCdnUrl(String objectKey) {
-        return "https://cdn.tmpdomain.com/" + objectKey;
-    }
 }

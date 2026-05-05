@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
 import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipPasteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
@@ -13,6 +14,7 @@ import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipPasteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDuplicateResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
@@ -24,6 +26,7 @@ import com.salmon.studion.domain.clip.entity.ClipDeleteEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipDuplicateEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipMoveEventDocument;
+import com.salmon.studion.domain.clip.entity.ClipPasteEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipSplitEventDocument;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
@@ -429,6 +432,67 @@ public class ClipService {
 
         return ClipCopyResponse.builder()
                 .clipId(request.getClipId())
+                .build();
+    }
+
+    /*
+        클립을 붙여넣는 메서드
+        클립보드(Redis)에서 ClipState를 읽어 지정 위치에 새 클립을 생성한다.
+        붙여넣기 후 클립보드는 유지된다 (반복 paste 가능).
+     */
+    public ClipPasteResponse pasteClip(ClipPasteRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        String clipboardKey = String.format(CLIP_CLIPBOARD_KEY, request.getProjectId(), userId);
+        String clipboardJson = redisTemplate.opsForValue().get(clipboardKey);
+        if (clipboardJson == null) {
+            throw new BusinessException(ErrorCode.CLIP_NOT_FOUND);
+        }
+
+        ClipState clipboardState;
+        try {
+            clipboardState = objectMapper.readValue(clipboardJson, ClipState.class);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        Integer newClipId = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+
+        ClipState newClip = ClipState.builder()
+                .clipId(newClipId)
+                .trackId(request.getTargetTrackId())
+                .start(request.getTargetStartBar())
+                .duration(clipboardState.getDuration())
+                .build();
+        saveClipStateToRedis(request.getProjectId(), newClip);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            clipEventRepository.save(ClipPasteEventDocument.builder()
+                    .event("CLIP_PASTE")
+                    .projectId(request.getProjectId())
+                    .clipId(newClipId)
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .targetTrackId(request.getTargetTrackId())
+                    .targetStartBar(request.getTargetStartBar())
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_PASTE, newClipId={}", newClipId, e);
+        }
+
+        return ClipPasteResponse.builder()
+                .clipId(newClipId)
+                .targetTrackId(request.getTargetTrackId())
+                .targetStartBar(request.getTargetStartBar())
                 .build();
     }
 

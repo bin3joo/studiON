@@ -1,15 +1,61 @@
 <!--스토어에서 트랙 목록을 가져와서 세로로 나열하는 역할을 수행한다.-->
 <script setup lang="ts">
+import {ref} from 'vue'
 import {useTrackStore} from '../store/useTrackStore'
 import TrackItem from './TrackItem.vue'
 
 //1.스토어에서 트랙 데이터를 꺼내옴
 const trackStore = useTrackStore();
 
+// 드래그 앤 드롭 상태 관리
+const draggedTrackId = ref<number | null>(null);
+const dragOverIndex = ref<number | null>(null);
+
+const onDragStart = (e: DragEvent, trackId: number) => {
+  draggedTrackId.value = trackId;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    // 시각적 피드백을 위해 약간 투명하게 만듦 (선택)
+    setTimeout(() => {
+      const target = e.target as HTMLElement;
+      if (target) target.classList.add('opacity-50');
+    }, 0);
+  }
+};
+
+const onDragEnter = (e: DragEvent, index: number) => {
+  e.preventDefault();
+  dragOverIndex.value = index;
+};
+
+const onDragOver = (e: DragEvent) => {
+  e.preventDefault(); // 드롭을 허용
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move';
+  }
+};
+
+const onDrop = (e: DragEvent, index: number) => {
+  e.preventDefault();
+  if (draggedTrackId.value !== null && draggedTrackId.value !== trackStore.trackList[index].trackId) {
+    trackStore.reorderTrack(draggedTrackId.value, index);
+  }
+  
+  draggedTrackId.value = null;
+  dragOverIndex.value = null;
+};
+
+const onDragEnd = (e: DragEvent) => {
+  draggedTrackId.value = null;
+  dragOverIndex.value = null;
+  const target = e.target as HTMLElement;
+  if (target) target.classList.remove('opacity-50');
+};
+
 </script>
 
 <template>
-  <section aria-label="트랙 리스트 영역" class="flex flex-col bg-background">
+  <section aria-label="트랙 리스트 영역" class="flex flex-col bg-background relative">
     
     <!--일반 트랙 목록 렌더링-->
     <div 
@@ -17,12 +63,26 @@ const trackStore = useTrackStore();
       aria-label="트랙 목록" 
       class="flex flex-col"
     >
-      <TrackItem
-        v-for="track in trackStore.trackList"
+      <!-- 드래그 앤 드롭 이벤트 연결 -->
+      <div
+        v-for="(track, index) in trackStore.trackList"
         :key="track.trackId"
-        :track="track"
-        :is-master="false"
-      />
+        draggable="true"
+        @dragstart="onDragStart($event, track.trackId)"
+        @dragenter="onDragEnter($event, index)"
+        @dragover="onDragOver"
+        @drop="onDrop($event, index)"
+        @dragend="onDragEnd"
+        class="transition-transform duration-200"
+        :class="{
+          'border-t-2 border-t-primary': dragOverIndex === index && draggedTrackId !== track.trackId
+        }"
+      >
+        <TrackItem
+          :track="track"
+          :is-master="false"
+        />
+      </div>
     </div>
     
     <div 

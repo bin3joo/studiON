@@ -322,6 +322,12 @@ export const useTrackStore = defineStore('track', () => {
                 setTimeout(() => resolve({ event: "TRACK_RENAME", trackId, name }), 300)
             );
         },
+        // 트랙 순서 변경
+        emitTrackReorder: async (projectId: number, trackId: number, preTrackId: number | null, postTrackId: number | null) => {
+            return new Promise<any>(resolve =>
+                setTimeout(() => resolve({ event: "TRACK_REORDER", trackId, preTrackId, postTrackId }), 300)
+            );
+        },
 
     };
 
@@ -1023,6 +1029,31 @@ const getVolumeFromPercent = (percent: number) => {
         }
     };
 
+    // 트랙 순서 변경 로직
+    const reorderTrack = async (draggedTrackId: number, targetIndex: number) => {
+        if (draggedTrackId === 999999) return; // 마스터 트랙은 이동 불가
+
+        const draggedIndex = trackList.value.findIndex(t => t.trackId === draggedTrackId);
+        if (draggedIndex === -1 || draggedIndex === targetIndex) return;
+
+        // 1. 배열에서 트랙을 빼내서 새 위치에 삽입 (UI 즉각 반영)
+        const [track] = trackList.value.splice(draggedIndex, 1);
+        trackList.value.splice(targetIndex, 0, track);
+
+        // 2. 서버 통신을 위한 preTrackId, postTrackId 계산
+        const preTrackId = targetIndex > 0 ? trackList.value[targetIndex - 1].trackId : null;
+        const postTrackId = targetIndex < trackList.value.length - 1 ? trackList.value[targetIndex + 1].trackId : null;
+
+        console.log(`[통신] 백엔드에 트랙 순서 변경(TRACK_REORDER) 요청 중...`);
+        try {
+            await mockServerAPI.emitTrackReorder(projectInfo.value.projectId, draggedTrackId, preTrackId, postTrackId);
+            console.log(`[통신 성공] 트랙 순서 변경 완료`);
+        } catch (error) {
+            console.error("트랙 순서 변경 통신 실패", error);
+            // 에러 시 배열 원상복구 로직 (생략됨 - 실제 구현 시 필요)
+        }
+    };
+
     // ==========================================
     // 3. 액션(Action) 선언(데이터 패칭 및 가공)
     // ==========================================
@@ -1394,5 +1425,6 @@ const getVolumeFromPercent = (percent: number) => {
         getVolumePercent,
         getVolumeFromPercent,
         renameTrack,
+        reorderTrack,
     };
 });

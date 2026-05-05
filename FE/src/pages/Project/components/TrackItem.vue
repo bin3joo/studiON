@@ -123,6 +123,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return; // 좌클릭만 허용하기
   e.stopPropagation(); //이벤트를 부모로 전달 안하기 (트랙의 빈 공간 클릭 방지)
+  e.preventDefault(); //이벤트를 브라우저로 전달 안하기 (새 탭으로 열기 방지)클립을 잡을 때 트랙 전체가 드래그 되는 현상 차단
 
   activeClip.value = clip; //현재 드래그하는 클립 상태로 저장
   startMouseX.value = e.clientX; //드래그 시작점의 x좌표 기록
@@ -267,6 +268,7 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return;
   e.stopPropagation(); // 일반 클립 이동(드래그) 이벤트 방지
+  e.preventDefault(); // 클립을 잡을 때 트랙 전체가 드래그 되는 현상 차단
 
   resizeState.value = {
     clip,
@@ -798,6 +800,7 @@ const finishEditName = () => {
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDrop"
+      @dragstart.prevent.stop
     >
       <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
       

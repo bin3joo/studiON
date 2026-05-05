@@ -3,12 +3,14 @@ package com.salmon.studion.domain.clip.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
@@ -1041,6 +1043,144 @@ class ClipServiceTest {
                 req.setProjectId(PROJECT_ID);
 
                 assertThatThrownBy(() -> clipService.duplicateClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("cutClip")
+    class CutClipTest {
+
+        private static final Double ORIGINAL_START = 2.0;
+        private static final Double ORIGINAL_DURATION = 4.0;
+        private static final Integer ORIGINAL_TRACK_ID = 1;
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+
+            lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                    .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+        }
+
+        private ClipCutRequest cutRequest(Integer clipId) {
+            ClipCutRequest req = new ClipCutRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(clipId);
+            return req;
+        }
+
+        private String clipStateJson() throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(ORIGINAL_TRACK_ID).start(ORIGINAL_START).duration(ORIGINAL_DURATION)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("Redis에 클립 상태가 있을 때 CUT 성공 시 clipId를 반환한다")
+        void cutSuccess_fromRedis() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            ClipCutResponse response = clipService.cutClip(cutRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+        }
+
+        @Test
+        @DisplayName("Redis에 상태가 없을 때 MySQL에서 로드 후 CUT 성공한다")
+        void cutSuccess_lazyInit() {
+            Track mockTrack = mock(Track.class);
+            Clip mockClip = mock(Clip.class);
+            when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
+            when(mockClip.getId()).thenReturn(CLIP_ID);
+            when(mockClip.getTrack()).thenReturn(mockTrack);
+            when(mockClip.getStart()).thenReturn(ORIGINAL_START);
+            when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
+
+            ClipCutResponse response = clipService.cutClip(cutRequest(CLIP_ID), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+        }
+
+        @Test
+        @DisplayName("클립보드 저장, 타임라인 제거, 락 해제가 MULTI/EXEC 트랜잭션으로 원자적으로 실행된다")
+        void cutAtomicExecution() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson());
+
+            clipService.cutClip(cutRequest(CLIP_ID), USER_ID);
+
+            verify(redisTemplate).execute(any(org.springframework.data.redis.core.SessionCallback.class));
+        }
+
+        @Test
+        @DisplayName("클립이 잠겨있지 않으면 CLIP_LOCKED 예외를 던진다")
+        void cutFailWhenNotLocked() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(null);
+
+            assertThatThrownBy(() -> clipService.cutClip(cutRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("다른 사용자가 잠근 클립에 CUT 요청 시 CLIP_LOCKED 예외를 던진다")
+        void cutFailWhenLockedByOtherUser() {
+            when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(OTHER_USER_ID));
+
+            assertThatThrownBy(() -> clipService.cutClip(cutRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_LOCKED));
+        }
+
+        @Test
+        @DisplayName("Redis에 없고 MySQL에도 없는 클립 CUT 시 CLIP_NOT_FOUND 예외를 던진다")
+        void cutFailWhenClipNotFound() {
+            when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> clipService.cutClip(cutRequest(CLIP_ID), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipCutRequest req = new ClipCutRequest();
+                req.setClipId(CLIP_ID);
+
+                assertThatThrownBy(() -> clipService.cutClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("clipId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void clipIdNull() {
+                ClipCutRequest req = new ClipCutRequest();
+                req.setProjectId(PROJECT_ID);
+
+                assertThatThrownBy(() -> clipService.cutClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

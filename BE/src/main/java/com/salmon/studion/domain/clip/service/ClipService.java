@@ -3,12 +3,14 @@ package com.salmon.studion.domain.clip.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDuplicateResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
@@ -46,6 +48,7 @@ public class ClipService {
     private static final String CLIP_EVENT_SEQ_KEY = "project:%d:clip:event:seq";
     private static final String CLIP_STATE_KEY = "project:%d:clips";
     private static final String CLIP_ID_SEQ_KEY = "project:%d:clip:id_seq";
+    private static final String CLIP_CLIPBOARD_KEY = "project:%d:user:%d:clipboard";
 
     private final ProjectService projectService;
     private final ClipRepository clipRepository;
@@ -359,6 +362,47 @@ public class ClipService {
                 .originalDuration(newOriginalDuration)
                 .newClipId(newClipId)
                 .newClipDuration(newClipDuration)
+                .build();
+    }
+
+    /*
+        클립을 오려두는 메서드
+        타임라인에서 클립을 제거하고 클립보드(Redis)에 저장한다.
+        MongoDB 로깅 없음 — 세션 종료 시 자동 Save로 RDB에 반영되므로 이벤트 재생 불필요
+     */
+    public ClipCutResponse cutClip(ClipCutRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
+        String currentLocker = redisTemplate.opsForValue().get(lockKey);
+        if (!String.valueOf(userId).equals(currentLocker)) {
+            throw new BusinessException(ErrorCode.CLIP_LOCKED);
+        }
+
+        ClipState state = getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        String clipboardKey = String.format(CLIP_CLIPBOARD_KEY, request.getProjectId(), userId);
+        String stateKey = String.format(CLIP_STATE_KEY, request.getProjectId());
+        try {
+            String clipboardValue = objectMapper.writeValueAsString(state);
+            redisTemplate.execute(new SessionCallback<>() {
+                @Override
+                public Object execute(RedisOperations operations) {
+                    operations.multi();
+                    operations.opsForValue().set(clipboardKey, clipboardValue);
+                    operations.opsForHash().delete(stateKey, String.valueOf(request.getClipId()));
+                    operations.delete(lockKey);
+                    return operations.exec();
+                }
+            });
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        return ClipCutResponse.builder()
+                .clipId(request.getClipId())
                 .build();
     }
 

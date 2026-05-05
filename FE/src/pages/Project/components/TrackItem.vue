@@ -459,6 +459,69 @@ const handleFileUpload = (event: Event) => {
   }
 };
 
+// ==========================================
+// 파일 드래그 앤 드롭 (OS에서 트랙으로 오디오 불러오기)
+// ==========================================
+const isDragOver = ref(false); // 파일을 트랙 위로 드래그 중인지 여부
+
+const onDragEnter = (e: DragEvent) => {
+  if (props.isMaster) return; // 마스터 트랙은 드롭 불가
+  e.preventDefault();
+  isDragOver.value = true;
+};
+
+const onDragOver = (e: DragEvent) => {
+  if (props.isMaster) return;
+  e.preventDefault(); // 브라우저가 파일을 열어버리는 기본 동작 방지
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'; // 복사(추가)된다는 마우스 커서 표시
+  }
+};
+
+const onDragLeave = (e: DragEvent) => {
+  if (props.isMaster) return;
+  e.preventDefault();
+  
+  // 자식 요소 위로 마우스가 지나갈 때 깜빡이는 현상 방지
+  const currentTarget = e.currentTarget as HTMLElement;
+  const relatedTarget = e.relatedTarget as Node;
+  if (!currentTarget.contains(relatedTarget)) {
+    isDragOver.value = false;
+  }
+};
+
+const onDrop = (e: DragEvent) => {
+  if (props.isMaster) return;
+  e.preventDefault();
+  isDragOver.value = false;
+
+  // 1. 떨어뜨린 파일 가져오기
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+
+  const file = files[0];
+
+  // 2. 오디오 파일인지 검증 (mp3, wav 등)
+  if (!file.type.startsWith('audio/')) {
+    alert('오디오 파일(mp3, wav 등)만 추가할 수 있습니다.');
+    return;
+  }
+
+  // 3. 마우스를 떨어뜨린 X 좌표를 마디(Bar)로 변환
+  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
+  const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+  
+  const absoluteX = e.clientX - 224 + scrollLeft; // 224는 왼쪽 컨트롤 패널 너비
+  let targetBar = absoluteX / trackStore.pixelPerBar;
+  
+  // 스냅 해상도에 맞춰 위치 보정
+  const snap = trackStore.subDivision;
+  targetBar = Math.max(0, Math.round(targetBar * snap) / snap);
+
+  // 4. 스토어의 업로드 액션
+  trackStore.uploadAndAddAudioClip(file, props.track.trackId, targetBar);
+};
+
 
 </script>
 
@@ -552,8 +615,15 @@ const handleFileUpload = (event: Event) => {
     <div 
       aria-label="오디오 클립 작업 영역" 
       class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
+      :class="[
+        isDragOver ? 'bg-primary/20 ring-2 ring-inset ring-primary' : 'bg-transparent'
+      ]"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       @wheel.ctrl.prevent="trackStore.updateZoom($event.deltaY)"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
     >
       <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
       

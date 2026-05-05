@@ -25,7 +25,4 @@ public class AudioUploadUrlRequest {
     @Max(value = MAX_AUDIO_SIZE_BYTES, message = "파일 크기는 50MB를 초과할 수 없습니다.")
     private Integer sizeBytes;
 
-    @NotNull(message = "오디오의 길이는 필수입니다.")
-    @Positive(message = "오디오의 길이는 0보다 커야 합니다.")
-    private Integer durationMs;
 }

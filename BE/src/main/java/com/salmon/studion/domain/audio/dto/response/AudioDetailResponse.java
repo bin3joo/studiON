@@ -11,9 +11,7 @@ import lombok.Getter;
 public class AudioDetailResponse {
 
     private Integer audioMetadataId;
-    private String objectKey;
     private String originalName;
-    private String storedName;
     private MimeType mimeType;
     private Integer sizeBytes;
     private Integer durationMs;
@@ -25,9 +23,7 @@ public class AudioDetailResponse {
     ) {
         return new AudioDetailResponse(
                 audioMetadata.getId(),
-                audioMetadata.getObjectKey(),
                 audioMetadata.getOriginalName(),
-                audioMetadata.getStoredName(),
                 audioMetadata.getMimeType(),
                 audioMetadata.getSizeBytes(),
                 audioMetadata.getDurationMs(),

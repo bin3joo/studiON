@@ -152,105 +152,78 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     //만약 해당 요소를 찾았다면,
     if(targetTrackEl) {
       const targetTrackId = Number(targetTrackEl.getAttribute('data-track-id'));
-      //놓은 곳이 현재 트랙이 아니라 다른 트랙이라면 이사를 실행한다.
-      if(targetTrackId && targetTrackId !== props.track.trackId) {
-        trackStore.moveClipToTrack(activeClip.value.clipId, props.track.trackId, targetTrackId);
-        finalTrackId = targetTrackId; // 이사간 트랙 아이디
-      }
+      if (targetTrackId) {
+      finalTrackId = targetTrackId; // 놓은 곳의 트랙 ID 타겟팅
     }
+  }
 
-    //겹침 방지로직
+    //겹침 방지로직(밀어내기 대신 원래 자리로 롤백)
     const finalTrack = trackStore.trackList.find(t => t.trackId === finalTrackId);
+    let isOverlapping = false;
+    const epsilon = 0.001; //소수점 오차로 인한 무한루프 방지
+
     if (finalTrack) {
-      let hasOverlap = true;
-      const epsilon = 0.001; // 미세한 소수점 오차로 인한 무한루프 방지
-      let safetyCounter = 0; // 무한 루프 방지용
+     const activeStart = activeClip.value.start;
+    const activeEnd = activeStart + activeClip.value.duration;
 
-    //  현재 짚은 위치의 앞에 들어갈 수 있는지 빈 공간을 미리 검사하는 헬퍼 함수
-      const isSpaceClear = (targetStart: number, duration: number) => {
-        if (targetStart < 0) return false; // 0마디 이전은 벽이므로 공간 없음
-        const targetEnd = targetStart + duration;
-        
-        for (const c of finalTrack.clips) {
-          if (c.clipId === currentClip.clipId) continue;
-          if (targetStart < c.start + c.duration - 0.005 && targetEnd > c.start + 0.005) {
-            return false; // 다른 클립에 부딪히면 좁은 것
-          }
-        }
-        return true; // 안전한 빈 공간
-      };
+    // 타겟 트랙의 모든 클립을 순회하며 겹치는지 단 한 번만 검사합니다.
+    for (const otherClip of finalTrack.clips) {
+      // 자기 자신은 비교 대상에서 제외
+      if (otherClip.clipId === activeClip.value.clipId) continue;
 
-      // 겹치는 클립이 없을 때까지 계속 뒤로 밀어냅니다. (연쇄 밀어내기 지원)
-      while (hasOverlap && safetyCounter < 100) {
-        hasOverlap = false;
-        safetyCounter++;
-        
-        for (const otherClip of finalTrack.clips) {
-          // 자기 자신은 비교 대상에서 제외
-          if (otherClip.clipId === activeClip.value.clipId) continue;
+      const existingStart = otherClip.start;
+      const existingEnd = otherClip.start + otherClip.duration;
 
-          const existingStart = otherClip.start;
-          const existingEnd = otherClip.start + otherClip.duration;
-          
-          const activeStart = activeClip.value.start;
-          const activeEnd = activeClip.value.start + activeClip.value.duration;
-          const activeDuration = activeClip.value.duration;
-
-          // 겹침 판별 공식: (A의 시작 < B의 끝) && (A의 끝 > B의 시작)
-          // A의 시작점이 B의 끝점보다 '확실히' 작고, A의 끝점이 B의 시작점보다 '확실히' 클 때만 겹친 것으로 판정!
-          if (activeStart < existingEnd - epsilon && activeEnd > existingStart + epsilon) {
-            hasOverlap = true;
-
-            // 마우스를 놓은 위치(클립의 중심점)와 기존 클립의 중심점을 비교
-            const dropCenter = activeStart + (activeDuration / 2);
-            const existingCenter = existingStart + (otherClip.duration / 2);
-
-            let placedFront = false;
-
-            // 1. 기존 클립의 '앞쪽' 절반에 놓았을 경우
-            if (dropCenter <= existingCenter) {
-              const proposedStart = existingStart - activeDuration;
-              
-              // 바로 앞에 끼워 넣을 공간이 충분한지 검사!
-              if (isSpaceClear(proposedStart, activeDuration)) {
-                activeClip.value.start = proposedStart; // 쏙! 앞으로 당겨짐
-                placedFront = true;
-              }
-            }
-
-            // 2. '뒤쪽'에 놓았거나, 앞쪽에 놓고 싶었지만 다른 클립이 가로막고 있는 경우
-            if (!placedFront) {
-              activeClip.value.start = existingEnd; // 안전하게 뒤로 밀어냄
-            }
-            break;
-          }
-        }
+      // 겹침 판별 공식: (A의 시작 < B의 끝) && (A의 끝 > B의 시작)
+      if (activeStart < existingEnd - epsilon && activeEnd > existingStart + epsilon) {
+        isOverlapping = true;
+        break; // 하나라도 겹치면 즉시 검사 종료
       }
     }
+  }
 
-    console.log(`\n========================================`);
-    console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
-    console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
-    console.log(`========================================`);
-
-    //서버에 통신을 보내서 이동 확정
-    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, activeClip.value.start);
+  // 결과 처리: 겹쳤다면 원상복구, 아니면 이동 확정
+  if (isOverlapping) {
+    console.log("클립이 다른 클립과 겹쳐서 원래 자리로 돌아갑니다.");
     
+    // 1. 위치 롤백 (드래그 시작 지점으로)
+    activeClip.value.start = startClipBar.value; 
+    
+    // 2. 트랙 롤백 (트랙 이동도 무효화)
+    finalTrackId = props.track.trackId; 
 
-    activeClip.value.isDragging = false; //드래그 끝
-    activeClip.value = null; //클립 해제
-    dragoffsetY.value = 0; //세로 이동값 초기화
+    // 오디오 동기화를 위해 제자리 통신(기존 위치)을 쏴주거나, 프론트에서만 조용히 돌려놓습니다.
+    trackStore.resyncClip(activeClip.value.clipId, startClipBar.value);
 
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch(err) {
-      console.warn("releasePointerCapture 오류 발생", err);
+  } else {
+    // 겹치지 않았다면 트랙 이동 및 서버 확정 진행
+    if (finalTrackId !== props.track.trackId) {
+      trackStore.moveClipToTrack(activeClip.value.clipId, props.track.trackId, finalTrackId);
     }
+    
+    // 서버에 통신을 보내서 이동 확정
+    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, activeClip.value.start);
+  }
 
-    //드래그가 끝나면 드래그 상태를 복원하여 이후의 이벤트가 정상적으로 작동하도록 함
-    (e.currentTarget as HTMLElement).onpointerup = null;
-    (e.currentTarget as HTMLElement).onpointermove = null;
-  };
+  console.log(`\n========================================`);
+  console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
+  console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
+  console.log(`========================================`);
+
+  activeClip.value.isDragging = false; // 드래그 끝
+  activeClip.value = null; // 클립 해제
+  dragoffsetY.value = 0; // 세로 이동값 초기화
+
+  try {
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+  } catch (err) {
+    console.warn("releasePointerCapture 오류 발생", err);
+  }
+
+  // 드래그가 끝나면 이벤트 리스너 해제
+  (e.currentTarget as HTMLElement).onpointerup = null;
+  (e.currentTarget as HTMLElement).onpointermove = null;
+};
 
   // ==========================================
 // 클립 리사이즈(Trim) 로직

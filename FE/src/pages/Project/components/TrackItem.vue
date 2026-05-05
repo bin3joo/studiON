@@ -435,6 +435,93 @@ const handleSplit = () => {
   closeMenu();
 };
 
+// 파일 입력을 위한 참조 변수
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+// 우클릭 메뉴에서 '오디오 불러오기' 클릭 시 파일 탐색기 열기
+const triggerFileInput = () => {
+  if (fileInputRef.value) {
+    fileInputRef.value.click();
+  }
+  closeMenu();
+};
+
+// 파일 선택이 완료되었을 때 실행되는 함수
+const handleFileUpload = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    const file = target.files[0];
+    // 우클릭했던 트랙 ID와 타임라인의 마디(Bar) 위치를 이용해 업로드 액션 실행
+    trackStore.uploadAndAddAudioClip(file, menuState.value.targetTrackId, menuState.value.targetBar);
+    
+    // 같은 파일을 다시 올릴 수 있도록 input 초기화
+    target.value = '';
+  }
+};
+
+// ==========================================
+// 파일 드래그 앤 드롭 (OS에서 트랙으로 오디오 불러오기)
+// ==========================================
+const isDragOver = ref(false); // 파일을 트랙 위로 드래그 중인지 여부
+
+const onDragEnter = (e: DragEvent) => {
+  if (props.isMaster) return; // 마스터 트랙은 드롭 불가
+  e.preventDefault();
+  isDragOver.value = true;
+};
+
+const onDragOver = (e: DragEvent) => {
+  if (props.isMaster) return;
+  e.preventDefault(); // 브라우저가 파일을 열어버리는 기본 동작 방지
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'; // 복사(추가)된다는 마우스 커서 표시
+  }
+};
+
+const onDragLeave = (e: DragEvent) => {
+  if (props.isMaster) return;
+  e.preventDefault();
+  
+  // 자식 요소 위로 마우스가 지나갈 때 깜빡이는 현상 방지
+  const currentTarget = e.currentTarget as HTMLElement;
+  const relatedTarget = e.relatedTarget as Node;
+  if (!currentTarget.contains(relatedTarget)) {
+    isDragOver.value = false;
+  }
+};
+
+const onDrop = (e: DragEvent) => {
+  if (props.isMaster) return;
+  e.preventDefault();
+  isDragOver.value = false;
+
+  // 1. 떨어뜨린 파일 가져오기
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+
+  const file = files[0];
+
+  // 2. 오디오 파일인지 검증 (mp3, wav 등)
+  if (!file.type.startsWith('audio/')) {
+    alert('오디오 파일(mp3, wav 등)만 추가할 수 있습니다.');
+    return;
+  }
+
+  // 3. 마우스를 떨어뜨린 X 좌표를 마디(Bar)로 변환
+  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
+  const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+  
+  const absoluteX = e.clientX - 224 + scrollLeft; // 224는 왼쪽 컨트롤 패널 너비
+  let targetBar = absoluteX / trackStore.pixelPerBar;
+  
+  // 스냅 해상도에 맞춰 위치 보정
+  const snap = trackStore.subDivision;
+  targetBar = Math.max(0, Math.round(targetBar * snap) / snap);
+
+  // 4. 스토어의 업로드 액션
+  trackStore.uploadAndAddAudioClip(file, props.track.trackId, targetBar);
+};
+
 
 </script>
 
@@ -528,8 +615,15 @@ const handleSplit = () => {
     <div 
       aria-label="오디오 클립 작업 영역" 
       class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
+      :class="[
+        isDragOver ? 'bg-primary/20 ring-2 ring-inset ring-primary' : 'bg-transparent'
+      ]"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       @wheel.ctrl.prevent="trackStore.updateZoom($event.deltaY)"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
     >
       <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
       
@@ -672,12 +766,21 @@ const handleSplit = () => {
     >
       <!-- 트랙 우클릭 시에만 보여줄 메뉴 (클립 우클릭 시엔 비활성화/숨김) -->
       <template v-if="menuState.type === 'track'">
-        <button class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
+        <button @click="triggerFileInput" class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
           <span class="flex items-center gap-2"><UploadIcon class="h-4 w-4" /> 오디오 불러오기</span>
           <span class="text-[10px] text-gray-500">Ctrl+I</span>
         </button>
         <div class="my-1 h-px w-full bg-[#393C45]"></div>
       </template>
+
+      <!-- 숨겨진 파일 인풋 (실제 업로드 처리 담당) -->
+      <input 
+        type="file" 
+        ref="fileInputRef" 
+        accept="audio/mpeg, audio/wav" 
+        class="hidden" 
+        @change="handleFileUpload" 
+      />
 
       <!-- 클립 우클릭 시 활성화되는 메뉴들 -->
 

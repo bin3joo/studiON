@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {ref} from 'vue';
+import {ref, computed} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
@@ -14,6 +14,31 @@ const props = defineProps<{
 
 //스토어 사용
 const trackStore = useTrackStore();
+
+// 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
+const masterBackgroundBlocks = computed(() => {
+  if (!props.isMaster) return [];
+  
+  const intervals = props.track.clips.map(c => ({ start: c.start, end: c.start + c.duration }));
+  intervals.sort((a, b) => a.start - b.start);
+  
+  const merged = [];
+  if (intervals.length > 0) {
+    let current = { ...intervals[0] };
+    for (let i = 1; i < intervals.length; i++) {
+      const next = intervals[i];
+      if (current.end >= next.start) {
+        current.end = Math.max(current.end, next.end); // 구간 연장
+      } else {
+        merged.push(current);
+        current = { ...next };
+      }
+    }
+    merged.push(current);
+  }
+  return merged;
+});
+
 
 // ==========================================
 // 클립 드래그 앤 드롭 로직
@@ -152,105 +177,78 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     //만약 해당 요소를 찾았다면,
     if(targetTrackEl) {
       const targetTrackId = Number(targetTrackEl.getAttribute('data-track-id'));
-      //놓은 곳이 현재 트랙이 아니라 다른 트랙이라면 이사를 실행한다.
-      if(targetTrackId && targetTrackId !== props.track.trackId) {
-        trackStore.moveClipToTrack(activeClip.value.clipId, props.track.trackId, targetTrackId);
-        finalTrackId = targetTrackId; // 이사간 트랙 아이디
-      }
+      if (targetTrackId) {
+      finalTrackId = targetTrackId; // 놓은 곳의 트랙 ID 타겟팅
     }
+  }
 
-    //겹침 방지로직
+    //겹침 방지로직(밀어내기 대신 원래 자리로 롤백)
     const finalTrack = trackStore.trackList.find(t => t.trackId === finalTrackId);
+    let isOverlapping = false;
+    const epsilon = 0.001; //소수점 오차로 인한 무한루프 방지
+
     if (finalTrack) {
-      let hasOverlap = true;
-      const epsilon = 0.001; // 미세한 소수점 오차로 인한 무한루프 방지
-      let safetyCounter = 0; // 무한 루프 방지용
+     const activeStart = activeClip.value.start;
+    const activeEnd = activeStart + activeClip.value.duration;
 
-    //  현재 짚은 위치의 앞에 들어갈 수 있는지 빈 공간을 미리 검사하는 헬퍼 함수
-      const isSpaceClear = (targetStart: number, duration: number) => {
-        if (targetStart < 0) return false; // 0마디 이전은 벽이므로 공간 없음
-        const targetEnd = targetStart + duration;
-        
-        for (const c of finalTrack.clips) {
-          if (c.clipId === currentClip.clipId) continue;
-          if (targetStart < c.start + c.duration - 0.005 && targetEnd > c.start + 0.005) {
-            return false; // 다른 클립에 부딪히면 좁은 것
-          }
-        }
-        return true; // 안전한 빈 공간
-      };
+    // 타겟 트랙의 모든 클립을 순회하며 겹치는지 단 한 번만 검사합니다.
+    for (const otherClip of finalTrack.clips) {
+      // 자기 자신은 비교 대상에서 제외
+      if (otherClip.clipId === activeClip.value.clipId) continue;
 
-      // 겹치는 클립이 없을 때까지 계속 뒤로 밀어냅니다. (연쇄 밀어내기 지원)
-      while (hasOverlap && safetyCounter < 100) {
-        hasOverlap = false;
-        safetyCounter++;
-        
-        for (const otherClip of finalTrack.clips) {
-          // 자기 자신은 비교 대상에서 제외
-          if (otherClip.clipId === activeClip.value.clipId) continue;
+      const existingStart = otherClip.start;
+      const existingEnd = otherClip.start + otherClip.duration;
 
-          const existingStart = otherClip.start;
-          const existingEnd = otherClip.start + otherClip.duration;
-          
-          const activeStart = activeClip.value.start;
-          const activeEnd = activeClip.value.start + activeClip.value.duration;
-          const activeDuration = activeClip.value.duration;
-
-          // 겹침 판별 공식: (A의 시작 < B의 끝) && (A의 끝 > B의 시작)
-          // A의 시작점이 B의 끝점보다 '확실히' 작고, A의 끝점이 B의 시작점보다 '확실히' 클 때만 겹친 것으로 판정!
-          if (activeStart < existingEnd - epsilon && activeEnd > existingStart + epsilon) {
-            hasOverlap = true;
-
-            // 마우스를 놓은 위치(클립의 중심점)와 기존 클립의 중심점을 비교
-            const dropCenter = activeStart + (activeDuration / 2);
-            const existingCenter = existingStart + (otherClip.duration / 2);
-
-            let placedFront = false;
-
-            // 1. 기존 클립의 '앞쪽' 절반에 놓았을 경우
-            if (dropCenter <= existingCenter) {
-              const proposedStart = existingStart - activeDuration;
-              
-              // 바로 앞에 끼워 넣을 공간이 충분한지 검사!
-              if (isSpaceClear(proposedStart, activeDuration)) {
-                activeClip.value.start = proposedStart; // 쏙! 앞으로 당겨짐
-                placedFront = true;
-              }
-            }
-
-            // 2. '뒤쪽'에 놓았거나, 앞쪽에 놓고 싶었지만 다른 클립이 가로막고 있는 경우
-            if (!placedFront) {
-              activeClip.value.start = existingEnd; // 안전하게 뒤로 밀어냄
-            }
-            break;
-          }
-        }
+      // 겹침 판별 공식: (A의 시작 < B의 끝) && (A의 끝 > B의 시작)
+      if (activeStart < existingEnd - epsilon && activeEnd > existingStart + epsilon) {
+        isOverlapping = true;
+        break; // 하나라도 겹치면 즉시 검사 종료
       }
     }
+  }
 
-    console.log(`\n========================================`);
-    console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
-    console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
-    console.log(`========================================`);
-
-    //서버에 통신을 보내서 이동 확정
-    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, activeClip.value.start);
+  // 결과 처리: 겹쳤다면 원상복구, 아니면 이동 확정
+  if (isOverlapping) {
+    console.log("클립이 다른 클립과 겹쳐서 원래 자리로 돌아갑니다.");
     
+    // 1. 위치 롤백 (드래그 시작 지점으로)
+    activeClip.value.start = startClipBar.value; 
+    
+    // 2. 트랙 롤백 (트랙 이동도 무효화)
+    finalTrackId = props.track.trackId; 
 
-    activeClip.value.isDragging = false; //드래그 끝
-    activeClip.value = null; //클립 해제
-    dragoffsetY.value = 0; //세로 이동값 초기화
+    // 오디오 동기화를 위해 제자리 통신(기존 위치)을 쏴주거나, 프론트에서만 조용히 돌려놓습니다.
+    trackStore.resyncClip(activeClip.value.clipId, startClipBar.value);
 
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch(err) {
-      console.warn("releasePointerCapture 오류 발생", err);
+  } else {
+    // 겹치지 않았다면 트랙 이동 및 서버 확정 진행
+    if (finalTrackId !== props.track.trackId) {
+      trackStore.moveClipToTrack(activeClip.value.clipId, props.track.trackId, finalTrackId);
     }
+    
+    // 서버에 통신을 보내서 이동 확정
+    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, activeClip.value.start);
+  }
 
-    //드래그가 끝나면 드래그 상태를 복원하여 이후의 이벤트가 정상적으로 작동하도록 함
-    (e.currentTarget as HTMLElement).onpointerup = null;
-    (e.currentTarget as HTMLElement).onpointermove = null;
-  };
+  console.log(`\n========================================`);
+  console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
+  console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
+  console.log(`========================================`);
+
+  activeClip.value.isDragging = false; // 드래그 끝
+  activeClip.value = null; // 클립 해제
+  dragoffsetY.value = 0; // 세로 이동값 초기화
+
+  try {
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+  } catch (err) {
+    console.warn("releasePointerCapture 오류 발생", err);
+  }
+
+  // 드래그가 끝나면 이벤트 리스너 해제
+  (e.currentTarget as HTMLElement).onpointerup = null;
+  (e.currentTarget as HTMLElement).onpointermove = null;
+};
 
   // ==========================================
 // 클립 리사이즈(Trim) 로직
@@ -563,34 +561,48 @@ const handleSplit = () => {
             </template>
           </div>
         </div>
+
+        <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
+        <div v-if="isMaster">
+          <div 
+            v-for="(block, idx) in masterBackgroundBlocks" 
+            :key="'bg-'+idx"
+            class="absolute inset-y-1 z-0 rounded-md bg-[#4b4b4b]/40 border border-[#4b4b4b]"
+            :style="{
+              left: `${block.start * trackStore.pixelPerBar}px`,
+              width: `${(block.end - block.start) * trackStore.pixelPerBar}px`
+            }"
+          ></div>
+        </div>
         
-        <!--실제 클립 렌더링 및  클립 전용 우클릭 이벤트(z-10)-->
-       <!--  key를 clip.clipId로 고정하여 드래그 중 파괴 방지 -->
+     <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
           v-for="clip in track.clips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
-          class="absolute inset-y-1 z-10 cursor-grab rounded-md border-2 active:cursor-grabbing"
+          class="absolute inset-y-1 z-10 rounded-md"
           :class="[
+            isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
             clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
-            clip.isSelected && !clip.isDragging ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
+            clip.isSelected && !clip.isDragging && !isMaster ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
           ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
-            borderColor: clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`, 
-            backgroundColor: clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`, 
-            boxShadow: clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)',
+            borderColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`), 
+            backgroundColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`), 
+            boxShadow: isMaster ? 'none' : (clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'),
             transform: clip.isDragging ? `translateY(${dragoffsetY}px)` : 'none'
           }"
-          @pointerdown="onClipPointerDown($event, clip); trackStore.selectClip(clip, track.trackId);"
-          @pointermove="onClipPointerMove"
-          @pointerup="onClipPointerUp"
-          @pointercancel="onClipPointerUp"
-          @contextmenu.prevent.stop="onClipRightClick($event, clip, track.trackId)"
+          @pointerdown="!isMaster && onClipPointerDown($event, clip); !isMaster && trackStore.selectClip(clip, track.trackId);"
+          @pointermove="!isMaster && onClipPointerMove($event)"
+          @pointerup="!isMaster && onClipPointerUp($event)"
+          @pointercancel="!isMaster && onClipPointerUp($event)"
+          @contextmenu.prevent.stop="!isMaster && onClipRightClick($event, clip, track.trackId)"
         >
-          <!-- 왼쪽 리사이즈 핸들 -->
+          <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) -->
           <div 
+            v-if="!isMaster"
             class="absolute left-0 top-0 bottom-0 w-2.5 z-20 cursor-w-resize hover:bg-white/30"
             @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
             @pointermove.stop="onResizePointerMove"
@@ -598,7 +610,9 @@ const handleSplit = () => {
             @pointercancel.stop="onResizePointerUp"
           ></div>
 
+          <!-- 이름표 (마스터에선 숨김) -->
           <div 
+            v-if="!isMaster"
             aria-hidden="true"
             class="absolute inset-x-0 top-0 truncate px-2 py-0.5 text-[10px] font-semibold pointer-events-none"
             :style="{ color: clip.color }"
@@ -606,21 +620,21 @@ const handleSplit = () => {
             {{ clip.audio?.originalName || track.name }}
           </div>
 
-          <!--GPU 파형 컴포넌트-->
+          <!-- GPU 파형 컴포넌트 -->
          <WaveformWebGL
           v-if="clip.audio?.cdnUrl"
           :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 
-          <!-- 오른쪽 리사이즈 핸들 -->
+          <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) -->
           <div 
+            v-if="!isMaster"
             class="absolute right-0 top-0 bottom-0 w-2.5 z-20 cursor-e-resize hover:bg-white/30"
             @pointerdown.stop="onResizePointerDown($event, clip, 'right')"
             @pointermove.stop="onResizePointerMove"
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
           ></div>
-
         </div>
 
       </div> 

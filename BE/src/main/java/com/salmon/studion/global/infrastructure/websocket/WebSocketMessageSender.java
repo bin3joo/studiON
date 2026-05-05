@@ -27,6 +27,13 @@ public class WebSocketMessageSender {
         }
     }
 
+    public void sendToSession(WebSocketSession session, String event, Object payload) throws IOException {
+        String message = objectMapper.writeValueAsString(Map.of("event", event, "payload", payload));
+        if (session.isOpen()) {
+            session.sendMessage(new TextMessage(message));
+        }
+    }
+
     public void sendError(WebSocketSession session, int code, String message) throws IOException {
         String payload = objectMapper.writeValueAsString(
                 Map.of("event", "ERROR", "payload", new WsErrorResponse(code, message))

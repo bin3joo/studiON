@@ -3,6 +3,7 @@ package com.salmon.studion.domain.clip.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
@@ -10,6 +11,7 @@ import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDuplicateResponse;
@@ -402,6 +404,30 @@ public class ClipService {
         }
 
         return ClipCutResponse.builder()
+                .clipId(request.getClipId())
+                .build();
+    }
+
+    /*
+        클립을 복사하는 메서드
+        타임라인에서 클립을 제거하지 않고 클립보드(Redis)에 ClipState를 저장한다.
+        락 없이 모든 사용자가 복사할 수 있으며 MongoDB 로깅 없음
+     */
+    public ClipCopyResponse copyClip(ClipCopyRequest request, Integer userId) {
+        request.validate();
+
+        projectService.getProjectOrThrow(request.getProjectId());
+
+        ClipState state = getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        String clipboardKey = String.format(CLIP_CLIPBOARD_KEY, request.getProjectId(), userId);
+        try {
+            redisTemplate.opsForValue().set(clipboardKey, objectMapper.writeValueAsString(state));
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        return ClipCopyResponse.builder()
                 .clipId(request.getClipId())
                 .build();
     }

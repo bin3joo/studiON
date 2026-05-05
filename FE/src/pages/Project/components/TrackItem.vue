@@ -435,6 +435,30 @@ const handleSplit = () => {
   closeMenu();
 };
 
+// 파일 입력을 위한 참조 변수
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+// 우클릭 메뉴에서 '오디오 불러오기' 클릭 시 파일 탐색기 열기
+const triggerFileInput = () => {
+  if (fileInputRef.value) {
+    fileInputRef.value.click();
+  }
+  closeMenu();
+};
+
+// 파일 선택이 완료되었을 때 실행되는 함수
+const handleFileUpload = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    const file = target.files[0];
+    // 우클릭했던 트랙 ID와 타임라인의 마디(Bar) 위치를 이용해 업로드 액션 실행
+    trackStore.uploadAndAddAudioClip(file, menuState.value.targetTrackId, menuState.value.targetBar);
+    
+    // 같은 파일을 다시 올릴 수 있도록 input 초기화
+    target.value = '';
+  }
+};
+
 
 </script>
 
@@ -672,12 +696,21 @@ const handleSplit = () => {
     >
       <!-- 트랙 우클릭 시에만 보여줄 메뉴 (클립 우클릭 시엔 비활성화/숨김) -->
       <template v-if="menuState.type === 'track'">
-        <button class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
+        <button @click="triggerFileInput" class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
           <span class="flex items-center gap-2"><UploadIcon class="h-4 w-4" /> 오디오 불러오기</span>
           <span class="text-[10px] text-gray-500">Ctrl+I</span>
         </button>
         <div class="my-1 h-px w-full bg-[#393C45]"></div>
       </template>
+
+      <!-- 숨겨진 파일 인풋 (실제 업로드 처리 담당) -->
+      <input 
+        type="file" 
+        ref="fileInputRef" 
+        accept="audio/mpeg, audio/wav" 
+        class="hidden" 
+        @change="handleFileUpload" 
+      />
 
       <!-- 클립 우클릭 시 활성화되는 메뉴들 -->
 

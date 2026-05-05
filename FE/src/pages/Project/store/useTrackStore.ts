@@ -270,7 +270,125 @@ export const useTrackStore = defineStore('track', () => {
                 }, 300);
             })
         },
+
+        //오디오 추가
+        emitAddAudioClip: async (projectId: number, trackId: number, audioMetadataId: number, startBar: number, durationBar: number) => {
+            return new Promise<any>((resolve) => {
+                setTimeout(() => {
+                    resolve({
+                        event: "AUDIO_CLIP_ADD",
+                        clipId: Math.floor(Math.random() * 10000) + 1,
+                        trackId: trackId,
+                        audioMetadataId: audioMetadataId,
+                        start: startBar,
+                        duration: durationBar,
+                        color: "#" + Math.floor(Math.random() * 16777215).toString(16) // 랜덤 색상
+                    });
+                }, 300);
+            });
+        },
     };
+
+    // 오디오 파일 길이(duration) 추출 헬퍼 함수
+    const getAudioDuration = (file: File): Promise<number> => {
+        return new Promise((resolve) => {
+            const url = URL.createObjectURL(file);
+            const audio = new Audio(url);
+            audio.onloadedmetadata = () => {
+                resolve(audio.duration * 1000); // ms 단위 반환
+                URL.revokeObjectURL(url);
+            };
+        });
+    };
+
+    // 실제 오디오 파일 업로드 & 클립 추가 Action
+    const uploadAndAddAudioClip = async (file: File, trackId: number, startBar: number) => {
+        console.log(`[업로드 시작] 파일명: ${file.name}, 트랙: ${trackId}, 마디: ${startBar}`);
+        try {
+            // 1. 파일 길이 구하기 및 MIME 타입 설정
+            const durationMs = await getAudioDuration(file);
+            const mimeType = file.type.includes('wav') ? 'WAV' : 'MPEG';
+            
+            // --- S3 연동이 아직 준비되지 않았다면 아래 주석된 API 호출 대신 로컬 Mock을 사용합니다 ---
+            /*
+            // 2. S3 URL 발급 API 호출
+            const uploadInfo = await projectApi.getAudioUploadUrl(projectInfo.value.projectId, {
+                originalName: file.name,
+                mimeType: mimeType,
+                sizeBytes: file.size
+            });
+
+            // 3. 실제 S3에 PUT 업로드
+            await fetch(uploadInfo.uploadUrl, { method: 'PUT', body: file });
+
+            // 4. 오디오 메타데이터 저장 API 호출
+            const metaData = await projectApi.saveAudioMetadata(projectInfo.value.projectId, {
+                objectKey: uploadInfo.objectKey,
+                originalName: file.name,
+                storedName: uploadInfo.storedName,
+                mimeType: mimeType,
+                sizeBytes: file.size,
+                durationMs: durationMs
+            });
+            */
+            
+            // S3 연동 전 프론트엔드 단독 테스트용 임시 메타데이터 (연동 시 삭제)
+            const metaData = {
+                audioMetadataId: Math.floor(Math.random() * 1000) + 1,
+                cdnUrl: URL.createObjectURL(file), // S3 cdnUrl 대신 로컬 Blob URL 임시 사용
+                originalName: file.name,
+                durationMs: durationMs
+            };
+
+            // 5. 마디(Bar) 단위로 길이 변환 후 웹소켓(Mock)에 추가 이벤트 전송
+            const durationBar = (durationMs / 1000) / secondsPerBar.value;
+            const response = await mockServerAPI.emitAddAudioClip(
+                projectInfo.value.projectId, 
+                trackId, 
+                metaData.audioMetadataId, 
+                startBar, 
+                durationBar
+            );
+
+            // 6. UI 반영 및 Tone.js 스케줄링
+            const targetTrack = trackList.value.find(t => t.trackId === trackId);
+            if (targetTrack) {
+                const newClip: ClipUIState = {
+                    clipId: response.clipId,
+                    start: response.start,
+                    duration: response.duration,
+                    audioStartMs: 0,
+                    audioDurationMs: durationMs,
+                    color: response.color,
+                    audio: {
+                        audioMetadataId: metaData.audioMetadataId,
+                        cdnUrl: metaData.cdnUrl, // (추후 S3 주소로 매핑)
+                        originalName: file.name,
+                        durationMs: durationMs
+                    },
+                    isSelected: false,
+                    isDragging: false
+                };
+                
+                targetTrack.clips.push(newClip);
+                checkAndExpandTimeline(newClip.start + newClip.duration);
+
+                // 오디오 엔진에 적재
+                const targetChannel = trackChannels.get(trackId);
+                if (targetChannel) {
+                    const newPlayer = new Tone.Player().connect(targetChannel);
+                    await newPlayer.load(metaData.cdnUrl); // Blob URL에서 오디오 로딩
+                    clipPlayers.set(newClip.clipId, newPlayer);
+                    resyncClip(newClip.clipId, newClip.start);
+                    console.log(`[업로드 완료] 클립 추가 완료!`);
+                }
+            }
+        } catch (error) {
+            console.error("오디오 업로드 및 추가 중 에러 발생:", error);
+        }
+    };
+
+
 
     // 1. 복사
     const copyClip = (clip: ClipUIState) => {
@@ -945,22 +1063,7 @@ export const useTrackStore = defineStore('track', () => {
                         isMuted: false,
                         isSoloed: false,
                         pan: 0,
-                        clips: [
-                            {
-                                clipId: 1,
-                                start: 1,
-                                duration: 120,
-                                color: "#FF3DCB",
-                                audioStartMs: 0,
-                                audioDurationMs: 200000,
-                                audio: {
-                                    audioMetadataId: 1,
-                                    cdnUrl: "/test2.mp3",
-                                    originalName: "test2.mp3",
-                                    durationMs: 200000
-                                }
-                            }
-                        ] as any[]
+                        clips: [] as any[]
                     },
                 ]
             };//테스트 목데이터
@@ -1091,6 +1194,9 @@ export const useTrackStore = defineStore('track', () => {
         deleteTrack,
 
         //트랙 선택 기능
-        selectTrack
+        selectTrack,
+
+        //오디오 업로드 추가
+        uploadAndAddAudioClip,
     };
 });

@@ -81,6 +81,48 @@ export function buildCreateProjectPayload(
   }
 }
 
+// ==========================================
+// [추가] 오디오 파일 업로드 관련 API 인터페이스
+// ==========================================
+export interface GetUploadUrlRequest {
+  originalName: string;
+  mimeType: 'MPEG' | 'WAV';
+  sizeBytes: number;
+}
+
+export interface GetUploadUrlResponse {
+  code: string;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    objectKey: string;
+    storedName: string;
+    uploadUrl: string; // S3 Presigned URL
+  }
+}
+
+export interface SaveAudioMetadataRequest {
+  objectKey: string;
+  originalName: string;
+  storedName: string;
+  mimeType: 'MPEG' | 'WAV';
+  sizeBytes: number;
+  durationMs: number;
+}
+
+export interface SaveAudioMetadataResponse {
+  code: string;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    audioMetadataId: number;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+    durationMs: number;
+  }
+}
+
 
 // ==========================================
 // [API 객체] 프로젝트 관련 통신 모음집
@@ -99,7 +141,20 @@ export const projectApi = {
 
     //인터셉터 덕분에 response.data에 data객체가 바로 들어있음
     return response.data.data;
+  },
+
+  // S3 업로드 URL 발급
+  getAudioUploadUrl: async (projectId: number, payload: GetUploadUrlRequest) => {
+    const response = await axiosInstance.post<GetUploadUrlResponse>(`/api/v1/projects/${projectId}/audios/upload-url`, payload);
+    return response.data.data;
+  },
+
+  // 메타데이터 저장
+  saveAudioMetadata: async (projectId: number, payload: SaveAudioMetadataRequest) => {
+    const response = await axiosInstance.post<SaveAudioMetadataResponse>(`/api/v1/projects/${projectId}/audios`, payload);
+    return response.data.data;
   }
+
 }
 
 // 프로젝트 목록 조회

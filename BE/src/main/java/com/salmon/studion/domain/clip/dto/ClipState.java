@@ -14,4 +14,8 @@ public class ClipState {
     private Integer trackId;
     private Double start;
     private Double duration;
+    private Integer audioMetadataId;
+    private String color;
+    private Integer audioStartMs;
+    private Integer audioDurationMs;
 }

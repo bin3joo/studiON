@@ -61,6 +61,26 @@ public class ClipService {
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
+    //////////////////////// RDB ////////////////////////
+
+    /*
+
+     */
+    public List<Clip> getClipsWithAudioMetadataByTrackIds(List<Integer> trackIds) {
+        if (trackIds == null || trackIds.isEmpty()) {
+            return List.of();
+        }
+
+        return clipRepository.findAllWithAudioMetadataByTrackIds(trackIds);
+    }
+
+    public void saveClipsByRedis() {
+
+    }
+
+
+    //////////////////////// Redis ////////////////////////
+
     /*
         Clip Lock 실행/해제 메서드
         Redis 분산 락으로 구현
@@ -139,6 +159,10 @@ public class ClipService {
                 .trackId(request.getTargetTrackId())
                 .start(request.getTargetStartBar())
                 .duration(state.getDuration())
+                .audioMetadataId(state.getAudioMetadataId())
+                .color(state.getColor())
+                .audioStartMs(state.getAudioStartMs())
+                .audioDurationMs(state.getAudioDurationMs())
                 .build();
         saveClipStateToRedis(request.getProjectId(), updated);
 
@@ -219,11 +243,19 @@ public class ClipService {
             }
         }
 
+        double msPerBar = (double) state.getAudioDurationMs() / state.getDuration();
+        int newAudioStartMs = (int) Math.round(state.getAudioStartMs() + (request.getStartBar() - state.getStart()) * msPerBar);
+        int newAudioDurationMs = (int) Math.round(request.getLength() * msPerBar);
+
         ClipState updated = ClipState.builder()
                 .clipId(state.getClipId())
                 .trackId(state.getTrackId())
                 .start(request.getStartBar())
                 .duration(request.getLength())
+                .audioMetadataId(state.getAudioMetadataId())
+                .color(state.getColor())
+                .audioStartMs(newAudioStartMs)
+                .audioDurationMs(newAudioDurationMs)
                 .build();
         saveClipStateToRedis(request.getProjectId(), updated);
 
@@ -339,23 +371,33 @@ public class ClipService {
         Integer newClipId = redisTemplate.opsForValue()
                 .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
 
-        // 기존 클립 수정 (split 기준 왼쪽이 기존 클립, 락은 기존 클립만 유지)
+        double msPerBar = (double) original.getAudioDurationMs() / original.getDuration();
+
+        // 기존 클립 수정 (split 기준 왼쪽, 락은 기존 클립만 유지)
         Double newOriginalDuration = splitBar - originalStart;
         ClipState updatedOriginal = ClipState.builder()
                 .clipId(original.getClipId())
                 .trackId(original.getTrackId())
                 .start(originalStart)
                 .duration(newOriginalDuration)
+                .audioMetadataId(original.getAudioMetadataId())
+                .color(original.getColor())
+                .audioStartMs(original.getAudioStartMs())
+                .audioDurationMs((int) Math.round(newOriginalDuration * msPerBar))
                 .build();
         saveClipStateToRedis(request.getProjectId(), updatedOriginal);
 
-        // 새로운 클립 생성 (split 기준 오른쪽이 신규 클립)
+        // 새로운 클립 생성 (split 기준 오른쪽)
         Double newClipDuration = originalEnd - splitBar;
         ClipState newClip = ClipState.builder()
                 .clipId(newClipId)
                 .trackId(original.getTrackId())
                 .start(splitBar)
                 .duration(newClipDuration)
+                .audioMetadataId(original.getAudioMetadataId())
+                .color(original.getColor())
+                .audioStartMs((int) Math.round(original.getAudioStartMs() + (splitBar - originalStart) * msPerBar))
+                .audioDurationMs((int) Math.round(newClipDuration * msPerBar))
                 .build();
         saveClipStateToRedis(request.getProjectId(), newClip);
 
@@ -485,6 +527,10 @@ public class ClipService {
                 .trackId(request.getTargetTrackId())
                 .start(request.getTargetStartBar())
                 .duration(clipboardState.getDuration())
+                .audioMetadataId(clipboardState.getAudioMetadataId())
+                .color(clipboardState.getColor())
+                .audioStartMs(clipboardState.getAudioStartMs())
+                .audioDurationMs(clipboardState.getAudioDurationMs())
                 .build();
         saveClipStateToRedis(request.getProjectId(), newClip);
 
@@ -544,6 +590,10 @@ public class ClipService {
                 .trackId(targetTrackId)
                 .start(targetStartBar)
                 .duration(original.getDuration())
+                .audioMetadataId(original.getAudioMetadataId())
+                .color(original.getColor())
+                .audioStartMs(original.getAudioStartMs())
+                .audioDurationMs(original.getAudioDurationMs())
                 .build();
         saveClipStateToRedis(request.getProjectId(), newClip);
 
@@ -605,6 +655,10 @@ public class ClipService {
                 .trackId(clip.getTrack().getId())
                 .start(clip.getStart())
                 .duration(clip.getDuration())
+                .audioMetadataId(clip.getAudioMetadata().getId())
+                .color(clip.getColor())
+                .audioStartMs(clip.getAudioStartMs())
+                .audioDurationMs(clip.getAudioDurationMs())
                 .build();
         saveClipStateToRedis(projectId, state);
         return state;
@@ -620,11 +674,4 @@ public class ClipService {
         }
     }
 
-    public List<Clip> getClipsWithAudioMetadataByTrackIds(List<Integer> trackIds) {
-        if (trackIds == null || trackIds.isEmpty()) {
-            return List.of();
-        }
-
-        return clipRepository.findAllWithAudioMetadataByTrackIds(trackIds);
-    }
 }

@@ -26,7 +26,7 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
     private final ProjectSessionManager sessionManager;
     private final ProjectPresenceService projectPresenceService;
     private final ObjectMapper objectMapper;
-    private final ProjectJoinEventHandler projectJoinEventHandler;
+    private final ProjectEventHandler projectEventHandler;
     private final TrackEventHandler trackEventHandler;
     private final ClipEventHandler clipEventHandler;
     private final WebSocketMessageSender webSocketMessageSender;
@@ -40,8 +40,11 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
-        WsMessage<Map> raw = objectMapper.readValue(message.getPayload(), objectMapper.getTypeFactory()
-                .constructParametricType(WsMessage.class, Map.class));
+        WsMessage<Map> raw = objectMapper.readValue(
+                message.getPayload(),
+                objectMapper.getTypeFactory().constructParametricType(WsMessage.class, Map.class)
+        );
+
         String event = raw.getEvent();
         Integer projectId = WebSocketSessionUtils.getProjectId(session);
         Integer userId = WebSocketSessionUtils.getUserId(session);
@@ -49,7 +52,7 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
         try {
             ProjectWebSocketEventType projectEventType = ProjectWebSocketEventType.from(event);
             if (projectEventType != null) {
-                projectJoinEventHandler.handleProjectEvent(session, projectId, userId, projectEventType, raw);
+                projectEventHandler.handleProjectEvent(session, projectId, userId, projectEventType, raw);
             }
             else if(event.startsWith("TRACK_")){
                 trackEventHandler.handleTrackEvent(session, projectId, event, raw);

@@ -7,6 +7,7 @@ import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -39,5 +40,13 @@ public class ProjectService {
     public Project getProjectOrThrow(Integer projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_NOT_FOUND));
+    }
+
+    @Transactional
+    public String renameProject(Integer projectId, String name) {
+        Project project = getProjectOrThrow(projectId);
+        project.rename(name);
+        Project savedProject = projectRepository.save(project);
+        return savedProject.getName();
     }
 }

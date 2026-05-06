@@ -31,18 +31,24 @@ const groupedPositions = computed(() => {
   }>()
 
   positions.value.forEach((position) => {
-    const group = position.positionGroup
+    const group = position.groupCode
 
-    if (!groupMap.has(group.code)) {
-      groupMap.set(group.code, {
-        code: group.code,
-        name: group.name,
-        order: group.order,
-        positions: [],
+    // if (!groupMap.has(position.groupCode)) {
+      // groupMap.set(group.code, {
+      //   code: group.code,
+      //   name: group.name,
+      //   order: group.order,
+      //   positions: [],
+      if (!groupMap.has(position.groupCode)) {
+        groupMap.set(position.groupCode, {
+          code: position.groupCode,
+          name: position.groupName,
+          order: position.groupOrder,
+          positions: [],
       })
     }
 
-    groupMap.get(group.code)?.positions.push(position)
+    groupMap.get(position.groupCode)?.positions.push(position)
   })
 
   return Array.from(groupMap.values())
@@ -181,6 +187,7 @@ function handleEditAgain() {
         <div
           v-for="group in groupedPositions"
           :key="group.code"
+          type="button"
           class="mt-6"
         >
           <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">

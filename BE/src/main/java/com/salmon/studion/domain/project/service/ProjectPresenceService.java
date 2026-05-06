@@ -59,8 +59,10 @@ public class ProjectPresenceService {
                 .toList();
     }
 
-    public void removeProjectUser(Integer projectId, Integer userId) {
-        redisTemplate.opsForHash().delete(presenceKey(projectId), String.valueOf(userId));
+    public boolean removeProjectUser(Integer projectId, Integer userId) {
+        Long deletedCount = redisTemplate.opsForHash().delete(presenceKey(projectId), String.valueOf(userId));
+
+        return deletedCount != null && deletedCount > 0;
     }
 
     private String presenceKey(Integer projectId) {

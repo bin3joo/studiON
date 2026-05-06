@@ -83,4 +83,9 @@ public class Project extends BaseEntity {
         project.lastUpdateAt = LocalDateTime.now();
         return project;
     }
+
+    public void rename(String name) {
+        this.name = name;
+        this.lastUpdateAt = LocalDateTime.now();
+    }
 }

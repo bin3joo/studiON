@@ -160,114 +160,17 @@ export const projectApi = {
 // 프로젝트 목록 조회
 
 export async function fetchProjects(): Promise<FetchProjectsResponse> {
-  // =========================
-  // mock implementation
-  // =========================
-  // await wait(MOCK_PROJECT_LIST_DELAY_MS)
-
-  // return {
-  //   code: 200,
-  //   message: '요청에 성공하였습니다.',
-  //   isSuccess: true,
-  //   data: {
-  //     projects: [
-  //       {
-  //         projectId: 1,
-  //         projectName: '새 프로젝트',
-  //         totalBarCount: 0,
-  //         totalPlayTime: 0,
-  //         totalAudioSize: 0,
-  //         lastUpdateAt: '2026-04-20T12:30:44',
-  //         members: [
-  //           {
-  //             userId: 1,
-  //             profileImgUrl: 'https://example.com/profile-1.png',
-  //           },
-  //         ],
-  //       },
-  //       {
-  //         projectId: 2,
-  //         projectName: '새 프로젝트1',
-  //         totalBarCount: 8,
-  //         totalPlayTime: 180000,
-  //         totalAudioSize: 314572800,
-  //         lastUpdateAt: '2026-04-21T10:00:00',
-  //         members: [
-  //           {
-  //             userId: 1,
-  //             profileImgUrl: 'https://example.com/profile-1.png',
-  //           },
-  //           {
-  //             userId: 2,
-  //             profileImgUrl: 'https://example.com/profile-2.png',
-  //           },
-  //         ],
-  //       },
-  //     ],
-  //   },
-  // }
-
-  // =========================
-  // real API implementation
-  // =========================
-  const response = await fetch('/api/v1/projects', {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  })
-  
-  if (!response.ok) {
-    throw new Error('프로젝트 목록 조회에 실패했습니다.')
-  }
-  
-  return await response.json() as FetchProjectsResponse
+  const { data } = await axiosInstance.get('/api/v1/projects')
+  return data
 }
 
 /**
  * 프로젝트 생성
- * 현재는 백엔드가 없어서 mock 응답을 사용한다.
- * 백엔드 연결 시 아래 real API 코드를 주석 해제하고 mock 부분을 제거하면 된다.
  */
 export async function createProject(
   payload: CreateProjectRequest = buildCreateProjectPayload(),
 ): Promise<CreateProjectResponse> {
-  // =========================
-  // mock implementation
-  // =========================
-  // await wait(MOCK_PROJECT_CREATE_DELAY_MS)
 
-  // const fakeProjectId = Date.now()
-
-  // return {
-  //   code: 200,
-  //   message: '프로젝트가 생성되었습니다.',
-  //   isSuccess: true,
-  //   data: {
-  //     project: {
-  //       projectId: fakeProjectId,
-  //       name: payload.name,
-  //       rootNote: payload.rootNote,
-  //       mode: payload.mode,
-  //       tempo: payload.tempo,
-  //       timeSigNumerator: payload.timeSigNumerator,
-  //       timeSigDenominator: payload.timeSigDenominator,
-  //       totalBarCount: 0,
-  //       totalPlayTime: 0,
-  //     },
-  //     masterTrack: {
-  //       masterTrackId: fakeProjectId,
-  //       isSoloed: false,
-  //       isMuted: false,
-  //       volume: 1,
-  //       pan: 0,
-  //     },
-  //   },
-  // }
-
-  // =========================
-  // real API implementation
-  // =========================
   const response = await axiosInstance.post<CreateProjectResponse>(
       '/api/v1/projects',
       payload,

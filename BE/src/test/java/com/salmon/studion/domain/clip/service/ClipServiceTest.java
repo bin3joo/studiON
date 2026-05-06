@@ -42,7 +42,9 @@ import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -410,6 +412,8 @@ class ClipServiceTest {
                 store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
                 return null;
             }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+            lenient().doAnswer(inv -> new ArrayList<>(store.values()))
+                    .when(hashOperations).values(eq(CLIP_STATE_KEY));
         }
 
         private ClipResizeRequest resizeRequest(Integer clipId, Double startBar, Double length) {
@@ -504,6 +508,55 @@ class ClipServiceTest {
                     .isInstanceOf(BusinessException.class)
                     .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                             .isEqualTo(ErrorCode.CLIP_NOT_FOUND));
+        }
+
+        @Test
+        @DisplayName("같은 트랙 내 다른 클립과 겹치면 CLIP_OVERLAP 예외를 던진다")
+        void resizeFailWhenOverlap() throws JsonProcessingException {
+            // 대상 클립: trackId=1, start=1.0, duration=4.0
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START_BAR, ORIGINAL_LENGTH));
+            // 같은 트랙의 다른 클립: trackId=1, start=7.0, duration=3.0 → [7, 10)
+            store.put("99", objectMapper.writeValueAsString(
+                    ClipState.builder().clipId(99).trackId(1).start(7.0).duration(3.0).build()));
+
+            // 리사이즈 후 범위: [2.0, 2.0+8.0) = [2, 10) → 다른 클립 [7, 10)과 겹침
+            assertThatThrownBy(() -> clipService.resizeClip(
+                    resizeRequest(CLIP_ID, 2.0, 8.0), USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_OVERLAP));
+        }
+
+        @Test
+        @DisplayName("다른 트랙의 클립과 범위가 겹쳐도 예외를 던지지 않는다")
+        void resizeSuccessWhenOverlapOnDifferentTrack() throws JsonProcessingException {
+            // 대상 클립: trackId=1, start=1.0, duration=4.0
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START_BAR, ORIGINAL_LENGTH));
+            // 다른 트랙의 클립: trackId=2, start=2.0, duration=3.0
+            store.put("99", objectMapper.writeValueAsString(
+                    ClipState.builder().clipId(99).trackId(2).start(2.0).duration(3.0).build()));
+
+            // 리사이즈 후 범위: [2.0, 2.0+5.0) — 다른 트랙이므로 겹침 체크 제외
+            ClipResizeResponse response = clipService.resizeClip(
+                    resizeRequest(CLIP_ID, 2.0, 5.0), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
+        }
+
+        @Test
+        @DisplayName("같은 트랙 내 다른 클립과 겹치지 않으면 리사이즈 성공한다")
+        void resizeSuccessWhenNoOverlap() throws JsonProcessingException {
+            // 대상 클립: trackId=1, start=1.0, duration=4.0 → [1, 5)
+            store.put(String.valueOf(CLIP_ID), clipStateJson(ORIGINAL_START_BAR, ORIGINAL_LENGTH));
+            // 같은 트랙의 다른 클립: trackId=1, start=8.0, duration=2.0 → [8, 10)
+            store.put("99", objectMapper.writeValueAsString(
+                    ClipState.builder().clipId(99).trackId(1).start(8.0).duration(2.0).build()));
+
+            // 리사이즈 후 범위: [1.0, 1.0+5.0) = [1, 6) → [8, 10)과 겹치지 않음
+            ClipResizeResponse response = clipService.resizeClip(
+                    resizeRequest(CLIP_ID, 1.0, 5.0), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(CLIP_ID);
         }
 
         @Nested

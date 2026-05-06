@@ -200,6 +200,25 @@ public class ClipService {
         Double beforeStart = state.getStart();
         Double beforeDuration = state.getDuration();
 
+        // 같은 트랙 내 다른 클립과 겹침 여부 확인
+        String clipHashKey = String.format(CLIP_STATE_KEY, request.getProjectId());
+        List<Object> allClipValues = redisTemplate.opsForHash().values(clipHashKey);
+        for (Object val : allClipValues) {
+            try {
+                ClipState other = objectMapper.readValue((String) val, ClipState.class);
+                if (!other.getClipId().equals(request.getClipId())
+                        && other.getTrackId().equals(state.getTrackId())) {
+                    boolean overlaps = request.getStartBar() < other.getStart() + other.getDuration()
+                            && other.getStart() < request.getStartBar() + request.getLength();
+                    if (overlaps) {
+                        throw new BusinessException(ErrorCode.CLIP_OVERLAP);
+                    }
+                }
+            } catch (JsonProcessingException e) {
+                throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+            }
+        }
+
         ClipState updated = ClipState.builder()
                 .clipId(state.getClipId())
                 .trackId(state.getTrackId())

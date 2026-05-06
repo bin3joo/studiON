@@ -21,9 +21,14 @@ import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipSplitResponse;
+import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.audio.service.AudioService;
+import com.salmon.studion.domain.clip.dto.request.ClipCreateRequest;
+import com.salmon.studion.domain.clip.dto.response.ClipCreateResponse;
 import com.salmon.studion.domain.clip.entity.Clip;
+import com.salmon.studion.domain.clip.entity.ClipCreateEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipDeleteEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipDuplicateEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
@@ -33,6 +38,7 @@ import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
 import com.salmon.studion.domain.clip.entity.ClipSplitEventDocument;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
 import com.salmon.studion.domain.clip.repository.ClipRepository;
+import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.repository.TrackRepository;
@@ -64,6 +70,7 @@ public class ClipService {
     private static final String DELETED_CLIPS_KEY = "project:%d:deleted_clips";
 
     private final ProjectService projectService;
+    private final AudioService audioService;
     private final ClipRepository clipRepository;
     private final ClipEventRepository clipEventRepository;
     private final TrackRepository trackRepository;
@@ -194,6 +201,80 @@ public class ClipService {
                 .clipId(request.getClipId())
                 .isLocked(request.getIsLocked())
                 .userId(userId)
+                .build();
+    }
+
+    /*
+        오디오를 트랙에 import할 때 클립을 생성하는 메서드
+        audioDurationMs와 프로젝트 BPM/박자로 duration(bars)을 계산한다.
+     */
+    public ClipCreateResponse createClip(ClipCreateRequest request, Integer userId) {
+        request.validate();
+
+        Project project = projectService.getProjectOrThrow(request.getProjectId());
+
+        AudioMetadata audioMetadata = audioService.createAudioMetadata(
+                AudioMetadataCreateRequest.builder()
+                        .objectKey(request.getObjectKey())
+                        .originalName(request.getOriginalName())
+                        .storedName(request.getStoredName())
+                        .mimeType(request.getMimeType())
+                        .sizeBytes(request.getSizeBytes())
+                        .durationMs(request.getDurationMs())
+                        .build()
+        );
+
+        double durationBars = (audioMetadata.getDurationMs() / 1000.0)
+                * (project.getTempo() / 60.0)
+                / project.getTimeSigNumerator();
+
+        Integer clipId = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+
+        ClipState state = ClipState.builder()
+                .clipId(clipId)
+                .trackId(request.getTrackId())
+                .start(request.getStartBar())
+                .duration(durationBars)
+                .audioMetadataId(audioMetadata.getId())
+                .color(request.getColor())
+                .audioStartMs(0)
+                .audioDurationMs(audioMetadata.getDurationMs())
+                .build();
+
+        saveClipStateToRedis(request.getProjectId(), state);
+
+        Long sequenceNo = redisTemplate.opsForValue()
+                .increment(String.format(CLIP_EVENT_SEQ_KEY, request.getProjectId()));
+
+        try {
+            clipEventRepository.save(ClipCreateEventDocument.builder()
+                    .event("CLIP_CREATE")
+                    .projectId(request.getProjectId())
+                    .clipId(clipId)
+                    .userId(userId)
+                    .sequenceNo(sequenceNo)
+                    .timestamp(LocalDateTime.now())
+                    .trackId(request.getTrackId())
+                    .audioMetadataId(audioMetadata.getId())
+                    .startBar(request.getStartBar())
+                    .duration(durationBars)
+                    .undoable(true)
+                    .undone(false)
+                    .build());
+        } catch (Exception e) {
+            log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_CREATE, clipId={}", clipId, e);
+        }
+
+        return ClipCreateResponse.builder()
+                .clipId(clipId)
+                .trackId(request.getTrackId())
+                .startBar(request.getStartBar())
+                .duration(durationBars)
+                .color(request.getColor())
+                .audioMetadataId(audioMetadata.getId())
+                .audioStartMs(0)
+                .audioDurationMs(audioMetadata.getDurationMs())
                 .build();
     }
 

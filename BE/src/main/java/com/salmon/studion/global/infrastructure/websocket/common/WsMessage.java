@@ -1,4 +1,4 @@
-package com.salmon.studion.global.infrastructure.websocket;
+package com.salmon.studion.global.infrastructure.websocket.common;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;

@@ -1,11 +1,12 @@
 package com.salmon.studion.global.infrastructure.websocket;
 
+import com.salmon.studion.global.infrastructure.websocket.util.WebSocketSessionUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
 
 @Component
 public class ProjectSessionManager {
@@ -28,5 +29,11 @@ public class ProjectSessionManager {
 
     public Set<WebSocketSession> getSessions(Integer projectId) {
         return projectSessions.getOrDefault(projectId, Set.of());
+    }
+
+    public boolean hasUserSession(Integer projectId, Integer userId) {
+        return getSessions(projectId).stream()
+                .map(WebSocketSessionUtils::getUserId)
+                .anyMatch(userId::equals);
     }
 }

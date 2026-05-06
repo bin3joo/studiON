@@ -3,6 +3,7 @@ import ThemeToggle from '@/shared/ui/theme/ThemeToggle.vue'
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
 import ProfileSetupForm from './components/ProfileSetupForm.vue'
+
 </script>
 
 <template>

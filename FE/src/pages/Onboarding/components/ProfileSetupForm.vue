@@ -14,6 +14,9 @@ const authStore = useAuthStore()
 const positions = ref<Position[]>([])
 const selectedPositionCodes = ref<number[]>([])
 
+const activeGroupCode = ref<number | null>(null)
+const activePositionCode = ref<number | null>(null)
+
 const done = ref(false)
 const isLoading = ref(false)
 const errorMessage = ref('')
@@ -31,18 +34,16 @@ const groupedPositions = computed(() => {
   }>()
 
   positions.value.forEach((position) => {
-    const group = position.positionGroup
-
-    if (!groupMap.has(group.code)) {
-      groupMap.set(group.code, {
-        code: group.code,
-        name: group.name,
-        order: group.order,
+    if (!groupMap.has(position.groupCode)) {
+      groupMap.set(position.groupCode, {
+        code: position.groupCode,
+        name: position.groupName,
+        order: position.groupOrder,
         positions: [],
       })
     }
 
-    groupMap.get(group.code)?.positions.push(position)
+    groupMap.get(position.groupCode)?.positions.push(position)
   })
 
   return Array.from(groupMap.values())
@@ -51,6 +52,17 @@ const groupedPositions = computed(() => {
       positions: group.positions.sort((a, b) => a.order - b.order),
     }))
     .sort((a, b) => a.order - b.order)
+})
+
+const activeGroup = computed(() => {
+  if (activeGroupCode.value === null)
+    return null
+
+  return groupedPositions.value.find(group => group.code === activeGroupCode.value) ?? null
+})
+
+const activeGroupPositions = computed(() => {
+  return activeGroup.value?.positions ?? []
 })
 
 const selectedPositions = computed(() => {
@@ -68,17 +80,20 @@ onMounted(async () => {
     }
 
     positions.value = response.data
+
+    const firstGroup = groupedPositions.value[0]
+    if (firstGroup) {
+      activeGroupCode.value = firstGroup.code
+    }
   } catch (error) {
     console.error(error)
     errorMessage.value = '포지션 목록을 불러오지 못했습니다.'
   }
 })
 
-function togglePosition(positionCode: number) {
-  if (selectedPositionCodes.value.includes(positionCode)) {
-    selectedPositionCodes.value = selectedPositionCodes.value.filter(code => code !== positionCode)
+function addSelection(positionCode: number) {
+  if (selectedPositionCodes.value.includes(positionCode))
     return
-  }
 
   if (selectedPositionCodes.value.length >= MAX_SELECTIONS) {
     errorMessage.value = `포지션은 최대 ${MAX_SELECTIONS}개까지 선택할 수 있습니다.`
@@ -89,8 +104,39 @@ function togglePosition(positionCode: number) {
   selectedPositionCodes.value.push(positionCode)
 }
 
+function handleGroupClick(group: {
+  code: number
+  name: string
+  order: number
+  positions: Position[]
+}) {
+  activeGroupCode.value = group.code
+  activePositionCode.value = null
+
+  const hasSubOptions = group.positions.length > 1
+
+  if (!hasSubOptions) {
+    const onlyPosition = group.positions[0]
+    if (onlyPosition) {
+      activePositionCode.value = onlyPosition.code
+      addSelection(onlyPosition.code)
+    }
+  }
+}
+
+function handlePositionClick(position: Position) {
+  activePositionCode.value = position.code
+  addSelection(position.code)
+}
+
 function removeSelection(positionCode: number) {
   selectedPositionCodes.value = selectedPositionCodes.value.filter(code => code !== positionCode)
+}
+
+function isGroupPicked(group: {
+  positions: Position[]
+}) {
+  return group.positions.some(position => selectedPositionCodes.value.includes(position.code))
 }
 
 async function handleSubmit() {
@@ -167,42 +213,56 @@ function handleEditAgain() {
       </div>
 
       <div class="mt-10">
-        <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">
-          포지션
-        </span>
+  <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">
+    포지션
+  </span>
 
-        <p
-          v-if="positions.length === 0 && !errorMessage"
-          class="mt-4 text-sm text-muted-foreground"
-        >
-          포지션 목록을 불러오는 중입니다.
-        </p>
+  <p
+    v-if="positions.length === 0 && !errorMessage"
+    class="mt-4 text-sm text-muted-foreground"
+  >
+    포지션 목록을 불러오는 중입니다.
+  </p>
 
-        <div
-          v-for="group in groupedPositions"
-          :key="group.code"
-          class="mt-6"
-        >
-          <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">
-            {{ group.name }}
-          </span>
+  <div class="mt-4 flex flex-wrap gap-2.5">
+    <button
+      v-for="group in groupedPositions"
+      :key="group.code"
+      type="button"
+      class="rounded-full px-5 py-2 text-sm transition"
+      :class="activeGroupCode === group.code || isGroupPicked(group)
+        ? 'bg-foreground text-background shadow-[0_0_20px_hsl(0_0%_100%/0.15)]'
+        : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
+      @click="handleGroupClick(group)"
+    >
+      {{ group.name }}
+    </button>
+  </div>
+</div>
 
-          <div class="mt-4 flex flex-wrap gap-2.5">
-            <button
-              v-for="position in group.positions"
-              :key="position.code"
-              type="button"
-              class="rounded-full px-5 py-2 text-sm transition"
-              :class="selectedPositionCodes.includes(position.code)
-                ? 'bg-foreground text-background shadow-[0_0_20px_hsl(0_0%_100%/0.15)]'
-                : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
-              @click="togglePosition(position.code)"
-            >
-              {{ position.name }}
-            </button>
-          </div>
-        </div>
-      </div>
+<div
+  v-if="activeGroup && activeGroupPositions.length > 1"
+  class="mt-10 animate-fade-in"
+>
+  <span class="text-[11px] uppercase tracking-[0.35em] text-muted-foreground/80">
+    {{ activeGroup.name }}
+  </span>
+
+  <div class="mt-4 space-y-2.5">
+    <button
+      v-for="position in activeGroupPositions"
+      :key="position.code"
+      type="button"
+      class="block w-full rounded-full px-6 py-3 text-left text-sm transition"
+      :class="activePositionCode === position.code || selectedPositionCodes.includes(position.code)
+        ? 'bg-foreground text-background shadow-[0_0_24px_hsl(0_0%_100%/0.15)]'
+        : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
+      @click="handlePositionClick(position)"
+    >
+      {{ position.name }}
+    </button>
+  </div>
+</div>
 
       <p
         v-if="errorMessage"

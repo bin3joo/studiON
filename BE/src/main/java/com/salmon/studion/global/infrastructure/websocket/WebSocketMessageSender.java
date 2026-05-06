@@ -1,6 +1,7 @@
 package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.global.infrastructure.websocket.common.WsErrorResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

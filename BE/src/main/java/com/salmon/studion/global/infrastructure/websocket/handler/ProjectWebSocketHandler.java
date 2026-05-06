@@ -1,7 +1,12 @@
-package com.salmon.studion.global.infrastructure.websocket;
+package com.salmon.studion.global.infrastructure.websocket.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.project.service.ProjectPresenceService;
+import com.salmon.studion.global.common.enums.ProjectWebSocketEventType;
 import com.salmon.studion.global.exception.BusinessException;
+import com.salmon.studion.global.infrastructure.websocket.*;
+import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
+import com.salmon.studion.global.infrastructure.websocket.util.WebSocketSessionUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -19,14 +24,16 @@ import java.util.Map;
 public class ProjectWebSocketHandler extends TextWebSocketHandler {
 
     private final ProjectSessionManager sessionManager;
+    private final ProjectPresenceService projectPresenceService;
     private final ObjectMapper objectMapper;
+    private final ProjectJoinEventHandler projectJoinEventHandler;
     private final TrackEventHandler trackEventHandler;
     private final ClipEventHandler clipEventHandler;
     private final WebSocketMessageSender webSocketMessageSender;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        Integer projectId = extractProjectId(session);
+        Integer projectId = WebSocketSessionUtils.getProjectId(session);
         sessionManager.register(projectId, session);
         log.info("[WS 연결 성공]: session_id={}, project_id={}", session.getId(), projectId);
     }
@@ -36,10 +43,15 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
         WsMessage<Map> raw = objectMapper.readValue(message.getPayload(), objectMapper.getTypeFactory()
                 .constructParametricType(WsMessage.class, Map.class));
         String event = raw.getEvent();
-        Integer projectId = extractProjectId(session);
+        Integer projectId = WebSocketSessionUtils.getProjectId(session);
+        Integer userId = WebSocketSessionUtils.getUserId(session);
 
         try {
-            if(event.startsWith("TRACK_")){
+            ProjectWebSocketEventType projectEventType = ProjectWebSocketEventType.from(event);
+            if (projectEventType != null) {
+                projectJoinEventHandler.handleProjectEvent(session, projectId, userId, projectEventType, raw);
+            }
+            else if(event.startsWith("TRACK_")){
                 trackEventHandler.handleTrackEvent(session, projectId, event, raw);
             }
             else if(event.startsWith("CLIP_")){
@@ -58,13 +70,14 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        Integer projectId = extractProjectId(session);
-        sessionManager.remove(projectId, session);
-        log.info("[WS 연결 종료]: session_id={}, project_id={}", session.getId(), projectId);
-    }
+        Integer projectId = WebSocketSessionUtils.getProjectId(session);
+        Integer userId = WebSocketSessionUtils.getUserId(session);
 
-    private Integer extractProjectId(WebSocketSession session) {
-        String path = session.getUri().getPath();
-        return Integer.parseInt(path.split("/")[3]);
+        sessionManager.remove(projectId, session);
+        if (userId != null && !sessionManager.hasUserSession(projectId, userId)) {
+            projectPresenceService.removeProjectUser(projectId, userId);
+        }
+
+        log.info("[WS 연결 종료]: session_id={}, project_id={}", session.getId(), projectId);
     }
 }

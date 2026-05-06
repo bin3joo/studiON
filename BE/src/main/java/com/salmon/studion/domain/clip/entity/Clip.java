@@ -15,7 +15,6 @@ import lombok.NoArgsConstructor;
 public class Clip extends BaseEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -40,4 +39,26 @@ public class Clip extends BaseEntity {
 
     @Column(name = "audio_duration_ms", nullable = false)
     private Integer audioDurationMs = 0;
+
+    public static Clip create(Integer id, Track track, AudioMetadata audioMetadata, String color,
+                               Double start, Double duration, Integer audioStartMs, Integer audioDurationMs) {
+        Clip clip = new Clip();
+        clip.id = id;
+        clip.track = track;
+        clip.audioMetadata = audioMetadata;
+        clip.color = color != null ? color : "#FFFFFF";
+        clip.start = start != null ? start : 1.0;
+        clip.duration = duration != null ? duration : 1.0;
+        clip.audioStartMs = audioStartMs != null ? audioStartMs : 0;
+        clip.audioDurationMs = audioDurationMs != null ? audioDurationMs : 0;
+        return clip;
+    }
+
+    public void update(Track track, Double start, Double duration, Integer audioStartMs, Integer audioDurationMs) {
+        this.track = track;
+        this.start = start;
+        this.duration = duration;
+        this.audioStartMs = audioStartMs;
+        this.audioDurationMs = audioDurationMs;
+    }
 }

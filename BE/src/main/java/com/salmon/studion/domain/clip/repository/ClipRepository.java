@@ -25,4 +25,7 @@ public interface ClipRepository extends JpaRepository<Clip, Integer> {
         AND t.project.id = :projectId
     """)
     List<Clip> findAllByIdsAndProjectIdWithAudioMetadata(@Param("clipIds") List<Integer> clipIds, @Param("projectId") Integer projectId);
+
+    @Query("SELECT c FROM Clip c WHERE c.track.project.id = :projectId")
+    List<Clip> findAllByProjectId(@Param("projectId") Integer projectId);
 }

@@ -43,10 +43,10 @@ export const useTrackStore = defineStore('track', () => {
     const bpm = ref(120);
     Tone.getTransport().bpm.value = bpm.value;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
-    
+
     //마스터 트랙의 패닝을 제어하기 위한 글로벌 마스터 패너 생성
     const masterPanner = new Tone.Panner(0).toDestination();
-    
+
     //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
     watch(bpm, (newBpm) => {
         Tone.getTransport().bpm.value = newBpm;
@@ -308,17 +308,17 @@ export const useTrackStore = defineStore('track', () => {
         },
         // 트랙 볼륨
         emitTrackVolume: async (projectId: number, trackId: number, volume: number) => {
-            return new Promise<any>(resolve =>  
-                setTimeout(() => 
+            return new Promise<any>(resolve =>
+                setTimeout(() =>
                     resolve({ event: "TRACK_VOLUME_CHANGE", trackId, volume }),
-                300));
+                    300));
         },
         // 트랙 패닝
         emitTrackPan: async (projectId: number, trackId: number, pan: number) => {
             return new Promise<any>(resolve =>
                 setTimeout(() =>
                     resolve({ event: "TRACK_PAN_CHANGE", trackId, pan }),
-                300));
+                    300));
         },
         // 트랙 이름 변경
         emitTrackRename: async (projectId: number, trackId: number, name: string) => {
@@ -352,13 +352,13 @@ export const useTrackStore = defineStore('track', () => {
             // 1. 임시 Blob URL 생성
             const cdnUrl = URL.createObjectURL(file);
             console.log(`[Upload] 1. Blob URL 생성 완료: ${cdnUrl}`);
-            
+
             // 2. Tone.Player를 먼저 생성하여 오디오를 완벽히 디코딩하고 메모리에 올립니다.
             const newPlayer = new Tone.Player();
             console.log(`[Upload] 2. Tone.Player 생성 및 오디오 로드 시작...`);
             await newPlayer.load(cdnUrl);
             console.log(`[Upload] 3. 오디오 로드 완료! 버퍼 길이: ${newPlayer.buffer.duration}초`);
-            
+
             // 3. 연속 업로드 시 브라우저 오디오 정책으로 인해 엔진이 멈추는 현상 방어
             if (Tone.getContext().state !== 'running') {
                 console.log(`[Upload] 4. AudioContext 상태가 '${Tone.getContext().state}' 입니다. Resume 시도...`);
@@ -379,7 +379,7 @@ export const useTrackStore = defineStore('track', () => {
             // 5. 정확한 길이를 마디(Bar) 단위로 변환 후 서버에 전송
             const durationBar = (durationMs / 1000) / secondsPerBar.value;
             console.log(`[Upload] 6. 마디 변환 완료: ${durationBar}마디`);
-            
+
             console.log(`[Upload] 7. 서버에 추가 이벤트 전송 중...`);
             const response = await mockServerAPI.emitAddAudioClip(
                 projectInfo.value.projectId, trackId, metaData.audioMetadataId, startBar, durationBar
@@ -400,22 +400,22 @@ export const useTrackStore = defineStore('track', () => {
                     isSelected: false,
                     isDragging: false
                 };
-                
+
                 targetTrack.clips.push(newClip);
                 checkAndExpandTimeline(newClip.start + newClip.duration);
 
                 const targetChannel = trackChannels.get(trackId);
                 if (targetChannel) {
                     console.log(`[Upload] 9. Player를 트랙 채널에 연결합니다.`);
-                    newPlayer.connect(targetChannel); 
-                    clipPlayers.set(newClip.clipId, newPlayer); 
-                    
+                    newPlayer.connect(targetChannel);
+                    clipPlayers.set(newClip.clipId, newPlayer);
+
                     console.log(`[Upload] 10. resyncClip 호출 전...`);
-                    resyncClip(newClip.clipId, newClip.start); 
+                    resyncClip(newClip.clipId, newClip.start);
                     console.log(`[Upload] 11. 🚀 업로드 및 스케줄링 완벽 종료! (클립 ID: ${newClip.clipId})`);
                 } else {
                     console.error(`[Upload 🚨] 타겟 트랙 채널을 찾을 수 없습니다!`);
-                    newPlayer.dispose(); 
+                    newPlayer.dispose();
                 }
             } else {
                 console.error(`[Upload 🚨] 트랙 리스트에서 타겟 트랙을 찾을 수 없습니다!`);
@@ -639,7 +639,7 @@ export const useTrackStore = defineStore('track', () => {
             const targetChannel = trackChannels.get(response.targetTrackId);
             if (targetChannel && duplicatedClip.audio?.cdnUrl) {
                 const newPlayer = new Tone.Player().connect(targetChannel);
-              newPlayer.load(duplicatedClip.audio.cdnUrl).then(() => {
+                newPlayer.load(duplicatedClip.audio.cdnUrl).then(() => {
                     const exactStartTimeSec = duplicatedClip.start * secondsPerBar.value;
                     const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
                     const audioDurationSec = clip.duration * secondsPerBar.value;
@@ -817,7 +817,7 @@ export const useTrackStore = defineStore('track', () => {
         console.log(`[통신] 트랙 추가(ADD_TRACK) 요청 중...`);
         try {
             const response: any = await mockServerAPI.emitAddTrack(projectInfo.value.projectId, newTrackName);
-            
+
             const newTrack: TrackUIState = {
                 trackId: response.trackId,
                 name: response.name,
@@ -836,7 +836,7 @@ export const useTrackStore = defineStore('track', () => {
 
             //  1. 새 트랙의 오디오 믹서 채널 생성
             const channel = new Tone.Channel(newTrack.volume, newTrack.pan).connect(masterPanner);
-            
+
             //  2. 생성한 채널을 보관함(Map)에 반드시 저장
             trackChannels.set(newTrack.trackId, channel);
 
@@ -846,7 +846,7 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
-   // ==========================================
+    // ==========================================
     // 오디오 출력 상태 동기화 (Solo / Mute 통합 관리)
     // ==========================================
     const syncEffectiveMuteStates = () => {
@@ -874,7 +874,7 @@ export const useTrackStore = defineStore('track', () => {
         if (!track) return;
 
         track.isMuted = !track.isMuted;
-        
+
         // 변경된 상태를 기준으로 전체 트랙 오디오 실제 출력 재계산
         syncEffectiveMuteStates();
 
@@ -902,7 +902,7 @@ export const useTrackStore = defineStore('track', () => {
                     t.isSoloed = false; // UI 상태 해제
                     const channel = trackChannels.get(t.trackId);
                     if (channel) channel.solo = false; // 오디오 엔진 솔로 해제
-                    
+
                     // 서버에도 다른 트랙들의 솔로가 꺼졌음을 알림
                     mockServerAPI.emitTrackSolo(projectInfo.value.projectId, t.trackId, false).catch(e => console.error(e));
                 }
@@ -923,13 +923,13 @@ export const useTrackStore = defineStore('track', () => {
         } catch (e) {
             console.error("솔로 통신 실패", e);
             // 통신 실패 시 원상복구
-            targetTrack.isSoloed = !targetTrack.isSoloed; 
-            syncEffectiveMuteStates(); 
+            targetTrack.isSoloed = !targetTrack.isSoloed;
+            syncEffectiveMuteStates();
         }
     };
 
     // 트랙 볼륨 조절 (-60dB ~ 6dB)
-   const setTrackVolume = (trackId: number, volume: number) => {
+    const setTrackVolume = (trackId: number, volume: number) => {
         if (trackId === 999999) {
             masterTrack.value.volume = volume;
             Tone.getDestination().volume.value = volume; // 글로벌 마스터 볼륨 조절
@@ -947,25 +947,25 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // ==========================================
-// 볼륨 UI 정중앙(0dB) 비선형 매핑 로직
-// ==========================================
-// 1. 실제 볼륨(dB) -> 화면 슬라이더 위치(%)
-const getVolumePercent = (vol: number) => {
-  if (vol <= 0) {
-    return ((vol + 60) / 60) * 50; // -60~0dB 구간을 0~50% 영역에 그림
-  } else {
-    return 50 + (vol / 6) * 50;    // 0~6dB 구간을 50~100% 영역에 그림
-  }
-};
+    // 볼륨 UI 정중앙(0dB) 비선형 매핑 로직
+    // ==========================================
+    // 1. 실제 볼륨(dB) -> 화면 슬라이더 위치(%)
+    const getVolumePercent = (vol: number) => {
+        if (vol <= 0) {
+            return ((vol + 60) / 60) * 50; // -60~0dB 구간을 0~50% 영역에 그림
+        } else {
+            return 50 + (vol / 6) * 50;    // 0~6dB 구간을 50~100% 영역에 그림
+        }
+    };
 
-// 2. 화면 슬라이더 위치(%) -> 실제 볼륨(dB)
-const getVolumeFromPercent = (percent: number) => {
-  if (percent <= 50) {
-    return (percent / 50) * 60 - 60; // 0~50% 클릭 시 -60~0dB 로 변환
-  } else {
-    return ((percent - 50) / 50) * 6; // 50~100% 클릭 시 0~6dB 로 변환
-  }
-};
+    // 2. 화면 슬라이더 위치(%) -> 실제 볼륨(dB)
+    const getVolumeFromPercent = (percent: number) => {
+        if (percent <= 50) {
+            return (percent / 50) * 60 - 60; // 0~50% 클릭 시 -60~0dB 로 변환
+        } else {
+            return ((percent - 50) / 50) * 6; // 50~100% 클릭 시 0~6dB 로 변환
+        }
+    };
 
     // 트랙 패닝 조절 (-100 ~ 100)
     const setTrackPan = (trackId: number, pan: number) => {
@@ -1226,7 +1226,7 @@ const getVolumeFromPercent = (percent: number) => {
     //클립 위치가 변경되었을 때 오디오 엔진 스케줄을 재설정 하는 함수
     const resyncClip = (clipId: number, newStartBar: number) => {
         console.log(`  └─ [Resync] 클립 ID ${clipId} 재동기화 시작 (새 위치: ${newStartBar}마디)`);
-        
+
         const player = clipPlayers.get(clipId);
         if (!player) {
             console.error(`  └─ [Resync 🚨] 클립 ID ${clipId}의 오디오 플레이어를 찾을 수 없습니다! (유령 클립)`);
@@ -1259,7 +1259,7 @@ const getVolumeFromPercent = (percent: number) => {
         const requestedDuration = targetClip.duration * secondsPerBar.value;
 
         const safeDurationSec = Math.max(0.01, Math.min(requestedDuration, maxDuration));
-        
+
         console.log(`  └─ [Resync] 타임라인 스케줄링 -> 시작: ${exactStartTimeSec.toFixed(2)}초, Offset: ${audioOffsetSec.toFixed(2)}초, 재생길이: ${safeDurationSec.toFixed(2)}초`);
 
         if (safeDurationSec > 0) {
@@ -1354,19 +1354,19 @@ const getVolumeFromPercent = (percent: number) => {
     };
 
     socketService.subscribe('CLIP_LOCK', (data) => {
-    // 📥 서버(혹은 가상 서버)에서 누군가 클립을 잠갔다는 알림이 옴!
-    // 내 화면의 클립 자물쇠를 그에 맞게 업데이트!
-    const track = trackList.value.find(t => t.clips.some(c => c.clipId === data.clipId));
-    if (track) {
-        const clip = track.clips.find(c => c.clipId === data.clipId);
-        if (clip) {
-            clip.isLocked = data.isLocked; // 내 화면에도 자물쇠 찰칵!
+        // 📥 서버(혹은 가상 서버)에서 누군가 클립을 잠갔다는 알림이 옴!
+        // 내 화면의 클립 자물쇠를 그에 맞게 업데이트!
+        const track = trackList.value.find(t => t.clips.some(c => c.clipId === data.clipId));
+        if (track) {
+            const clip = track.clips.find(c => c.clipId === data.clipId);
+            if (clip) {
+                clip.isLocked = data.isLocked; // 내 화면에도 자물쇠 찰칵!
+            }
         }
-    }
-});
+    });
 
-// 2. 내가 액션을 했을 때 서버로 쏘기
-// 1. 내가 클립을 잡았을 때 서버에 Lock 요청
+    // 2. 내가 액션을 했을 때 서버로 쏘기
+    // 1. 내가 클립을 잡았을 때 서버에 Lock 요청
     const lockClip = (clipId: number, trackId: number) => {
         socketService.publish('CLIP_LOCK', {
             projectId: projectInfo.value.projectId,
@@ -1479,6 +1479,6 @@ const getVolumeFromPercent = (percent: number) => {
         reorderTrack,
         lockClip,
         unlockClip,
-       
+
     };
 });

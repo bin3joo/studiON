@@ -13,6 +13,7 @@ import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.service.ClipService;
 import com.salmon.studion.global.infrastructure.websocket.WebSocketMessageSender;
 import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
+import com.salmon.studion.global.infrastructure.websocket.util.WebSocketSessionUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -30,8 +31,7 @@ public class ClipEventHandler {
     private final ClipService clipService;
 
     public void handleClipEvent(WebSocketSession session, Integer projectId, String event, WsMessage<Map> raw) throws IOException {
-        // TODO: 인증 구현 후 SecurityContext에서 userId 추출
-        Integer userId = 0;
+        Integer userId = WebSocketSessionUtils.getUserId(session);
 
         Object response = null;
         switch (event){

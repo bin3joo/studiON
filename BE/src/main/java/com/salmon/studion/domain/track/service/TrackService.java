@@ -2,8 +2,10 @@ package com.salmon.studion.domain.track.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
+import com.salmon.studion.global.common.enums.TrackType;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
 import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
@@ -36,6 +38,8 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -45,6 +49,7 @@ public class TrackService {
     private static final String TRACKS_KEY = "project:%d:tracks";
     private static final String TRACK_ID_SEQ_KEY = "project:%d:track:id_seq";
     private static final String EVENT_SEQ_KEY = "project:%d:event:seq";
+    private static final String DELETED_TRACKS_KEY = "project:%d:deleted_tracks";
 
     private final ProjectService projectService;
     private final TrackRepository trackRepository;
@@ -61,7 +66,67 @@ public class TrackService {
         return trackRepository.findByProject_Id(projectId);
     }
 
+    /*
+        Redis의 트랙에 대한 현재 상태를 RDB로 upsert + orphan delete
+     */
+    public void saveTrackByRedis(Integer projectId) {
+        // 삭제된 track RDB에서 제거
+        String deletedKey = String.format(DELETED_TRACKS_KEY, projectId);
+        Set<String> deletedIdStrs = redisTemplate.opsForSet().members(deletedKey);
+        if (deletedIdStrs != null && !deletedIdStrs.isEmpty()) {
+            List<Integer> deletedIds = deletedIdStrs.stream().map(Integer::parseInt).toList();
+            trackRepository.deleteAllById(deletedIds);
+        }
 
+        // Redis 트랙 upsert
+        String trackKey = String.format(TRACKS_KEY, projectId);
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(trackKey);
+        if (!entries.isEmpty()) {
+            List<TrackState> redisTrackList = entries.values().stream()
+                    .map(v -> parseTrackState((String) v))
+                    .toList();
+
+            Map<Integer, Track> rdbTrackMap = trackRepository.findByProject_Id(projectId).stream()
+                    .collect(Collectors.toMap(Track::getId, t -> t));
+
+            Project project = projectService.getProjectOrThrow(projectId);
+
+            List<Track> toSave = redisTrackList.stream()
+                    .map(state -> {
+                        Track existing = rdbTrackMap.get(state.getTrackId());
+                        if (existing != null) {
+                            existing.update(
+                                    state.getName(),
+                                    state.getPreTrackId(),
+                                    state.getPostTrackId(),
+                                    state.getIsSoloed(),
+                                    state.getIsMuted(),
+                                    state.getVolume(),
+                                    state.getPan()
+                            );
+                            return existing;
+                        }
+                        return Track.create(
+                                state.getTrackId(),
+                                project,
+                                state.getPreTrackId(),
+                                state.getPostTrackId(),
+                                TrackType.valueOf(state.getType().toUpperCase()),
+                                state.getName(),
+                                state.getIsSoloed(),
+                                state.getIsMuted(),
+                                state.getVolume(),
+                                state.getPan()
+                        );
+                    })
+                    .toList();
+
+            trackRepository.saveAll(toSave);
+        }
+
+        // deleted set 초기화
+        redisTemplate.delete(deletedKey);
+    }
 
     //////////////////////// Redis ////////////////////////
 
@@ -147,6 +212,10 @@ public class TrackService {
         }
 
         removeTrackToRedis(request.getProjectId(), track);
+        redisTemplate.opsForSet().add(
+                String.format(DELETED_TRACKS_KEY, request.getProjectId()),
+                String.valueOf(request.getTrackId())
+        );
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
@@ -405,6 +474,14 @@ public class TrackService {
                 .trackId(request.getTrackId())
                 .pan(request.getPan())
                 .build();
+    }
+
+    private TrackState parseTrackState(String json) {
+        try {
+            return objectMapper.readValue(json, TrackState.class);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
     }
 
     /*

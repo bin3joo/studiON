@@ -13,7 +13,6 @@ import lombok.*;
 public class Track extends BaseEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -52,6 +51,34 @@ public class Track extends BaseEntity {
         this.postTrackId = postTrackId;
         this.trackType = trackType != null ? trackType : TrackType.AUDIO;
         this.name = name;
+    }
+
+    public static Track create(Integer id, Project project, Integer preTrackId, Integer postTrackId,
+                               TrackType trackType, String name, Boolean isSoloed, Boolean isMuted,
+                               Double volume, Integer pan) {
+        Track track = new Track();
+        track.id = id;
+        track.project = project;
+        track.preTrackId = preTrackId;
+        track.postTrackId = postTrackId;
+        track.trackType = trackType != null ? trackType : TrackType.AUDIO;
+        track.name = name;
+        track.isSoloed = isSoloed != null ? isSoloed : false;
+        track.isMuted = isMuted != null ? isMuted : false;
+        track.volume = volume != null ? volume : 0.0;
+        track.pan = pan != null ? pan : 0;
+        return track;
+    }
+
+    public void update(String name, Integer preTrackId, Integer postTrackId,
+                       Boolean isSoloed, Boolean isMuted, Double volume, Integer pan) {
+        this.name = name;
+        this.preTrackId = preTrackId;
+        this.postTrackId = postTrackId;
+        this.isSoloed = isSoloed;
+        this.isMuted = isMuted;
+        this.volume = volume;
+        this.pan = pan;
     }
 
     public void updatePostTrackId(Integer postTrackId) {

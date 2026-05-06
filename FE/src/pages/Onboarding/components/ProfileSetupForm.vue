@@ -280,23 +280,24 @@ function handleEditAgain() {
             포지션을 선택해주세요
           </span>
 
-          <span
-            v-for="selection in selectedPositions"
-            v-else
-            :key="selection.code"
-            class="inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5 text-sm text-foreground dark:bg-[hsl(230_20%_14%)]"
-          >
-            {{ selection.name }}
-
-            <button
-              type="button"
-              class="text-muted-foreground transition hover:text-fuchsia-500 dark:hover:text-fuchsia-400"
-              :aria-label="`${selection.name} 제거`"
-              @click="removeSelection(selection.code)"
+          <template v-else>
+            <span
+              v-for="selection in selectedPositions"
+              :key="selection.code"
+              class="inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5 text-sm text-foreground dark:bg-[hsl(230_20%_14%)]"
             >
-              <X class="h-3.5 w-3.5" />
-            </button>
-          </span>
+              {{ selection.name }}
+
+              <button
+                type="button"
+                class="text-muted-foreground transition hover:text-fuchsia-500 dark:hover:text-fuchsia-400"
+                :aria-label="`${selection.name} 제거`"
+                @click="removeSelection(selection.code)"
+              >
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </span>
+          </template>
         </div>
 
         <div class="mt-5 flex items-end justify-between gap-4">

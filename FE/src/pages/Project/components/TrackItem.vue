@@ -5,12 +5,17 @@ import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
 import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock} from 'lucide-vue-next';
+import type { TrackMeasureCommentGroup } from '../types/comment.types'
+import TrackCommentLayer from './TrackCommentLayer.vue'
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
   track: TrackUIState
   isMaster?: boolean //마스터 트랙인지 확인하는 용도
-}>();
+  hoveredMeasure?: number | null
+  hoveredTrackId?: string | null
+  commentedGroups?: TrackMeasureCommentGroup[]
+}>()
 
 //스토어 사용
 const trackStore = useTrackStore();
@@ -610,7 +615,24 @@ const finishEditName = () => {
 };
 
 // 부모(TrackList.vue)로 드래그 이벤트를 올려보내기 위한 정의
-defineEmits(['dragstart', 'dragend']);
+const emit = defineEmits<{
+  dragstart: [event: DragEvent]
+  dragend: [event: DragEvent]
+  'hover-measure': [payload: {
+    trackId: string | null
+    measure: number | null
+  }]
+  'submit-inline-comment': [payload: {
+    trackId: string
+    trackName: string
+    measure: number
+    content: string
+  }]
+  'resolve-comment': [payload: {
+    trackId: string
+    measure: number
+  }]
+}>()
 
 </script>
 
@@ -647,8 +669,8 @@ defineEmits(['dragstart', 'dragend']);
         <div 
           class="flex min-w-0 flex-1 items-center gap-1.5 cursor-grab active:cursor-grabbing"
           :draggable="!isMaster"
-          @dragstart="$emit('dragstart', $event)"
-          @dragend="$emit('dragend', $event)"
+          @dragstart="emit('dragstart', $event)"
+          @dragend="emit('dragend', $event)"
         >
          <!-- 수정 모드: 인풋창 -->
           <input
@@ -928,7 +950,23 @@ defineEmits(['dragstart', 'dragend']);
           ></div>
         </div>
 
+        <TrackCommentLayer
+  :track-id="String(track.trackId)"
+  :track-name="track.name"
+  :total-bar-count="trackStore.projectInfo.totalBarCount"
+  :pixel-per-bar="trackStore.pixelPerBar"
+  :sub-division="trackStore.subDivision"
+  :timeline-width="trackStore.totalTimelineWidth"
+  :hovered-measure="hoveredMeasure ?? null"
+  :hovered-track-id="hoveredTrackId ?? null"
+  :commented-groups="commentedGroups ?? []"
+  @hover-measure="emit('hover-measure', $event)"
+  @submit-inline-comment="emit('submit-inline-comment', $event)"
+  @resolve-comment="emit('resolve-comment', $event)"
+/>
       </div> 
+
+      
 
       <!--재생바-->
       <div 

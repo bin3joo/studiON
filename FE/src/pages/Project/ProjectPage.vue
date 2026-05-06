@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
+import type { TrackMeasureCommentGroup, TimelineComment, AddCommentPayload } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
 import ProjectHeader from './components/ProjectHeader.vue'
 import TrackList from './components/TrackList.vue' //트랙 리스트 컴포넌트
@@ -16,6 +16,8 @@ import TrackItem from './components/TrackItem.vue'//트랙 아이템 마스터 �
 import RemoteCursors from './components/RemoteCursors.vue' //커서 컴포넌트
 import { useCollabStore } from './store/useCollabStore';//공동 작업 스토어 
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
+import { useTrackComments } from './composables/useTrackComments'
+
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -250,6 +252,31 @@ onUnmounted(()=>{
 const isInviteModalOpen = ref(false)
 const activeSidePanel = ref<SidePanelType>(null)
 
+  const mockStompClient = {
+  connected: true,
+
+  publish: ({ destination, body }: { destination: string; body: string }) => {
+    console.log('[댓글 웹소켓 mock] 전송 주소:', destination)
+    console.log('[댓글 웹소켓 mock] 전송 데이터:', JSON.parse(body))
+  },
+}
+
+const {
+  addComment,
+  handleSocketMessage,
+} = useTrackComments(mockStompClient)
+
+function parseTrackId(trackId: string) {
+  const parsed = Number(trackId)
+
+  if (!Number.isNaN(parsed)) {
+    return parsed
+  }
+
+  const matched = trackId.match(/\d+/)
+  return matched ? Number(matched[0]) : 0
+}
+
 const hoveredMeasure = ref<number | null>(null)
 const hoveredTrackId = ref<string | null>(null)
 
@@ -340,6 +367,8 @@ function handleCloseSidePanel() {
 }
 
 function handleHoverMeasure(payload: { trackId: string | null, measure: number | null }) {
+  console.log('호버 이벤트 수신:', payload)
+
   hoveredTrackId.value = payload.trackId
   hoveredMeasure.value = payload.measure
 }
@@ -354,6 +383,32 @@ function handleSubmitInlineComment(payload: {
 
   if (!trimmed)
     return
+
+  const addCommentPayload: AddCommentPayload = {
+    projectId: Number(projectId),
+    trackId: parseTrackId(payload.trackId),
+    content: trimmed,
+    location: payload.measure,
+    mentionedUserIds: [],
+  }
+
+  addComment(addCommentPayload)
+
+  handleSocketMessage({
+    event: 'COMMENT_ADD',
+    data: {
+      commentId: Date.now(),
+      trackId: addCommentPayload.trackId,
+      content: trimmed,
+      location: payload.measure,
+      isResolved: false,
+      mentionedUsers: [],
+      createdBy: {
+        userId: 1,
+        nickname: '사용자',
+      },
+    },
+  })
 
   const target = commentGroups.value.find(group =>
     group.trackId === payload.trackId && group.measure === payload.measure,
@@ -469,6 +524,7 @@ const unlockAudioEngine = async () => {
 />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
+
       <div 
         ref="timelineContainerRef" 
         class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
@@ -479,16 +535,35 @@ const unlockAudioEngine = async () => {
           <TimelineRuler />
         </div>
 
-        <AiConflictOverlay v-if="aiConflict" :conflict="aiConflict" />
+        <AiConflictOverlay
+    v-if="aiConflict"
+    :conflict="aiConflict"
+  />
 
         <!--  [세로 스크롤] -->
         <div class="w-max min-w-full pb-[100px] flex-1">
-          <TrackList /> 
-        </div>
+  <TrackList
+    :hovered-measure="hoveredMeasure"
+    :hovered-track-id="hoveredTrackId"
+    :commented-groups="commentGroups"
+    @hover-measure="handleHoverMeasure"
+    @submit-inline-comment="handleSubmitInlineComment"
+    @resolve-comment="handleResolveComment"
+  />
+</div>
 
         <!-- 마스터 트랙 -->
         <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
-          <TrackItem :track="trackStore.masterTrack" :is-master="true" />
+          <TrackItem
+  :track="trackStore.masterTrack"
+  :is-master="true"
+  :hovered-measure="hoveredMeasure"
+  :hovered-track-id="hoveredTrackId"
+  :commented-groups="commentGroups"
+  @hover-measure="handleHoverMeasure"
+  @submit-inline-comment="handleSubmitInlineComment"
+  @resolve-comment="handleResolveComment"
+/>
         </div>
         
       </div>
@@ -496,15 +571,7 @@ const unlockAudioEngine = async () => {
 
     <section class="px-6 py-4">
       <div class="relative">
-        <ProjectEditSection
-          :hovered-measure="hoveredMeasure"
-          :hovered-track-id="hoveredTrackId"
-          :commented-groups="commentGroups"
-          @hover-measure="handleHoverMeasure"
-          @submit-inline-comment="handleSubmitInlineComment"
-          @resolve-comment="handleResolveComment"
-        />
-
+        
         <ProjectSidePanel
           :open="activeSidePanel !== null"
           :type="activeSidePanel"

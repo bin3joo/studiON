@@ -3,6 +3,7 @@
 import {ref} from 'vue'
 import {useTrackStore} from '../store/useTrackStore'
 import TrackItem from './TrackItem.vue'
+import type { TrackMeasureCommentGroup } from '../types/comment.types'
 
 //1.스토어에서 트랙 데이터를 꺼내옴
 const trackStore = useTrackStore();
@@ -52,6 +53,26 @@ const onDragEnd = (e: DragEvent) => {
   if (target) target.classList.remove('opacity-50');
 };
 
+const props = defineProps<{
+  hoveredMeasure: number | null
+  hoveredTrackId: string | null
+  commentedGroups: TrackMeasureCommentGroup[]
+}>()
+
+const emit = defineEmits<{
+  'hover-measure': [payload: { trackId: string | null; measure: number | null }]
+  'submit-inline-comment': [payload: {
+    trackId: string
+    trackName: string
+    measure: number
+    content: string
+  }]
+  'resolve-comment': [payload: {
+    trackId: string
+    measure: number
+  }]
+}>()
+
 </script>
 
 <template>
@@ -76,12 +97,20 @@ const onDragEnd = (e: DragEvent) => {
         }"
       >
        <TrackItem
-          :track="track"
-          :is-master="false"
-          @dragstart="onDragStart($event, track.trackId)"
-          @dragend="onDragEnd"
-        />
+  :track="track"
+  :is-master="false"
+  :hovered-measure="props.hoveredMeasure"
+  :hovered-track-id="props.hoveredTrackId"
+  :commented-groups="props.commentedGroups"
+  @hover-measure="emit('hover-measure', $event)"
+  @submit-inline-comment="emit('submit-inline-comment', $event)"
+  @resolve-comment="emit('resolve-comment', $event)"
+  @dragstart="onDragStart($event, track.trackId)"
+  @dragend="onDragEnd"
+/>
       </div>
+
+
     </div>
     
     <div 

@@ -37,4 +37,8 @@ public class ProjectMemberService {
             throw new BusinessException(ErrorCode.PROJECT_ACCESS_DENIED);
         }
     }
+
+    public List<Integer> getProjectMemberUserIds(Integer projectId, List<Integer> mentionedUserIds) {
+        return projectMemberRepository.findUserIdsInProject(projectId, mentionedUserIds);
+    }
 }

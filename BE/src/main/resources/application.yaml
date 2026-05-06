@@ -1,11 +1,12 @@
 spring:
   profiles:
     include: secret
+
   application:
     name: studion
 
   datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:3307/studion?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+    url: jdbc:mysql://${DB_HOST:localhost}:3307/${DB_NAME:studion}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -23,10 +24,12 @@ spring:
     init:
       mode: always
       data-locations: classpath:metadata/position-data.sql
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+
     mongodb:
       host: ${MONGODB_HOST:localhost}
       port: ${MONGODB_PORT:27017}
@@ -41,13 +44,21 @@ spring:
             client-secret: ${GOOGLE_CLIENT_SECRET}
             scope: email, profile
 
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration: ${JWT_EXPIRATION:86400000}
+    refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+    tmp-expiration: ${JWT_TMP_EXPIRATION:300000}
+
 cloud:
   aws:
     credentials:
       access-key: ${AWS_ACCESS_KEY}
       secret-key: ${AWS_SECRET_KEY}
+
     region:
       static: ap-northeast-2
+
     s3:
       bucket: ${AWS_S3_BUCKET}
       upload-url-expiration-minutes: ${AWS_UPLOAD_URL_EXPIRATION_MINUTES}

@@ -28,6 +28,19 @@ public class CommentMention extends BaseEntity {
     @JoinColumn(name = "user_id")
     private User user;
 
+    public static CommentMention create(Comment comment, User user) {
+        CommentMention commentMention = new CommentMention();
+        CommentMentionId id = new CommentMentionId();
+
+        id.commentId = comment.getId();
+        id.userId = user.getId();
+        commentMention.id = id;
+        commentMention.comment = comment;
+        commentMention.user = user;
+
+        return commentMention;
+    }
+
     @Embeddable
     @EqualsAndHashCode
     @Getter

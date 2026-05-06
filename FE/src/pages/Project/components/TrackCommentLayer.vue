@@ -2,6 +2,10 @@
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { SmilePlus, ArrowUp, X, Check } from 'lucide-vue-next'
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
+import { useTrackStore } from '../store/useTrackStore';
+
+
+const trackStore = useTrackStore();
 
 type Placement = 'top' | 'bottom'
 
@@ -261,13 +265,14 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
 
 <template>
   <div
-  ref="rootRef"
-  class="absolute left-0 top-0 z-[100] h-full pointer-events-auto"
-  :style="{
-    width: `${props.timelineWidth}px`,
-    minWidth: `${props.timelineWidth}px`,
-  }"
->
+    ref="rootRef"
+    class="absolute left-0 top-0 z-[100] h-full"
+    :class="trackStore.isCommentMode ? 'pointer-events-auto' : 'pointer-events-none'"
+    :style="{
+      width: `${props.timelineWidth}px`,
+      minWidth: `${props.timelineWidth}px`,
+    }"
+  >
 <!-- 등록된 댓글 마커 / 클러스터 레이어 -->
     <div class="pointer-events-none absolute inset-0 z-40">
       <button
@@ -287,23 +292,26 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
       </button>
     </div>
     <div
-  v-for="cell in commentCells"
-  :key="`${trackId}-${cell.key}-${pixelPerBar}-${subDivision}`"
-  class="absolute top-0 h-full pointer-events-auto"
-  :class="isExpanded(cell.location) ? 'z-[500]' : 'z-10'"
-  :style="{
-    left: `${cell.left}px`,
-    width: `${cell.width}px`,
-  }"
-  @mouseenter="emit('hover-measure', {
-    trackId,
-    measure: cell.location,
-  })"
-  @mouseleave="emit('hover-measure', {
-    trackId: null,
-    measure: null,
-  })"
->
+      v-for="cell in commentCells"
+      :key="`${trackId}-${cell.key}-${pixelPerBar}-${subDivision}`"
+      class="absolute top-0 h-full"
+      :class="[
+        trackStore.isCommentMode ? 'pointer-events-auto' : 'pointer-events-none',
+        isExpanded(cell.location) ? 'z-[500]' : 'z-10'
+      ]"
+      :style="{
+        left: `${cell.left}px`,
+        width: `${cell.width}px`,
+      }"
+      @mouseenter="emit('hover-measure', {
+        trackId,
+        measure: cell.location,
+      })"
+      @mouseleave="emit('hover-measure', {
+        trackId: null,
+        measure: null,
+      })"
+    >
       <!-- hover된 마디 세로 강조선 -->
       <div
         v-if="isActiveHover(cell.location)"

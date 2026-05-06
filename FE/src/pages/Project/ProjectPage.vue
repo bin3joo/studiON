@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment, AddCommentPayload } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -17,6 +17,7 @@ import RemoteCursors from './components/RemoteCursors.vue' //커서 컴포넌트
 import { useCollabStore } from './store/useCollabStore';//공동 작업 스토어 
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
 import { useTrackComments } from './composables/useTrackComments'
+import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
@@ -31,7 +32,7 @@ const projectName = computed(() => {
 })
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
-
+const authStore = useAuthStore(); // Auth 스토어 사용 준비
 
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
@@ -75,6 +76,12 @@ const handleWheel = (e: WheelEvent) => {
 const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // 입력창(input, textarea)에 포커스가 있을 때는 단축키를 무시해야 합니다. (이름/볼륨 수정 중 스페이스바 띄어쓰기 보호)
   if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+  // 대소문자 상관없이 순수하게 C키만 눌렀을 때 코멘트 모드 전환
+  if(e.code === 'KeyC' && !e.ctrlKey && !e.metaKey) {
+    trackStore.toggleCommentMode();
+    return;
+  }
 
   // 스페이스바 처리
   if(e.code === 'Space'){
@@ -219,9 +226,21 @@ onMounted(async () => {
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
-    //가상 웹소켓 연결
-    socketService.connect(Number(projectId));
+
+    // 토큰이 이미 있으면 바로 연결 (문자열인 projectId를 Number로 변환!)
+    if (authStore.accessToken) {
+      socketService.connect(Number(projectId)); 
+    } else {
+      // 토큰이 아직 복구되지 않았다면, 토큰이 들어오는 순간을 기다렸다가 연결
+      const unwatch = watch(() => authStore.accessToken, (newToken) => {
+        if (newToken) {
+          socketService.connect(Number(projectId)); // 여기도 Number() 추가!
+          unwatch(); // 한 번 연결했으면 감시 종료
+        }
+      });
+    }
   }
+  
   //키보드 이벤트 리스너 등록
   window.addEventListener('keydown', handleKeyDown);
   //  마우스 이동 감지

@@ -13,6 +13,9 @@ import { fileURLToPath, URL } from 'node:url'
 export default defineConfig({
   //바이트에 장착하는 플러그인
   plugins: [vue(), tailwindcss()],
+  define: {
+    global: 'window',
+  },
   resolve: {
     //dirname 설정파일이 있는 FE폴더, @는 src폴더를 가리킴
     alias: {
@@ -22,13 +25,13 @@ export default defineConfig({
 
   // TODO: 백엔드에 CORS 설정 추가되면 지워도 됨
   server: {
-  proxy: {
-    '/api': {
-      target: 'http://localhost:8080',
-      changeOrigin: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
-  },
-}
+  }
 
 
 })

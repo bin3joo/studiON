@@ -463,6 +463,7 @@ const handleFileUpload = (event: Event) => {
   const target = event.target as HTMLInputElement;
   if (target.files && target.files.length > 0) {
     const file = target.files[0];
+    console.log(`[디버그 - 2번 케이스: 탐색기 파일 선택] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
     // 우클릭했던 트랙 ID와 타임라인의 마디(Bar) 위치를 이용해 업로드 액션 실행
     trackStore.uploadAndAddAudioClip(file, menuState.value.targetTrackId, menuState.value.targetBar);
     
@@ -513,9 +514,11 @@ const onDrop = (e: DragEvent) => {
   if (!files || files.length === 0) return;
 
   const file = files[0];
+  console.log(`[디버그 - 1번 케이스: 드래그 앤 드롭] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
 
   // 2. 오디오 파일인지 검증 (mp3, wav 등)
   if (!file.type.startsWith('audio/')) {
+    console.warn(`[디버그 - 드래그 앤 드롭 차단됨] file.type이 'audio/'로 시작하지 않습니다. (현재: '${file.type}')`);
     alert('오디오 파일(mp3, wav 등)만 추가할 수 있습니다.');
     return;
   }

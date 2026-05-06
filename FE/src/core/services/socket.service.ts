@@ -1,94 +1,111 @@
+import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
+
 type EventHandler = (data: any) => void;
 
 class SocketService {
-  // 🌟 핵심: 현재 백엔드가 없으므로 true로 설정하여 가짜 통신 활성화
-  public isMockMode = true; 
-  
-  // 이벤트 타입별로 실행할 콜백 함수들을 모아두는 보관함
+  public isMockMode = false;
+
+  private ws: WebSocket | null = null;
+  private currentProjectId: number | null = null;
   private listeners: Map<string, EventHandler[]> = new Map();
 
-  // 1. 웹소켓 연결
   connect(projectId: number) {
-    if (this.isMockMode) {
-      // [가짜 마우스 움직임 시뮬레이션]
-      let fakeX = 500;
-      let fakeY = 300;
-      setInterval(() => {
-        fakeX += (Math.random() - 0.5) * 50; // 랜덤하게 움직임
-        fakeY += (Math.random() - 0.5) * 50;
-        
-        this.simulateIncomingEvent('CURSOR_MOVE', {
-          userId: 'user_999',
-          nickname: '협업자_버블',
-          color: '#FF3DCB',
-          x: fakeX,
-          y: fakeY
-        });
-      }, 100); // 0.1초마다 움직임
-      console.log(`[Socket Mock] 🟢 프로젝트 ${projectId} 가상 웹소켓 연결 성공!`);
-      // 가상의 다른 사용자가 접속해 있는 상황 시뮬레이션
-      setTimeout(() => {
-        this.simulateIncomingEvent('MEMBER_JOINED', {
-          joinedUser: { userId: 2, nickname: "협업자_버블" },
-          currentMembers: [
-            { userId: 1, nickname: "나" },
-            { userId: 2, nickname: "협업자_버블" }
-          ]
-        });
-      }, 1000);
-      return;
+    if (this.isMockMode) return;
+
+    this.currentProjectId = projectId;
+    const authStore = useAuthStore();
+    const token = authStore.accessToken;
+
+    // 🌟 추가된 디버깅 및 방어 코드 🌟
+    console.log("[Socket] 현재 가져온 토큰:", token);
+
+    if (!token) {
+      console.error("[Socket 🚨] 토큰이 없습니다! 소켓 연결을 중단합니다. (로그인 상태 확인 필요)");
+      return; // 토큰이 없으면 아예 연결 시도를 하지 않고 함수 종료
     }
 
-    // 나중에 실제 연동 시 여기에 SockJS + STOMP 클라이언트 생성 및 connect 로직 작성
-    // const socket = new SockJS('https://api.yourdomain.com/ws');
-    // this.stompClient = Stomp.over(socket);
-    // this.stompClient.connect({...});
+    // 🌟 1. baseUrl의 끝에 /ws를 빼고 순수 도메인까지만 잡습니다.
+    let baseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8080';
+    if (baseUrl.startsWith('http')) {
+      baseUrl = baseUrl.replace('http', 'ws');
+    }
+
+    // 🌟 2. 백엔드 엔드포인트(/ws/projects/{projectId})에 정확히 맞춥니다.
+    const wsUrl = `${baseUrl}/ws/projects/${projectId}?accessToken=${token}`;
+    this.ws = new WebSocket(wsUrl);
+
+    // 연결 성공 시
+    this.ws.onopen = () => {
+      console.log(`[Socket] 🟢 프로젝트 ${projectId} 순수 웹소켓 연결 성공!`);
+      this.publish('PROJECT_JOIN', { projectId });
+    };
+
+    // 메시지 수신 시 (STOMP의 subscribe 역할 대체)
+    this.ws.onmessage = (event) => {
+      try {
+        const receivedData = JSON.parse(event.data);
+
+        // 백엔드가 { event: '...', payload: {...} } 형태로 보낼 경우를 대비
+        const eventType = receivedData.event || receivedData.eventType;
+        // payload 껍데기가 있으면 알맹이만 꺼내고, 없으면 전체를 payload로 씀
+        const payload = receivedData.payload ? receivedData.payload : receivedData;
+
+        //console.log(`[Socket 📥] 수신 [${eventType}]:`, payload);
+
+        if (eventType && this.listeners.has(eventType)) {
+          const callbacks = this.listeners.get(eventType) || [];
+          callbacks.forEach(cb => cb(payload));
+        }
+      } catch (e) {
+        console.error(`[Socket 🚨] 메시지 파싱 에러:`, e);
+      }
+    };
+
+    // 에러 발생 시
+    this.ws.onerror = (error) => {
+      console.error('[Socket 🚨] 웹소켓 에러 발생:', error);
+    };
+
+    // 연결 종료 시
+    this.ws.onclose = () => {
+      console.log('[Socket] 🔴 웹소켓 연결 해제됨');
+    };
   }
 
-  // 2. 서버 구독 (이벤트 수신 대기)
+  // 컴포넌트에서 이벤트 리스너를 등록하는 함수
   subscribe(eventType: string, callback: EventHandler) {
     if (!this.listeners.has(eventType)) {
       this.listeners.set(eventType, []);
     }
     this.listeners.get(eventType)?.push(callback);
-    
-    if (!this.isMockMode) {
-        // 실제 STOMP subscribe 로직...
-        // this.stompClient.subscribe(`/topic/projects/${projectId}/${eventType}`, (msg) => callback(JSON.parse(msg.body)));
-    }
   }
 
-  // 3. 서버로 데이터 발행 (전송)
+  // 서버로 메시지 발신
   publish(eventType: string, payload: any) {
-    if (this.isMockMode) {
-      console.log(`[Socket Mock] 📤 서버로 전송됨 [${eventType}]:`, payload);
-
-      // 가짜 서버 딜레이(0.5초) 후, 백엔드가 모두에게 뿌려준 것처럼 수신 흉내
-      setTimeout(() => {
-        this.simulateIncomingEvent(eventType, payload);
-      }, 500);
+    if (this.isMockMode || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.currentProjectId) {
+      //console.warn(`[Socket ⚠️] 연결되지 않은 상태에서 전송 시도됨: ${eventType}`);
       return;
     }
 
-    // 실제 전송 로직
-    // this.stompClient.send(`/app/projects/${projectId}/${eventType}`, {}, JSON.stringify(payload));
+    // 🌟 백엔드의 WsMessage 객체 구조({ event: "...", payload: {...} })에 정확히 맞춥니다!
+    const message = {
+      event: eventType,
+      payload: payload
+    };
+
+    this.ws.send(JSON.stringify(message));
+    //console.log(`[Socket 📤] 발신 [${eventType}]:`, payload);
   }
 
-  // 연결 해제
   disconnect() {
-    console.log('[Socket Mock] 🔴 웹소켓 연결 해제됨');
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
     this.listeners.clear();
-    // 실제 연결 해제 로직...
-  }
-
-  // --- [테스트 전용 헬퍼 함수] ---
-  // 프론트엔드에서 강제로 '서버에서 알림이 온 것처럼' 이벤트를 쏴주는 함수
-  public simulateIncomingEvent(eventType: string, payload: any) {
-    console.log(`[Socket Mock] 📥 서버에서 수신됨 [${eventType}]:`, payload);
-    const callbacks = this.listeners.get(eventType) || [];
-    callbacks.forEach(cb => cb(payload)); 
+    this.currentProjectId = null;
+    console.log('[Socket] 🔴 웹소켓 수동 연결 해제 완료');
   }
 }
 
-// 싱글톤으로 export (어디서 임포트하든 똑같은 객체를 사용함)
 export const socketService = new SocketService();

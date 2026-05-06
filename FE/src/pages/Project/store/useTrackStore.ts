@@ -17,8 +17,11 @@ export const useTrackStore = defineStore('track', () => {
 
     //오디오 객체 보관함 만들기 순수 자바스크립트 객체 보관용이기 때문에 ref를 사용하지 않는다.
     //음원 파일의 데이터를 브라우저 메모리에 올려서 타이밍에 맞춰 스피커로 재생
-    const trackChannels = new Map<number, Tone.Channel>();  //트랙별 믹서(볼륨/솔로/뮤트)
-    const trackPanners = new Map<number, Tone.Panner>();    //트랙별 전용 패너 (Tone.Channel 자체 패닝 버그 우회용)
+    // [핵심] Tone.Channel은 내부 Solo→PanVol 노드 체인에서 모노 다운믹스가 발생하여 패닝이 불가능합니다.
+    // 따라서 Tone.Volume(볼륨/뮤트 전담) + Tone.Panner(패닝 전담)로 완전히 분리합니다.
+    // 신호 흐름: Player → Tone.Volume → Tone.Panner → masterPanner → Destination
+    const trackVolumes = new Map<number, Tone.Volume>();   // 트랙별 볼륨/뮤트 노드
+    const trackPanners = new Map<number, Tone.Panner>();   // 트랙별 패닝 노드
     const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
 
     //[1-1] 백엔드 연동 데이터
@@ -42,8 +45,15 @@ export const useTrackStore = defineStore('track', () => {
     Tone.getTransport().bpm.value = bpm.value;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
 
-    //마스터 트랙의 패닝을 제어하기 위한 글로벌 마스터 패너 생성
+    // 마스터 트랙의 믹서 채널 생성 (모노 다운믹스 절대 방지: 강제 스테레오)
     const masterPanner = new Tone.Panner(0).toDestination();
+    const masterVolume = new Tone.Volume(0).connect(masterPanner);
+
+    // 스테레오 보존을 위한 강력한 Web Audio API 옵션 적용
+    masterVolume.channelCount = 2;
+    masterVolume.channelCountMode = "explicit";
+    masterPanner.channelCount = 2;
+    masterPanner.channelCountMode = "explicit";
 
     //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
     watch(bpm, (newBpm) => {
@@ -235,10 +245,11 @@ export const useTrackStore = defineStore('track', () => {
                 targetTrack.clips.push(newClip);
                 checkAndExpandTimeline(newClip.start + newClip.duration);
 
-                const targetChannel = trackChannels.get(trackId);
-                if (targetChannel) {
-                    console.log(`[Upload] 7. Player를 트랙 채널에 연결합니다.`);
-                    newPlayer.connect(targetChannel);
+                const targetVol = trackVolumes.get(trackId);
+                console.log(`[패닝 디버그] 업로드 - trackId=${trackId}, targetVol 존재=${!!targetVol}, trackVolumes 키:`, [...trackVolumes.keys()], 'trackPanners 키:', [...trackPanners.keys()]);
+                if (targetVol) {
+                    console.log(`[Upload] 7. Player를 트랙 볼륨 노드에 연결합니다.`);
+                    newPlayer.connect(targetVol);
                     clipPlayers.set(newClip.clipId, newPlayer);
 
                     resyncClip(newClip.clipId, newClip.start);
@@ -367,9 +378,9 @@ export const useTrackStore = defineStore('track', () => {
         targetTrack.clips.push(newClip);
 
         // 오디오 플레이어 복제 및 생성
-        const targetChannel = trackChannels.get(targetTrackId);
-        if (targetChannel && newClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetChannel);
+        const targetVol = trackVolumes.get(targetTrackId);
+        if (targetVol && newClip.audio?.cdnUrl) {
+            const newPlayer = new Tone.Player().connect(targetVol);
             newPlayer.load(newClip.audio.cdnUrl).then(() => {
                 if (Tone.getContext().state !== 'running') Tone.getContext().resume();
 
@@ -450,9 +461,9 @@ export const useTrackStore = defineStore('track', () => {
         checkAndExpandTimeline(duplicatedClip.start + duplicatedClip.duration);
         targetTrack.clips.push(duplicatedClip);
 
-        const targetChannel = trackChannels.get(trackId);
-        if (targetChannel && duplicatedClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetChannel);
+        const targetVol = trackVolumes.get(trackId);
+        if (targetVol && duplicatedClip.audio?.cdnUrl) {
+            const newPlayer = new Tone.Player().connect(targetVol);
             newPlayer.load(duplicatedClip.audio.cdnUrl).then(() => {
                 const exactStartTimeSec = duplicatedClip.start * secondsPerBar.value;
                 const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
@@ -523,9 +534,9 @@ export const useTrackStore = defineStore('track', () => {
             resyncClip(originalClip.clipId, originalClip.start);
 
             // 3. 오른쪽 클립 동기(await) 로딩 및 스케줄링
-            const targetChannel = trackChannels.get(trackId);
-            if (targetChannel && rightClip.audio?.cdnUrl) {
-                const newPlayer = new Tone.Player().connect(targetChannel);
+            const targetVol = trackVolumes.get(trackId);
+            if (targetVol && rightClip.audio?.cdnUrl) {
+                const newPlayer = new Tone.Player().connect(targetVol);
                 await newPlayer.load(rightClip.audio.cdnUrl);
 
                 if (Tone.getContext().state !== 'running') Tone.getContext().resume();
@@ -651,12 +662,19 @@ export const useTrackStore = defineStore('track', () => {
         }
         trackList.value.push(newTrack);
 
-        // 1. 새 트랙의 전용 패너 및 믹서 채널 생성 (Tone.Channel의 모노 다운믹스/패닝 버그 완전 우회)
-        const panner = new Tone.Panner(newTrack.pan / 100).connect(masterPanner);
-        const channel = new Tone.Channel({ channelCount: 2, volume: newTrack.volume }).connect(panner);
-        // 2. 생성한 채널을 보관함(Map)에 반드시 저장
-        trackChannels.set(newTrack.trackId, channel);
+        // 1. 새 트랙의 볼륨 노드 + 패너 생성 (테스트 완료: 마스터 볼륨으로 안전하게 연결)
+        const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
+        const vol = new Tone.Volume(newTrack.volume).connect(panner);
+        
+        // 개별 트랙 노드들도 스테레오 강제 유지
+        panner.channelCount = 2;
+        panner.channelCountMode = "explicit";
+        vol.channelCount = 2;
+        vol.channelCountMode = "explicit";
+        // 2. 생성한 노드를 보관함(Map)에 반드시 저장
+        trackVolumes.set(newTrack.trackId, vol);
         trackPanners.set(newTrack.trackId, panner);
+        console.log(`[패닝 디버그] addTrack - 트랙 ${newTrack.trackId} 노드 생성 완료. vol:`, vol, "panner:", panner);
     };
 
     // ==========================================
@@ -666,12 +684,12 @@ export const useTrackStore = defineStore('track', () => {
         const isAnySoloed = trackList.value.some(t => t.isSoloed);
 
         trackList.value.forEach(t => {
-            const channel = trackChannels.get(t.trackId);
-            if (channel) {
+            const vol = trackVolumes.get(t.trackId);
+            if (vol) {
                 if (isAnySoloed) {
-                    channel.mute = !t.isSoloed;
+                    vol.mute = !t.isSoloed;
                 } else {
-                    channel.mute = t.isMuted;
+                    vol.mute = t.isMuted;
                 }
             }
         });
@@ -705,9 +723,7 @@ export const useTrackStore = defineStore('track', () => {
             trackList.value.forEach(t => {
                 if (t.trackId !== trackId && t.isSoloed) {
                     t.isSoloed = false;
-                    const channel = trackChannels.get(t.trackId);
-                    if (channel) channel.solo = false;
-
+                    // solo 상태 변경은 syncEffectiveMuteStates에서 mute로 일괄 처리
                     socketService.publish('TRACK_SOLO_CHANGE', {
                         projectId: projectInfo.value.projectId,
                         trackId: t.trackId,
@@ -718,8 +734,6 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         targetTrack.isSoloed = isTurningOn;
-        const channel = trackChannels.get(trackId);
-        if (channel) channel.solo = targetTrack.isSoloed;
 
         syncEffectiveMuteStates();
 
@@ -734,7 +748,7 @@ export const useTrackStore = defineStore('track', () => {
     const setTrackVolume = (trackId: number, volume: number) => {
         if (trackId === 999999) {
             masterTrack.value.volume = volume;
-            Tone.getDestination().volume.value = volume;
+            masterVolume.volume.value = volume;
             return;
         }
 
@@ -742,8 +756,8 @@ export const useTrackStore = defineStore('track', () => {
         if (!track) return;
 
         track.volume = volume;
-        const channel = trackChannels.get(trackId);
-        if (channel) channel.volume.value = volume;
+        const vol = trackVolumes.get(trackId);
+        if (vol) vol.volume.value = volume;
 
         socketService.publish('TRACK_VOLUME_CHANGE', {
             projectId: projectInfo.value.projectId,
@@ -771,18 +785,30 @@ export const useTrackStore = defineStore('track', () => {
 
     // 트랙 패닝 조절 (-100 ~ 100)
     const setTrackPan = (trackId: number, pan: number) => {
+        console.log(`[패닝 디버그] setTrackPan 호출! trackId=${trackId}, pan=${pan}`);
         if (trackId === 999999) {
             masterTrack.value.pan = pan;
             masterPanner.pan.value = pan / 100;
+            console.log(`[패닝 디버그] 마스터 패너 적용 완료: masterPanner.pan.value=${masterPanner.pan.value}`);
             return;
         }
 
         const track = trackList.value.find(t => t.trackId === trackId);
-        if (!track) return;
+        if (!track) {
+            console.error(`[패닝 디버그] 트랙을 찾을 수 없음! trackId=${trackId}`);
+            return;
+        }
 
         track.pan = pan;
         const panner = trackPanners.get(trackId);
-        if (panner) panner.pan.value = pan / 100;
+        if (panner) {
+            panner.pan.value = pan / 100;
+            console.log(`[패닝 디버그] 트랙 ${trackId} 패너 적용 완료: panner.pan.value=${panner.pan.value}`);
+        } else {
+            console.error(`[패닝 디버그] 트랙 ${trackId}의 panner를 trackPanners Map에서 찾을 수 없음!`);
+            console.log(`[패닝 디버그] 현재 trackPanners 키 목록:`, [...trackPanners.keys()]);
+            console.log(`[패닝 디버그] 현재 trackVolumes 키 목록:`, [...trackVolumes.keys()]);
+        }
 
         socketService.publish('TRACK_PAN_CHANGE', {
             projectId: projectInfo.value.projectId,
@@ -811,9 +837,9 @@ export const useTrackStore = defineStore('track', () => {
                 }
             });
 
-            const channel = trackChannels.get(trackId);
-            if (channel) channel.dispose();
-            trackChannels.delete(trackId);
+            const vol = trackVolumes.get(trackId);
+            if (vol) vol.dispose();
+            trackVolumes.delete(trackId);
             
             const panner = trackPanners.get(trackId);
             if (panner) panner.dispose();
@@ -895,18 +921,23 @@ export const useTrackStore = defineStore('track', () => {
             toTrack.clips.push(clip);
 
             const player = clipPlayers.get(clipId);
-            let toChannel = trackChannels.get(toTrackId);
+            let toVol = trackVolumes.get(toTrackId);
 
-            if (!toChannel) {
-                const panner = new Tone.Panner(toTrack.pan / 100).connect(masterPanner);
-                toChannel = new Tone.Channel({ channelCount: 2, volume: toTrack.volume }).connect(panner);
-                trackChannels.set(toTrackId, toChannel);
+            if (!toVol) {
+                const panner = new Tone.Panner(toTrack.pan / 100).connect(masterVolume);
+                toVol = new Tone.Volume(toTrack.volume).connect(panner);
+                panner.channelCount = 2;
+                panner.channelCountMode = "explicit";
+                toVol.channelCount = 2;
+                toVol.channelCountMode = "explicit";
+                
+                trackVolumes.set(toTrackId, toVol);
                 trackPanners.set(toTrackId, panner);
             }
 
             if (player) {
                 player.disconnect();
-                player.connect(toChannel);
+                player.connect(toVol);
             }
         }
     };
@@ -980,18 +1011,25 @@ export const useTrackStore = defineStore('track', () => {
         console.log("========== [Audio Engine Setup Start] ==========");
 
         for (const track of tracks) {
-            if (!trackChannels.has(track.trackId)) {
-                const panner = new Tone.Panner(track.pan / 100).connect(masterPanner);
-                const channel = new Tone.Channel({ channelCount: 2, volume: track.volume }).connect(panner);
-                trackChannels.set(track.trackId, channel);
+            if (!trackVolumes.has(track.trackId)) {
+                // 테스트 완료: 마스터 볼륨으로 안전하게 연결
+                const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
+                const vol = new Tone.Volume(track.volume).connect(panner);
+
+                panner.channelCount = 2;
+                panner.channelCountMode = "explicit";
+                vol.channelCount = 2;
+                vol.channelCountMode = "explicit";
+
+                trackVolumes.set(track.trackId, vol);
                 trackPanners.set(track.trackId, panner);
-                console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 채널 생성 완료.`);
+                console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
             }
         }
 
         for (const track of tracks) {
-            const channel = trackChannels.get(track.trackId);
-            if (!channel) continue;
+            const vol = trackVolumes.get(track.trackId);
+            if (!vol) continue;
 
             for (const clip of track.clips) {
                 if (!clip.audio?.cdnUrl) {
@@ -1000,7 +1038,7 @@ export const useTrackStore = defineStore('track', () => {
                 }
 
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
-                const player = new Tone.Player().connect(channel);
+                const player = new Tone.Player().connect(vol);
 
                 try {
                     await player.load(clip.audio.cdnUrl);

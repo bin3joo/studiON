@@ -16,4 +16,6 @@ public interface TrackRepository extends JpaRepository<Track, Integer> {
     Optional<Track> findByProjectAndPostTrackIdIsNull(Project project);
 
     List<Track> findByProject_Id(Integer projectId);
+
+    Optional<Track> findByIdAndProject_Id(Integer trackId, Integer projectId);
 }

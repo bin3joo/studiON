@@ -3,140 +3,87 @@ const audioCache = new Map<string, { channelData: Float32Array, sampleRate: numb
 </script>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { computed, onMounted, shallowRef } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
 import * as Tone from 'tone';
+import WaveformChunk from './WaveformChunk.vue';
 
 const props = defineProps<{ 
   clip: ClipUIState;
 }>();
 
 const trackStore = useTrackStore();
-const canvasRef = ref<HTMLCanvasElement | null>(null);
 
-let worker: Worker | null = null; 
-let observer: IntersectionObserver | null = null; 
-let isVisible = false; 
+// 오디오 데이터를 담을 반응형 변수 (shallowRef로 대용량 데이터 성능 최적화)
+const audioData = shallowRef<{ channelData: Float32Array, sampleRate: number } | null>(null);
 
-const renderWaveform = async () => {
-    // offscreen 변수 체크 삭제 (워커 내부에서 관리하므로)
-    if (!canvasRef.value || !props.clip.audio?.cdnUrl || !worker) return;
+// 브라우저 렌더링 한계치를 피하기 위한 최대 캔버스 너비 (안전하게 8000픽셀로 설정)
+const MAX_CANVAS_WIDTH = 8000;
 
-    if (!isVisible) return;
+// 전체 길이를 바탕으로 청크 조각들을 계산
+const chunks = computed(() => {
+  if (!audioData.value) return [];
+  
+  const totalWidth = Math.floor(props.clip.duration * trackStore.pixelPerBar);
+  if (totalWidth <= 0) return [];
+  
+  const numChunks = Math.ceil(totalWidth / MAX_CANVAS_WIDTH);
+  
+  return Array.from({ length: numChunks }, (_, i) => {
+    const isLast = i === numChunks - 1;
+    const chunkWidth = isLast ? (totalWidth % MAX_CANVAS_WIDTH || MAX_CANVAS_WIDTH) : MAX_CANVAS_WIDTH;
+    return {
+      id: `${props.clip.clipId}-${i}`, // 고유 식별자
+      left: i * MAX_CANVAS_WIDTH,
+      width: chunkWidth
+    };
+  });
+});
 
-    const width = Math.floor(props.clip.duration * trackStore.pixelPerBar);
-    const height = 100;
-
-    if (width <= 0 || height <= 0) return;
-
-    // 핵심 수정: 메인 스레드에서 canvasRef.width 조작 금지!
-    // 대신 상위 div(TrackItem.vue)에서 크기를 잡아주므로 캔버스는 가만히 두면 됩니다.
-
-    const audioUrl = props.clip.audio.cdnUrl;
-    let cached = audioCache.get(audioUrl);
-
-    if (!cached) {
+const loadAudioData = async () => {
+  if (!props.clip.audio?.cdnUrl) return;
+  const audioUrl = props.clip.audio.cdnUrl;
+  
+  let cached = audioCache.get(audioUrl);
+  
+  if (!cached) {
+    try {
       const response = await fetch(audioUrl);
       const arrayBuffer = await response.arrayBuffer();
-     const audioCtx = Tone.getContext().rawContext as AudioContext;
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    
-    cached = {
-      channelData: new Float32Array(audioBuffer.getChannelData(0)),
-      sampleRate: audioBuffer.sampleRate
-    };
-    audioCache.set(audioUrl, cached);
+      const audioCtx = Tone.getContext().rawContext as AudioContext;
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      
+      cached = {
+        channelData: new Float32Array(audioBuffer.getChannelData(0)),
+        sampleRate: audioBuffer.sampleRate
+      };
+      audioCache.set(audioUrl, cached);
+    } catch (error) {
+      console.error("[Waveform] 오디오 데이터 로드 실패:", error);
+      return;
     }
-
-    const secondsPerPixel = trackStore.secondsPerBar / trackStore.pixelPerBar;
-    const samplesPerPixel = secondsPerPixel * cached.sampleRate;
-    const startSampleOffset = (props.clip.audioStartMs / 1000) * cached.sampleRate;
-
-    // audioStartMs가 오디오 파일 총 길이를 초과하는 에러 데이터일 경우 렌더링 스킵[cite: 24]
-    const totalSamples = cached.channelData.length;
-    if (startSampleOffset >= totalSamples) {
-        console.warn(`[Waveform] audioStartMs(${props.clip.audioStartMs}ms)가 오디오 파일 길이를 초과하여 렌더링을 생략합니다.`);
-        return;
-    }
-
-    // 워커에게 새 크기 정보와 함께 다시 그리라고 명령만 내림
-    worker.postMessage({
-        channelData: cached.channelData, 
-        color: '#D4CED2',
-        width: width,      //  워커 내부에서 이 값을 받아 캔버스 크기를 조절할 것임
-        height: height,    // 
-        samplesPerPixel: samplesPerPixel,      
-        startSampleOffset: startSampleOffset   
-    });
-};
-
-const handleVisibilityChange = () => {
-    if (document.visibilityState === 'visible') {
-        renderWaveform();
-    }
-};
-
-//트랙의 줌레벨 감지
-watch(() => trackStore.pixelPerBar, () => {
-    renderWaveform();
-});
-
-//클립 자체의 길이, 잘린 지점 변경 감지 클립이나 오디오 시작점이 변하면 파형을 다시 그리도록 함
-watch(
-  () => [props.clip.duration, props.clip.audioStartMs],
-  () => {
-    renderWaveform();
   }
-)
+  
+  audioData.value = cached;
+};
 
-onMounted(async () => {
-  await nextTick(); 
-  if (!canvasRef.value || !props.clip.audio?.cdnUrl) return;
-
-  const workerUrl = new URL('@/core/workers/waveform.worker.ts', import.meta.url).href;
-  worker = new Worker(workerUrl, { type: 'module' });
-
-  //  최초 1회만 제어권을 워커로 넘김 (offscreen 변수 저장 X)
-  const offscreenCanvas = canvasRef.value.transferControlToOffscreen();
-  worker.postMessage({ canvas: offscreenCanvas }, [offscreenCanvas]); 
-
-  observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      isVisible = entry.isIntersecting; 
-      if (isVisible) {
-        renderWaveform(); 
-      }
-    });
-  }, {
-    root: document.querySelector('.overflow-auto'), 
-    rootMargin: '300px', 
-    threshold: 0 
-  });
-
-  observer.observe(canvasRef.value);
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-});
-
-onUnmounted(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange);
-  observer?.disconnect(); 
-  worker?.terminate();
+onMounted(() => {
+  loadAudioData();
 });
 </script>
 
 <template>
-  <canvas ref="canvasRef"
-  class="pointer-events-none absolute inset-0 h-full w-full opacity-60 mix-blend-screen"
-  ></canvas>
+  <div class="pointer-events-none absolute inset-0 h-full w-full opacity-60 mix-blend-screen">
+    <template v-if="audioData">
+      <WaveformChunk
+        v-for="chunk in chunks"
+        :key="chunk.id"
+        :clip="clip"
+        :audio-data="audioData"
+        :chunk-left="chunk.left"
+        :chunk-width="chunk.width"
+      />
+    </template>
+  </div>
 </template>
-
-<style scoped>
-@keyframes smoothAppear {
-  0% { opacity: 0; }
-  100% { opacity: 0.6; } 
-}
-canvas {
-  animation: smoothAppear 0.15s ease-out forwards;
-}
-</style>

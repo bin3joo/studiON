@@ -286,7 +286,7 @@
     .preview-box {
       display: grid;
       gap: 12px;
-      padding: 14px;
+      padding: 18px;
       border: 1px solid var(--line);
       border-radius: 16px;
       background: rgba(255, 255, 255, 0.85);
@@ -294,13 +294,26 @@
 
     .preview-meta {
       display: grid;
-      gap: 8px;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .preview-meta > div {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      line-height: 1.5;
+    }
+
+    .preview-panel {
+      margin-top: 16px;
     }
 
     .preview-compare {
       display: grid;
       gap: 12px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
     }
 
     .preview-card {
@@ -312,6 +325,162 @@
 
     .preview-audio {
       width: 100%;
+    }
+
+    .preview-canvas {
+      width: 100%;
+      height: 220px;
+      border-radius: 12px;
+      border: 1px solid rgba(33, 37, 41, 0.08);
+      background: linear-gradient(180deg, #fffef9 0%, #f7f1e7 100%);
+    }
+
+    .preview-canvas.short {
+      height: 140px;
+    }
+
+    .preview-canvas.tall {
+      height: 180px;
+    }
+
+    .preview-canvas.spectrum {
+      height: 220px;
+    }
+
+    .preview-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr;
+    }
+
+    .compare-stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .compare-section-title {
+      margin: 0 0 10px;
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .compare-section-caption {
+      margin: 0 0 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .overlay-details {
+      border: 1px solid rgba(33, 37, 41, 0.08);
+      border-radius: 12px;
+      background: #fff;
+      padding: 10px 12px;
+    }
+
+    .overlay-details summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .overlay-details pre {
+      margin: 10px 0 0;
+      max-height: 260px;
+      overflow: auto;
+    }
+
+    .metric-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .metric-card {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f8f3ea;
+      border: 1px solid rgba(33, 37, 41, 0.08);
+    }
+
+    .metric-label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .metric-value {
+      margin-top: 6px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .hint-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .hint-card {
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(33, 37, 41, 0.08);
+      background: #fff;
+    }
+
+    .hint-card.warn {
+      background: #fff7e8;
+    }
+
+    .hint-card.good {
+      background: #eff7ee;
+    }
+
+    .hint-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-weight: 700;
+    }
+
+    .hint-prompt {
+      margin-top: 8px;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .chart-title {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .preview-loading {
+      padding: 16px;
+      border-radius: 12px;
+      background: #f8f3ea;
+      color: var(--muted);
+    }
+
+    .chart-caption {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    @media (max-width: 1100px) {
+      .preview-compare,
+      .preview-grid,
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     .accordion {
@@ -356,6 +525,10 @@
       .row,
       .row-3,
       .meta-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-meta {
         grid-template-columns: 1fr;
       }
     }
@@ -442,18 +615,6 @@
           </div>
           <div id="previewBox" class="preview-box" style="margin-top: 12px;">
             <div class="preview-meta muted">preview_render가 아직 없습니다.</div>
-            <div class="preview-compare">
-              <article class="preview-card">
-                <strong>Before</strong>
-                <div class="muted" style="margin: 6px 0 10px;">snapshot-based reconstructed master excerpt reference</div>
-                <audio id="masterAudio" class="preview-audio" controls preload="none"></audio>
-              </article>
-              <article class="preview-card">
-                <strong>After</strong>
-                <div class="muted" style="margin: 6px 0 10px;">master-context preview excerpt after representative action</div>
-                <audio id="previewAudio" class="preview-audio" controls preload="none"></audio>
-              </article>
-            </div>
           </div>
         </section>
       </div>
@@ -495,9 +656,7 @@
             <div class="accordion-body">
               <pre>POST /internal/workflow/jobs/start
 GET  /internal/workflow/jobs/{job_id}
-GET  /internal/workflow/jobs/{job_id}/preview/before/audio
-GET  /internal/workflow/jobs/{job_id}/master/audio
-GET  /internal/workflow/jobs/{job_id}/preview/audio
+GET  /internal/workflow/jobs/{job_id}/preview-compare
 POST /internal/workflow/jobs/resume
 
 resume payload required fields:
@@ -530,7 +689,6 @@ resume payload required fields:
       planBoard: document.getElementById("planBoard"),
       regions: document.getElementById("regions"),
       previewBox: document.getElementById("previewBox"),
-      previewAudio: document.getElementById("previewAudio"),
       fillSampleBtn: document.getElementById("fillSampleBtn"),
       startBtn: document.getElementById("startBtn"),
       pollBtn: document.getElementById("pollBtn"),
@@ -543,6 +701,14 @@ resume payload required fields:
     };
 
     let latestStatus = null;
+    let previewCompareRequestKey = null;
+
+    const previewPanel = document.querySelector(".grid > .stack:first-child > .panel:last-child");
+    const wrap = document.querySelector(".wrap");
+    if (previewPanel && wrap) {
+      previewPanel.classList.add("preview-panel");
+      wrap.appendChild(previewPanel);
+    }
 
     function pretty(value) {
       return JSON.stringify(value, null, 2);
@@ -582,7 +748,6 @@ resume payload required fields:
       const projections = data?.projections ?? {};
       const planState = projections.plan_state ?? {};
       const suggestionGroup = projections.suggestion_group ?? null;
-      const master = projections.master_audio ?? null;
       const preview = projections.preview_render ?? null;
       const primaryAction = getPrimaryAction(data);
       const targetRegion = getFocusRegion(data);
@@ -593,7 +758,6 @@ resume payload required fields:
         ["status", job.status],
         ["phase", job.phase],
         ["current_node", job.current_node],
-        ["master", master?.status],
         ["preview", preview?.status],
         ["plan", planState.status],
       ].forEach(([label, value]) => {
@@ -607,8 +771,7 @@ resume payload required fields:
       const lines = [
         `job ${job.id ?? "-"} / project ${job.project_id ?? "-"}`,
         `workflow: ${job.status ?? "-"} / ${job.phase ?? "-"}`,
-        `master: ${master?.status ?? "-"}${master?.duration_ms != null ? ` / ${master.duration_ms}ms` : ""}`,
-        `preview: ${preview?.status ?? "-"}${preview?.duration_ms != null ? ` / ${preview.duration_ms}ms` : ""}`,
+        `preview: ${preview?.status ?? "-"}`,
         `region: ${preview?.preview_target_region ?? targetRegion?.id ?? suggestionGroup?.region_id ?? "-"}`,
         `master range: ${formatRange(preview?.preview_region_start_ms ?? targetRegion?.start_ms, preview?.preview_region_end_ms ?? targetRegion?.end_ms)}`,
         `measure: ${formatMeasureRange(preview?.preview_measure_start ?? targetRegion?.measure_start, preview?.preview_measure_end ?? targetRegion?.measure_end)}`,
@@ -661,6 +824,26 @@ resume payload required fields:
       return regions.find((region) => String(region.id) === String(regionId)) ?? null;
     }
 
+    function buildPreviewDetailRows(preview, focusRegion) {
+      const excerptRange = preview?.preview_excerpt_range ?? null;
+      return [
+        ["preview_target_region", preview?.preview_target_region ?? focusRegion?.id ?? "-"],
+        ["master_range", formatRange(preview?.preview_region_start_ms ?? focusRegion?.start_ms, preview?.preview_region_end_ms ?? focusRegion?.end_ms)],
+        ["measure", formatMeasureRange(preview?.preview_measure_start ?? focusRegion?.measure_start, preview?.preview_measure_end ?? focusRegion?.measure_end)],
+        ["preview_action_type", preview?.preview_action_type ?? "-"],
+        ["preview_action_track", preview?.preview_action_track ?? "-"],
+        ["preview_excerpt_range", formatRange(excerptRange?.start_ms, excerptRange?.end_ms)],
+        ["status", preview?.status ?? "-"],
+        ["suggestion_id", preview?.suggestion_id ?? "-"],
+        ["requested_at", preview?.requested_at ?? "-"],
+        ["started_at", preview?.started_at ?? "-"],
+        ["completed_at", preview?.completed_at ?? "-"],
+        ["expired_at", preview?.expired_at ?? "-"],
+        ["error_code", preview?.error_code ?? "-"],
+        ["error", preview?.error_message ?? "-"],
+      ];
+    }
+
     function buildCompactDebugPayload(data) {
       const job = data?.job ?? {};
       const projections = data?.projections ?? {};
@@ -676,7 +859,6 @@ resume payload required fields:
           error_code: job.error_code,
           error_message: job.error_message,
         },
-        master_audio: projections.master_audio ?? null,
         preview_render: projections.preview_render ?? null,
         focus_region: focusRegion ? {
           id: focusRegion.id,
@@ -866,166 +1048,614 @@ resume payload required fields:
       }
     }
 
-    function previewAudioPath(jobId) {
-      const base = els.apiBase.value.replace(/\/$/, "");
-      return `${base}/internal/workflow/jobs/${jobId}/preview/audio`;
-    }
-
-    function previewBeforeAudioPath(jobId) {
-      const base = els.apiBase.value.replace(/\/$/, "");
-      return `${base}/internal/workflow/jobs/${jobId}/preview/before/audio`;
-    }
-
-    function masterAudioPath(jobId) {
-      const base = els.apiBase.value.replace(/\/$/, "");
-      return `${base}/internal/workflow/jobs/${jobId}/master/audio`;
-    }
-
     function renderPreview(data) {
-      const preview = data?.projections?.preview_render ?? null;
-      const jobId = data?.job?.id ?? Number(els.jobId.value);
-      if (!preview) {
-        els.previewBox.innerHTML = `
-          <div class="preview-meta muted">preview_render가 아직 없습니다.</div>
-          <audio id="previewAudio" class="preview-audio" controls preload="none"></audio>
-        `;
-        els.previewAudio = document.getElementById("previewAudio");
-        return;
-      }
-
-      const detailRows = [
-        ["status", preview.status ?? "-"],
-        ["suggestion_id", preview.suggestion_id ?? "-"],
-        ["duration_ms", preview.duration_ms ?? "-"],
-        ["object_key", preview.object_key ?? "-"],
-        ["error", preview.error_message ?? "-"],
-      ];
-      const canPlay = preview.status === "READY";
-      const audioSrc = canPlay ? `${previewAudioPath(jobId)}?ts=${Date.now()}` : "";
-      els.previewBox.innerHTML = `
-        <div class="preview-meta">
-          ${detailRows.map(([label, value]) => `
-            <div><strong>${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(value)}</span></div>
-          `).join("")}
-        </div>
-        <audio
-          id="previewAudio"
-          class="preview-audio"
-          controls
-          preload="none"
-          ${canPlay ? `src="${escapeHtml(audioSrc)}"` : ""}
-        ></audio>
-      `;
-      els.previewAudio = document.getElementById("previewAudio");
+      renderPreviewWithMaster(data);
     }
 
     function renderPreviewWithMaster(data) {
       const preview = data?.projections?.preview_render ?? null;
-      const master = data?.projections?.master_audio ?? null;
       const focusRegion = getFocusRegion(data);
-      const excerptRange = preview?.preview_excerpt_range ?? null;
-      const jobId = data?.job?.id ?? Number(els.jobId.value);
       if (!preview) {
-        const canPlayMaster = master?.status === "READY";
-        const masterSrc = canPlayMaster ? `${masterAudioPath(jobId)}?ts=${Date.now()}` : "";
-        const masterRows = master
-          ? [
-              ["master_status", master.status ?? "-"],
-              ["master_duration_ms", master.duration_ms ?? "-"],
-              ["master_object_key", master.object_key ?? "-"],
-              ["master_error", master.error_message ?? "-"],
-            ]
-          : [["master", "not available"]];
         els.previewBox.innerHTML = `
-          <div class="preview-meta">
-            ${masterRows.map(([label, value]) => `
-              <div><strong>${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(value)}</span></div>
-            `).join("")}
-            ${focusRegion ? `
-              <div><strong>preview_target_region</strong> <span class="muted">${escapeHtml(focusRegion.id)}</span></div>
-              <div><strong>master_range</strong> <span class="muted">${escapeHtml(formatRange(focusRegion.start_ms, focusRegion.end_ms))}</span></div>
-              <div><strong>measure</strong> <span class="muted">${escapeHtml(formatMeasureRange(focusRegion.measure_start, focusRegion.measure_end))}</span></div>
-            ` : ""}
-          </div>
-          <div class="preview-compare">
-            <article class="preview-card">
-              <strong>Before</strong>
-              <div class="muted" style="margin: 6px 0 10px;">snapshot-based reconstructed master excerpt reference</div>
-              <audio
-                id="masterAudio"
-                class="preview-audio"
-                controls
-                preload="none"
-                ${canPlayMaster ? `src="${escapeHtml(masterSrc)}"` : ""}
-              ></audio>
-            </article>
-            <article class="preview-card">
-              <strong>After</strong>
-              <div class="muted" style="margin: 6px 0 10px;">master-context preview excerpt after representative action</div>
-              <audio id="previewAudio" class="preview-audio" controls preload="none"></audio>
-            </article>
-          </div>
+          <div class="preview-meta muted">preview_render not present</div>
         `;
-        els.masterAudio = document.getElementById("masterAudio");
-        els.previewAudio = document.getElementById("previewAudio");
         return;
       }
 
-      const detailRows = [
-        ["master_status", master?.status ?? "-"],
-        ["master_duration_ms", master?.duration_ms ?? "-"],
-        ["master_object_key", master?.object_key ?? "-"],
-        ["before_duration_ms", preview?.before_duration_ms ?? "-"],
-        ["before_object_key", preview?.before_object_key ?? "-"],
-        ["preview_target_region", preview?.preview_target_region ?? focusRegion?.id ?? "-"],
-        ["master_range", formatRange(preview?.preview_region_start_ms ?? focusRegion?.start_ms, preview?.preview_region_end_ms ?? focusRegion?.end_ms)],
-        ["measure", formatMeasureRange(preview?.preview_measure_start ?? focusRegion?.measure_start, preview?.preview_measure_end ?? focusRegion?.measure_end)],
-        ["preview_action_type", preview?.preview_action_type ?? "-"],
-        ["preview_action_track", preview?.preview_action_track ?? "-"],
-        ["preview_excerpt_range", formatRange(excerptRange?.start_ms, excerptRange?.end_ms)],
-        ["status", preview.status ?? "-"],
-        ["suggestion_id", preview.suggestion_id ?? "-"],
-        ["duration_ms", preview.duration_ms ?? "-"],
-        ["object_key", preview.object_key ?? "-"],
-        ["error", preview.error_message ?? "-"],
-      ];
-      const canPlay = preview.status === "READY";
-      const cacheBuster = Date.now();
-      const previewSrc = canPlay ? `${previewAudioPath(jobId)}?ts=${cacheBuster}` : "";
-      const beforeSrc = canPlay ? `${previewBeforeAudioPath(jobId)}?ts=${cacheBuster}` : "";
+      const detailRows = buildPreviewDetailRows(preview, focusRegion);
       els.previewBox.innerHTML = `
         <div class="preview-meta">
           ${detailRows.map(([label, value]) => `
             <div><strong>${escapeHtml(label)}</strong> <span class="muted">${escapeHtml(value)}</span></div>
           `).join("")}
         </div>
-        <div class="preview-compare">
-          <article class="preview-card">
-            <strong>Before</strong>
-            <div class="muted" style="margin: 6px 0 10px;">snapshot-based reconstructed master excerpt reference</div>
-            <audio
-              id="masterAudio"
-              class="preview-audio"
-              controls
-              preload="none"
-              ${canPlay ? `src="${escapeHtml(beforeSrc)}"` : ""}
-            ></audio>
-          </article>
-          <article class="preview-card">
-            <strong>After</strong>
-            <div class="muted" style="margin: 6px 0 10px;">master-context preview excerpt after representative action</div>
-            <audio
-              id="previewAudio"
-              class="preview-audio"
-              controls
-              preload="none"
-              ${canPlay ? `src="${escapeHtml(previewSrc)}"` : ""}
-            ></audio>
-          </article>
+        <div class="preview-loading">
+          ${preview.status === "READY"
+            ? "Loading visual compare..."
+            : "Preview compare becomes available after preview status is READY."}
         </div>
       `;
-      els.masterAudio = document.getElementById("masterAudio");
-      els.previewAudio = document.getElementById("previewAudio");
+
+      if (preview.status === "READY") {
+        void renderComparePanels(data);
+      }
+    }
+
+    async function renderComparePanels(data) {
+      const jobId = Number(data?.job?.id);
+      const isConfirmedApplied =
+        data?.job?.status === "COMPLETED"
+        && data?.projections?.feedback_event?.payload?.decision === "confirm";
+
+      try {
+        const previewCompare = await loadPreviewCompare(jobId, "preview");
+        if (!previewCompare) return;
+        const sections = [
+          renderPreviewCompare(previewCompare, {
+            title: "Preview Compare",
+            caption: "Representative preview action only. Use this to judge the user-facing confirm step.",
+          }),
+        ];
+
+        let appliedCompare = null;
+        if (isConfirmedApplied) {
+          try {
+            appliedCompare = await loadPreviewCompare(jobId, "applied");
+          } catch (error) {
+            appliedCompare = { error: String(error.message || error) };
+          }
+          if (appliedCompare?.error) {
+            sections.push(`
+              <section class="compare-section">
+                <h3 class="compare-section-title">Applied Compare</h3>
+                <p class="compare-section-caption">All deterministic auto-fix actions plus the confirmed user action.</p>
+                <div class="preview-card"><pre>${escapeHtml(appliedCompare.error)}</pre></div>
+              </section>
+            `);
+          } else if (appliedCompare) {
+            sections.push(
+              renderPreviewCompare(appliedCompare, {
+                title: "Applied Compare",
+                caption: "All deterministic auto-fix actions plus the confirmed user action.",
+              })
+            );
+          }
+        }
+
+        els.previewBox.innerHTML = `<div class="compare-stack">${sections.join("")}</div>`;
+        const roots = els.previewBox.querySelectorAll(".compare-section");
+        if (roots[0]) paintPreviewCompare(previewCompare, roots[0]);
+        if (isConfirmedApplied && roots[1] && appliedCompare && !appliedCompare.error) {
+          paintPreviewCompare(appliedCompare, roots[1]);
+        }
+      } catch (error) {
+        els.previewBox.innerHTML += `
+          <div class="preview-card">
+            <strong>Preview Compare Error</strong>
+            <pre>${escapeHtml(String(error.message || error))}</pre>
+          </div>
+        `;
+      }
+    }
+
+    async function loadPreviewCompare(jobId, mode = "preview") {
+      if (!jobId) return;
+      const requestKey = `${jobId}:${mode}:${latestStatus?.projections?.preview_render?.id ?? "none"}`;
+      previewCompareRequestKey = requestKey;
+      try {
+        const compare = await callJson(`/internal/workflow/jobs/${jobId}/preview-compare?mode=${encodeURIComponent(mode)}`, null, "GET");
+        if (previewCompareRequestKey !== requestKey) return;
+        return compare;
+      } catch (error) {
+        if (previewCompareRequestKey !== requestKey) return;
+        throw error;
+      }
+    }
+
+    function renderPreviewCompare(compare, options = {}) {
+      const title = options.title ?? "Preview Compare";
+      const caption = options.caption ?? "";
+      const preview = compare?.preview ?? {};
+      const focusRegion = compare?.focus_region ?? {};
+      const action = compare?.action ?? {};
+      const beforeExcerpt = compare?.before_excerpt ?? {};
+      const afterExcerpt = compare?.after_excerpt ?? {};
+      const beforeRegionSummary = compare?.before_region_summary ?? beforeExcerpt;
+      const afterRegionSummary = compare?.after_region_summary ?? afterExcerpt;
+      const diffExcerpt = compare?.diff_excerpt ?? {};
+      const issueOverlay = compare?.issue_overlay ?? {};
+      const hints = Array.isArray(compare?.prompt_feedback_hints) ? compare.prompt_feedback_hints : [];
+      const metrics = buildMetricCards(beforeRegionSummary, afterRegionSummary, issueOverlay);
+
+      return `
+        <section class="compare-section">
+          <h3 class="compare-section-title">${escapeHtml(title)}</h3>
+          ${caption ? `<p class="compare-section-caption">${escapeHtml(caption)}</p>` : ""}
+          <div class="preview-compare">
+          <div class="preview-card">
+            <div class="chart-title">Master Compare</div>
+            <canvas id="masterCompareCanvas" class="preview-canvas" width="920" height="220"></canvas>
+            <div class="chart-caption">x-axis: excerpt relative time (ms). Each lane uses a 0..1 normalized envelope, so the lower after lane is not a negative waveform.</div>
+            <div style="height: 12px;"></div>
+            <div class="chart-title">Difference (Magnified)</div>
+            <canvas id="diffCompareCanvas" class="preview-canvas tall" width="920" height="180"></canvas>
+            <div class="chart-caption">y-axis: absolute delta magnitude. The scale stays sensitive to the selected region even when larger auto-fix changes happen elsewhere in the excerpt.</div>
+            <div style="height: 12px;"></div>
+            <div class="chart-title">Region Zoom</div>
+            <canvas id="regionZoomCanvas" class="preview-canvas short" width="920" height="140"></canvas>
+            <div class="chart-caption">Zoomed envelope around the issue region only. Top is before, bottom is after, and both lanes stay on a positive 0..1 scale.</div>
+            <div style="height: 12px;"></div>
+            <div class="preview-grid">
+              <div class="preview-card">
+                <div class="chart-title">Before Spectrum</div>
+                <canvas id="beforeSpectrumCanvas" class="preview-canvas spectrum" width="920" height="220"></canvas>
+                <div class="chart-caption">y-axis: shared dB range across before and after, so height is directly comparable.</div>
+              </div>
+              <div class="preview-card">
+                <div class="chart-title">After Spectrum</div>
+                <canvas id="afterSpectrumCanvas" class="preview-canvas spectrum" width="920" height="220"></canvas>
+                <div class="chart-caption">Uses the same y-axis as before spectrum for direct comparison.</div>
+              </div>
+              <div class="preview-card">
+                <div class="chart-title">Diff Spectrum</div>
+                <canvas id="diffSpectrumCanvas" class="preview-canvas spectrum" width="920" height="220"></canvas>
+                <div class="chart-caption">Orange bars show where energy changed most. Taller bars mean stronger change in that band.</div>
+              </div>
+            </div>
+          </div>
+          <div style="display: grid; gap: 12px;">
+            <div class="preview-card">
+              <div class="chart-title">Preview Meta</div>
+              <div class="preview-meta">
+                <div><strong>region</strong> <span class="muted">${escapeHtml(preview.preview_target_region ?? "-")}</span></div>
+                <div><strong>issue</strong> <span class="muted">${escapeHtml(focusRegion.issue_type ?? "-")}</span></div>
+                <div><strong>excerpt</strong> <span class="muted">${escapeHtml(formatRange(preview.preview_excerpt_range?.start_ms, preview.preview_excerpt_range?.end_ms))}</span></div>
+                <div><strong>action</strong> <span class="muted">${escapeHtml(formatActionType(action.action_type) || "-")}</span></div>
+                <div><strong>target</strong> <span class="muted">${escapeHtml(action.target_scope ?? "-")} / ${escapeHtml(action.target_track_id ?? "-")}</span></div>
+              </div>
+            </div>
+            <div class="preview-card">
+              <div class="chart-title">Metrics</div>
+              <div class="metric-grid">
+                ${metrics.map((item) => `
+                  <div class="metric-card">
+                    <div class="metric-label">${escapeHtml(item.label)}</div>
+                    <div class="metric-value">${escapeHtml(item.value)}</div>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+            <div class="preview-card">
+              <div class="chart-title">Prompt Feedback</div>
+              <div class="hint-list">
+                ${hints.map((hint) => `
+                  <div class="hint-card ${escapeHtml(hint.verdict || "warn")}">
+                    <div class="hint-title">
+                      <span>${escapeHtml(hint.label ?? "-")}</span>
+                      <span class="muted">${escapeHtml(hint.verdict ?? "-")}</span>
+                    </div>
+                    <div class="hint-prompt">${escapeHtml(hint.detail ?? "-")}</div>
+                    <div class="hint-prompt">${escapeHtml(hint.prompt_hint ?? "-")}</div>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+            <div class="preview-card">
+              <div class="chart-title">Issue Overlay</div>
+              <details class="overlay-details">
+                <summary>Show Raw Overlay JSON</summary>
+                <pre>${escapeHtml(pretty(issueOverlay))}</pre>
+              </details>
+            </div>
+          </div>
+        </div>
+        </section>
+      `;
+    }
+
+    function paintPreviewCompare(compare, root) {
+      const preview = compare?.preview ?? {};
+      const focusRegion = compare?.focus_region ?? {};
+      const beforeExcerpt = compare?.before_excerpt ?? {};
+      const afterExcerpt = compare?.after_excerpt ?? {};
+      const diffExcerpt = compare?.diff_excerpt ?? {};
+
+      drawWaveformCompare(
+        root.querySelector("#masterCompareCanvas"),
+        beforeExcerpt.waveform_points ?? [],
+        afterExcerpt.waveform_points ?? [],
+        preview.preview_excerpt_range ?? {},
+        focusRegion,
+      );
+      drawSingleSeries(
+        root.querySelector("#diffCompareCanvas"),
+        diffExcerpt.waveform_points ?? [],
+        "#b45f06",
+        {
+          leftLabel: "|after-before|",
+          bottomLabel: buildTimeAxisLabel(preview.preview_excerpt_range),
+          highlightRange: buildRelativeRange(preview.preview_excerpt_range ?? {}, focusRegion),
+          yLabels: buildDiffYAxisLabels(
+            diffExcerpt.waveform_points ?? [],
+            buildRelativeRange(preview.preview_excerpt_range ?? {}, focusRegion),
+          ),
+          valueMax: pickDiffScaleMax(
+            diffExcerpt.waveform_points ?? [],
+            buildRelativeRange(preview.preview_excerpt_range ?? {}, focusRegion),
+          ),
+        },
+      );
+      drawRegionZoom(
+        root.querySelector("#regionZoomCanvas"),
+        beforeExcerpt.waveform_points ?? [],
+        afterExcerpt.waveform_points ?? [],
+        preview.preview_excerpt_range ?? {},
+        focusRegion,
+      );
+      const sharedSpectrumRange = buildSharedSpectrumRange(
+        beforeExcerpt.spectrum_bins ?? [],
+        afterExcerpt.spectrum_bins ?? [],
+      );
+      drawSpectrumBars(
+        root.querySelector("#beforeSpectrumCanvas"),
+        beforeExcerpt.spectrum_bins ?? [],
+        "#6d8b74",
+        { axisRange: sharedSpectrumRange },
+      );
+      drawSpectrumBars(
+        root.querySelector("#afterSpectrumCanvas"),
+        afterExcerpt.spectrum_bins ?? [],
+        "#3f6c99",
+        { axisRange: sharedSpectrumRange },
+      );
+      drawSpectrumBars(root.querySelector("#diffSpectrumCanvas"), diffExcerpt.spectrum_bins ?? [], "#b45f06");
+    }
+
+    function buildMetricCards(beforeRegionSummary, afterRegionSummary, issueOverlay) {
+      const issueMetrics = issueOverlay?.metrics ?? {};
+      const rmsDelta = Number(afterRegionSummary.rms_dbfs ?? 0) - Number(beforeRegionSummary.rms_dbfs ?? 0);
+      const peakDelta = Number(afterRegionSummary.true_peak_dbfs ?? 0) - Number(beforeRegionSummary.true_peak_dbfs ?? 0);
+      const issueLabel = ({
+        master_clipping: "Clipped Samples",
+        track_clipping: "Track Clipped",
+        sibilance: "Band Delta",
+        high_band_harshness: "Band Delta",
+        band_overlap: "Body Overlap",
+      })[issueOverlay?.kind] ?? "Issue Metric";
+      const issueValue = issueOverlay?.kind === "band_overlap"
+        ? `${formatNumber(issueMetrics.before_body_overlap)} -> ${formatNumber(issueMetrics.after_body_overlap)}`
+        : (issueOverlay?.kind === "sibilance" || issueOverlay?.kind === "high_band_harshness")
+          ? `${formatNumber(issueMetrics.band_delta_db)} dB`
+          : `${issueMetrics.before_clipped_sample_count ?? 0} -> ${issueMetrics.after_clipped_sample_count ?? 0}`;
+      return [
+        {
+          label: "True Peak",
+          value: `${formatNumber(beforeRegionSummary.true_peak_dbfs)} -> ${formatNumber(afterRegionSummary.true_peak_dbfs)} dBFS`,
+        },
+        {
+          label: "RMS",
+          value: `${formatNumber(beforeRegionSummary.rms_dbfs)} -> ${formatNumber(afterRegionSummary.rms_dbfs)} dBFS`,
+        },
+        {
+          label: "Crest",
+          value: `${formatNumber(beforeRegionSummary.crest_factor_db)} -> ${formatNumber(afterRegionSummary.crest_factor_db)} dB`,
+        },
+        {
+          label: "Peak Delta",
+          value: `${formatSignedNumber(peakDelta)} dB`,
+        },
+        {
+          label: "RMS Delta",
+          value: `${formatSignedNumber(rmsDelta)} dB`,
+        },
+        {
+          label: issueLabel,
+          value: issueValue,
+        },
+      ];
+    }
+
+    function drawWaveformCompare(canvas, beforePoints, afterPoints, excerptRange, focusRegion) {
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const { width, height } = canvas;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fffef9";
+      ctx.fillRect(0, 0, width, height);
+      const padding = { left: 56, right: 18, top: 18, bottom: 28 };
+      const plotWidth = width - padding.left - padding.right;
+      const plotHeight = height - padding.top - padding.bottom;
+      const topHeight = plotHeight * 0.44;
+      const bottomStart = padding.top + (plotHeight * 0.56);
+      drawPlotFrame(ctx, padding, plotWidth, plotHeight, buildTimeTicks(excerptRange), ["1.00", "0.50", "0.00"]);
+      drawAreaSeries(ctx, beforePoints, padding.left, padding.top, plotWidth, topHeight, "#6d8b74");
+      drawAreaSeries(ctx, afterPoints, padding.left, bottomStart, plotWidth, topHeight, "#3f6c99");
+      drawSeriesLabel(ctx, padding.left + 8, padding.top + 12, "before envelope");
+      drawSeriesLabel(ctx, padding.left + 8, bottomStart + 12, "after envelope");
+
+      const excerptStart = Number(excerptRange?.start_ms ?? 0);
+      const excerptEnd = Number(excerptRange?.end_ms ?? 1);
+      const regionStart = Number(focusRegion?.start_ms ?? excerptStart);
+      const regionEnd = Number(focusRegion?.end_ms ?? excerptEnd);
+      const startX = padding.left + (plotWidth * clamp((regionStart - excerptStart) / Math.max(excerptEnd - excerptStart, 1), 0, 1));
+      const endX = padding.left + (plotWidth * clamp((regionEnd - excerptStart) / Math.max(excerptEnd - excerptStart, 1), 0, 1));
+      ctx.fillStyle = "rgba(180, 95, 6, 0.12)";
+      ctx.fillRect(startX, padding.top, Math.max(endX - startX, 2), plotHeight);
+      ctx.strokeStyle = "rgba(180, 95, 6, 0.55)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(startX, padding.top);
+      ctx.lineTo(startX, padding.top + plotHeight);
+      ctx.moveTo(endX, padding.top);
+      ctx.lineTo(endX, padding.top + plotHeight);
+      ctx.stroke();
+      drawSeriesLabel(ctx, startX + 4, padding.top + 16, "region");
+    }
+
+    function drawSingleSeries(canvas, points, color, options = {}) {
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const { width, height } = canvas;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fffef9";
+      ctx.fillRect(0, 0, width, height);
+      const padding = { left: 56, right: 18, top: 18, bottom: 28 };
+      const plotWidth = width - padding.left - padding.right;
+      const plotHeight = height - padding.top - padding.bottom;
+      drawPlotFrame(
+        ctx,
+        padding,
+        plotWidth,
+        plotHeight,
+        buildTimeTicksFromLabel(options.bottomLabel),
+        options.yLabels ?? ["1.00", "0.50", "0.00"],
+      );
+      drawAreaSeries(
+        ctx,
+        points,
+        padding.left,
+        padding.top,
+        plotWidth,
+        plotHeight,
+        color,
+        { valueMax: options.valueMax },
+      );
+      if (options.highlightRange) {
+        const startX = padding.left + (plotWidth * options.highlightRange.startRatio);
+        const endX = padding.left + (plotWidth * options.highlightRange.endRatio);
+        ctx.fillStyle = "rgba(180, 95, 6, 0.1)";
+        ctx.fillRect(startX, padding.top, Math.max(endX - startX, 2), plotHeight);
+      }
+      if (options.leftLabel) {
+        drawSeriesLabel(ctx, 8, padding.top + 14, options.leftLabel);
+      }
+    }
+
+    function drawAreaSeries(ctx, points, xStart, yStart, bandWidth, bandHeight, color, options = {}) {
+      const maxValue = Math.max(Number(options.valueMax ?? 0), ...points, 0.0001);
+      const baselineY = yStart + bandHeight - 8;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = `${color}33`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      points.forEach((value, index) => {
+        const x = xStart + ((index / Math.max(points.length - 1, 1)) * bandWidth);
+        const amplitude = (value / maxValue) * (bandHeight * 0.78);
+        const y = baselineY - amplitude;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.lineTo(xStart + bandWidth, baselineY);
+      ctx.lineTo(xStart, baselineY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawSpectrumBars(canvas, values, color, options = {}) {
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const { width, height } = canvas;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fffef9";
+      ctx.fillRect(0, 0, width, height);
+      const padding = { left: 44, right: 10, top: 10, bottom: 24 };
+      const plotWidth = width - padding.left - padding.right;
+      const plotHeight = height - padding.top - padding.bottom;
+      const numericValues = values.map((value) => Number(value ?? -120));
+      const minValue = Number(options.axisRange?.min ?? Math.min(...numericValues, -120));
+      const maxValue = Number(options.axisRange?.max ?? Math.max(...numericValues, -20));
+      drawPlotFrame(
+        ctx,
+        padding,
+        plotWidth,
+        plotHeight,
+        [{ ratio: 0, label: "low" }, { ratio: 0.5, label: "mid" }, { ratio: 1, label: "high" }],
+        [formatNumber(maxValue), formatNumber((maxValue + minValue) / 2), formatNumber(minValue)],
+      );
+      const barWidth = plotWidth / Math.max(numericValues.length, 1);
+      ctx.fillStyle = color;
+      numericValues.forEach((value, index) => {
+        const normalized = (value - minValue) / Math.max(maxValue - minValue, 1);
+        const barHeight = Math.max(normalized * plotHeight, 2);
+        ctx.fillRect(
+          padding.left + (index * barWidth),
+          padding.top + plotHeight - barHeight,
+          Math.max(barWidth - 1, 1),
+          barHeight,
+        );
+      });
+    }
+
+    function drawRegionZoom(canvas, beforePoints, afterPoints, excerptRange, focusRegion) {
+      if (!canvas) return;
+      const range = buildRelativeRange(excerptRange, focusRegion);
+      const zoomBefore = sliceSeriesByRatio(beforePoints, range.startRatio, range.endRatio, 200);
+      const zoomAfter = sliceSeriesByRatio(afterPoints, range.startRatio, range.endRatio, 200);
+      const ctx = canvas.getContext("2d");
+      const { width, height } = canvas;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fffef9";
+      ctx.fillRect(0, 0, width, height);
+      const padding = { left: 56, right: 18, top: 18, bottom: 28 };
+      const plotWidth = width - padding.left - padding.right;
+      const plotHeight = height - padding.top - padding.bottom;
+      const topHeight = plotHeight * 0.44;
+      const bottomStart = padding.top + (plotHeight * 0.56);
+      drawPlotFrame(ctx, padding, plotWidth, plotHeight, buildRegionTicks(focusRegion), ["1.00", "0.50", "0.00"]);
+      drawAreaSeries(ctx, zoomBefore, padding.left, padding.top, plotWidth, topHeight, "#6d8b74");
+      drawAreaSeries(ctx, zoomAfter, padding.left, bottomStart, plotWidth, topHeight, "#3f6c99");
+      drawSeriesLabel(ctx, padding.left + 8, padding.top + 12, "before zoom");
+      drawSeriesLabel(ctx, padding.left + 8, bottomStart + 12, "after zoom");
+    }
+
+    function drawPlotFrame(ctx, padding, plotWidth, plotHeight, xTicks, yLabels) {
+      const left = padding.left;
+      const top = padding.top;
+      ctx.strokeStyle = "rgba(33, 37, 41, 0.16)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left, top, plotWidth, plotHeight);
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#7d6c56";
+      ctx.textBaseline = "middle";
+      yLabels.forEach((label, index) => {
+        const ratio = yLabels.length === 1 ? 0 : index / (yLabels.length - 1);
+        const y = top + (ratio * plotHeight);
+        ctx.strokeStyle = "rgba(33, 37, 41, 0.08)";
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(left + plotWidth, y);
+        ctx.stroke();
+        ctx.fillText(String(label), 8, y);
+      });
+      ctx.textBaseline = "top";
+      xTicks.forEach((tick) => {
+        const x = left + (plotWidth * tick.ratio);
+        ctx.strokeStyle = "rgba(33, 37, 41, 0.08)";
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, top + plotHeight);
+        ctx.stroke();
+        ctx.fillText(String(tick.label), x - 10, top + plotHeight + 6);
+      });
+    }
+
+    function buildDiffYAxisLabels(points, highlightRange = null) {
+      const maxValue = pickDiffScaleMax(points, highlightRange);
+      if (maxValue <= 0) {
+        return ["0.000", "0.000", "0.000", "0.000", "0.000"];
+      }
+      return [1, 0.75, 0.5, 0.25, 0].map((ratio) => formatAxisNumber(maxValue * ratio));
+    }
+
+    function pickDiffScaleMax(points, highlightRange = null) {
+      const numericPoints = points
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value));
+      if (!numericPoints.length) return 0;
+      const sorted = [...numericPoints].sort((a, b) => a - b);
+      const percentileIndex = Math.max(Math.floor(sorted.length * 0.98) - 1, 0);
+      const percentileMax = sorted[percentileIndex];
+      const regionMax = highlightRange
+        ? Math.max(
+            ...sliceSeriesByRatio(points, highlightRange.startRatio, highlightRange.endRatio, points.length)
+              .map((value) => Number(value))
+              .filter((value) => Number.isFinite(value)),
+            0,
+          )
+        : 0;
+      return Math.max(percentileMax, regionMax, 0.0001);
+    }
+
+    function buildSharedSpectrumRange(beforeValues, afterValues) {
+      const numericBefore = beforeValues.map((value) => Number(value ?? -120)).filter((value) => Number.isFinite(value));
+      const numericAfter = afterValues.map((value) => Number(value ?? -120)).filter((value) => Number.isFinite(value));
+      const combined = [...numericBefore, ...numericAfter];
+      return {
+        min: Math.min(...combined, -120),
+        max: Math.max(...combined, -20),
+      };
+    }
+
+    function formatAxisNumber(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "-";
+      if (Math.abs(numeric) >= 1) return numeric.toFixed(2);
+      if (Math.abs(numeric) >= 0.01) return numeric.toFixed(3);
+      if (Math.abs(numeric) >= 0.001) return numeric.toFixed(4);
+      return numeric.toExponential(2);
+    }
+
+    function drawSeriesLabel(ctx, x, y, text) {
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#7d6c56";
+      ctx.textBaseline = "top";
+      ctx.fillText(String(text), x, y);
+    }
+
+    function buildTimeTicks(excerptRange) {
+      const start = Number(excerptRange?.start_ms ?? 0);
+      const end = Number(excerptRange?.end_ms ?? 0);
+      const duration = Math.max(end - start, 1);
+      return [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
+        ratio,
+        label: `${Math.round(duration * ratio)}ms`,
+      }));
+    }
+
+    function buildTimeTicksFromLabel(label) {
+      return Array.isArray(label) ? label : [{ ratio: 0, label: "0" }, { ratio: 0.5, label: "mid" }, { ratio: 1, label: "end" }];
+    }
+
+    function buildTimeAxisLabel(excerptRange) {
+      return buildTimeTicks(excerptRange);
+    }
+
+    function buildRegionTicks(focusRegion) {
+      const start = Number(focusRegion?.start_ms ?? 0);
+      const end = Number(focusRegion?.end_ms ?? start + 1);
+      const duration = Math.max(end - start, 1);
+      return [0, 0.5, 1].map((ratio) => ({
+        ratio,
+        label: `${Math.round(duration * ratio)}ms`,
+      }));
+    }
+
+    function buildRelativeRange(excerptRange, focusRegion) {
+      const excerptStart = Number(excerptRange?.start_ms ?? 0);
+      const excerptEnd = Number(excerptRange?.end_ms ?? 1);
+      const duration = Math.max(excerptEnd - excerptStart, 1);
+      const regionStart = Number(focusRegion?.start_ms ?? excerptStart);
+      const regionEnd = Number(focusRegion?.end_ms ?? excerptEnd);
+      return {
+        startRatio: clamp((regionStart - excerptStart) / duration, 0, 1),
+        endRatio: clamp((regionEnd - excerptStart) / duration, 0, 1),
+      };
+    }
+
+    function sliceSeriesByRatio(points, startRatio, endRatio, targetCount) {
+      const startIndex = Math.max(Math.floor(points.length * startRatio), 0);
+      const endIndex = Math.max(Math.ceil(points.length * endRatio), startIndex + 2);
+      const sliced = points.slice(startIndex, endIndex);
+      if (sliced.length <= targetCount) return sliced;
+      const step = sliced.length / targetCount;
+      return Array.from({ length: targetCount }, (_, index) => sliced[Math.min(Math.floor(index * step), sliced.length - 1)]);
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function formatNumber(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "-";
+      return numeric.toFixed(2);
+    }
+
+    function formatSignedNumber(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "-";
+      return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(2)}`;
     }
 
     async function callJson(path, payload, method = "POST") {
@@ -1097,16 +1727,6 @@ resume payload required fields:
         const preview = data?.projections?.preview_render ?? null;
         if (preview?.status === "READY") {
           els.summaryText.textContent = `preview ready after ${attempt} poll(s)\n\n` + pretty(preview);
-          if (els.masterAudio?.src) {
-            els.masterAudio.load();
-          }
-          if (els.previewAudio?.src) {
-            try {
-              await els.previewAudio.play();
-            } catch (error) {
-              console.warn("preview autoplay failed", error);
-            }
-          }
           return;
         }
         if (preview?.status === "FAILED") {

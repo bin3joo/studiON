@@ -18,11 +18,13 @@ from app.services.plan_critic_llm import PlanCriticLLMResponse
 from app.services.planning_llm import PlanningLLMError, PlanningLLMResponse
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_audio_metadata import AudioMetadataRecord
-from app.services.workflow_preview_renderer import (
-    PREVIEW_CONTEXT_PADDING_MS,
-    render_preview_audio,
-)
+from app.services.workflow_preview_renderer import PREVIEW_CONTEXT_PADDING_MS
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
+from app.services.workflow_track_eq_commit import (
+    TrackEqBandRecord,
+    TrackEqBandUpdatePayload,
+    TrackEqRecord,
+)
 
 _TEST_AUDIO_METADATA: dict[int, AudioMetadataRecord] = {}
 
@@ -68,37 +70,6 @@ def _register_audio_metadata(metadata_id: int, audio_path: str, *, duration_ms: 
     return metadata_id
 
 
-def _write_sine_audio(
-    name: str,
-    *,
-    frequency_hz: float,
-    amplitude: float,
-    duration_ms: int,
-    sample_rate: int = 44100,
-) -> str:
-    sample_count = int(round((duration_ms / 1000.0) * sample_rate))
-    time_axis = np.arange(sample_count, dtype=np.float32) / float(sample_rate)
-    signal = (amplitude * np.sin(2 * np.pi * frequency_hz * time_axis)).astype(np.float32)
-    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
-    audio_dir.mkdir(parents=True, exist_ok=True)
-    audio_path = audio_dir / f"{name}.wav"
-    sf.write(audio_path, signal, sample_rate)
-    return str(audio_path)
-
-
-def _band_magnitude(
-    waveform: np.ndarray,
-    *,
-    sample_rate: int,
-    frequency_hz: float,
-) -> float:
-    mono = waveform[:, 0] if waveform.ndim == 2 else waveform
-    spectrum = np.fft.rfft(mono)
-    frequencies = np.fft.rfftfreq(mono.shape[0], d=1.0 / sample_rate)
-    index = int(np.argmin(np.abs(frequencies - frequency_hz)))
-    return float(np.abs(spectrum[index]))
-
-
 class _FakeAudioMetadataStore:
     def get_by_ids(self, audio_metadata_ids: list[int]) -> dict[int, AudioMetadataRecord]:
         return {
@@ -128,6 +99,31 @@ class _FakeCLAPInferenceClient:
                 )
             )
         return predictions
+
+
+class _FakeTrackEqCommitStore:
+    def __init__(self) -> None:
+        self.blocked_track_ids: set[int] = set()
+        self.missing_band_track_eq_ids: set[int] = set()
+        self.updated_calls: list[tuple[int, TrackEqBandUpdatePayload]] = []
+
+    def get_track_eq_by_track_id(self, track_id: int) -> TrackEqRecord | None:
+        if int(track_id) in self.blocked_track_ids:
+            return None
+        return TrackEqRecord(id=int(track_id) * 10, track_id=int(track_id))
+
+    def get_active_track_eq_band(self, track_eq_id: int) -> TrackEqBandRecord | None:
+        if int(track_eq_id) in self.missing_band_track_eq_ids:
+            return None
+        return TrackEqBandRecord(id=int(track_eq_id) * 10, track_eq_id=int(track_eq_id))
+
+    def update_track_eq_band(
+        self,
+        band_id: int,
+        payload: TrackEqBandUpdatePayload,
+    ) -> TrackEqBandRecord:
+        self.updated_calls.append((band_id, payload))
+        return TrackEqBandRecord(id=int(band_id), track_eq_id=int(band_id) // 10)
 
 
 @pytest.fixture(autouse=True)
@@ -260,6 +256,18 @@ def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     artifact_store.reset()
     snapshot_store.reset()
     _TEST_AUDIO_METADATA.clear()
+
+
+@pytest.fixture(autouse=True)
+def patch_track_eq_commit_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> _FakeTrackEqCommitStore:
+    store = _FakeTrackEqCommitStore()
+    monkeypatch.setattr(
+        "app.graph.nodes.runtime.get_workflow_track_eq_commit_store",
+        lambda: store,
+    )
+    return store
 
 
 def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
@@ -403,10 +411,9 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     assert result["preview_action_ids"] == ["10003-action-1"]
     assert result["preview_status"] == "READY"
     assert result["preview_suggestion_id"] == "10003-group-suggestion-1"
-    assert result["preview_duration_ms"] is not None
-    assert result["preview_duration_ms"] > 0
-    assert result["preview_object_key"] is not None
-    assert Path(result["preview_object_key"]).exists()
+    assert result["preview_excerpt_start_ms"] is not None
+    assert result["preview_excerpt_end_ms"] is not None
+    assert result["preview_excerpt_end_ms"] > result["preview_excerpt_start_ms"]
     assert execution_plan_artifact is not None
     assert execution_plan_artifact.artifact_type == "execution_plan"
     assert execution_plan_artifact.payload["previewActionIds"] == ["10003-action-1"]
@@ -733,7 +740,9 @@ def test_workflow_auto_applies_representative_preview_action() -> None:
     assert selected["preview_status"] == "READY"
 
 
-def test_workflow_confirm_commits_and_finalizes() -> None:
+def test_workflow_confirm_commits_and_finalizes(
+    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
+) -> None:
     waiting = run_workflow_graph(
         {
             "job_id": 10038,
@@ -755,6 +764,189 @@ def test_workflow_confirm_commits_and_finalizes() -> None:
     assert confirmed["current_node"] == "finalize_output"
     assert confirmed["runtime_status"] == "completed"
     assert confirmed["feedback_event_id"] == "10038-feedback"
+    assert confirmed["committed_track_eq_band_id"] is not None
+    assert len(patch_track_eq_commit_store.updated_calls) == 1
+
+
+def test_commit_selected_edit_recipe_updates_track_eq_band(
+    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
+) -> None:
+    result = nodes.commit_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10050,
+            project_id=20050,
+            requested_by=77,
+            apply_result_id="10050-apply",
+            preview_action_ids=["10050-action-1"],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "actions": [
+                            {
+                                "actionId": "10050-action-1",
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 14,
+                                "bandLowHz": 180,
+                                "bandHighHz": 420,
+                                "gainDeltaDb": -2.4,
+                                "params": {"q": 1.1, "threshold": -19},
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+    )
+
+    assert result["current_node"] == "commit_selected_edit_recipe"
+    assert result["committed_track_eq_band_id"] == 1400
+    band_id, payload = patch_track_eq_commit_store.updated_calls[0]
+    assert band_id == 1400
+    assert payload.eq_type_code == "BELL"
+    assert payload.frequency_hz == 275
+    assert payload.q == 1.1
+    assert payload.gain_delta_db == -2.4
+    assert payload.job_id == 10050
+    assert payload.suggestion_action_id == "10050-action-1"
+    assert payload.applied_suggestion_id == "10050-apply"
+    assert payload.source_type_code == "AI_SUGGESTION"
+    assert payload.updated_by == 77
+
+
+def test_commit_selected_edit_recipe_derives_q_from_band_bounds(
+    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
+) -> None:
+    nodes.commit_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10051,
+            project_id=20051,
+            preview_action_ids=["10051-action-1"],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "actions": [
+                            {
+                                "actionId": "10051-action-1",
+                                "actionType": "EQ_CUT",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 22,
+                                "bandLowHz": 200,
+                                "bandHighHz": 800,
+                                "gainDeltaDb": -1.8,
+                                "params": {"threshold": -18},
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+    )
+
+    _, payload = patch_track_eq_commit_store.updated_calls[0]
+    assert payload.frequency_hz == 400
+    assert payload.q == 0.667
+
+
+def test_commit_selected_edit_recipe_fails_without_track_eq(
+    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
+) -> None:
+    patch_track_eq_commit_store.blocked_track_ids.add(31)
+
+    failed = nodes.commit_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10052,
+            project_id=20052,
+            preview_action_ids=["10052-action-1"],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "actions": [
+                            {
+                                "actionId": "10052-action-1",
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 31,
+                                "bandLowHz": 250,
+                                "bandHighHz": 1200,
+                                "gainDeltaDb": -2.0,
+                                "params": {},
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["failure_code"] == "TRACK_EQ_NOT_FOUND"
+
+
+def test_commit_selected_edit_recipe_fails_without_active_track_eq_band(
+    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
+) -> None:
+    patch_track_eq_commit_store.missing_band_track_eq_ids.add(320)
+
+    failed = nodes.commit_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10053,
+            project_id=20053,
+            preview_action_ids=["10053-action-1"],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "actions": [
+                            {
+                                "actionId": "10053-action-1",
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 32,
+                                "bandLowHz": 250,
+                                "bandHighHz": 1200,
+                                "gainDeltaDb": -2.0,
+                                "params": {},
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["failure_code"] == "ACTIVE_TRACK_EQ_BAND_NOT_FOUND"
+
+
+def test_commit_selected_edit_recipe_rejects_non_eq_track_action() -> None:
+    failed = nodes.commit_selected_edit_recipe(
+        build_workflow_initial_state(
+            job_id=10054,
+            project_id=20054,
+            preview_action_ids=["10054-action-1"],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "actions": [
+                            {
+                                "actionId": "10054-action-1",
+                                "actionType": "GAIN_TRIM",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 44,
+                                "bandLowHz": None,
+                                "bandHighHz": None,
+                                "gainDeltaDb": -2.0,
+                                "params": {"preGainDb": -2.0},
+                            }
+                        ]
+                    }
+                ]
+            },
+        )
+    )
+
+    assert failed["current_node"] == "fail_workflow"
+    assert failed["failure_code"] == "UNSUPPORTED_COMMIT_ACTION"
 
 
 def test_workflow_cancel_path_finalizes() -> None:
@@ -821,8 +1013,8 @@ def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
     assert failed["failure_code"] == "INVALID_PREVIEW_ACTION_COUNT"
 
 
-def test_render_preview_fails_when_audio_source_cannot_be_resolved() -> None:
-    failed = nodes.render_preview(
+def test_render_preview_succeeds_without_audio_file_generation() -> None:
+    result = nodes.render_preview(
         build_workflow_initial_state(
             job_id=10019,
             project_id=20019,
@@ -876,114 +1068,26 @@ def test_render_preview_fails_when_audio_source_cannot_be_resolved() -> None:
         )
     )
 
-    assert failed["current_node"] == "fail_workflow"
-    assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "PREVIEW_AUDIO_NOT_FOUND"
-    assert failed["preview_status"] == "FAILED"
+    assert result["current_node"] == "render_preview"
+    assert result["preview_status"] == "READY"
+    assert result["preview_excerpt_start_ms"] == 0
+    assert result["preview_excerpt_end_ms"] == 1200
 
 
-def test_render_preview_audio_generates_preview_wav() -> None:
-    preview_id = "10043-preview"
-    duration_ms = 2200
-    target_path = _write_sine_audio(
-        "preview-target-10043",
-        frequency_hz=220.0,
-        amplitude=0.5,
-        duration_ms=duration_ms,
+def test_resolve_preview_excerpt_range_uses_context_padding() -> None:
+    waiting = run_workflow_graph(
+        {
+            "job_id": 10043,
+            "project_id": 20043,
+            "project_snapshot": build_project_snapshot(track_ids=[12, 24]),
+            "issue_types": ["band_overlap"],
+        }
     )
-    support_path = _write_sine_audio(
-        "preview-support-10043",
-        frequency_hz=1000.0,
-        amplitude=0.2,
-        duration_ms=duration_ms,
-    )
-    result = render_preview_audio(
-        job_id=10043,
-        preview_id=preview_id,
-        clip_index=[
-            {
-                "clip_id": _clip_id(12, 1),
-                "track_id": 12,
-                "start_ms": 0,
-                "end_ms": duration_ms,
-                "audio_path": target_path,
-                "audio_start_ms": 0,
-                "audio_duration_ms": duration_ms,
-            },
-            {
-                "clip_id": _clip_id(24, 1),
-                "track_id": 24,
-                "start_ms": 0,
-                "end_ms": duration_ms,
-                "audio_path": support_path,
-                "audio_start_ms": 0,
-                "audio_duration_ms": duration_ms,
-            },
-        ],
-        action={
-            "actionType": "DYNAMIC_EQ",
-            "targetScope": "TRACK",
-            "targetTrackId": 12,
-            "startMs": 100,
-            "endMs": 700,
-            "bandLowHz": 180,
-            "bandHighHz": 420,
-            "gainDeltaDb": -2.5,
-            "params": {"threshold": -19, "ratio": 2.0},
-        },
-        focus_region={
-            "id": "region-10043",
-            "start_ms": 100,
-            "end_ms": 700,
-            "measure_start": 1,
-            "measure_end": 1,
-        },
-        project_duration_ms=duration_ms,
-    )
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
-    assert result.duration_ms > 0
-    assert result.duration_ms == duration_ms
-    assert result.excerpt_start_ms == 0
-    assert result.excerpt_end_ms == duration_ms
-    assert Path(result.object_key).exists()
-    waveform, sample_rate = sf.read(result.object_key, always_2d=True)
-    assert sample_rate == 44100
-    assert waveform.shape[0] == int(round((duration_ms / 1000.0) * sample_rate))
-
-    effect_start_frame = int(round((100 / 1000.0) * sample_rate))
-    effect_end_frame = int(round((700 / 1000.0) * sample_rate))
-    rendered_effect = waveform[effect_start_frame:effect_end_frame]
-
-    baseline_target, _ = sf.read(target_path, always_2d=True)
-    baseline_support, _ = sf.read(support_path, always_2d=True)
-    baseline_effect = (
-        baseline_target[effect_start_frame:effect_end_frame]
-        + baseline_support[effect_start_frame:effect_end_frame]
-    )
-
-    rendered_target_band = _band_magnitude(
-        rendered_effect,
-        sample_rate=sample_rate,
-        frequency_hz=220.0,
-    )
-    baseline_target_band = _band_magnitude(
-        baseline_effect,
-        sample_rate=sample_rate,
-        frequency_hz=220.0,
-    )
-    rendered_support_band = _band_magnitude(
-        rendered_effect,
-        sample_rate=sample_rate,
-        frequency_hz=1000.0,
-    )
-    baseline_support_band = _band_magnitude(
-        baseline_effect,
-        sample_rate=sample_rate,
-        frequency_hz=1000.0,
-    )
-
-    assert rendered_target_band < baseline_target_band * 0.9
-    assert rendered_support_band == pytest.approx(baseline_support_band, rel=0.05)
+    assert result["preview_status"] == "READY"
+    assert result["preview_excerpt_start_ms"] == 0
+    assert result["preview_excerpt_end_ms"] == 4800
 
 
 def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
@@ -1026,15 +1130,6 @@ def test_workflow_response_contains_unified_projections() -> None:
     assert response["projections"]["suggestion_group"]["id"] == "10042-group"
     assert response["projections"]["preview_render"]["id"] == "10042-preview"
     assert response["projections"]["preview_render"]["status"] == "READY"
-    assert response["projections"]["preview_render"]["object_key"] is not None
-    assert response["projections"]["preview_render"]["before_object_key"] is not None
-    assert Path(response["projections"]["preview_render"]["object_key"]).exists()
-    assert Path(response["projections"]["preview_render"]["before_object_key"]).exists()
-    assert response["projections"]["preview_render"]["duration_ms"] > 0
-    assert (
-        response["projections"]["preview_render"]["before_duration_ms"]
-        == response["projections"]["preview_render"]["duration_ms"]
-    )
     assert response["projections"]["preview_render"]["preview_target_region"] == (
         result["selected_region_id"]
     )

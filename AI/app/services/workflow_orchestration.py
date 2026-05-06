@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.graph.state import UserDecision, WorkflowDispatchType, build_workflow_initial_state
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
-from app.services.workflow_master_renderer import MasterRenderError, render_master_audio
+from app.services.workflow_preview_compare import build_preview_compare_payload
 from app.services.workflow_queue import enqueue_workflow_dispatch
 from app.services.workflow_snapshots import (
     ProjectSnapshot,
@@ -18,41 +18,6 @@ from app.services.workflow_snapshots import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _build_master_audio_state(
-    *,
-    job_id: int,
-    project_duration_ms: int,
-    clip_index: list[dict[str, object | None]],
-) -> dict[str, object]:
-    try:
-        result = render_master_audio(
-            job_id=job_id,
-            project_duration_ms=project_duration_ms,
-            clip_index=[dict(clip) for clip in clip_index],
-        )
-    except MasterRenderError as exc:
-        logger.warning(
-            "snapshot master 렌더링 실패: job_id=%s code=%s message=%s",
-            job_id,
-            exc.code,
-            exc.message,
-        )
-        return {
-            "master_audio_status": "FAILED",
-            "master_audio_object_key": None,
-            "master_audio_duration_ms": None,
-            "master_audio_error_code": exc.code,
-            "master_audio_error_message": exc.message,
-        }
-    return {
-        "master_audio_status": "READY",
-        "master_audio_object_key": result.object_key,
-        "master_audio_duration_ms": result.duration_ms,
-        "master_audio_error_code": None,
-        "master_audio_error_message": None,
-    }
 
 
 class WorkflowDispatchAccepted(BaseModel):
@@ -90,14 +55,11 @@ class WorkflowResumePayload(BaseModel):
     user_decision: UserDecision | None = None
     requested_by: int | None = None
 
-# start API 다음 단계다.
-# 초기 상태를 만들고 pending job을 저장한 뒤,
-# worker가 실제 그래프를 돌릴 수 있도록 dispatch 메시지를 큐에 넣는다.
+
 def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepted:
     store = get_workflow_job_store()
     snapshot_store = get_workflow_snapshot_store()
     timeline_snapshot_id = build_snapshot_id(payload.job_id)
-    # 비동기 worker가 동일한 기준선으로 분석하도록 start 시점 snapshot을 먼저 고정 저장한다.
     snapshot_document = build_timeline_snapshot_document(
         job_id=payload.job_id,
         project_id=payload.project_id,
@@ -120,11 +82,6 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
         validator_mode=payload.validator_mode,
         critic_mode=payload.critic_mode,
         requested_by=payload.requested_by,
-        **_build_master_audio_state(
-            job_id=payload.job_id,
-            project_duration_ms=snapshot_document.duration_ms,
-            clip_index=snapshot_document.clip_index,
-        ),
     )
     try:
         store.create_pending_job(initial_state)
@@ -138,7 +95,7 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
         requested_by=payload.requested_by,
     )
     logger.info(
-        "워크플로 작업 적재 요청: job_id=%s dispatch_type=%s queue=%s",
+        "workflow dispatch queued | job_id=%s dispatch_type=%s queue=%s",
         payload.job_id,
         message.dispatch_type,
         "workflow",
@@ -178,9 +135,8 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
         user_feedback_message=payload.user_feedback_message,
         user_decision=payload.user_decision,
     )
-    # API는 enqueue만 담당하고, durable 복원과 그래프 실행 책임은 worker가 가진다.
     logger.info(
-        "워크플로 재개 적재 요청: job_id=%s dispatch_type=%s queue=%s",
+        "workflow dispatch resumed | job_id=%s dispatch_type=%s queue=%s",
         payload.job_id,
         dispatch_type,
         "workflow",
@@ -204,25 +160,7 @@ def get_workflow_job_status(job_id: int) -> dict[str, object]:
             detail="Workflow job was not found.",
         )
 
-    state = build_workflow_initial_state(job_id=job.id, project_id=job.project_id)
-    # polling 응답은 MySQL durable state를 기준으로 재구성해 단일 조회 source of truth로 쓴다.
-    state.update(job.state_snapshot)
-    state.update(
-        {
-            "job_id": job.id,
-            "project_id": job.project_id,
-            "phase": job.phase,
-            "current_node": job.current_node,
-            "progress": job.progress,
-            "durable_status": job.status,
-            "timeline_snapshot_id": job.timeline_snapshot_id,
-            "requested_by": job.requested_by,
-            "started_at": job.started_at,
-            "completed_at": job.completed_at,
-            "failure_code": job.error_code,
-            "failure_message": job.error_message,
-        }
-    )
+    state = _build_restored_job_state(job)
     return {
         "job": {
             "id": job.id,
@@ -240,6 +178,52 @@ def get_workflow_job_status(job_id: int) -> dict[str, object]:
         },
         "projections": build_workflow_projections(state).model_dump(mode="json"),
     }
+
+
+def get_workflow_preview_compare(job_id: int, *, mode: str = "preview") -> dict[str, object]:
+    store = get_workflow_job_store()
+    snapshot_store = get_workflow_snapshot_store()
+    job = store.get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow job was not found.",
+        )
+    if not job.timeline_snapshot_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Workflow job does not have a timeline snapshot.",
+        )
+    snapshot = snapshot_store.get_snapshot(job.timeline_snapshot_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow timeline snapshot was not found.",
+        )
+    state = _build_restored_job_state(job)
+    return build_preview_compare_payload(state, snapshot, mode=mode)
+
+
+def _build_restored_job_state(job: Any) -> dict[str, Any]:
+    state = build_workflow_initial_state(job_id=job.id, project_id=job.project_id)
+    state.update(job.state_snapshot)
+    state.update(
+        {
+            "job_id": job.id,
+            "project_id": job.project_id,
+            "phase": job.phase,
+            "current_node": job.current_node,
+            "progress": job.progress,
+            "durable_status": job.status,
+            "timeline_snapshot_id": job.timeline_snapshot_id,
+            "requested_by": job.requested_by,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "failure_code": job.error_code,
+            "failure_message": job.error_message,
+        }
+    )
+    return state
 
 
 def _dispatch_type_for_phase(phase: str) -> WorkflowDispatchType:

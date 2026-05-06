@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from math import sqrt
 
 from app.graph.nodes.common import append_transition, artifact_id, workflow_update
 from app.graph.state import WorkflowState, utc_now
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
-from app.services.workflow_master_renderer import MasterRenderError, render_master_audio
-from app.services.workflow_preview_renderer import (
-    PreviewRenderError,
-    render_preview_audio,
-    render_preview_before_audio,
+from app.services.workflow_preview_renderer import PreviewRenderError, resolve_preview_excerpt_range
+from app.services.workflow_track_eq_commit import (
+    TrackEqBandUpdatePayload,
+    TrackEqCommitError,
+    get_workflow_track_eq_commit_store,
 )
 
 
@@ -426,10 +427,6 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
             ),
             "preview_status": "PROCESSING",
             "preview_render_no": max(int(state.get("preview_render_no", 1) or 1), 1),
-            "preview_object_key": None,
-            "preview_duration_ms": None,
-            "preview_before_object_key": None,
-            "preview_before_duration_ms": None,
             "preview_excerpt_start_ms": None,
             "preview_excerpt_end_ms": None,
             "preview_requested_at": requested_at,
@@ -446,25 +443,13 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
 def render_preview(state: WorkflowState) -> WorkflowState:
     preview_id = state.get("preview_id") or f"{state['job_id']}-preview"
     started_at = utc_now()
-    focus_region = _resolve_preview_focus_region(state)
-    preview_action = _resolve_preview_action(state)
-    master_audio_state: dict[str, object] = {}
     try:
-        result = render_preview_audio(
-            job_id=state["job_id"],
-            preview_id=preview_id,
+        focus_region = _resolve_preview_focus_region(state)
+        _resolve_preview_action(state)
+        excerpt_start_ms, excerpt_end_ms = resolve_preview_excerpt_range(
             clip_index=state.get("clip_index", []),
-            action=preview_action,
             focus_region=focus_region,
             project_duration_ms=state.get("project_duration_ms"),
-        )
-        master_audio_path, master_audio_state = _ensure_master_audio_for_preview(state)
-        before_result = render_preview_before_audio(
-            job_id=state["job_id"],
-            preview_id=preview_id,
-            master_audio_path=master_audio_path,
-            excerpt_start_ms=result.excerpt_start_ms,
-            excerpt_end_ms=result.excerpt_end_ms,
         )
     except PreviewRenderError as exc:
         return fail_workflow(
@@ -489,18 +474,13 @@ def render_preview(state: WorkflowState) -> WorkflowState:
         extra={
             "preview_id": preview_id,
             "preview_status": "READY",
-            "preview_object_key": result.object_key,
-            "preview_duration_ms": result.duration_ms,
-            "preview_before_object_key": before_result.object_key,
-            "preview_before_duration_ms": before_result.duration_ms,
-            "preview_excerpt_start_ms": result.excerpt_start_ms,
-            "preview_excerpt_end_ms": result.excerpt_end_ms,
+            "preview_excerpt_start_ms": excerpt_start_ms,
+            "preview_excerpt_end_ms": excerpt_end_ms,
             "preview_started_at": started_at,
             "preview_completed_at": utc_now(),
             "preview_error_code": None,
             "preview_error_message": None,
             "user_decision": None,
-            **master_audio_state,
         },
     )
 
@@ -517,6 +497,50 @@ def wait_user_confirm(state: WorkflowState) -> WorkflowState:
 
 
 def commit_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
+    try:
+        action = _resolve_preview_action(state)
+        target_track_id, band_update = _build_track_eq_band_update_payload(state, action=action)
+        store = get_workflow_track_eq_commit_store()
+        if store is None:
+            raise TrackEqCommitError(
+                "TRACK_EQ_STORE_UNAVAILABLE",
+                "track_eq commit을 수행할 MySQL 저장소를 구성하지 못했습니다.",
+            )
+        track_eq = store.get_track_eq_by_track_id(target_track_id)
+        if track_eq is None:
+            raise TrackEqCommitError(
+                "TRACK_EQ_NOT_FOUND",
+                f"트랙 {target_track_id}의 track_eq row를 찾지 못했습니다.",
+            )
+        active_band = store.get_active_track_eq_band(track_eq.id)
+        if active_band is None:
+            raise TrackEqCommitError(
+                "ACTIVE_TRACK_EQ_BAND_NOT_FOUND",
+                f"track_eq {track_eq.id}에 활성 track_eq_band가 없습니다.",
+            )
+        committed_band = store.update_track_eq_band(active_band.id, band_update)
+    except PreviewRenderError as exc:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": exc.code,
+                "failure_message": exc.message,
+            }
+        )
+    except TrackEqCommitError as exc:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": exc.code,
+                "failure_message": exc.message,
+            }
+        )
+
+    notes = [*state.get("notes", [])]
+    notes.append(
+        f"트랙 {target_track_id}의 EQ band {committed_band.id}를 "
+        f"preview action {band_update.suggestion_action_id} 기준으로 갱신했다."
+    )
     return workflow_update(
         state,
         node="commit_selected_edit_recipe",
@@ -524,6 +548,10 @@ def commit_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         progress=99,
         runtime_status="running",
         durable_status="RUNNING",
+        extra={
+            "committed_track_eq_band_id": committed_band.id,
+            "notes": notes,
+        },
     )
 
 
@@ -569,10 +597,6 @@ def fail_workflow(state: WorkflowState) -> WorkflowState:
             "preview_suggestion_id": state.get("preview_suggestion_id"),
             "preview_status": state.get("preview_status"),
             "preview_render_no": state.get("preview_render_no", 1),
-            "preview_object_key": state.get("preview_object_key"),
-            "preview_duration_ms": state.get("preview_duration_ms"),
-            "preview_before_object_key": state.get("preview_before_object_key"),
-            "preview_before_duration_ms": state.get("preview_before_duration_ms"),
             "preview_excerpt_start_ms": state.get("preview_excerpt_start_ms"),
             "preview_excerpt_end_ms": state.get("preview_excerpt_end_ms"),
             "preview_requested_at": state.get("preview_requested_at"),
@@ -799,38 +823,103 @@ def _resolve_preview_suggestion_id(
     return None
 
 
-def _resolve_master_audio_path(state: WorkflowState) -> str:
-    master_audio_path = state.get("master_audio_object_key")
-    if not isinstance(master_audio_path, str) or not master_audio_path.strip():
-        raise PreviewRenderError(
-            "MASTER_AUDIO_NOT_FOUND",
-            "before excerpt를 만들기 위한 master 오디오 경로가 없습니다.",
+def _build_track_eq_band_update_payload(
+    state: WorkflowState,
+    *,
+    action: dict[str, object],
+) -> tuple[int, TrackEqBandUpdatePayload]:
+    action_type = str(action.get("actionType") or "")
+    target_scope = str(action.get("targetScope") or "")
+    target_track_id = action.get("targetTrackId")
+    if action_type not in {"DYNAMIC_EQ", "EQ_CUT"} or target_scope != "TRACK":
+        raise TrackEqCommitError(
+            "UNSUPPORTED_COMMIT_ACTION",
+            (
+                "현재 commit_selected_edit_recipe는 TRACK scope의 "
+                "EQ 계열 action(DYNAMIC_EQ/EQ_CUT)만 반영할 수 있습니다."
+            ),
         )
-    return master_audio_path
-
-
-def _ensure_master_audio_for_preview(state: WorkflowState) -> tuple[str, dict[str, object]]:
-    try:
-        return _resolve_master_audio_path(state), {}
-    except PreviewRenderError:
-        pass
-
-    try:
-        result = render_master_audio(
-            job_id=state["job_id"],
-            project_duration_ms=int(state.get("project_duration_ms") or 0),
-            clip_index=[dict(clip) for clip in state.get("clip_index", [])],
+    if not isinstance(target_track_id, int):
+        raise TrackEqCommitError(
+            "UNSUPPORTED_COMMIT_ACTION",
+            "TRACK EQ commit에는 정수 targetTrackId가 필요합니다.",
         )
-    except MasterRenderError as exc:
-        raise PreviewRenderError(exc.code, exc.message) from exc
+    gain_delta_db = action.get("gainDeltaDb")
+    if not isinstance(gain_delta_db, int | float):
+        raise TrackEqCommitError(
+            "INVALID_EQ_BAND_MAPPING",
+            "EQ commit에는 숫자 gainDeltaDb가 필요합니다.",
+        )
 
-    return result.object_key, {
-        "master_audio_status": "READY",
-        "master_audio_object_key": result.object_key,
-        "master_audio_duration_ms": result.duration_ms,
-        "master_audio_error_code": None,
-        "master_audio_error_message": None,
-    }
+    # action payload에는 실제 DB용 중심 주파수와 Q가 없어서,
+    # MVP에서는 대역 범위를 BELL band 1개로 투영하는 규칙을 여기서 고정한다.
+    frequency_hz = _resolve_eq_center_frequency(action)
+    q = _resolve_eq_q_value(action, frequency_hz=frequency_hz)
+    preview_action_id = str(action.get("actionId") or "")
+    applied_suggestion_id = state.get("apply_result_id") or state.get("preview_suggestion_id")
+    if applied_suggestion_id is None and preview_action_id:
+        applied_suggestion_id = _resolve_preview_suggestion_id(
+            state,
+            preview_action_id=preview_action_id,
+        )
+    return target_track_id, TrackEqBandUpdatePayload(
+        eq_type_code="BELL",
+        frequency_hz=frequency_hz,
+        q=q,
+        gain_delta_db=round(float(gain_delta_db), 3),
+        job_id=int(state["job_id"]),
+        suggestion_action_id=preview_action_id,
+        applied_suggestion_id=applied_suggestion_id,
+        source_type_code="AI_SUGGESTION",
+        updated_by=int(state.get("requested_by") or 0),
+    )
+
+
+def _resolve_eq_center_frequency(action: dict[str, object]) -> int:
+    band_low_hz, band_high_hz = _resolve_eq_band_bounds(action)
+    if band_low_hz <= 0 or band_high_hz <= 0:
+        raise TrackEqCommitError(
+            "INVALID_EQ_BAND_MAPPING",
+            "EQ 중심 주파수를 계산하려면 양수 bandLowHz/bandHighHz가 필요합니다.",
+        )
+    return int(round(sqrt(band_low_hz * band_high_hz)))
+
+
+def _resolve_eq_q_value(
+    action: dict[str, object],
+    *,
+    frequency_hz: int,
+) -> float:
+    params = action.get("params") or {}
+    if isinstance(params, dict):
+        q_value = params.get("q")
+        if isinstance(q_value, int | float) and float(q_value) > 0:
+            return round(float(q_value), 3)
+    band_low_hz, band_high_hz = _resolve_eq_band_bounds(action)
+    bandwidth_hz = band_high_hz - band_low_hz
+    if bandwidth_hz <= 0:
+        raise TrackEqCommitError(
+            "INVALID_EQ_BAND_MAPPING",
+            "EQ Q 값을 계산하려면 bandHighHz가 bandLowHz보다 커야 합니다.",
+        )
+    q_value = float(frequency_hz) / float(bandwidth_hz)
+    if q_value <= 0:
+        raise TrackEqCommitError(
+            "INVALID_EQ_BAND_MAPPING",
+            "계산된 EQ Q 값이 유효하지 않습니다.",
+        )
+    return round(q_value, 3)
+
+
+def _resolve_eq_band_bounds(action: dict[str, object]) -> tuple[int, int]:
+    band_low_hz = action.get("bandLowHz")
+    band_high_hz = action.get("bandHighHz")
+    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
+        raise TrackEqCommitError(
+            "INVALID_EQ_BAND_MAPPING",
+            "EQ commit에는 정수 bandLowHz/bandHighHz가 필요합니다.",
+        )
+    return band_low_hz, band_high_hz
 
 
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:

@@ -102,10 +102,6 @@ class WorkflowState(TypedDict, total=False):
     preview_suggestion_id: str | None
     preview_status: str | None
     preview_render_no: int
-    preview_object_key: str | None
-    preview_duration_ms: int | None
-    preview_before_object_key: str | None
-    preview_before_duration_ms: int | None
     preview_excerpt_start_ms: int | None
     preview_excerpt_end_ms: int | None
     preview_requested_at: str | None
@@ -114,11 +110,6 @@ class WorkflowState(TypedDict, total=False):
     preview_expired_at: str | None
     preview_error_code: str | None
     preview_error_message: str | None
-    master_audio_status: str | None
-    master_audio_object_key: str | None
-    master_audio_duration_ms: int | None
-    master_audio_error_code: str | None
-    master_audio_error_message: str | None
     user_decision: UserDecision | None
     user_action_required: bool
     validator_mode: str
@@ -128,6 +119,7 @@ class WorkflowState(TypedDict, total=False):
     revise_count: int
     max_revise_count: int
     apply_result_id: str | None
+    committed_track_eq_band_id: int | None
     feedback_event_id: str | None
     latest_artifact_id: str | None
     mongo_artifact_ids: list[str]
@@ -223,10 +215,6 @@ def build_workflow_initial_state(
         "preview_suggestion_id": None,
         "preview_status": None,
         "preview_render_no": 1,
-        "preview_object_key": None,
-        "preview_duration_ms": None,
-        "preview_before_object_key": None,
-        "preview_before_duration_ms": None,
         "preview_excerpt_start_ms": None,
         "preview_excerpt_end_ms": None,
         "preview_requested_at": None,
@@ -235,11 +223,6 @@ def build_workflow_initial_state(
         "preview_expired_at": None,
         "preview_error_code": None,
         "preview_error_message": None,
-        "master_audio_status": None,
-        "master_audio_object_key": None,
-        "master_audio_duration_ms": None,
-        "master_audio_error_code": None,
-        "master_audio_error_message": None,
         "user_decision": None,
         "user_action_required": False,
         "validator_mode": "PASS",
@@ -249,6 +232,7 @@ def build_workflow_initial_state(
         "revise_count": 0,
         "max_revise_count": 1,
         "apply_result_id": None,
+        "committed_track_eq_band_id": None,
         "feedback_event_id": None,
         "latest_artifact_id": None,
         "mongo_artifact_ids": [],

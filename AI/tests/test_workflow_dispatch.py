@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import io
 from pathlib import Path
 from tempfile import gettempdir
 from types import SimpleNamespace
@@ -36,6 +34,11 @@ from app.services.workflow_snapshots import (
     MongoWorkflowSnapshotStore,
     TimelineSnapshotDocument,
     get_workflow_snapshot_store,
+)
+from app.services.workflow_track_eq_commit import (
+    TrackEqBandRecord,
+    TrackEqBandUpdatePayload,
+    TrackEqRecord,
 )
 from app.services.workflow_worker import run_workflow_dispatch
 
@@ -83,11 +86,6 @@ def _register_audio_metadata(metadata_id: int, audio_path: str) -> int:
     return metadata_id
 
 
-def _wav_duration_ms_from_bytes(payload: bytes) -> int:
-    waveform, sample_rate = sf.read(io.BytesIO(payload), always_2d=True)
-    return int(round((waveform.shape[0] / sample_rate) * 1000))
-
-
 class _FakeAudioMetadataStore:
     def get_by_ids(self, audio_metadata_ids: list[int]) -> dict[int, AudioMetadataRecord]:
         return {
@@ -131,6 +129,25 @@ class _CaptureCollection:
         self.upsert = upsert
 
 
+class _FakeTrackEqCommitStore:
+    def __init__(self) -> None:
+        self.updated_calls: list[tuple[int, TrackEqBandUpdatePayload]] = []
+
+    def get_track_eq_by_track_id(self, track_id: int) -> TrackEqRecord | None:
+        return TrackEqRecord(id=int(track_id) * 10, track_id=int(track_id))
+
+    def get_active_track_eq_band(self, track_eq_id: int) -> TrackEqBandRecord | None:
+        return TrackEqBandRecord(id=int(track_eq_id) * 10, track_eq_id=int(track_eq_id))
+
+    def update_track_eq_band(
+        self,
+        band_id: int,
+        payload: TrackEqBandUpdatePayload,
+    ) -> TrackEqBandRecord:
+        self.updated_calls.append((band_id, payload))
+        return TrackEqBandRecord(id=int(band_id), track_eq_id=int(band_id) // 10)
+
+
 @pytest.fixture(autouse=True)
 def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     _TEST_AUDIO_METADATA.clear()
@@ -170,6 +187,18 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshot_store.reset()
     artifact_store.reset()
     _TEST_AUDIO_METADATA.clear()
+
+
+@pytest.fixture(autouse=True)
+def patch_track_eq_commit_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> _FakeTrackEqCommitStore:
+    store = _FakeTrackEqCommitStore()
+    monkeypatch.setattr(
+        "app.graph.nodes.runtime.get_workflow_track_eq_commit_store",
+        lambda: store,
+    )
+    return store
 
 
 @pytest.fixture(autouse=True)
@@ -580,9 +609,9 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
     assert result["current_node"] == "wait_user_confirm"
     assert result["preview_action_ids"] == ["20015-action-1"]
     assert result["preview_status"] == "READY"
-    assert result["preview_object_key"] is not None
-    assert Path(result["preview_object_key"]).exists()
-    assert result["preview_duration_ms"] >= 2000
+    assert result["preview_excerpt_start_ms"] is not None
+    assert result["preview_excerpt_end_ms"] is not None
+    assert result["preview_excerpt_end_ms"] > result["preview_excerpt_start_ms"]
     assert result["sibilance_fix_applied"] is True
     assert recipe_artifact is not None
     assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
@@ -816,9 +845,9 @@ def test_worker_rejects_confirm_resume_without_user_decision(
     )
     assert preview_wait["phase"] == "waiting_for_user_confirm"
     assert preview_wait["preview_status"] == "READY"
-    assert preview_wait["preview_object_key"] is not None
-    assert Path(preview_wait["preview_object_key"]).exists()
-    assert preview_wait["preview_duration_ms"] >= 2000
+    assert preview_wait["preview_excerpt_start_ms"] is not None
+    assert preview_wait["preview_excerpt_end_ms"] is not None
+    assert preview_wait["preview_excerpt_end_ms"] > preview_wait["preview_excerpt_start_ms"]
 
     failed = run_workflow_dispatch(
         WorkflowDispatchMessage(
@@ -902,9 +931,8 @@ def test_start_api_persists_snapshot_only_in_snapshot_store(
     assert stored.timeline_snapshot_id == snapshot.id
     assert "project_snapshot" not in stored.state_snapshot
     assert snapshot.snapshot["clips"][0]["clip_id"] == _clip_id(3, 1)
-    assert stored.state_snapshot["master_audio_status"] == "READY"
-    assert stored.state_snapshot["master_audio_object_key"] is not None
-    assert Path(stored.state_snapshot["master_audio_object_key"]).exists()
+    assert "master_audio_status" not in stored.state_snapshot
+    assert "master_audio_object_key" not in stored.state_snapshot
 
 
 def test_resume_api_infers_dispatch_type_from_waiting_phase(
@@ -979,116 +1007,9 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     body = response.json()
     assert body["job"]["id"] == 20012
     assert body["projections"]["analysis_job"]["id"] == 20012
-    assert body["projections"]["master_audio"]["status"] == "READY"
+    assert "master_audio" not in body["projections"]
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert body["projections"]["suggestion_group"] is None
-
-
-def test_master_audio_api_serves_generated_master(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
-        lambda message: None,
-    )
-    start_workflow_job(
-        WorkflowStartPayload(
-            job_id=20021,
-            project_id=30021,
-            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
-            issue_types=["band_overlap"],
-        )
-    )
-
-    client = TestClient(create_app())
-    response = client.get("/api/v1/internal/workflow/jobs/20021/master/audio")
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("audio/wav")
-    assert response.content[:4] == b"RIFF"
-    assert _wav_duration_ms_from_bytes(response.content) == 4800
-
-
-def test_preview_audio_api_serves_generated_preview(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
-        lambda message: None,
-    )
-    start_workflow_job(
-        WorkflowStartPayload(
-            job_id=20018,
-            project_id=30018,
-            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
-            issue_types=["band_overlap"],
-        )
-    )
-    waiting = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20018,
-            project_id=30018,
-            dispatch_type="start",
-        )
-    )
-    preview_wait = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20018,
-            project_id=30018,
-            dispatch_type="resume_plan_input",
-            **build_plan_input(waiting),
-        )
-    )
-    assert preview_wait["preview_status"] == "READY"
-
-    client = TestClient(create_app())
-    response = client.get("/api/v1/internal/workflow/jobs/20018/preview/audio")
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("audio/wav")
-    assert response.content[:4] == b"RIFF"
-    assert _wav_duration_ms_from_bytes(response.content) >= 2000
-
-
-def test_preview_before_audio_api_serves_generated_before_excerpt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
-        lambda message: None,
-    )
-    start_workflow_job(
-        WorkflowStartPayload(
-            job_id=20023,
-            project_id=30023,
-            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
-            issue_types=["band_overlap"],
-        )
-    )
-    waiting = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20023,
-            project_id=30023,
-            dispatch_type="start",
-        )
-    )
-    preview_wait = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20023,
-            project_id=30023,
-            dispatch_type="resume_plan_input",
-            **build_plan_input(waiting),
-        )
-    )
-    assert preview_wait["preview_status"] == "READY"
-
-    client = TestClient(create_app())
-    response = client.get("/api/v1/internal/workflow/jobs/20023/preview/before/audio")
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("audio/wav")
-    assert response.content[:4] == b"RIFF"
-    assert _wav_duration_ms_from_bytes(response.content) == preview_wait["preview_duration_ms"]
 
 
 def test_job_status_api_exposes_master_context_preview_metadata(
@@ -1131,10 +1052,185 @@ def test_job_status_api_exposes_master_context_preview_metadata(
     assert preview["preview_target_region"] is not None
     assert preview["preview_action_track"] is not None
     assert preview["preview_action_type"] == "DYNAMIC_EQ"
-    assert preview["before_object_key"] is not None
-    assert preview["before_duration_ms"] == preview["duration_ms"]
     assert preview["preview_excerpt_range"]["start_ms"] <= preview["preview_region_start_ms"]
     assert preview["preview_excerpt_range"]["end_ms"] >= preview["preview_region_end_ms"]
+
+
+def test_preview_compare_api_returns_visual_compare_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20023,
+            project_id=30023,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20023,
+            project_id=30023,
+            dispatch_type="start",
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20023,
+            project_id=30023,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20023/preview-compare")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview"]["status"] == "READY"
+    assert body["issue_overlay"]["kind"] == "band_overlap"
+    assert len(body["before_excerpt"]["waveform_points"]) == 1200
+    assert len(body["after_excerpt"]["waveform_points"]) == 1200
+    assert len(body["before_excerpt"]["spectrum_bins"]) == 96
+    assert body["before_region_summary"]["duration_ms"] > 0
+    assert body["before_region_summary"]["duration_ms"] < body["before_excerpt"]["duration_ms"]
+    assert body["after_region_summary"]["duration_ms"] == body["before_region_summary"]["duration_ms"]
+    assert len(body["before_region_summary"]["waveform_points"]) == 1200
+    assert len(body["prompt_feedback_hints"]) >= 2
+
+
+def test_preview_compare_api_rejects_non_ready_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20024,
+            project_id=30024,
+            project_snapshot=build_project_snapshot(track_ids=[21, 22]),
+            issue_types=["band_overlap"],
+        )
+    )
+    store = get_workflow_job_store()
+    record = store.get_job(20024)
+    assert record is not None
+    state = build_workflow_initial_state(
+        job_id=20024,
+        project_id=30024,
+        timeline_snapshot_id=record.timeline_snapshot_id,
+        project_duration_ms=4800,
+        track_ids=[21, 22],
+        clip_index=record.state_snapshot["clip_index"],
+        issue_types=["band_overlap"],
+    )
+    state.update(
+        {
+            "phase": "preview_processing",
+            "selected_region_id": "20024-region-1",
+            "analysis_regions": [
+                {
+                    "id": "20024-region-1",
+                    "issue_type": "band_overlap",
+                    "track_id": 21,
+                    "secondary_track_id": 22,
+                    "start_ms": 400,
+                    "end_ms": 1600,
+                    "band_low_hz": 200,
+                    "band_high_hz": 1200,
+                }
+            ],
+            "suggestion_payload": {
+                "suggestions": [
+                    {
+                        "actions": [
+                            {
+                                "actionId": "20024-action-1",
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 21,
+                                "targetClipId": None,
+                                "startMs": 400,
+                                "endMs": 1600,
+                                "bandLowHz": 200,
+                                "bandHighHz": 1200,
+                                "gainDeltaDb": -2.4,
+                                "params": {"threshold": -19, "ratio": 2.0},
+                            }
+                        ]
+                    }
+                ]
+            },
+            "preview_id": "20024-preview",
+            "preview_action_ids": ["20024-action-1"],
+            "preview_status": "PROCESSING",
+        }
+    )
+    store.save_graph_state(state)
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20024/preview-compare")
+
+    assert response.status_code == 409
+    assert "not ready" in response.json()["detail"]
+
+
+def test_preview_compare_api_supports_applied_mode_after_confirm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20025,
+            project_id=30025,
+            project_snapshot=build_project_snapshot(track_ids=[31, 32]),
+            issue_types=["band_overlap", "sibilance"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20025,
+            project_id=30025,
+            dispatch_type="start",
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20025,
+            project_id=30025,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20025,
+            project_id=30025,
+            dispatch_type="resume_confirm",
+            user_decision="confirm",
+        )
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20025/preview-compare?mode=applied")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "applied"
+    assert len(body["actions"]) >= 1
+    assert body["action"]["action_id"] == body["actions"][-1]["action_id"]
+
+
 def test_job_record_spills_large_state_into_artifact_store() -> None:
     state = build_workflow_initial_state(job_id=20014, project_id=30014)
     state.update(

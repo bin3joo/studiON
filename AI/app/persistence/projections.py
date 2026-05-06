@@ -135,10 +135,6 @@ class PreviewRenderProjection(BaseModel):
     suggestion_id: str | None = None
     status: str
     render_no: int = 1
-    object_key: str | None = None
-    duration_ms: int | None = None
-    before_object_key: str | None = None
-    before_duration_ms: int | None = None
     preview_target_region: str | None = None
     preview_region_start_ms: int | None = None
     preview_region_end_ms: int | None = None
@@ -152,15 +148,6 @@ class PreviewRenderProjection(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     expired_at: str | None = None
-    error_code: str | None = None
-    error_message: str | None = None
-
-
-class MasterAudioProjection(BaseModel):
-    job_id: int
-    status: str
-    object_key: str | None = None
-    duration_ms: int | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -193,7 +180,6 @@ class WorkflowGraphProjections(BaseModel):
     plan_state: PlanStateProjection | None = None
     suggestion_group: SuggestionGroupProjection | None = None
     preview_render: PreviewRenderProjection | None = None
-    master_audio: MasterAudioProjection | None = None
     applied_suggestion: AppliedSuggestionProjection | None = None
     feedback_event: FeedbackEventProjection | None = None
 
@@ -233,7 +219,6 @@ def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections
         plan_state=_build_plan_state(state),
         suggestion_group=suggestion_group,
         preview_render=_build_preview_render(state, suggestion_group),
-        master_audio=_build_master_audio(state),
         applied_suggestion=_build_applied_suggestion(state, suggestion_group),
         feedback_event=_build_feedback_event(state),
     )
@@ -458,10 +443,6 @@ def _build_preview_render(
         status=state.get("preview_status")
         or ("FAILED" if state.get("phase") == "failed" else "PROCESSING"),
         render_no=int(state.get("preview_render_no", 1) or 1),
-        object_key=state.get("preview_object_key"),
-        duration_ms=state.get("preview_duration_ms"),
-        before_object_key=state.get("preview_before_object_key"),
-        before_duration_ms=state.get("preview_before_duration_ms"),
         preview_target_region=preview_region.get("id") if preview_region else None,
         preview_region_start_ms=preview_region.get("start_ms") if preview_region else None,
         preview_region_end_ms=preview_region.get("end_ms") if preview_region else None,
@@ -516,24 +497,6 @@ def _build_preview_excerpt_range(state: WorkflowState) -> dict[str, int] | None:
     }
 
 
-def _build_master_audio(state: WorkflowState) -> MasterAudioProjection | None:
-    if not any(
-        [
-            state.get("master_audio_status"),
-            state.get("master_audio_object_key"),
-            state.get("master_audio_error_code"),
-            state.get("master_audio_error_message"),
-        ]
-    ):
-        return None
-    return MasterAudioProjection(
-        job_id=state["job_id"],
-        status=state.get("master_audio_status") or "PROCESSING",
-        object_key=state.get("master_audio_object_key"),
-        duration_ms=state.get("master_audio_duration_ms"),
-        error_code=state.get("master_audio_error_code"),
-        error_message=state.get("master_audio_error_message"),
-    )
 
 
 # apply 결과가 있거나 workflow가 종료 상태에 도달했을 때 적용 projection을 만든다.

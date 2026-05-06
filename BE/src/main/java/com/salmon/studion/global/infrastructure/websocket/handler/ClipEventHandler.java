@@ -1,4 +1,4 @@
-package com.salmon.studion.global.infrastructure.websocket;
+package com.salmon.studion.global.infrastructure.websocket.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
@@ -11,6 +11,8 @@ import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.global.infrastructure.websocket.WebSocketMessageSender;
+import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

@@ -1,4 +1,4 @@
-package com.salmon.studion.global.infrastructure.websocket;
+package com.salmon.studion.global.infrastructure.websocket.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
@@ -10,6 +10,8 @@ import com.salmon.studion.domain.track.dto.request.TrackPanRequest;
 import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
 import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
 import com.salmon.studion.domain.track.service.TrackService;
+import com.salmon.studion.global.infrastructure.websocket.WebSocketMessageSender;
+import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

@@ -9,11 +9,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class CommentStatusChangeRequest extends CommentRequest {
     private Integer commentId;
-    private Boolean isResolved;
 
     @Override
     public void validate() {
-        if (getProjectId() == null || commentId == null || isResolved == null) {
+        if (getProjectId() == null || commentId == null) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
     }

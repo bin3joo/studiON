@@ -5,6 +5,8 @@ spring:
   application:
     name: studion
 
+
+
   datasource:
     url: jdbc:mysql://${DB_HOST:localhost}:3307/${DB_NAME:studion}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
     username: ${DB_USERNAME}
@@ -82,3 +84,6 @@ logging:
 
 app:
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
+
+server:
+  forward-headers-strategy: framework

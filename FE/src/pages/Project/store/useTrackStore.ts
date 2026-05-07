@@ -156,7 +156,7 @@ export const useTrackStore = defineStore('track', () => {
     // ==========================================
     // 🌐 웹소켓 수신 (Subscribe) 처리부
     // ==========================================
-    // 백엔드 명세에 맞추어 이벤트 명(`CLIP_PASTE_SUCCESS` 등)을 수정하여 사용
+       // 백엔드 명세에 맞추어 이벤트 명(`CLIP_PASTE_SUCCESS` 등)을 수정하여 사용
 
 
     // --------------------- 트랙 관련 (소켓) ---------------------    
@@ -252,7 +252,7 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
 
-    socketService.subscribe('CLIP_MOVE', (data) => {
+     socketService.subscribe('CLIP_MOVE', (data) => {
         let targetClip: ClipUIState | null = null;
         let sourceTrack: TrackUIState | null = null;
 
@@ -829,7 +829,7 @@ export const useTrackStore = defineStore('track', () => {
         // 1. 새 트랙의 볼륨 노드 + 패너 생성 (테스트 완료: 마스터 볼륨으로 안전하게 연결)
         const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
         const vol = new Tone.Volume(newTrack.volume).connect(panner);
-
+        
         // 개별 트랙 노드들도 스테레오 강제 유지
         panner.channelCount = 2;
         panner.channelCountMode = "explicit";
@@ -1004,7 +1004,7 @@ export const useTrackStore = defineStore('track', () => {
             const vol = trackVolumes.get(trackId);
             if (vol) vol.dispose();
             trackVolumes.delete(trackId);
-
+            
             const panner = trackPanners.get(trackId);
             if (panner) panner.dispose();
             trackPanners.delete(trackId);
@@ -1094,7 +1094,7 @@ export const useTrackStore = defineStore('track', () => {
                 panner.channelCountMode = "explicit";
                 toVol.channelCount = 2;
                 toVol.channelCountMode = "explicit";
-
+                
                 trackVolumes.set(toTrackId, toVol);
                 trackPanners.set(toTrackId, panner);
             }
@@ -1280,8 +1280,8 @@ export const useTrackStore = defineStore('track', () => {
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 
-            console.log('[fetchProject] data:', data)
-            console.log('[fetchProject] data.name:', data.name)
+console.log('[fetchProject] data:', data)
+console.log('[fetchProject] data.name:', data.name)
 
             if (data) {
                 const MIN_TOTAL_BAR_COUNT = 100
@@ -1296,7 +1296,7 @@ export const useTrackStore = defineStore('track', () => {
 
                     // 핵심: 백엔드가 0을 내려줘도 화면 작업 영역은 최소 100마디 확보
                     totalBarCount: Math.max(data.totalBarCount ?? 0, MIN_TOTAL_BAR_COUNT),
-                }
+            }
                 bpm.value = data.tempo;
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({

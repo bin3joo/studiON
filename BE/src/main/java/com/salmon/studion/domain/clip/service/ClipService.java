@@ -703,6 +703,7 @@ public class ClipService {
 
         return ClipPasteResponse.builder()
                 .clipId(newClipId)
+                .sourceClipId(clipboardState.getClipId())
                 .targetTrackId(request.getTargetTrackId())
                 .targetStartBar(request.getTargetStartBar())
                 .build();

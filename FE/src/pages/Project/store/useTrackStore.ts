@@ -1122,16 +1122,19 @@ console.log('[fetchProject] data:', data)
 console.log('[fetchProject] data.name:', data.name)
 
             if (data) {
+                const MIN_TOTAL_BAR_COUNT = 100
                 projectInfo.value = {
                     projectId: data.projectId,
-                    name: data.name,
-                    tempo: data.tempo,
-                    rootNote: data.rootNote,
-                    mode: data.projectMode,
-                    timeSigNumerator: data.timeSigNumerator,
-                    timeSigDenominator: data.timeSigDenominator,
-                    totalBarCount: data.totalBarCount
-                };
+                    name: data.name ?? '프로젝트',
+                    tempo: data.tempo ?? 120,
+                    rootNote: data.rootNote ?? 'C',
+                    mode: data.projectMode ?? 'MAJOR',
+                    timeSigNumerator: data.timeSigNumerator ?? 4,
+                    timeSigDenominator: data.timeSigDenominator ?? 4,
+
+                    // 핵심: 백엔드가 0을 내려줘도 화면 작업 영역은 최소 100마디 확보
+                    totalBarCount: Math.max(data.totalBarCount ?? 0, MIN_TOTAL_BAR_COUNT),
+                }
                 bpm.value = data.tempo;
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({

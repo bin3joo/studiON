@@ -1,5 +1,6 @@
 package com.salmon.studion.domain.comment.dto.websocket;
 
+import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.comment.entity.Comment;
 
 import java.math.BigDecimal;
@@ -7,30 +8,44 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public record CommentCreateResponse(
-        Integer commentId,
+        Integer projectId,
         Integer trackId,
-        Integer userId,
-        String nickname,
-        String profileImgUrl,
+        Integer commentId,
         Integer parentCommentId,
         String content,
         BigDecimal location,    // 댓글이 달린 마디 위치
         Boolean isResolved,
-        List<Integer> mentionedUserIds,
+
+        UserSummary author,
+        List<UserSummary> mentionedUsers,
         LocalDateTime createdAt
 ) {
-    public static CommentCreateResponse of(Comment comment, List<Integer> mentionedUserIds) {
+    public record UserSummary(
+            Integer userId,
+            String nickname,
+            String profileImgUrl
+    ) {
+        public static UserSummary from(User user) {
+            return new UserSummary(
+                    user.getId(),
+                    user.getNickname(),
+                    user.getProfileImgUrl());
+        }
+    }
+
+    public static CommentCreateResponse of(Integer projectId, Comment comment, List<User> mentionedUsers) {
         return new CommentCreateResponse(
-                comment.getId(),
+                projectId,
                 comment.getTrack().getId(),
-                comment.getUser().getId(),
-                comment.getUser().getNickname(),
-                comment.getUser().getProfileImgUrl(),
+                comment.getId(),
                 comment.getParentCommentId(),
                 comment.getContent(),
                 comment.getLocation(),
                 comment.getIsResolved(),
-                mentionedUserIds,
+                UserSummary.from(comment.getUser()),
+                mentionedUsers.stream()
+                        .map(UserSummary::from)
+                        .toList(),
                 comment.getCreatedAt()
         );
     }

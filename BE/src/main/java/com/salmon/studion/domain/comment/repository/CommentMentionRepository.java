@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface CommentMentionRepository extends JpaRepository<CommentMention, Integer> {
+public interface CommentMentionRepository extends JpaRepository<CommentMention, CommentMention.CommentMentionId> {
 
     @Query("""
         SELECT cm

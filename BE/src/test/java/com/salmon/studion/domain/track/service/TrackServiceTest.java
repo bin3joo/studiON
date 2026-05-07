@@ -33,6 +33,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.util.HashMap;
@@ -53,6 +54,7 @@ class TrackServiceTest {
 
     @Mock private ValueOperations<String, String> valueOperations;
     @Mock private HashOperations<String, Object, Object> hashOperations;
+    @Mock private SetOperations<String, String> setOperations;
 
     private static final Integer PROJECT_ID = 1;
     private static final String TRACKS_KEY = "project:1:tracks";
@@ -67,6 +69,7 @@ class TrackServiceTest {
 
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
         lenient().when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mock(Project.class));
 
         lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))

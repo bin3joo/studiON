@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
-import { SmilePlus, ArrowUp, X, Check } from 'lucide-vue-next'
+import { SmilePlus, ArrowUp, X, Check, Trash2 } from 'lucide-vue-next'
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import { useTrackStore } from '../store/useTrackStore';
 
@@ -35,6 +35,9 @@ const emit = defineEmits<{
   'resolve-comment': [payload: {
     trackId: string
     measure: number
+  }]
+  'delete-comment': [payload: {
+    commentId: number
   }]
   'track-contextmenu': [event: MouseEvent]
 }>()
@@ -158,6 +161,19 @@ function submitComment(measure: number) {
   draftComment.value = ''
 }
 
+function requestDeleteComment(commentId: string | number) {
+  const parsedCommentId = Number(commentId)
+
+  if (!Number.isInteger(parsedCommentId)) {
+    console.error('[댓글 삭제 실패] 유효하지 않은 commentId:', commentId)
+    return
+  }
+
+  emit('delete-comment', {
+    commentId: parsedCommentId,
+  })
+}
+
 function handleOutsideClick(event: MouseEvent) {
   if (!rootRef.value) return
 
@@ -267,7 +283,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
 <template>
   <div
     ref="rootRef"
-    class="absolute left-0 top-0 z-100 h-full pointer-events-none"
+    class="absolute left-0 top-0 z-[100] h-full pointer-events-none"
     :style="{
       width: `${props.timelineWidth}px`,
       minWidth: `${props.timelineWidth}px`,
@@ -295,7 +311,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
   v-for="cell in commentCells"
   :key="`${trackId}-${cell.key}-${pixelPerBar}-${subDivision}`"
   class="absolute top-0 h-full pointer-events-none"
-  :class="isExpanded(cell.location) ? 'z-500' : 'z-10'"
+  :class="isExpanded(cell.location) ? 'z-[500]' : 'z-[10]'"
   :style="{
     left: `${cell.left}px`,
     width: `${cell.width}px`,
@@ -344,7 +360,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="isExpanded(cell.location)"
-        class="pointer-events-auto absolute left-0 z-1200 w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
+        class="pointer-events-auto absolute left-0 z-[1200] w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
         :class="expandedPlacement === 'top'
           ? 'bottom-[calc(100%-8px)]'
           : 'top-[calc(100%-8px)]'"
@@ -387,18 +403,28 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
             />
 
             <div class="min-w-0 flex-1">
-              <div class="mb-1 flex items-center gap-2">
-                <div class="text-sm font-medium text-[#b5b7c4]">
-                  {{ comment.author }}
-                </div>
+              <div class="mb-1 flex items-start justify-between gap-2">
+  <div class="flex min-w-0 items-center gap-2">
+    <div class="truncate text-sm font-medium text-[#b5b7c4]">
+      {{ comment.author }}
+    </div>
 
-                <span
-                  v-if="getCommentGroup(cell.location)?.resolved"
-                  class="rounded-full bg-green-500/15 px-2 py-0.5 text-[11px] text-green-400"
-                >
-                  해결됨
-                </span>
-              </div>
+    <span
+      v-if="getCommentGroup(cell.location)?.resolved"
+      class="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-[11px] text-green-400"
+    >
+      해결됨
+    </span>
+  </div>
+
+  <button
+    type="button"
+    class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[#8f93a5] transition hover:bg-white/5 hover:text-red-400"
+    @click.stop="requestDeleteComment(comment.id)"
+  >
+    <Trash2 class="h-4 w-4" />
+  </button>
+</div>
 
               <div
                 v-if="comment.mention"

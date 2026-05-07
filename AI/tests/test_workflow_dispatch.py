@@ -35,11 +35,6 @@ from app.services.workflow_snapshots import (
     TimelineSnapshotDocument,
     get_workflow_snapshot_store,
 )
-from app.services.workflow_track_eq_commit import (
-    TrackEqBandRecord,
-    TrackEqBandUpdatePayload,
-    TrackEqRecord,
-)
 from app.services.workflow_worker import run_workflow_dispatch
 
 _TEST_AUDIO_METADATA: dict[int, AudioMetadataRecord] = {}
@@ -129,25 +124,6 @@ class _CaptureCollection:
         self.upsert = upsert
 
 
-class _FakeTrackEqCommitStore:
-    def __init__(self) -> None:
-        self.updated_calls: list[tuple[int, TrackEqBandUpdatePayload]] = []
-
-    def get_track_eq_by_track_id(self, track_id: int) -> TrackEqRecord | None:
-        return TrackEqRecord(id=int(track_id) * 10, track_id=int(track_id))
-
-    def get_active_track_eq_band(self, track_eq_id: int) -> TrackEqBandRecord | None:
-        return TrackEqBandRecord(id=int(track_eq_id) * 10, track_eq_id=int(track_eq_id))
-
-    def update_track_eq_band(
-        self,
-        band_id: int,
-        payload: TrackEqBandUpdatePayload,
-    ) -> TrackEqBandRecord:
-        self.updated_calls.append((band_id, payload))
-        return TrackEqBandRecord(id=int(band_id), track_eq_id=int(band_id) // 10)
-
-
 @pytest.fixture(autouse=True)
 def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     _TEST_AUDIO_METADATA.clear()
@@ -187,18 +163,6 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshot_store.reset()
     artifact_store.reset()
     _TEST_AUDIO_METADATA.clear()
-
-
-@pytest.fixture(autouse=True)
-def patch_track_eq_commit_store(
-    monkeypatch: pytest.MonkeyPatch,
-) -> _FakeTrackEqCommitStore:
-    store = _FakeTrackEqCommitStore()
-    monkeypatch.setattr(
-        "app.graph.nodes.runtime.get_workflow_track_eq_commit_store",
-        lambda: store,
-    )
-    return store
 
 
 @pytest.fixture(autouse=True)
@@ -606,18 +570,19 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
     artifact_store = get_workflow_artifact_store()
     recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
 
-    assert result["current_node"] == "wait_user_confirm"
-    assert result["preview_action_ids"] == ["20015-action-1"]
+    assert result["current_node"] == "finalize_output"
     assert result["preview_status"] == "READY"
     assert result["preview_excerpt_start_ms"] is not None
     assert result["preview_excerpt_end_ms"] is not None
     assert result["preview_excerpt_end_ms"] > result["preview_excerpt_start_ms"]
+    preview_band = result["suggestion_payload"]["suggestions"][0]["previewBands"][0]
+    assert preview_band["jobId"] == 20015
     assert result["sibilance_fix_applied"] is True
     assert recipe_artifact is not None
     assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
 
 
-def test_worker_rejects_confirm_resume_from_plan_input_phase(
+def test_worker_rejects_plan_resume_from_completed_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -632,7 +597,7 @@ def test_worker_rejects_confirm_resume_from_plan_input_phase(
             issue_types=["band_overlap"],
         )
     )
-    run_workflow_dispatch(
+    started = run_workflow_dispatch(
         WorkflowDispatchMessage(
             job_id=20004,
             project_id=30004,
@@ -640,12 +605,22 @@ def test_worker_rejects_confirm_resume_from_plan_input_phase(
         )
     )
 
+    completed = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20004,
+            project_id=30004,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(started),
+        )
+    )
+    assert completed["phase"] == "completed"
+
     failed = run_workflow_dispatch(
         WorkflowDispatchMessage(
             job_id=20004,
             project_id=30004,
-            dispatch_type="resume_confirm",
-            user_decision="confirm",
+            dispatch_type="resume_plan_input",
+            **build_plan_input(started),
         )
     )
 
@@ -780,7 +755,7 @@ def test_worker_rejects_plan_resume_for_non_ranked_region(
     assert failed["failure_code"] == "INVALID_SELECTED_REGION"
 
 
-def test_worker_rejects_confirm_resume_from_non_confirm_phase(
+def test_worker_rejects_plan_resume_from_non_waiting_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = get_workflow_job_store()
@@ -791,11 +766,10 @@ def test_worker_rejects_confirm_resume_from_non_confirm_phase(
             "phase": "analysis_result_persisted",
             "current_node": "persist_analysis_result",
             "progress": 95,
-            "runtime_status": "waiting_for_user",
-            "durable_status": "WAITING_USER",
+            "runtime_status": "running",
+            "durable_status": "RUNNING",
             "timeline_snapshot_id": "20007-timeline-snapshot",
             "langgraph_thread_id": "lg-thread:20007",
-            "preview_action_ids": ["20007-action-1", "20007-action-2"],
         }
     )
 
@@ -803,63 +777,15 @@ def test_worker_rejects_confirm_resume_from_non_confirm_phase(
         WorkflowDispatchMessage(
             job_id=20007,
             project_id=30007,
-            dispatch_type="resume_confirm",
-            user_decision="confirm",
+            dispatch_type="resume_plan_input",
+            selected_region_id="region-1",
+            preserve_clip_id=1,
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
     assert failed["failure_code"] == "INVALID_RESUME_PHASE"
-
-
-def test_worker_rejects_confirm_resume_without_user_decision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
-        lambda message: None,
-    )
-    start_workflow_job(
-        WorkflowStartPayload(
-            job_id=20008,
-            project_id=30008,
-            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
-            issue_types=["band_overlap"],
-        )
-    )
-    waiting = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20008,
-            project_id=30008,
-            dispatch_type="start",
-        )
-    )
-    preview_wait = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20008,
-            project_id=30008,
-            dispatch_type="resume_plan_input",
-            **build_plan_input(waiting),
-        )
-    )
-    assert preview_wait["phase"] == "waiting_for_user_confirm"
-    assert preview_wait["preview_status"] == "READY"
-    assert preview_wait["preview_excerpt_start_ms"] is not None
-    assert preview_wait["preview_excerpt_end_ms"] is not None
-    assert preview_wait["preview_excerpt_end_ms"] > preview_wait["preview_excerpt_start_ms"]
-
-    failed = run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20008,
-            project_id=30008,
-            dispatch_type="resume_confirm",
-        )
-    )
-
-    assert failed["current_node"] == "fail_workflow"
-    assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "MISSING_USER_DECISION"
 
 
 def test_start_api_enqueues_without_running_worker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1150,26 +1076,40 @@ def test_preview_compare_api_rejects_non_ready_preview(
             "suggestion_payload": {
                 "suggestions": [
                     {
-                        "actions": [
+                        "previewBands": [
                             {
-                                "actionId": "20024-action-1",
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
                                 "targetTrackId": 21,
-                                "targetClipId": None,
-                                "startMs": 400,
-                                "endMs": 1600,
-                                "bandLowHz": 200,
-                                "bandHighHz": 1200,
+                                "jobId": 20024,
+                                "bandOrder": 1,
+                                "eqTypeCode": 1,
+                                "frequencyHz": 490,
+                                "q": 0.49,
                                 "gainDeltaDb": -2.4,
-                                "params": {"threshold": -19, "ratio": 2.0},
+                                "statusCode": 1,
+                                "previewExpiresAt": "2026-05-07T10:00:00+09:00",
                             }
                         ]
                     }
                 ]
             },
+            "plan_payload": {
+                "candidate": {
+                    "candidateId": "20024-plan-candidate-1",
+                    "action": {
+                        "actionType": "DYNAMIC_EQ",
+                        "targetScope": "TRACK",
+                        "targetTrackId": 21,
+                        "targetClipId": None,
+                        "startMs": 400,
+                        "endMs": 1600,
+                        "bandLowHz": 200,
+                        "bandHighHz": 1200,
+                        "gainDeltaDb": -2.4,
+                        "params": {"threshold": -19, "ratio": 2.0},
+                    },
+                }
+            },
             "preview_id": "20024-preview",
-            "preview_action_ids": ["20024-action-1"],
             "preview_status": "PROCESSING",
         }
     )
@@ -1182,7 +1122,7 @@ def test_preview_compare_api_rejects_non_ready_preview(
     assert "not ready" in response.json()["detail"]
 
 
-def test_preview_compare_api_supports_applied_mode_after_confirm(
+def test_preview_compare_api_rejects_non_preview_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -1212,23 +1152,12 @@ def test_preview_compare_api_supports_applied_mode_after_confirm(
             **build_plan_input(waiting),
         )
     )
-    run_workflow_dispatch(
-        WorkflowDispatchMessage(
-            job_id=20025,
-            project_id=30025,
-            dispatch_type="resume_confirm",
-            user_decision="confirm",
-        )
-    )
 
     client = TestClient(create_app())
     response = client.get("/api/v1/internal/workflow/jobs/20025/preview-compare?mode=applied")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["mode"] == "applied"
-    assert len(body["actions"]) >= 1
-    assert body["action"]["action_id"] == body["actions"][-1]["action_id"]
+    assert response.status_code == 422
+    assert "Unsupported preview compare mode" in response.json()["detail"]
 
 
 def test_job_record_spills_large_state_into_artifact_store() -> None:

@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
-from app.graph.state import UserDecision, WorkflowDispatchType, WorkflowState
+from app.graph.state import WorkflowDispatchType, WorkflowState
 from app.services.workflow_artifacts import (
     WorkflowArtifactDocument,
     get_workflow_artifact_store,
@@ -28,7 +28,6 @@ class WorkflowDispatchMessage(BaseModel):
     selected_region_id: str | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
-    user_decision: UserDecision | None = None
 
 
 class WorkflowJobRecord(BaseModel):
@@ -92,8 +91,6 @@ COMPACT_STATE_KEYS = {
     "plan_status",
     "suggestion_group_id",
     "preview_id",
-    "preview_action_ids",
-    "preview_suggestion_id",
     "preview_status",
     "preview_render_no",
     "preview_excerpt_start_ms",
@@ -104,7 +101,6 @@ COMPACT_STATE_KEYS = {
     "preview_expired_at",
     "preview_error_code",
     "preview_error_message",
-    "user_decision",
     "user_action_required",
     "validator_mode",
     "validator_result",
@@ -112,9 +108,6 @@ COMPACT_STATE_KEYS = {
     "critic_result",
     "revise_count",
     "max_revise_count",
-    "apply_result_id",
-    "committed_track_eq_band_id",
-    "feedback_event_id",
     "latest_artifact_id",
     "mongo_artifact_ids",
     "failure_code",

@@ -20,11 +20,6 @@ from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workfl
 from app.services.workflow_audio_metadata import AudioMetadataRecord
 from app.services.workflow_preview_renderer import PREVIEW_CONTEXT_PADDING_MS
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
-from app.services.workflow_track_eq_commit import (
-    TrackEqBandRecord,
-    TrackEqBandUpdatePayload,
-    TrackEqRecord,
-)
 
 _TEST_AUDIO_METADATA: dict[int, AudioMetadataRecord] = {}
 
@@ -99,31 +94,6 @@ class _FakeCLAPInferenceClient:
                 )
             )
         return predictions
-
-
-class _FakeTrackEqCommitStore:
-    def __init__(self) -> None:
-        self.blocked_track_ids: set[int] = set()
-        self.missing_band_track_eq_ids: set[int] = set()
-        self.updated_calls: list[tuple[int, TrackEqBandUpdatePayload]] = []
-
-    def get_track_eq_by_track_id(self, track_id: int) -> TrackEqRecord | None:
-        if int(track_id) in self.blocked_track_ids:
-            return None
-        return TrackEqRecord(id=int(track_id) * 10, track_id=int(track_id))
-
-    def get_active_track_eq_band(self, track_eq_id: int) -> TrackEqBandRecord | None:
-        if int(track_eq_id) in self.missing_band_track_eq_ids:
-            return None
-        return TrackEqBandRecord(id=int(track_eq_id) * 10, track_eq_id=int(track_eq_id))
-
-    def update_track_eq_band(
-        self,
-        band_id: int,
-        payload: TrackEqBandUpdatePayload,
-    ) -> TrackEqBandRecord:
-        self.updated_calls.append((band_id, payload))
-        return TrackEqBandRecord(id=int(band_id), track_eq_id=int(band_id) // 10)
 
 
 @pytest.fixture(autouse=True)
@@ -256,18 +226,6 @@ def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     artifact_store.reset()
     snapshot_store.reset()
     _TEST_AUDIO_METADATA.clear()
-
-
-@pytest.fixture(autouse=True)
-def patch_track_eq_commit_store(
-    monkeypatch: pytest.MonkeyPatch,
-) -> _FakeTrackEqCommitStore:
-    store = _FakeTrackEqCommitStore()
-    monkeypatch.setattr(
-        "app.graph.nodes.runtime.get_workflow_track_eq_commit_store",
-        lambda: store,
-    )
-    return store
 
 
 def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
@@ -406,23 +364,22 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     )
     execution_plan_artifact = artifact_store.get_artifact(execution_plan_artifact_id)
 
-    assert result["current_node"] == "wait_user_confirm"
+    assert result["current_node"] == "finalize_output"
+    assert result["runtime_status"] == "completed"
     assert result["plan_status"] == "APPROVED"
-    assert result["preview_action_ids"] == ["10003-action-1"]
     assert result["preview_status"] == "READY"
-    assert result["preview_suggestion_id"] == "10003-group-suggestion-1"
     assert result["preview_excerpt_start_ms"] is not None
     assert result["preview_excerpt_end_ms"] is not None
     assert result["preview_excerpt_end_ms"] > result["preview_excerpt_start_ms"]
     assert execution_plan_artifact is not None
     assert execution_plan_artifact.artifact_type == "execution_plan"
-    assert execution_plan_artifact.payload["previewActionIds"] == ["10003-action-1"]
-    preview_action_id = (
-        execution_plan_artifact.payload["suggestionPayload"]["suggestions"][0]["actions"][0][
-            "actionId"
-        ]
-    )
-    assert preview_action_id == "10003-action-1"
+    preview_band = execution_plan_artifact.payload["previewBandSpecs"][0]
+    assert preview_band["jobId"] == 10003
+    assert preview_band["targetTrackId"] is not None
+    assert preview_band["bandOrder"] == 1
+    assert preview_band["eqTypeCode"] == 1
+    assert preview_band["statusCode"] == 1
+    assert isinstance(preview_band["previewExpiresAt"], str)
 
 
 def test_materialize_execution_plan_fails_before_internal_approval() -> None:
@@ -498,7 +455,7 @@ def test_workflow_revises_once_then_passes() -> None:
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
-    assert result["current_node"] == "wait_user_confirm"
+    assert result["current_node"] == "finalize_output"
     assert result["transition_log"].count("planning_agent") == 2
 
 
@@ -655,7 +612,6 @@ def test_workflow_autofixes_sibilance_without_preview() -> None:
 
     assert result["current_node"] == "finalize_output"
     assert result["runtime_status"] == "completed"
-    assert result["preview_action_ids"] == []
     assert result["sibilance_fix_applied"] is True
     assert result["sibilance_fix_log_id"] is not None
     assert result["auto_fix_recipe_artifact_id"] is not None
@@ -707,8 +663,9 @@ def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> 
     recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
     log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
 
-    assert result["current_node"] == "wait_user_confirm"
-    assert result["preview_action_ids"] == ["10042-action-1"]
+    assert result["current_node"] == "finalize_output"
+    preview_band = result["suggestion_payload"]["suggestions"][0]["previewBands"][0]
+    assert preview_band["jobId"] == 10042
     assert result["sibilance_fix_applied"] is True
     assert result["auto_fix_recipe_artifact_id"] is not None
     assert result["sibilance_fix_log_id"] is not None
@@ -719,7 +676,7 @@ def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> 
     assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
 
 
-def test_workflow_auto_applies_representative_preview_action() -> None:
+def test_workflow_auto_applies_preview_band_spec_and_completes() -> None:
     waiting = run_workflow_graph(
         {
             "job_id": 10037,
@@ -730,238 +687,13 @@ def test_workflow_auto_applies_representative_preview_action() -> None:
     )
     selected = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
-    assert selected["current_node"] == "wait_user_confirm"
-    assert selected["runtime_status"] == "waiting_for_user"
-    assert selected["apply_result_id"] == "10037-apply"
-    assert selected["preview_action_ids"] == ["10037-action-1"]
+    assert selected["current_node"] == "finalize_output"
+    assert selected["runtime_status"] == "completed"
     assert selected["preview_requested_at"] is not None
     assert selected["preview_started_at"] is not None
     assert selected["preview_completed_at"] is not None
+    assert selected["preview_expired_at"] is not None
     assert selected["preview_status"] == "READY"
-
-
-def test_workflow_confirm_commits_and_finalizes(
-    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
-) -> None:
-    waiting = run_workflow_graph(
-        {
-            "job_id": 10038,
-            "project_id": 20038,
-            "project_snapshot": build_project_snapshot(track_ids=[4, 14]),
-            "issue_types": ["band_overlap"],
-        }
-    )
-    mix_resolved = run_workflow_graph(
-        {**waiting, **build_plan_input(waiting)}
-    )
-    confirmed = run_workflow_graph(
-        {
-            **mix_resolved,
-            "user_decision": "confirm",
-        }
-    )
-
-    assert confirmed["current_node"] == "finalize_output"
-    assert confirmed["runtime_status"] == "completed"
-    assert confirmed["feedback_event_id"] == "10038-feedback"
-    assert confirmed["committed_track_eq_band_id"] is not None
-    assert len(patch_track_eq_commit_store.updated_calls) == 1
-
-
-def test_commit_selected_edit_recipe_updates_track_eq_band(
-    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
-) -> None:
-    result = nodes.commit_selected_edit_recipe(
-        build_workflow_initial_state(
-            job_id=10050,
-            project_id=20050,
-            requested_by=77,
-            apply_result_id="10050-apply",
-            preview_action_ids=["10050-action-1"],
-            suggestion_payload={
-                "suggestions": [
-                    {
-                        "actions": [
-                            {
-                                "actionId": "10050-action-1",
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 14,
-                                "bandLowHz": 180,
-                                "bandHighHz": 420,
-                                "gainDeltaDb": -2.4,
-                                "params": {"q": 1.1, "threshold": -19},
-                            }
-                        ]
-                    }
-                ]
-            },
-        )
-    )
-
-    assert result["current_node"] == "commit_selected_edit_recipe"
-    assert result["committed_track_eq_band_id"] == 1400
-    band_id, payload = patch_track_eq_commit_store.updated_calls[0]
-    assert band_id == 1400
-    assert payload.eq_type_code == "BELL"
-    assert payload.frequency_hz == 275
-    assert payload.q == 1.1
-    assert payload.gain_delta_db == -2.4
-    assert payload.job_id == 10050
-    assert payload.suggestion_action_id == "10050-action-1"
-    assert payload.applied_suggestion_id == "10050-apply"
-    assert payload.source_type_code == "AI_SUGGESTION"
-    assert payload.updated_by == 77
-
-
-def test_commit_selected_edit_recipe_derives_q_from_band_bounds(
-    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
-) -> None:
-    nodes.commit_selected_edit_recipe(
-        build_workflow_initial_state(
-            job_id=10051,
-            project_id=20051,
-            preview_action_ids=["10051-action-1"],
-            suggestion_payload={
-                "suggestions": [
-                    {
-                        "actions": [
-                            {
-                                "actionId": "10051-action-1",
-                                "actionType": "EQ_CUT",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 22,
-                                "bandLowHz": 200,
-                                "bandHighHz": 800,
-                                "gainDeltaDb": -1.8,
-                                "params": {"threshold": -18},
-                            }
-                        ]
-                    }
-                ]
-            },
-        )
-    )
-
-    _, payload = patch_track_eq_commit_store.updated_calls[0]
-    assert payload.frequency_hz == 400
-    assert payload.q == 0.667
-
-
-def test_commit_selected_edit_recipe_fails_without_track_eq(
-    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
-) -> None:
-    patch_track_eq_commit_store.blocked_track_ids.add(31)
-
-    failed = nodes.commit_selected_edit_recipe(
-        build_workflow_initial_state(
-            job_id=10052,
-            project_id=20052,
-            preview_action_ids=["10052-action-1"],
-            suggestion_payload={
-                "suggestions": [
-                    {
-                        "actions": [
-                            {
-                                "actionId": "10052-action-1",
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 31,
-                                "bandLowHz": 250,
-                                "bandHighHz": 1200,
-                                "gainDeltaDb": -2.0,
-                                "params": {},
-                            }
-                        ]
-                    }
-                ]
-            },
-        )
-    )
-
-    assert failed["current_node"] == "fail_workflow"
-    assert failed["failure_code"] == "TRACK_EQ_NOT_FOUND"
-
-
-def test_commit_selected_edit_recipe_fails_without_active_track_eq_band(
-    patch_track_eq_commit_store: _FakeTrackEqCommitStore,
-) -> None:
-    patch_track_eq_commit_store.missing_band_track_eq_ids.add(320)
-
-    failed = nodes.commit_selected_edit_recipe(
-        build_workflow_initial_state(
-            job_id=10053,
-            project_id=20053,
-            preview_action_ids=["10053-action-1"],
-            suggestion_payload={
-                "suggestions": [
-                    {
-                        "actions": [
-                            {
-                                "actionId": "10053-action-1",
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 32,
-                                "bandLowHz": 250,
-                                "bandHighHz": 1200,
-                                "gainDeltaDb": -2.0,
-                                "params": {},
-                            }
-                        ]
-                    }
-                ]
-            },
-        )
-    )
-
-    assert failed["current_node"] == "fail_workflow"
-    assert failed["failure_code"] == "ACTIVE_TRACK_EQ_BAND_NOT_FOUND"
-
-
-def test_commit_selected_edit_recipe_rejects_non_eq_track_action() -> None:
-    failed = nodes.commit_selected_edit_recipe(
-        build_workflow_initial_state(
-            job_id=10054,
-            project_id=20054,
-            preview_action_ids=["10054-action-1"],
-            suggestion_payload={
-                "suggestions": [
-                    {
-                        "actions": [
-                            {
-                                "actionId": "10054-action-1",
-                                "actionType": "GAIN_TRIM",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 44,
-                                "bandLowHz": None,
-                                "bandHighHz": None,
-                                "gainDeltaDb": -2.0,
-                                "params": {"preGainDb": -2.0},
-                            }
-                        ]
-                    }
-                ]
-            },
-        )
-    )
-
-    assert failed["current_node"] == "fail_workflow"
-    assert failed["failure_code"] == "UNSUPPORTED_COMMIT_ACTION"
-
-
-def test_workflow_cancel_path_finalizes() -> None:
-    mix_resolved = run_workflow_graph(
-        {
-            "job_id": 10039,
-            "project_id": 20039,
-            "project_snapshot": build_project_snapshot(track_ids=[6, 7]),
-            "issue_types": ["band_overlap"],
-        }
-    )
-    mix_resolved = run_workflow_graph({**mix_resolved, **build_plan_input(mix_resolved)})
-    cancelled = run_workflow_graph({**mix_resolved, "user_decision": "cancel"})
-
-    assert cancelled["current_node"] == "finalize_output"
 
 
 def test_user_action_gate_routes_directly_to_apply_when_action_is_required() -> None:
@@ -969,7 +701,7 @@ def test_user_action_gate_routes_directly_to_apply_when_action_is_required() -> 
         job_id=10036,
         project_id=20036,
         phase="analysis_result_persisted",
-        preview_action_ids=["10036-action-1"],
+        suggestion_payload={"suggestions": [{"previewBands": [{"jobId": 10036}]}]},
         user_action_required=True,
     )
     gated = nodes.user_action_gate(original)
@@ -986,13 +718,13 @@ def test_workflow_fails_when_no_preview_action_exists() -> None:
             job_id=10017,
             project_id=20017,
             phase="analysis_result_persisted",
-            preview_action_ids=[],
+            suggestion_payload={},
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "MISSING_PREVIEW_ACTION"
+    assert failed["failure_code"] == "INVALID_PREVIEW_BAND_SPEC_COUNT"
 
 
 def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
@@ -1001,16 +733,22 @@ def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
             job_id=10018,
             project_id=20018,
             phase="analysis_result_persisted",
-            preview_action_ids=[
-                "job-unknown-selection-action-1",
-                "job-unknown-selection-action-2",
-            ],
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "previewBands": [
+                            {"jobId": 10018, "bandOrder": 1},
+                            {"jobId": 10018, "bandOrder": 2},
+                        ]
+                    }
+                ]
+            },
         )
     )
 
     assert failed["current_node"] == "fail_workflow"
     assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "INVALID_PREVIEW_ACTION_COUNT"
+    assert failed["failure_code"] == "INVALID_PREVIEW_BAND_SPEC_COUNT"
 
 
 def test_render_preview_succeeds_without_audio_file_generation() -> None:
@@ -1020,8 +758,42 @@ def test_render_preview_succeeds_without_audio_file_generation() -> None:
             project_id=20019,
             selected_region_id="region-1",
             preview_id="10019-preview",
-            preview_action_ids=["10019-action-1"],
             suggestion_group_id="10019-group",
+            plan_payload={
+                "candidate": {
+                    "candidateId": "10019-plan-candidate-1",
+                    "action": {
+                        "actionType": "DYNAMIC_EQ",
+                        "targetScope": "TRACK",
+                        "targetTrackId": 14,
+                        "startMs": 0,
+                        "endMs": 1200,
+                        "bandLowHz": 180,
+                        "bandHighHz": 420,
+                        "gainDeltaDb": -2.4,
+                        "params": {"q": 1.1},
+                    },
+                }
+            },
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "previewBands": [
+                            {
+                                "jobId": 10019,
+                                "targetTrackId": 14,
+                                "bandOrder": 1,
+                                "eqTypeCode": 1,
+                                "frequencyHz": 275,
+                                "q": 1.1,
+                                "gainDeltaDb": -2.4,
+                                "statusCode": 1,
+                                "previewExpiresAt": "2026-05-07T10:00:00+09:00",
+                            }
+                        ]
+                    }
+                ]
+            },
             analysis_regions=[
                 {
                     "id": "region-1",
@@ -1032,28 +804,6 @@ def test_render_preview_succeeds_without_audio_file_generation() -> None:
                     "measure_end": 1,
                 }
             ],
-            suggestion_payload={
-                "suggestions": [
-                    {
-                        "rank": 1,
-                        "summary": "preview",
-                        "actions": [
-                            {
-                                "actionId": "10019-action-1",
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 10,
-                                "startMs": 0,
-                                "endMs": 800,
-                                "bandLowHz": 180,
-                                "bandHighHz": 420,
-                                "gainDeltaDb": -2.0,
-                                "params": {"threshold": -19, "ratio": 2.0},
-                            }
-                        ],
-                    }
-                ]
-            },
             clip_index=[
                 {
                     "clip_id": _clip_id(10, 1),
@@ -1103,7 +853,7 @@ def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
     plan_input = build_plan_input(waiting)
     resumed = run_workflow_graph({**waiting, **plan_input})
 
-    action = resumed["suggestion_payload"]["suggestions"][0]["actions"][0]
+    action = resumed["plan_payload"]["candidate"]["action"]
     assert action["targetTrackId"] in {11, 22}
 
 
@@ -1160,7 +910,6 @@ def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
     assert result["current_node"] == "finalize_output"
     assert result["clipping_fix_applied"] is True
     assert result["preview_id"] is None
-    assert result["preview_action_ids"] == []
     assert (
         "track_clipping" in result["detected_issues"]
         or "master_clipping" in result["detected_issues"]

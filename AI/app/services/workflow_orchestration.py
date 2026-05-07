@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.graph.state import UserDecision, WorkflowDispatchType, build_workflow_initial_state
+from app.graph.state import WorkflowDispatchType, build_workflow_initial_state
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 from app.services.workflow_preview_compare import build_preview_compare_payload
 from app.services.workflow_queue import enqueue_workflow_dispatch
@@ -52,7 +52,6 @@ class WorkflowResumePayload(BaseModel):
     selected_region_id: str | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
-    user_decision: UserDecision | None = None
     requested_by: int | None = None
 
 
@@ -133,7 +132,6 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
         selected_region_id=payload.selected_region_id,
         preserve_clip_id=payload.preserve_clip_id,
         user_feedback_message=payload.user_feedback_message,
-        user_decision=payload.user_decision,
     )
     logger.info(
         "workflow dispatch resumed | job_id=%s dispatch_type=%s queue=%s",
@@ -229,8 +227,6 @@ def _build_restored_job_state(job: Any) -> dict[str, Any]:
 def _dispatch_type_for_phase(phase: str) -> WorkflowDispatchType:
     if phase == "waiting_for_user_plan_input":
         return "resume_plan_input"
-    if phase == "waiting_for_user_confirm":
-        return "resume_confirm"
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=f"Workflow job cannot be resumed from phase '{phase}'.",
@@ -247,9 +243,4 @@ def _validate_resume_inputs(dispatch_type: WorkflowDispatchType, payload: dict[s
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="preserve_clip_id is required for plan-input resume.",
-        )
-    if dispatch_type == "resume_confirm" and payload.get("user_decision") is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="user_decision is required for confirmation resume.",
         )

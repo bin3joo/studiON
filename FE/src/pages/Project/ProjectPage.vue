@@ -19,17 +19,10 @@ import {socketService} from '../../core/services/socket.service'; //웹 소켓 �
 import { useTrackComments } from './composables/useTrackComments'
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 
-
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
 const route = useRoute()
 const projectId = route.params.projectId as string
-const projectName = computed(() => {
-  const name = route.query.name
-  return typeof name === 'string' && name.trim().length > 0
-    ? name
-    : '프로젝트'
-})
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
 const authStore = useAuthStore(); // Auth 스토어 사용 준비
@@ -227,6 +220,32 @@ onMounted(async () => {
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
 
+    projectName.value = trackStore.projectInfo.name
+
+    socketService.subscribe('PROJECT_ONLINE_USERS', (payload) => {
+    onlineUsers.value = payload.users
+  })
+
+  socketService.subscribe('USER_JOINED_PROJECT', (payload) => {
+    onlineUsers.value = [
+      ...onlineUsers.value.filter(user => user.userId !== payload.user.userId),
+      payload.user,
+    ]
+  })
+
+  socketService.subscribe('USER_LEFT_PROJECT', (payload) => {
+  console.log('[ProjectPage] USER_LEFT_PROJECT 수신:', payload)
+
+  onlineUsers.value = onlineUsers.value.filter(
+    user => user.userId !== payload.userId
+  )
+})
+
+  socketService.subscribe('PROJECT_RENAMED', (payload) => {
+    projectName.value = payload.name
+    trackStore.projectInfo.name = payload.name
+  })
+
     // 토큰이 이미 있으면 바로 연결 (문자열인 projectId를 Number로 변환!)
     if (authStore.accessToken) {
       socketService.connect(Number(projectId)); 
@@ -254,6 +273,7 @@ if(timelineContainerRef.value) {
   //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
   window.addEventListener('pointerdown', unlockAudioEngine, {capture: true});
   window.addEventListener('keydown', unlockAudioEngine, {capture: true});
+
 })
 
 onUnmounted(()=>{
@@ -268,6 +288,14 @@ onUnmounted(()=>{
   socketService.disconnect();
 })
 
+interface OnlineUser {
+  userId: number
+  nickname: string
+  profileImageUrl: string | null
+}
+
+const onlineUsers = ref<OnlineUser[]>([])
+const projectName = ref('프로젝트')
 const isInviteModalOpen = ref(false)
 const activeSidePanel = ref<SidePanelType>(null)
 
@@ -337,8 +365,15 @@ const commentGroups = ref<TrackMeasureCommentGroup[]>([
   },
 ])
 
-function handleRename() {
-  console.log('프로젝트 이름 수정')
+function handleRename(nextName: string) {
+  const trimmedName = nextName.trim()
+
+  if (!trimmedName) return
+  if (trimmedName === projectName.value) return
+
+  socketService.publish('PROJECT_RENAME', {
+    name: trimmedName,
+  })
 }
 
 function handleExport() {
@@ -524,18 +559,19 @@ const unlockAudioEngine = async () => {
   
   <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground" >
     <ProjectHeader
-      :project-name="projectName"
-      last-saved-at="13:24"
-      @rename="handleRename"
-      @export="handleExport"
-      @save-version="handleSaveVersion"
-      @save="handleSave"
-      @undo="handleUndo"
-      @redo="handleRedo"
-      @open-invite="handleOpenInvite"
-      @open-comments="handleOpenComments"
-      @open-history="handleOpenHistory"
-    />
+  :project-name="projectName"
+  :online-users="onlineUsers"
+  last-saved-at="13:24"
+  @rename="handleRename"
+  @export="handleExport"
+  @save-version="handleSaveVersion"
+  @save="handleSave"
+  @undo="handleUndo"
+  @redo="handleRedo"
+  @open-invite="handleOpenInvite"
+  @open-comments="handleOpenComments"
+  @open-history="handleOpenHistory"
+/>
     <!-- 재생 컨트롤러 컴포넌트 추가 -->
     <PlayController
   :ai-analyzing="aiAnalyzing"

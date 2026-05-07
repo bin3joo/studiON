@@ -36,6 +36,7 @@ const emit = defineEmits<{
     trackId: string
     measure: number
   }]
+  'track-contextmenu': [event: MouseEvent]
 }>()
 
 const draftComment = ref('')
@@ -293,12 +294,29 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
     <div
   v-for="cell in commentCells"
   :key="`${trackId}-${cell.key}-${pixelPerBar}-${subDivision}`"
+<<<<<<< Updated upstream
   class="absolute top-0 h-full pointer-events-none"
   :class="isExpanded(cell.location) ? 'z-500' : 'z-10'"
+=======
+  class="absolute top-0 h-full pointer-events-auto"
+  :class="isExpanded(cell.location) ? 'z-[500]' : 'z-10'"
+>>>>>>> Stashed changes
   :style="{
     left: `${cell.left}px`,
     width: `${cell.width}px`,
   }"
+<<<<<<< Updated upstream
+=======
+  @mouseenter="emit('hover-measure', {
+    trackId,
+    measure: cell.location,
+  })"
+  @mouseleave="emit('hover-measure', {
+    trackId: null,
+    measure: null,
+  })"
+  @contextmenu.prevent.stop="emit('track-contextmenu', $event)"
+>>>>>>> Stashed changes
 >
       <!-- hover된 마디 세로 강조선 -->
       <div

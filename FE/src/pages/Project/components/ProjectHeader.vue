@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import type { OnlineUser } from '../types/projectSocket.types'
 import {
   Camera,
   Download,
@@ -14,33 +16,23 @@ import {
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
 
-interface Collaborator {
-  id: string
-  name: string
-  color: string
-}
-
 interface Props {
   projectName: string
   lastSavedAt?: string
-  collaborators?: Collaborator[]
+  onlineUsers?: OnlineUser[]
   canUndo?: boolean
   canRedo?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   lastSavedAt: '13:24',
-  collaborators: () => [
-    { id: '1', name: 'A', color: '#d946ef' },
-    { id: '2', name: 'B', color: '#3b82f6' },
-    { id: '3', name: 'C', color: '#4ade80' },
-  ],
+  onlineUsers: () => [],
   canUndo: true,
   canRedo: true,
 })
 
 const emit = defineEmits<{
-  (e: 'rename'): void
+  (e: 'rename', name: string): void
   (e: 'export'): void
   (e: 'save-version'): void
   (e: 'save'): void
@@ -50,6 +42,54 @@ const emit = defineEmits<{
   (e: 'open-comments'): void
   (e: 'open-history'): void
 }>()
+
+const visibleOnlineUsers = computed(() => props.onlineUsers.slice(0, 3))
+const hiddenOnlineUserCount = computed(() => Math.max(props.onlineUsers.length - 3, 0))
+
+const isEditingProjectName = ref(false)
+const editingProjectName = ref('')
+const projectNameInputRef = ref<HTMLInputElement | null>(null)
+
+watch(
+  () => props.projectName,
+  (newName) => {
+    if (!isEditingProjectName.value) {
+      editingProjectName.value = newName || ''
+    }
+  },
+  { immediate: true },
+)
+
+async function startProjectNameEdit() {
+  isEditingProjectName.value = true
+  editingProjectName.value = props.projectName || ''
+
+  await nextTick()
+
+  projectNameInputRef.value?.focus()
+  projectNameInputRef.value?.select()
+}
+
+function submitProjectNameEdit() {
+  const trimmedName = editingProjectName.value.trim()
+
+  if (!trimmedName) {
+    editingProjectName.value = props.projectName || ''
+    isEditingProjectName.value = false
+    return
+  }
+
+  if (trimmedName !== props.projectName) {
+    emit('rename', trimmedName)
+  }
+
+  isEditingProjectName.value = false
+}
+
+function cancelProjectNameEdit() {
+  editingProjectName.value = props.projectName || ''
+  isEditingProjectName.value = false
+}
 </script>
 
 <template>
@@ -76,19 +116,33 @@ const emit = defineEmits<{
 
       <div class="hidden h-7 w-px bg-border md:block" />
 
-      <div class="flex items-center gap-2 min-w-0">
-        <span class="truncate text-sm font-semibold text-foreground">
-          {{ projectName }}
-        </span>
+      <div class="flex min-w-0 items-center gap-2">
+  <template v-if="!isEditingProjectName">
+    <span class="truncate text-sm font-semibold text-foreground">
+      {{ projectName }}
+    </span>
 
-        <button
-          type="button"
-          class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground"
-          @click="emit('rename')"
-        >
-          <Pencil class="h-3.5 w-3.5" />
-        </button>
-      </div>
+    <button
+      type="button"
+      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground"
+      @click="startProjectNameEdit"
+    >
+      <Pencil class="h-3.5 w-3.5" />
+    </button>
+  </template>
+
+  <template v-else>
+    <input
+      ref="projectNameInputRef"
+      v-model="editingProjectName"
+      type="text"
+      class="h-7 w-[160px] rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition focus:border-primary"
+      @keydown.enter.prevent="submitProjectNameEdit"
+      @keydown.esc.prevent="cancelProjectNameEdit"
+      @blur="submitProjectNameEdit"
+    >
+  </template>
+</div>
 
       <button
         type="button"
@@ -143,14 +197,33 @@ const emit = defineEmits<{
     <!-- 오른쪽 -->
     <div class="flex items-center gap-3">
       <div class="hidden items-center -space-x-2 md:flex">
-        <div
-          v-for="member in collaborators"
-          :key="member.id"
-          class="h-7 w-7 rounded-full border-2 border-background"
-          :style="{ backgroundColor: member.color }"
-          :title="member.name"
-        />
-      </div>
+  <div
+    v-for="user in visibleOnlineUsers"
+    :key="user.userId"
+    class="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-foreground"
+    :title="user.nickname"
+  >
+    <img
+      v-if="user.profileImageUrl"
+      :src="user.profileImageUrl"
+      :alt="user.nickname"
+      class="h-full w-full object-cover"
+    >
+
+    <span v-else>
+      {{ user.nickname.charAt(0) }}
+    </span>
+  </div>
+
+  <div
+    v-if="hiddenOnlineUserCount > 0"
+    class="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground"
+  >
+    +{{ hiddenOnlineUserCount }}
+  </div>
+</div>
+
+
 
       <button
         type="button"

@@ -7,6 +7,7 @@ import lombok.Getter;
 @Builder
 public class ClipPasteResponse {
     private Integer clipId;
+    private Integer sourceClipId;
     private Integer targetTrackId;
     private Double targetStartBar;
 }

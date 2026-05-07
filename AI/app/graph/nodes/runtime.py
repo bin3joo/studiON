@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from math import sqrt
 
 from app.graph.nodes.common import append_transition, artifact_id, workflow_update
 from app.graph.state import WorkflowState, utc_now
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 from app.services.workflow_preview_renderer import PreviewRenderError, resolve_preview_excerpt_range
-from app.services.workflow_track_eq_commit import (
-    TrackEqBandUpdatePayload,
-    TrackEqCommitError,
-    get_workflow_track_eq_commit_store,
-)
 
 
 def load_entry_context(state: WorkflowState) -> WorkflowState:
@@ -358,7 +352,7 @@ def persist_analysis_result(state: WorkflowState) -> WorkflowState:
     preview_id = state.get("preview_id")
     user_action_required = any(
         bool(region.get("requires_user_action")) for region in state.get("analysis_regions", [])
-    ) and bool(state.get("preview_action_ids"))
+    ) and bool(_resolve_preview_band_specs(state))
     if user_action_required:
         preview_id = preview_id or f"{state['job_id']}-preview"
     return workflow_update(
@@ -383,34 +377,20 @@ def user_action_gate(state: WorkflowState) -> WorkflowState:
 
 
 def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
-    preview_action_ids = [*state.get("preview_action_ids", [])]
-    if not preview_action_ids:
+    preview_band_specs = _resolve_preview_band_specs(state)
+    if len(preview_band_specs) != 1:
         return fail_workflow(
             {
                 **state,
-                "failure_code": "MISSING_PREVIEW_ACTION",
+                "failure_code": "INVALID_PREVIEW_BAND_SPEC_COUNT",
                 "failure_message": (
                     "대표 레시피를 적용하기 전에 "
-                    "프리뷰 액션이 필요합니다."
-                ),
-            }
-        )
-    if len(preview_action_ids) != 1:
-        return fail_workflow(
-            {
-                **state,
-                "failure_code": "INVALID_PREVIEW_ACTION_COUNT",
-                "failure_message": (
-                    "현재 MVP 흐름에서는 대표 프리뷰 액션이 "
-                    "정확히 1개여야 합니다."
+                    "Spring 저장용 preview band spec 1개가 필요합니다."
                 ),
             }
         )
     notes = [*state.get("notes", [])]
-    notes.append(
-        "Automatically applied representative preview action "
-        f"{preview_action_ids[0]} without selection wait."
-    )
+    notes.append("대표 plan을 preview band spec으로 고정하고 Spring 저장 대기 상태로 전환했다.")
     requested_at = utc_now()
     return workflow_update(
         state,
@@ -420,11 +400,6 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         runtime_status="running",
         durable_status="RUNNING",
         extra={
-            "apply_result_id": f"{state['job_id']}-apply",
-            "preview_suggestion_id": _resolve_preview_suggestion_id(
-                state,
-                preview_action_id=preview_action_ids[0],
-            ),
             "preview_status": "PROCESSING",
             "preview_render_no": max(int(state.get("preview_render_no", 1) or 1), 1),
             "preview_excerpt_start_ms": None,
@@ -439,13 +414,19 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
         },
     )
 
-
+# 실제로 preview를 만드는 함수가 아님
+# preview 생성을 위한 메타데이터를 만드는 함수 (preview 시작/종료 시간, preivew에 적용할 action)
 def render_preview(state: WorkflowState) -> WorkflowState:
     preview_id = state.get("preview_id") or f"{state['job_id']}-preview"
     started_at = utc_now()
     try:
         focus_region = _resolve_preview_focus_region(state)
-        _resolve_preview_action(state)
+        preview_band_specs = _resolve_preview_band_specs(state)
+        if len(preview_band_specs) != 1:
+            raise PreviewRenderError(
+                "INVALID_PREVIEW_BAND_SPEC_COUNT",
+                "프리뷰 렌더링에는 preview band spec 1개가 필요합니다.",
+            )
         excerpt_start_ms, excerpt_end_ms = resolve_preview_excerpt_range(
             clip_index=state.get("clip_index", []),
             focus_region=focus_region,
@@ -478,97 +459,18 @@ def render_preview(state: WorkflowState) -> WorkflowState:
             "preview_excerpt_end_ms": excerpt_end_ms,
             "preview_started_at": started_at,
             "preview_completed_at": utc_now(),
+            # Spring은 이 ISO 8601 값을 DATETIME으로 저장하는 계약을 사용한다.
+            "preview_expired_at": preview_band_specs[0].get("previewExpiresAt"),
             "preview_error_code": None,
             "preview_error_message": None,
-            "user_decision": None,
         },
-    )
-
-
-def wait_user_confirm(state: WorkflowState) -> WorkflowState:
-    return workflow_update(
-        state,
-        node="wait_user_confirm",
-        phase="waiting_for_user_confirm",
-        progress=98,
-        runtime_status="waiting_for_user",
-        durable_status="WAITING_USER",
-    )
-
-
-def commit_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
-    try:
-        action = _resolve_preview_action(state)
-        target_track_id, band_update = _build_track_eq_band_update_payload(state, action=action)
-        store = get_workflow_track_eq_commit_store()
-        if store is None:
-            raise TrackEqCommitError(
-                "TRACK_EQ_STORE_UNAVAILABLE",
-                "track_eq commit을 수행할 MySQL 저장소를 구성하지 못했습니다.",
-            )
-        track_eq = store.get_track_eq_by_track_id(target_track_id)
-        if track_eq is None:
-            raise TrackEqCommitError(
-                "TRACK_EQ_NOT_FOUND",
-                f"트랙 {target_track_id}의 track_eq row를 찾지 못했습니다.",
-            )
-        active_band = store.get_active_track_eq_band(track_eq.id)
-        if active_band is None:
-            raise TrackEqCommitError(
-                "ACTIVE_TRACK_EQ_BAND_NOT_FOUND",
-                f"track_eq {track_eq.id}에 활성 track_eq_band가 없습니다.",
-            )
-        committed_band = store.update_track_eq_band(active_band.id, band_update)
-    except PreviewRenderError as exc:
-        return fail_workflow(
-            {
-                **state,
-                "failure_code": exc.code,
-                "failure_message": exc.message,
-            }
-        )
-    except TrackEqCommitError as exc:
-        return fail_workflow(
-            {
-                **state,
-                "failure_code": exc.code,
-                "failure_message": exc.message,
-            }
-        )
-
-    notes = [*state.get("notes", [])]
-    notes.append(
-        f"트랙 {target_track_id}의 EQ band {committed_band.id}를 "
-        f"preview action {band_update.suggestion_action_id} 기준으로 갱신했다."
-    )
-    return workflow_update(
-        state,
-        node="commit_selected_edit_recipe",
-        phase="selected_recipe_committed",
-        progress=99,
-        runtime_status="running",
-        durable_status="RUNNING",
-        extra={
-            "committed_track_eq_band_id": committed_band.id,
-            "notes": notes,
-        },
-    )
-
-
-def emit_feedback_event(state: WorkflowState) -> WorkflowState:
-    return workflow_update(
-        state,
-        node="emit_feedback_event",
-        phase="feedback_event_emitted",
-        progress=99,
-        extra={"feedback_event_id": f"{state['job_id']}-feedback"},
     )
 
 
 def finalize_output(state: WorkflowState) -> WorkflowState:
     notes = [*state.get("notes", [])]
-    if state.get("user_decision") == "cancel":
-        notes.append("User cancelled suggested edit application.")
+    if state.get("preview_status") == "READY":
+        notes.append("AI worker는 preview 생성까지만 수행했고 confirm/cancel은 Spring 경계로 넘겼다.")
     return workflow_update(
         state,
         node="finalize_output",
@@ -594,7 +496,6 @@ def fail_workflow(state: WorkflowState) -> WorkflowState:
             "failure_message": state.get("failure_message")
             or "The workflow could not complete successfully.",
             "preview_id": state.get("preview_id"),
-            "preview_suggestion_id": state.get("preview_suggestion_id"),
             "preview_status": state.get("preview_status"),
             "preview_render_no": state.get("preview_render_no", 1),
             "preview_excerpt_start_ms": state.get("preview_excerpt_start_ms"),
@@ -634,7 +535,6 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "selected_region_id": state.get("selected_region_id"),
             "preserve_clip_id": state.get("preserve_clip_id"),
             "user_feedback_message": state.get("user_feedback_message"),
-            "user_decision": state.get("user_decision"),
         }
     )
     failure = _validate_dispatch(job.state_snapshot, dispatch)
@@ -663,8 +563,6 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
         restored["preserve_clip_id"] = dispatch.preserve_clip_id
     if dispatch.user_feedback_message is not None:
         restored["user_feedback_message"] = dispatch.user_feedback_message
-    if dispatch.user_decision is not None:
-        restored["user_decision"] = dispatch.user_decision
     return restored
 
 
@@ -703,14 +601,10 @@ def _validate_dispatch(
         if selection_error is not None:
             return selection_error
         return None
-    if phase != "waiting_for_user_confirm":
-        return (
-            "INVALID_RESUME_PHASE",
-            f"Confirmation resume expected 'waiting_for_user_confirm', got '{phase}'.",
-        )
-    if dispatch.user_decision is None:
-        return ("MISSING_USER_DECISION", "user_decision is required for confirmation resume.")
-    return None
+    return (
+        "INVALID_RESUME_PHASE",
+        f"Resume expected 'waiting_for_user_plan_input', got '{phase}'.",
+    )
 
 
 def _entry_failure(
@@ -773,26 +667,19 @@ def _validate_plan_input_selection(state: WorkflowState) -> tuple[str, str] | No
         )
     return None
 
-
+# 프리뷰 렌더링을 위한 대표 action 복원 함수
 def _resolve_preview_action(state: WorkflowState) -> dict[str, object]:
-    preview_action_ids = [*state.get("preview_action_ids", [])]
-    if len(preview_action_ids) != 1:
+    plan_payload = state.get("plan_payload") or {}
+    candidate = plan_payload.get("candidate") or {}
+    action = candidate.get("action")
+    if not isinstance(action, dict):
         raise PreviewRenderError(
-            "INVALID_PREVIEW_ACTION_COUNT",
-            "프리뷰 렌더링에는 대표 프리뷰 액션이 정확히 1개 필요합니다.",
+            "PREVIEW_ACTION_NOT_FOUND",
+            "plan_payload에서 preview 비교용 action을 찾지 못했습니다.",
         )
-    preview_action_id = preview_action_ids[0]
-    payload = state.get("suggestion_payload") or {}
-    for suggestion in payload.get("suggestions", []):
-        for action in suggestion.get("actions", []):
-            if action.get("actionId") == preview_action_id:
-                return action
-    raise PreviewRenderError(
-        "PREVIEW_ACTION_NOT_FOUND",
-        f"preview action {preview_action_id}를 suggestion_payload에서 찾지 못했습니다.",
-    )
+    return action
 
-
+# 프리뷰 생성을 위한 구간을 확정하는 함수
 def _resolve_preview_focus_region(state: WorkflowState) -> dict[str, object]:
     selected_region_id = state.get("selected_region_id")
     if selected_region_id is None:
@@ -809,117 +696,14 @@ def _resolve_preview_focus_region(state: WorkflowState) -> dict[str, object]:
     )
 
 
-def _resolve_preview_suggestion_id(
-    state: WorkflowState,
-    *,
-    preview_action_id: str,
-) -> str | None:
+def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, object]]:
     payload = state.get("suggestion_payload") or {}
-    group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
-    for suggestion_index, suggestion in enumerate(payload.get("suggestions", []), start=1):
-        for action in suggestion.get("actions", []):
-            if action.get("actionId") == preview_action_id:
-                return f"{group_id}-suggestion-{suggestion_index}"
-    return None
-
-
-def _build_track_eq_band_update_payload(
-    state: WorkflowState,
-    *,
-    action: dict[str, object],
-) -> tuple[int, TrackEqBandUpdatePayload]:
-    action_type = str(action.get("actionType") or "")
-    target_scope = str(action.get("targetScope") or "")
-    target_track_id = action.get("targetTrackId")
-    if action_type not in {"DYNAMIC_EQ", "EQ_CUT"} or target_scope != "TRACK":
-        raise TrackEqCommitError(
-            "UNSUPPORTED_COMMIT_ACTION",
-            (
-                "현재 commit_selected_edit_recipe는 TRACK scope의 "
-                "EQ 계열 action(DYNAMIC_EQ/EQ_CUT)만 반영할 수 있습니다."
-            ),
-        )
-    if not isinstance(target_track_id, int):
-        raise TrackEqCommitError(
-            "UNSUPPORTED_COMMIT_ACTION",
-            "TRACK EQ commit에는 정수 targetTrackId가 필요합니다.",
-        )
-    gain_delta_db = action.get("gainDeltaDb")
-    if not isinstance(gain_delta_db, int | float):
-        raise TrackEqCommitError(
-            "INVALID_EQ_BAND_MAPPING",
-            "EQ commit에는 숫자 gainDeltaDb가 필요합니다.",
-        )
-
-    # action payload에는 실제 DB용 중심 주파수와 Q가 없어서,
-    # MVP에서는 대역 범위를 BELL band 1개로 투영하는 규칙을 여기서 고정한다.
-    frequency_hz = _resolve_eq_center_frequency(action)
-    q = _resolve_eq_q_value(action, frequency_hz=frequency_hz)
-    preview_action_id = str(action.get("actionId") or "")
-    applied_suggestion_id = state.get("apply_result_id") or state.get("preview_suggestion_id")
-    if applied_suggestion_id is None and preview_action_id:
-        applied_suggestion_id = _resolve_preview_suggestion_id(
-            state,
-            preview_action_id=preview_action_id,
-        )
-    return target_track_id, TrackEqBandUpdatePayload(
-        eq_type_code="BELL",
-        frequency_hz=frequency_hz,
-        q=q,
-        gain_delta_db=round(float(gain_delta_db), 3),
-        job_id=int(state["job_id"]),
-        suggestion_action_id=preview_action_id,
-        applied_suggestion_id=applied_suggestion_id,
-        source_type_code="AI_SUGGESTION",
-        updated_by=int(state.get("requested_by") or 0),
-    )
-
-
-def _resolve_eq_center_frequency(action: dict[str, object]) -> int:
-    band_low_hz, band_high_hz = _resolve_eq_band_bounds(action)
-    if band_low_hz <= 0 or band_high_hz <= 0:
-        raise TrackEqCommitError(
-            "INVALID_EQ_BAND_MAPPING",
-            "EQ 중심 주파수를 계산하려면 양수 bandLowHz/bandHighHz가 필요합니다.",
-        )
-    return int(round(sqrt(band_low_hz * band_high_hz)))
-
-
-def _resolve_eq_q_value(
-    action: dict[str, object],
-    *,
-    frequency_hz: int,
-) -> float:
-    params = action.get("params") or {}
-    if isinstance(params, dict):
-        q_value = params.get("q")
-        if isinstance(q_value, int | float) and float(q_value) > 0:
-            return round(float(q_value), 3)
-    band_low_hz, band_high_hz = _resolve_eq_band_bounds(action)
-    bandwidth_hz = band_high_hz - band_low_hz
-    if bandwidth_hz <= 0:
-        raise TrackEqCommitError(
-            "INVALID_EQ_BAND_MAPPING",
-            "EQ Q 값을 계산하려면 bandHighHz가 bandLowHz보다 커야 합니다.",
-        )
-    q_value = float(frequency_hz) / float(bandwidth_hz)
-    if q_value <= 0:
-        raise TrackEqCommitError(
-            "INVALID_EQ_BAND_MAPPING",
-            "계산된 EQ Q 값이 유효하지 않습니다.",
-        )
-    return round(q_value, 3)
-
-
-def _resolve_eq_band_bounds(action: dict[str, object]) -> tuple[int, int]:
-    band_low_hz = action.get("bandLowHz")
-    band_high_hz = action.get("bandHighHz")
-    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
-        raise TrackEqCommitError(
-            "INVALID_EQ_BAND_MAPPING",
-            "EQ commit에는 정수 bandLowHz/bandHighHz가 필요합니다.",
-        )
-    return band_low_hz, band_high_hz
+    preview_band_specs: list[dict[str, object]] = []
+    for suggestion in payload.get("suggestions", []):
+        for band in suggestion.get("previewBands", []):
+            if isinstance(band, dict):
+                preview_band_specs.append(band)
+    return preview_band_specs
 
 
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:

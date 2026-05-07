@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta
 
 from app.graph.nodes.common import artifact_id, build_action, workflow_update
 from app.graph.nodes.runtime import fail_workflow
@@ -112,7 +113,6 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             extra={
                 "suggestion_payload": {},
                 "suggestion_group_id": None,
-                "preview_action_ids": [],
                 "user_action_required": False,
                 "notes": notes,
             },
@@ -147,6 +147,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     # 확장한 후에는 여러 계획안에 여러 action을 만들어서 사용자에게 줄 예정.
     action = candidate["action"]
     suggestion_group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
+    preview_band_spec = _build_preview_band_spec(state, action=action)
     payload = {
         "groupTitle": plan_payload.get("strategyTitle") or "Workflow suggestion group",
         "groupSummary": plan_payload.get("strategySummary"),
@@ -155,11 +156,10 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
                 "rank": 1,
                 "summary": plan_payload.get("summary") or "문제 구간 보정 제안",
                 "explanation": plan_payload.get("explanation"),
-                "actions": [action],
+                "previewBands": [preview_band_spec],
             }
         ],
     }
-    preview_action_ids = [action["actionId"]]
     execution_plan_artifact_id = artifact_id(state, "execution-plan")
     get_workflow_artifact_store().upsert_artifact(
         WorkflowArtifactDocument(
@@ -171,18 +171,13 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
                 "issueType": selected_region.get("issue_type"),
                 "preserveClipId": state.get("preserve_clip_id"),
                 "planPayload": deepcopy(plan_payload),
-                "suggestionPayload": deepcopy(payload),
-                "previewActionIds": preview_action_ids,
+                "previewBandSpecs": [deepcopy(preview_band_spec)],
             },
         )
     )
     mongo_artifact_ids.append(execution_plan_artifact_id)
     latest_artifact_id = execution_plan_artifact_id
-    notes.append(
-        "승인된 실행 계획을 "
-        f"suggestion group {suggestion_group_id}과 preview action "
-        f"{preview_action_ids[0]}으로 구체화했다."
-    )
+    notes.append("승인된 실행 계획을 Spring 저장용 preview band spec으로 구체화했다.")
     return workflow_update(
         state,
         node="materialize_execution_plan",
@@ -191,7 +186,6 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         extra={
             "suggestion_payload": payload,
             "suggestion_group_id": suggestion_group_id,
-            "preview_action_ids": preview_action_ids,
             "user_action_required": True,
             "mongo_artifact_ids": mongo_artifact_ids,
             "latest_artifact_id": latest_artifact_id,
@@ -264,13 +258,63 @@ def _normalize_plan_payload(
     candidate["issueType"] = region.get("issue_type")
     candidate["preserveClipId"] = preserve_clip_id
 
-    action["actionId"] = str(action.get("actionId") or f"{state['job_id']}-action-1")
     action["targetScope"] = action.get("targetScope", "TRACK")
     action["params"] = action.get("params") or {}
     candidate["targetTrackId"] = action.get("targetTrackId")
     candidate["action"] = action
     plan_payload["candidate"] = candidate
     return plan_payload
+
+
+def _build_preview_band_spec(
+    state: WorkflowState,
+    *,
+    action: dict[str, object],
+) -> dict[str, object]:
+    target_track_id = action.get("targetTrackId")
+    gain_delta_db = action.get("gainDeltaDb")
+    if not isinstance(target_track_id, int):
+        raise ValueError("preview band spec requires integer targetTrackId")
+    if not isinstance(gain_delta_db, int | float):
+        raise ValueError("preview band spec requires numeric gainDeltaDb")
+
+    frequency_hz, q = _resolve_eq_band_values(action)
+    base_time = state.get("heartbeat_at")
+    preview_expires_at = (
+        datetime.fromisoformat(base_time) if isinstance(base_time, str) else datetime.now()
+    ) + timedelta(minutes=30)
+    return {
+        "jobId": int(state["job_id"]),
+        "targetTrackId": target_track_id,
+        "bandOrder": 1,
+        "eqTypeCode": 1,
+        "frequencyHz": frequency_hz,
+        "q": q,
+        "gainDeltaDb": round(float(gain_delta_db), 3),
+        "statusCode": 1,
+        "previewExpiresAt": preview_expires_at.isoformat(),
+    }
+
+
+def _resolve_eq_band_values(action: dict[str, object]) -> tuple[int, float]:
+    band_low_hz = action.get("bandLowHz")
+    band_high_hz = action.get("bandHighHz")
+    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
+        raise ValueError("preview band spec requires integer bandLowHz/bandHighHz")
+    if band_low_hz <= 0 or band_high_hz <= band_low_hz:
+        raise ValueError("preview band spec requires valid band bounds")
+
+    frequency_hz = int(round((band_low_hz * band_high_hz) ** 0.5))
+    params = action.get("params") or {}
+    if isinstance(params, dict):
+        q_value = params.get("q")
+        if isinstance(q_value, int | float) and float(q_value) > 0:
+            return frequency_hz, round(float(q_value), 3)
+
+    q = float(frequency_hz) / float(band_high_hz - band_low_hz)
+    if q <= 0:
+        raise ValueError("preview band spec requires positive q")
+    return frequency_hz, round(q, 3)
 
 
 def _build_region_action(

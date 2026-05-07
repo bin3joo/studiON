@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.graph.state import ApplyState, RuntimeState, UserDecision, WorkflowState
+from app.graph.state import ApplyState, RuntimeState, WorkflowState
 from app.graph.workflow import (
     build_apply_graph,
     build_apply_response,
@@ -53,7 +53,6 @@ class WorkflowRunRequest(BaseModel):
     selected_region_id: str | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
-    user_decision: UserDecision | None = None
 
 
 class RuntimeRunRequest(BaseModel):
@@ -79,7 +78,6 @@ class ApplyRunRequest(BaseModel):
     project_id: int
     preview_id: str
     suggestion_group_id: str
-    user_decision: UserDecision | None = None
 
 
 class WorkflowRunResponse(BaseModel):
@@ -133,7 +131,6 @@ def workflow_graph_summary() -> dict[str, Any]:
         "entrypoint": "load_entry_context",
         "terminal_nodes": [
             "wait_user_plan_input",
-            "wait_user_confirm",
             "finalize_output",
             "fail_workflow",
         ],
@@ -198,7 +195,6 @@ def apply_graph_run(request: ApplyRunRequest) -> ApplyRunResponse:
         "project_id": request.project_id,
         "preview_id": request.preview_id,
         "suggestion_group_id": request.suggestion_group_id,
-        "user_decision": request.user_decision,
     }
     result = run_apply_graph(state)
     return ApplyRunResponse.model_validate(build_apply_response(result))

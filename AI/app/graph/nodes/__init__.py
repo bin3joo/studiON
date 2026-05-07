@@ -23,8 +23,6 @@ from app.graph.nodes.review import plan_critic, plan_rule_validator
 from app.graph.nodes.runtime import (
     apply_selected_edit_recipe,
     auto_fix_non_user_issues,
-    commit_selected_edit_recipe,
-    emit_feedback_event,
     fail_workflow,
     finalize_output,
     init_state,
@@ -34,7 +32,6 @@ from app.graph.nodes.runtime import (
     render_preview,
     resume_after_plan_input,
     user_action_gate,
-    wait_user_confirm,
     wait_user_plan_input,
 )
 from app.graph.nodes.suggestion import (
@@ -50,7 +47,6 @@ __all__ = [
     "candidate_ranking",
     "cheap_dsp_scan",
     "clap_gate",
-    "commit_selected_edit_recipe",
     "detect_band_overlap",
     "detect_clipping",
     "detect_master_clipping",
@@ -59,7 +55,6 @@ __all__ = [
     "detect_track_clipping",
     "detect_high_band_harshness",
     "detect_sibilance",
-    "emit_feedback_event",
     "fail_workflow",
     "finalize_output",
     "approve_plan",
@@ -79,6 +74,5 @@ __all__ = [
     "sample_track_clips",
     "select_role_candidates",
     "user_action_gate",
-    "wait_user_confirm",
     "wait_user_plan_input",
 ]

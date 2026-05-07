@@ -41,4 +41,9 @@ public class CommentService {
         commentRepository.delete(comment);
     }
 
+    @Transactional(readOnly = true)
+    public boolean hasActiveChildren(Integer commentId) {
+        return commentRepository.existsByParentCommentIdAndDeletedAtIsNull(commentId);
+    }
+
 }

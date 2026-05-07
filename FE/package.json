@@ -19,6 +19,7 @@
     "clsx": "^2.1.1",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^3.0.4",
+    "pinia-plugin-persistedstate": "^4.7.1",
     "puppeteer": "^24.43.0",
     "reka-ui": "^2.9.6",
     "sockjs-client": "^1.6.1",

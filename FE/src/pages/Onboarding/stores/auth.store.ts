@@ -20,4 +20,8 @@ export const useAuthStore = defineStore('auth', () => {
     setAccessToken,
     clearAccessToken,
   }
-})
+},
+  {
+    persist: true
+
+  })

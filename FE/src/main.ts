@@ -9,9 +9,12 @@ import App from './app/App.vue'
 import router from './app/router'
 //Pinia 상태관리 설정
 import { createPinia } from 'pinia'
+//복구플러그인(새로고침해도 유지)
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 const app = createApp(App)
 const pinia = createPinia() //피니아 인스턴스를 생성
+pinia.use(piniaPluginPersistedstate) //복구플러그인 적용
 
 //순서 중요
 app.use(pinia) //피니아 먼저 설치

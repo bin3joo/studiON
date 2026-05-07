@@ -16,6 +16,7 @@ import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.entity.MasterTrack;
 import com.salmon.studion.domain.track.entity.Track;
+import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
 import com.salmon.studion.domain.track.service.TrackService;
 import com.salmon.studion.global.infrastructure.cdn.CdnUrlService;
 import lombok.RequiredArgsConstructor;
@@ -118,6 +119,8 @@ public class ProjectFacade {
         User user = userService.getUserByUserId(userId);
         projectMemberService.createProjectMember(project, user);
 
+        TrackAddResponse defaultTrack = trackService.addDefaultTrack(project.getId(), userId);
+
         return ProjectCreateResponse.builder()
                 .project(new ProjectCreateResponse.ProjectInfo(
                         project.getId(),
@@ -136,6 +139,17 @@ public class ProjectFacade {
                         masterTrack.getIsMuted(),
                         masterTrack.getVolume(),
                         masterTrack.getPan()
+                ))
+                .defaultTrack(new ProjectCreateResponse.TrackInfo(
+                        defaultTrack.getTrackId(),
+                        defaultTrack.getName(),
+                        defaultTrack.getType(),
+                        defaultTrack.getPreTrackId(),
+                        defaultTrack.getPostTrackId(),
+                        defaultTrack.getIsMuted(),
+                        defaultTrack.getIsSoloed(),
+                        defaultTrack.getVolume(),
+                        defaultTrack.getPan()
                 ))
                 .build();
     }

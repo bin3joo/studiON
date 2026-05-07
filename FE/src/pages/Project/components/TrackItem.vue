@@ -993,12 +993,8 @@ const onWorkAreaMouseLeave = () => {
   @hover-measure="emit('hover-measure', $event)"
   @submit-inline-comment="emit('submit-inline-comment', $event)"
   @resolve-comment="emit('resolve-comment', $event)"
-<<<<<<< Updated upstream
-  />
-=======
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
 />
->>>>>>> Stashed changes
       </div> 
 
       

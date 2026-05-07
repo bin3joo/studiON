@@ -50,7 +50,8 @@ public class SecurityConfig {
                                 "/api/v1/auth/onboarding",
                                 "/api/v1/auth/positions",
                                 "/api/v1/auth/exchange",
-                                "/api/v1/auth/reissue"
+                                "/api/v1/auth/reissue",
+                                "/api/ws/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

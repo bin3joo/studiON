@@ -39,12 +39,15 @@ public class CommentFacade {
         validateParentComment(request.getParentCommentId(), request.getProjectId(), request.getTrackId());
 
         User user = userService.getUserByUserId(userId);
+
         List<Integer> mentionedUserIds = normalizeMentionIds(request.getMentionedUserIds());
         List<User> mentionedUsers = validateAndLoadMentionUsers(request.getProjectId(), mentionedUserIds);
 
         Comment comment = commentService.createComment(track, user, request.getParentCommentId(), request.getContent(), request.getLocation());
 
-        return CommentCreateResponse.of(comment, mentionedUserIds);
+        commentMentionService.createCommentMention(comment, mentionedUsers);
+
+        return CommentCreateResponse.of(request.getProjectId(), comment, mentionedUsers);
     }
 
     @Transactional
@@ -55,10 +58,10 @@ public class CommentFacade {
         Comment comment = commentService.getCommentByProjectId(request.getCommentId(), request.getProjectId());
         validateCommentOwner(comment, userId);
 
-        commentMentionService.deleteAllByCommentId(comment.getId());
         commentService.deleteComment(comment);
+        commentMentionService.deleteAllByCommentId(comment.getId());
 
-        return new CommentDeleteResponse(comment.getId());
+        return CommentDeleteResponse.of(request.getProjectId(), comment);
     }
 
     @Transactional
@@ -67,18 +70,8 @@ public class CommentFacade {
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
 
         Comment comment = commentService.getCommentByProjectId(request.getCommentId(), request.getProjectId());
-        commentService.changeResolved(comment);
 
-        return new CommentStatusChangeResponse(comment.getId(), comment.getIsResolved());
-    }
-
-    private Track getTrackInProject(Integer trackId, Integer projectId) {
-        Track track = trackService.getTrackByTrackId(trackId);
-
-        if (!track.getProject().getId().equals(projectId)) {
-            throw new BusinessException(ErrorCode.COMMENT_ACCESS_DENIED);
-        }
-        return track;
+        return CommentStatusChangeResponse.of(request.getProjectId(), commentService.changeResolved(comment));
     }
 
     private void validateParentComment(Integer parentCommentId, Integer projectId, Integer trackId) {

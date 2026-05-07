@@ -29,6 +29,8 @@ pnpm-debug.log*
 .claude/
 .codex/
 
+FE/*.wav
+FE/*.mp3
 
 AI/*.png
 AI/*.wav

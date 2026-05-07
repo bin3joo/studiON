@@ -14,43 +14,55 @@ export interface TrackMeasureCommentGroup {
   comments: TimelineComment[]
 }
 
-export interface MentionedUser {
+export interface CommentUser {
   userId: number
   nickname: string
-}
-
-export interface CommentCreatedBy {
-  userId: number
-  nickname: string
+  profileImgUrl: string | null
 }
 
 export interface AddCommentPayload {
-  projectId: number
   trackId: number
+  parentCommentId: number | null
   content: string
   location: number
   mentionedUserIds: number[]
 }
 
-export interface AddCommentResponse {
-  commentId: number
+export interface CommentAddedResponse {
+  projectId: number
   trackId: number
+  commentId: number
+  parentCommentId: number | null
   content: string
   location: number
   isResolved: boolean
-  mentionedUsers: MentionedUser[]
-  createdBy: CommentCreatedBy
+  author: CommentUser
+  mentionedUsers: CommentUser[]
+  createdAt: string
 }
 
-export interface CompleteCommentPayload {
+export interface DeleteCommentPayload {
+  commentId: number
+}
+
+export interface CommentDeletedResponse {
   projectId: number
+  trackId: number
   commentId: number
-  isResolved: boolean
+  parentCommentId: number | null
 }
 
-export interface CompleteCommentResponse {
+export interface ChangeCommentStatusPayload {
   commentId: number
+}
+
+export interface CommentStatusChangedResponse {
+  projectId: number
+  trackId: number
+  commentId: number
+  parentCommentId: number | null
   isResolved: boolean
+  updatedAt: string
 }
 
 export interface SocketErrorResponse {

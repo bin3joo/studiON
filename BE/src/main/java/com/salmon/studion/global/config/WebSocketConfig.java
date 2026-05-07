@@ -23,7 +23,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(projectWebSocketHandler, "/ws/projects/{projectId}")
                 .addInterceptors(webSocketHandshakeInterceptor)
                 // 개발 환경
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns("*");
 //                // 운영 환경
 //                .setAllowedOrigins(
 //                "http://localhost:3000",
@@ -31,7 +31,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 //                "https://studion.ai.kr");
         registry.addHandler(chatWebSocketHandler, "/ws/chat")
                 // 개발 환경
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns("*");
 //                // 운영 환경
 //                .setAllowedOrigins(
 //                "http://localhost:3000",

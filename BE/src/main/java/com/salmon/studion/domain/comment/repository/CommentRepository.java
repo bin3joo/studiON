@@ -21,4 +21,6 @@ public interface CommentRepository extends JpaRepository<Comment, Integer> {
     """)
     Optional<Comment> findByIdAndProjectId(@Param("commentId") Integer commentId, @Param("projectId") Integer projectId);
 
+    boolean existsByParentCommentIdAndDeletedAtIsNull(Integer commentId);
+
 }

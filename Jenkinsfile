@@ -17,21 +17,29 @@ pipeline {
             }
         }
 
+        stage('Prepare Env') {
+            steps {
+                withCredentials([file(credentialsId: 'studion-prod-env', variable: 'ENV_PROD_FILE')]) {
+                    sh 'cp "$ENV_PROD_FILE" .env.prod'
+                }
+            }
+        }
+
         stage('Build') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml build'
+                sh 'docker compose --env-file .env.prod -f compose.prod.yaml build'
             }
         }
 
         stage('Deploy') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml up -d --remove-orphans'
+                sh 'docker compose --env-file .env.prod -f compose.prod.yaml up -d --remove-orphans'
             }
         }
 
         stage('Status') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml ps'
+                sh 'docker compose --env-file .env.prod -f compose.prod.yaml ps'
             }
         }
     }

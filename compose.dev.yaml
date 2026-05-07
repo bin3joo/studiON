@@ -22,6 +22,8 @@ services:
     restart: unless-stopped
 
   redis:
+    image: redis:7
+    container_name: redis
     ports:
       - "6379:6379"
     restart: unless-stopped
@@ -29,3 +31,4 @@ services:
 volumes:
   mysql_data:
   mongodb_data:
+  redis_data:

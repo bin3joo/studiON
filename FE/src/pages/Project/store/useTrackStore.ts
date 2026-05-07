@@ -62,6 +62,8 @@ export const useTrackStore = defineStore('track', () => {
         Tone.getTransport().bpm.value = newBpm;
     })
 
+
+
     // 현재 선택된 클립과 해당 트랙 ID
     const selectedClip = ref<ClipUIState | null>(null);
     const selectedTrackId = ref<number | null>(null);
@@ -154,8 +156,92 @@ export const useTrackStore = defineStore('track', () => {
     // ==========================================
     // 🌐 웹소켓 수신 (Subscribe) 처리부
     // ==========================================
-    // 백엔드 명세에 맞추어 이벤트 명(`CLIP_PASTE_SUCCESS` 등)을 수정하여 사용하세요.
+    // 백엔드 명세에 맞추어 이벤트 명(`CLIP_PASTE_SUCCESS` 등)을 수정하여 사용
 
+
+    // --------------------- 트랙 관련 (소켓) ---------------------    
+    socketService.subscribe('TRACK_ADD', (data) => {
+        // 이미 그려져있으면 무시 (Optimistic UI 중복 방지)
+        if (trackList.value.some(t => t.trackId === data.trackId)) return;
+
+        const newTrack: TrackUIState = {
+            trackId: data.trackId,
+            name: data.name,
+            type: data.type.toLowerCase(),
+            preTrackId: data.preTrackId,
+            postTrackId: data.postTrackId,
+            isMuted: data.isMuted,
+            isSoloed: data.isSoloed,
+            volume: data.volume,
+            pan: data.pan,
+            clips: [],
+            height: 100,
+            isSelected: false
+        };
+        trackList.value.push(newTrack);
+
+        const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
+        const vol = new Tone.Volume(newTrack.volume).connect(panner);
+        panner.channelCount = 2; panner.channelCountMode = "explicit";
+        vol.channelCount = 2; vol.channelCountMode = "explicit";
+
+        trackVolumes.set(newTrack.trackId, vol);
+        trackPanners.set(newTrack.trackId, panner);
+    });
+
+    socketService.subscribe('TRACK_DELETE', (data) => {
+        const index = trackList.value.findIndex(t => t.trackId === data.trackId);
+        if (index !== -1) {
+            // 🚨 보완: 트랙을 지우기 전에, 트랙 안에 있던 모든 클립의 오디오 메모리를 완전 해제!
+            trackList.value[index].clips.forEach(clip => {
+                const player = clipPlayers.get(clip.clipId);
+                if (player) {
+                    player.unsync().stop().dispose();
+                    clipPlayers.delete(clip.clipId);
+                }
+            });
+
+            // 트랙 삭제 및 믹서 노드 해제
+            trackList.value.splice(index, 1);
+            trackVolumes.get(data.trackId)?.dispose(); trackVolumes.delete(data.trackId);
+            trackPanners.get(data.trackId)?.dispose(); trackPanners.delete(data.trackId);
+        }
+    });
+
+    socketService.subscribe('TRACK_RENAME', (data) => {
+        const track = trackList.value.find(t => t.trackId === data.trackId);
+        if (track) track.name = data.name;
+    });
+
+    socketService.subscribe('TRACK_MUTE_CHANGE', (data) => {
+        const track = trackList.value.find(t => t.trackId === data.trackId);
+        if (track) { track.isMuted = data.isMuted; syncEffectiveMuteStates(); }
+    });
+
+    socketService.subscribe('TRACK_SOLO_CHANGE', (data) => {
+        const track = trackList.value.find(t => t.trackId === data.trackId);
+        if (track) { track.isSoloed = data.isSoloed; syncEffectiveMuteStates(); }
+    });
+
+    socketService.subscribe('TRACK_VOLUME_CHANGE', (data) => {
+        const track = trackList.value.find(t => t.trackId === data.trackId);
+        if (track) {
+            track.volume = data.volume;
+            const vol = trackVolumes.get(data.trackId);
+            if (vol) vol.volume.value = data.volume;
+        }
+    });
+
+    socketService.subscribe('TRACK_PAN_CHANGE', (data) => {
+        const track = trackList.value.find(t => t.trackId === data.trackId);
+        if (track) {
+            track.pan = data.pan;
+            const panner = trackPanners.get(data.trackId);
+            if (panner) panner.pan.value = data.pan / 100;
+        }
+    });
+
+    // --------------------- 클립 관련 (소켓) ---------------------
     socketService.subscribe('CLIP_LOCK', (data) => {
         const track = trackList.value.find(t => t.clips.some(c => c.clipId === data.clipId));
         if (track) {
@@ -166,17 +252,93 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
 
-    // 예시: 붙여넣기 완료 후 진짜 ID 교체
-    // socketService.subscribe('CLIP_PASTE_SUCCESS', (data) => {
-    //     const track = trackList.value.find(t => t.trackId === data.targetTrackId);
-    //     if (!track) return;
-    //     const clip = track.clips.find(c => c.clipId === data.tempClipId); 
-    //     if (clip) {
-    //         clip.clipId = data.realClipId; // 임시 ID를 진짜 백엔드 ID로 교체
-    //         // Map에 저장된 오디오 플레이어도 새 ID로 갱신해야 할 수 있음
-    //     }
-    // });
+    socketService.subscribe('CLIP_MOVE', (data) => {
+        let targetClip: ClipUIState | null = null;
+        let sourceTrack: TrackUIState | null = null;
 
+        // 🌟 보완: forEach 대신 for...of 적용 (클립 찾으면 즉시 루프 탈출하여 성능 최적화)
+        for (const track of trackList.value) {
+            const clip = track.clips.find(c => c.clipId === data.clipId);
+            if (clip) {
+                targetClip = clip;
+                sourceTrack = track;
+                break;
+            }
+        }
+
+        if (!targetClip || !sourceTrack) return;
+        if (targetClip.start === data.after.startBar && sourceTrack.trackId === data.after.trackId) return; // 변동 없으면 무시
+
+        if (sourceTrack.trackId !== data.after.trackId) {
+            const targetTrack = trackList.value.find(t => t.trackId === data.after.trackId);
+            if (targetTrack) {
+                const clipIndex = sourceTrack.clips.findIndex(c => c.clipId === data.clipId);
+                if (clipIndex !== -1) sourceTrack.clips.splice(clipIndex, 1);
+
+                targetTrack.clips.push(targetClip);
+
+                const newVolNode = trackVolumes.get(data.after.trackId);
+                const player = clipPlayers.get(data.clipId);
+                if (newVolNode && player) { player.disconnect(); player.connect(newVolNode); }
+            }
+        }
+
+        targetClip.start = data.after.startBar;
+        resyncClip(targetClip.clipId, targetClip.start);
+    });
+
+    socketService.subscribe('CLIP_RESIZE', (data) => {
+        for (const t of trackList.value) {
+            const clip = t.clips.find(c => c.clipId === data.clipId);
+            if (clip) {
+                clip.start = data.after.startBar;
+                clip.duration = data.after.length;
+                // 🚨 보완: 왼쪽을 잘랐다면 실제 오디오 시작점(Trim)도 갱신해야 합니다.
+                if (data.after.audioStartMs !== undefined) {
+                    clip.audioStartMs = data.after.audioStartMs;
+                }
+                resyncClip(clip.clipId, clip.start);
+                break; // 찾았으니 탈출
+            }
+        }
+    });
+
+    socketService.subscribe('CLIP_DELETE', (data) => {
+        for (const t of trackList.value) {
+            const index = t.clips.findIndex(c => c.clipId === data.clipId);
+            if (index !== -1) {
+                t.clips.splice(index, 1);
+                break; // 찾았으니 탈출
+            }
+        }
+        const player = clipPlayers.get(data.clipId);
+        if (player) { player.unsync().stop().dispose(); clipPlayers.delete(data.clipId); }
+    });
+
+    socketService.subscribe('CLIP_CUT', (data) => {
+        // 잘라내기도 화면상 삭제 로직은 동일
+        for (const t of trackList.value) {
+            const index = t.clips.findIndex(c => c.clipId === data.clipId);
+            if (index !== -1) {
+                t.clips.splice(index, 1);
+                break;
+            }
+        }
+        const player = clipPlayers.get(data.clipId);
+        if (player) { player.unsync().stop().dispose(); clipPlayers.delete(data.clipId); }
+    });
+
+    socketService.subscribe('CLIP_DUPLICATE', (data) => {
+        // 백엔드에서 새로운 clipId, targetTrackId, targetStartBar를 반환함.
+        // 원본 클립의 데이터를 베이스로 새 클립 객체 생성 로직 추가
+    });
+    socketService.subscribe('CLIP_SPLIT', (data) => {
+        // 백엔드에서 원본 클립 길이 축소 응답 및 새 clipId 생성 정보를 반환함.
+        // 이를 반영하여 UI 클립을 쪼개는 로직 추가
+    });
+    socketService.subscribe('CLIP_PASTE', (data) => {
+        // Redis 클립보드에서 꺼내 생성한 새 clipId와 타겟 정보를 기반으로 새 클립 렌더링
+    });
 
     // ==========================================
     // 3. 액션(Action) 선언 (웹소켓 발신 및 UI 렌더링)
@@ -667,7 +829,7 @@ export const useTrackStore = defineStore('track', () => {
         // 1. 새 트랙의 볼륨 노드 + 패너 생성 (테스트 완료: 마스터 볼륨으로 안전하게 연결)
         const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
         const vol = new Tone.Volume(newTrack.volume).connect(panner);
-        
+
         // 개별 트랙 노드들도 스테레오 강제 유지
         panner.channelCount = 2;
         panner.channelCountMode = "explicit";
@@ -842,7 +1004,7 @@ export const useTrackStore = defineStore('track', () => {
             const vol = trackVolumes.get(trackId);
             if (vol) vol.dispose();
             trackVolumes.delete(trackId);
-            
+
             const panner = trackPanners.get(trackId);
             if (panner) panner.dispose();
             trackPanners.delete(trackId);
@@ -932,7 +1094,7 @@ export const useTrackStore = defineStore('track', () => {
                 panner.channelCountMode = "explicit";
                 toVol.channelCount = 2;
                 toVol.channelCountMode = "explicit";
-                
+
                 trackVolumes.set(toTrackId, toVol);
                 trackPanners.set(toTrackId, panner);
             }
@@ -1118,8 +1280,8 @@ export const useTrackStore = defineStore('track', () => {
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 
-console.log('[fetchProject] data:', data)
-console.log('[fetchProject] data.name:', data.name)
+            console.log('[fetchProject] data:', data)
+            console.log('[fetchProject] data.name:', data.name)
 
             if (data) {
                 const MIN_TOTAL_BAR_COUNT = 100

@@ -3,7 +3,11 @@ package com.salmon.studion.domain.clip.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.audio.entity.AudioMetadata;
+import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.audio.service.AudioService;
 import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipCreateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipPasteRequest;
@@ -13,6 +17,7 @@ import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
 import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipCreateResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipPasteResponse;
@@ -27,6 +32,8 @@ import com.salmon.studion.domain.clip.repository.ClipRepository;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.entity.Track;
+import com.salmon.studion.domain.track.repository.TrackRepository;
+import com.salmon.studion.global.common.enums.MimeType;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +47,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.util.ArrayList;
@@ -57,8 +65,11 @@ import static org.mockito.Mockito.*;
 class ClipServiceTest {
 
     @Mock private ProjectService projectService;
+    @Mock private AudioService audioService;
     @Mock private ClipRepository clipRepository;
     @Mock private ClipEventRepository clipEventRepository;
+    @Mock private TrackRepository trackRepository;
+    @Mock private AudioMetadataRepository audioMetadataRepository;
     @Mock private RedisTemplate<String, String> redisTemplate;
     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -66,6 +77,7 @@ class ClipServiceTest {
 
     @Mock private ValueOperations<String, String> valueOperations;
     @Mock private HashOperations<String, Object, Object> hashOperations;
+    @Mock private SetOperations<String, String> setOperations;
 
     private static final Integer PROJECT_ID = 1;
     private static final Integer CLIP_ID = 3;
@@ -78,6 +90,7 @@ class ClipServiceTest {
     void setUp() {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
         lenient().when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mock(Project.class));
         lenient().when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
     }
@@ -271,11 +284,17 @@ class ClipServiceTest {
         void moveSuccess_lazyInit() throws JsonProcessingException {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(ORIGINAL_START);
             when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(4000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
 
             ClipMoveResponse response = clipService.moveClip(
@@ -428,6 +447,7 @@ class ClipServiceTest {
         private String clipStateJson(Double start, Double duration) throws JsonProcessingException {
             return objectMapper.writeValueAsString(ClipState.builder()
                     .clipId(CLIP_ID).trackId(1).start(start).duration(duration)
+                    .audioStartMs(0).audioDurationMs(4000)
                     .build());
         }
 
@@ -455,11 +475,17 @@ class ClipServiceTest {
         void resizeSuccess_lazyInit() throws JsonProcessingException {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(1);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(ORIGINAL_START_BAR);
             when(mockClip.getDuration()).thenReturn(ORIGINAL_LENGTH);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(4000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
 
             ClipResizeResponse response = clipService.resizeClip(
@@ -653,6 +679,7 @@ class ClipServiceTest {
         private String clipStateJson() throws JsonProcessingException {
             return objectMapper.writeValueAsString(ClipState.builder()
                     .clipId(CLIP_ID).trackId(1).start(1.0).duration(4.0)
+                    .audioStartMs(0).audioDurationMs(4000)
                     .build());
         }
 
@@ -674,11 +701,17 @@ class ClipServiceTest {
         void deleteSuccess_lazyInit() {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(1);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(1.0);
             when(mockClip.getDuration()).thenReturn(4.0);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(4000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
             when(redisTemplate.delete(LOCK_KEY)).thenReturn(true);
 
@@ -790,6 +823,7 @@ class ClipServiceTest {
         private String clipStateJson(Double start, Double duration) throws JsonProcessingException {
             return objectMapper.writeValueAsString(ClipState.builder()
                     .clipId(CLIP_ID).trackId(1).start(start).duration(duration)
+                    .audioStartMs(0).audioDurationMs(6000)
                     .build());
         }
 
@@ -821,11 +855,17 @@ class ClipServiceTest {
         void splitSuccess_lazyInit() throws JsonProcessingException {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(1);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(ORIGINAL_START);
             when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(6000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
 
             ClipSplitResponse response = clipService.splitClip(splitRequest(CLIP_ID, SPLIT_BAR), USER_ID);
@@ -1021,11 +1061,17 @@ class ClipServiceTest {
         void duplicateSuccess_lazyInit() throws JsonProcessingException {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(ORIGINAL_START);
             when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(4000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
 
             ClipDuplicateResponse response = clipService.duplicateClip(duplicateRequest(CLIP_ID), USER_ID);
@@ -1160,11 +1206,17 @@ class ClipServiceTest {
         void cutSuccess_lazyInit() {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(ORIGINAL_START);
             when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(4000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
 
             ClipCutResponse response = clipService.cutClip(cutRequest(CLIP_ID), USER_ID);
@@ -1297,11 +1349,17 @@ class ClipServiceTest {
         void copySuccess_lazyInit() {
             Track mockTrack = mock(Track.class);
             Clip mockClip = mock(Clip.class);
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
             when(mockTrack.getId()).thenReturn(ORIGINAL_TRACK_ID);
             when(mockClip.getId()).thenReturn(CLIP_ID);
             when(mockClip.getTrack()).thenReturn(mockTrack);
             when(mockClip.getStart()).thenReturn(ORIGINAL_START);
             when(mockClip.getDuration()).thenReturn(ORIGINAL_DURATION);
+            when(mockAudio.getId()).thenReturn(42);
+            when(mockClip.getAudioMetadata()).thenReturn(mockAudio);
+            when(mockClip.getColor()).thenReturn("#FFFFFF");
+            when(mockClip.getAudioStartMs()).thenReturn(0);
+            when(mockClip.getAudioDurationMs()).thenReturn(4000);
             when(clipRepository.findById(CLIP_ID)).thenReturn(Optional.of(mockClip));
 
             ClipCopyResponse response = clipService.copyClip(copyRequest(CLIP_ID), USER_ID);
@@ -1374,6 +1432,187 @@ class ClipServiceTest {
                 req.setProjectId(PROJECT_ID);
 
                 assertThatThrownBy(() -> clipService.copyClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("createClip")
+    class CreateClipTest {
+
+        private static final Integer TRACK_ID = 2;
+        private static final Integer NEW_CLIP_ID = 10;
+        private static final Integer AUDIO_METADATA_ID = 42;
+        private static final Integer DURATION_MS = 8000;
+        private static final Double EXPECTED_DURATION_BARS = 4.0; // (8000/1000) * (120/60) / 4
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            Project mockProject = mock(Project.class);
+            lenient().when(mockProject.getTempo()).thenReturn(120.0);
+            lenient().when(mockProject.getTimeSigNumerator()).thenReturn(4);
+            lenient().when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mockProject);
+
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
+            lenient().when(mockAudio.getId()).thenReturn(AUDIO_METADATA_ID);
+            lenient().when(mockAudio.getDurationMs()).thenReturn(DURATION_MS);
+            lenient().when(audioService.createAudioMetadata(any())).thenReturn(mockAudio);
+
+            lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+        }
+
+        private ClipCreateRequest createRequest() {
+            ClipCreateRequest req = new ClipCreateRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setTrackId(TRACK_ID);
+            req.setStartBar(0.0);
+            req.setColor("#FF0000");
+            req.setObjectKey("projects/1/audios/test.mp3");
+            req.setOriginalName("test.mp3");
+            req.setStoredName("test.mp3");
+            req.setMimeType(MimeType.MPEG);
+            req.setSizeBytes(100000);
+            req.setDurationMs(DURATION_MS);
+            return req;
+        }
+
+        @Test
+        @DisplayName("생성 성공 시 clipId, duration, audioMetadataId, color 등을 반환한다")
+        void createSuccess() {
+            ClipCreateResponse response = clipService.createClip(createRequest(), USER_ID);
+
+            assertThat(response.getClipId()).isEqualTo(NEW_CLIP_ID);
+            assertThat(response.getTrackId()).isEqualTo(TRACK_ID);
+            assertThat(response.getStartBar()).isEqualTo(0.0);
+            assertThat(response.getDuration()).isEqualTo(EXPECTED_DURATION_BARS);
+            assertThat(response.getColor()).isEqualTo("#FF0000");
+            assertThat(response.getAudioMetadataId()).isEqualTo(AUDIO_METADATA_ID);
+            assertThat(response.getAudioStartMs()).isEqualTo(0);
+            assertThat(response.getAudioDurationMs()).isEqualTo(DURATION_MS);
+        }
+
+        @Test
+        @DisplayName("duration은 (durationMs/1000) * (tempo/60) / timeSigNumerator 공식으로 계산된다")
+        void durationCalculation() {
+            // durationMs=8000, tempo=120, timeSigNumerator=4 → 4.0 bars
+            ClipCreateResponse response = clipService.createClip(createRequest(), USER_ID);
+            assertThat(response.getDuration()).isEqualTo(4.0);
+        }
+
+        @Test
+        @DisplayName("생성 시 audioService.createAudioMetadata가 호출된다")
+        void callsAudioServiceCreate() {
+            clipService.createClip(createRequest(), USER_ID);
+            verify(audioService).createAudioMetadata(any());
+        }
+
+        @Test
+        @DisplayName("생성 후 Redis Hash에 ClipState가 저장된다")
+        void savesClipStateToRedis() throws JsonProcessingException {
+            clipService.createClip(createRequest(), USER_ID);
+
+            ClipState saved = objectMapper.readValue(store.get(String.valueOf(NEW_CLIP_ID)), ClipState.class);
+            assertThat(saved.getClipId()).isEqualTo(NEW_CLIP_ID);
+            assertThat(saved.getTrackId()).isEqualTo(TRACK_ID);
+            assertThat(saved.getDuration()).isEqualTo(EXPECTED_DURATION_BARS);
+            assertThat(saved.getAudioMetadataId()).isEqualTo(AUDIO_METADATA_ID);
+            assertThat(saved.getAudioStartMs()).isEqualTo(0);
+            assertThat(saved.getAudioDurationMs()).isEqualTo(DURATION_MS);
+        }
+
+        @Test
+        @DisplayName("audioStartMs는 0으로 초기화된다 (전체 오디오 사용)")
+        void audioStartMsIsZero() {
+            ClipCreateResponse response = clipService.createClip(createRequest(), USER_ID);
+            assertThat(response.getAudioStartMs()).isEqualTo(0);
+            assertThat(response.getAudioDurationMs()).isEqualTo(DURATION_MS);
+        }
+
+        @Nested
+        @DisplayName("validate")
+        class ValidateTest {
+
+            @Test
+            @DisplayName("projectId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void projectIdNull() {
+                ClipCreateRequest req = createRequest();
+                req.setProjectId(null);
+
+                assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("trackId가 null이면 INVALID_REQUEST 예외를 던진다")
+            void trackIdNull() {
+                ClipCreateRequest req = createRequest();
+                req.setTrackId(null);
+
+                assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("startBar가 null이면 INVALID_REQUEST 예외를 던진다")
+            void startBarNull() {
+                ClipCreateRequest req = createRequest();
+                req.setStartBar(null);
+
+                assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("color가 null이면 INVALID_REQUEST 예외를 던진다")
+            void colorNull() {
+                ClipCreateRequest req = createRequest();
+                req.setColor(null);
+
+                assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("objectKey가 null이면 INVALID_REQUEST 예외를 던진다")
+            void objectKeyNull() {
+                ClipCreateRequest req = createRequest();
+                req.setObjectKey(null);
+
+                assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
+                        .isInstanceOf(BusinessException.class)
+                        .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_REQUEST));
+            }
+
+            @Test
+            @DisplayName("durationMs가 null이면 INVALID_REQUEST 예외를 던진다")
+            void durationMsNull() {
+                ClipCreateRequest req = createRequest();
+                req.setDurationMs(null);
+
+                assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
                         .isInstanceOf(BusinessException.class)
                         .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
                                 .isEqualTo(ErrorCode.INVALID_REQUEST));

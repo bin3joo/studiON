@@ -2,6 +2,7 @@ package com.salmon.studion.global.infrastructure.websocket.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
+import com.salmon.studion.domain.clip.dto.request.ClipCreateRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
 import com.salmon.studion.domain.clip.dto.request.ClipPasteRequest;
@@ -35,6 +36,10 @@ public class ClipEventHandler {
 
         Object response = null;
         switch (event){
+            case "CLIP_CREATE":
+                ClipCreateRequest createRequest = objectMapper.convertValue(raw.getPayload(), ClipCreateRequest.class);
+                response = clipService.createClip(createRequest, userId);
+                break;
             case "CLIP_LOCK":
                 ClipLockRequest lockRequest = objectMapper.convertValue(raw.getPayload(), ClipLockRequest.class);
                 response = clipService.lockClip(lockRequest, userId);

@@ -17,6 +17,7 @@ import java.util.List;
 public class ProjectDetailResponse {
 
     private Integer projectId;
+    private String  name;
     private RootNote rootNote;
     private ProjectMode mode;
     private Double tempo;
@@ -72,6 +73,7 @@ public class ProjectDetailResponse {
     ) {
         return new ProjectDetailResponse(
                 project.getId(),
+                project.getName(),
                 project.getRootNote(),
                 project.getMode(),
                 project.getTempo(),

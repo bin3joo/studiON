@@ -2,6 +2,7 @@ package com.salmon.studion.global.infrastructure.websocket.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.project.service.ProjectPresenceService;
+import com.salmon.studion.global.common.enums.CommentWebSocketEventType;
 import com.salmon.studion.global.common.enums.ProjectWebSocketEventType;
 import com.salmon.studion.global.exception.BusinessException;
 import com.salmon.studion.global.infrastructure.websocket.*;
@@ -27,6 +28,7 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
     private final ProjectPresenceService projectPresenceService;
     private final ObjectMapper objectMapper;
     private final ProjectEventHandler projectEventHandler;
+    private final CommentEventHandler commentEventHandler;
     private final TrackEventHandler trackEventHandler;
     private final ClipEventHandler clipEventHandler;
     private final WebSocketMessageSender webSocketMessageSender;
@@ -51,8 +53,13 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
 
         try {
             ProjectWebSocketEventType projectEventType = ProjectWebSocketEventType.from(event);
+            CommentWebSocketEventType commentEventType = CommentWebSocketEventType.from(event);
+
             if (projectEventType != null) {
                 projectEventHandler.handleProjectEvent(session, projectId, userId, projectEventType, raw);
+            }
+            else if(commentEventType != null) {
+                commentEventHandler.handleCommentEvent(session, projectId, userId, commentEventType, raw);
             }
             else if(event.startsWith("TRACK_")){
                 trackEventHandler.handleTrackEvent(session, projectId, event, raw);

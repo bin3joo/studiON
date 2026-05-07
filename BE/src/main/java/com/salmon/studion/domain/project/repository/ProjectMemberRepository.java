@@ -26,4 +26,16 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, In
     List<ProjectMember> findAllWithUserByProjectIdIn(List<Integer> projectIds);
 
     boolean existsByProject_IdAndUser_Id(Integer projectId, Integer userId);
+
+    @Query("""
+        SELECT pm.user.id
+        FROM ProjectMember pm
+        WHERE pm.project.id = :projectId
+          AND pm.user.id IN :userIds
+    """)
+    List<Integer> findUserIdsInProject(
+            @Param("projectId") Integer projectId,
+            @Param("userIds") List<Integer> userIds
+    );
+
 }

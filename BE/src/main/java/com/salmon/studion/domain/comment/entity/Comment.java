@@ -48,6 +48,23 @@ public class Comment extends BaseEntity {
     @Column(nullable = true)
     private LocalDateTime deletedAt;
 
+    public static Comment create(
+            Track track,
+            User user,
+            Integer parentCommentId,
+            String content,
+            BigDecimal location
+    ) {
+        Comment comment = new Comment();
+        comment.track = track;
+        comment.user = user;
+        comment.parentCommentId = parentCommentId;
+        comment.content = content;
+        comment.location = location;
+        comment.isResolved = false;
+        return comment;
+    }
+
     public void updateIsResolved() {
         this.isResolved = !this.isResolved;
     }

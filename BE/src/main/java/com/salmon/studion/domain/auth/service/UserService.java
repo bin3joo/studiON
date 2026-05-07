@@ -100,4 +100,8 @@ public class UserService {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
     }
+
+    public List<User> getUsersByIds(List<Integer> mentionedUserIds) {
+        return userRepository.findAllByIdIn(mentionedUserIds);
+    }
 }

@@ -616,4 +616,13 @@ public class TrackService {
                 .build());
     }
 
+    public Track getTrackByTrackId(Integer trackId) {
+        return trackRepository.findById(trackId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+    }
+
+    public Track getTrackInProjectId(Integer projectId, Integer trackId) {
+        return trackRepository.findByIdAndProject_Id(trackId, projectId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+    }
 }

@@ -635,6 +635,9 @@ const emit = defineEmits<{
     trackId: string
     measure: number
   }]
+  'delete-comment': [payload: {
+    commentId: number
+  }]
 }>()
 
 //
@@ -993,6 +996,7 @@ const onWorkAreaMouseLeave = () => {
   @hover-measure="emit('hover-measure', $event)"
   @submit-inline-comment="emit('submit-inline-comment', $event)"
   @resolve-comment="emit('resolve-comment', $event)"
+  @delete-comment="emit('delete-comment', $event)"
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
 />
       </div> 

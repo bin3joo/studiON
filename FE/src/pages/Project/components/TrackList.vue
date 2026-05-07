@@ -71,6 +71,9 @@ const emit = defineEmits<{
     trackId: string
     measure: number
   }]
+  'delete-comment': [payload: {
+    commentId: number
+  }]
 }>()
 
 </script>
@@ -105,6 +108,7 @@ const emit = defineEmits<{
   @hover-measure="emit('hover-measure', $event)"
   @submit-inline-comment="emit('submit-inline-comment', $event)"
   @resolve-comment="emit('resolve-comment', $event)"
+  @delete-comment="emit('delete-comment', $event)"
   @dragstart="onDragStart($event, track.trackId)"
   @dragend="onDragEnd"
 />

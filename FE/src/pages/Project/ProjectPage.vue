@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import type { TrackMeasureCommentGroup, TimelineComment, AddCommentPayload } from './types/comment.types'
+import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
 import ProjectHeader from './components/ProjectHeader.vue'
 import TrackList from './components/TrackList.vue' //트랙 리스트 컴포넌트
@@ -16,7 +16,6 @@ import TrackItem from './components/TrackItem.vue'//트랙 아이템 마스터 �
 import RemoteCursors from './components/RemoteCursors.vue' //커서 컴포넌트
 import { useCollabStore } from './store/useCollabStore';//공동 작업 스토어 
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
-import { useTrackComments } from './composables/useTrackComments'
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
@@ -198,7 +197,7 @@ const updateMousePos = (e: MouseEvent) => {
   currentMouseY = e.clientY;
 
   // 내 마우스 좌표를 서버로 계속 쏘기
-  collabStore.sendMyCursor(e.clientX, e.clientY);
+ // collabStore.sendMyCursor(e.clientX, e.clientY);
 };
 
 
@@ -246,6 +245,11 @@ onMounted(async () => {
     trackStore.projectInfo.name = payload.name
   })
 
+    socketService.subscribe('COMMENT_ADDED', applyCommentAdded)
+    socketService.subscribe('COMMENT_DELETED', applyCommentDeleted)
+    socketService.subscribe('COMMENT_STATUS_CHANGED', applyCommentStatusChanged)
+    socketService.subscribe('ERROR', handleSocketError)
+  
     // 토큰이 이미 있으면 바로 연결 (문자열인 projectId를 Number로 변환!)
     if (authStore.accessToken) {
       socketService.connect(Number(projectId)); 
@@ -299,20 +303,6 @@ const projectName = ref('프로젝트')
 const isInviteModalOpen = ref(false)
 const activeSidePanel = ref<SidePanelType>(null)
 
-  const mockStompClient = {
-  connected: true,
-
-  publish: ({ destination, body }: { destination: string; body: string }) => {
-    console.log('[댓글 웹소켓 mock] 전송 주소:', destination)
-    console.log('[댓글 웹소켓 mock] 전송 데이터:', JSON.parse(body))
-  },
-}
-
-const {
-  addComment,
-  handleSocketMessage,
-} = useTrackComments(mockStompClient)
-
 function parseTrackId(trackId: string) {
   const parsed = Number(trackId)
 
@@ -327,43 +317,141 @@ function parseTrackId(trackId: string) {
 const hoveredMeasure = ref<number | null>(null)
 const hoveredTrackId = ref<string | null>(null)
 
-const commentGroups = ref<TrackMeasureCommentGroup[]>([
-  {
-    trackId: 'track-1',
-    trackName: '트랙 1',
-    measure: 6,
-    resolved: false,
-    comments: [
-      {
-        id: 'c1',
-        author: '협업자',
-        mention: '@사용자1',
-        content: '리버브 너무 길어요. 줄여보면 어떨까요?',
-        color: '#e6c93e',
-      },
-    ],
-  },
-  {
-    trackId: 'track-2',
-    trackName: '딥 베이스 라인',
-    measure: 10,
-    resolved: false,
-    comments: [
-      {
-        id: 'c2',
-        author: '협업자',
-        content: '리버브 너무 길어요. 줄여보면 어떨까요?',
-        color: '#e6c93e',
-      },
-      {
-        id: 'c3',
-        author: '협업자',
-        content: '싫으면 마세요.',
-        color: '#e6c93e',
-      },
-    ],
-  },
-])
+  function applyCommentAdded(data: {
+  projectId: number
+  trackId: number
+  commentId: number
+  parentCommentId: number | null
+  content: string
+  location: number
+  isResolved: boolean
+  author: {
+    userId: number
+    nickname: string
+    profileImgUrl: string | null
+  }
+  mentionedUsers: {
+    userId: number
+    nickname: string
+    profileImgUrl: string | null
+  }[]
+  createdAt: string
+}) {
+  const trackId = String(data.trackId)
+
+  const target = commentGroups.value.find(group =>
+    group.trackId === trackId && group.measure === data.location,
+  )
+
+  const newComment: TimelineComment = {
+    id: String(data.commentId),
+    author: data.author.nickname,
+    content: data.content,
+    color: '#d93ce6',
+  }
+
+  if (target) {
+    target.comments.push(newComment)
+    target.resolved = data.isResolved
+  }
+  else {
+    commentGroups.value.push({
+      trackId,
+      trackName: findTrackName(trackId),
+      measure: data.location,
+      resolved: data.isResolved,
+      comments: [newComment],
+    })
+  }
+}
+
+function findTrackName(trackId: string) {
+  const numericTrackId = Number(trackId)
+
+  if (trackStore.masterTrack.trackId === numericTrackId) {
+    return trackStore.masterTrack.name
+  }
+
+  return trackStore.trackList.find(track =>
+    track.trackId === numericTrackId
+  )?.name ?? `트랙 ${trackId}`
+}
+
+function applyCommentDeleted(data: {
+  projectId: number
+  trackId: number
+  commentId: number
+  parentCommentId: number | null
+}) {
+  const trackId = String(data.trackId)
+  const commentId = String(data.commentId)
+
+  commentGroups.value = commentGroups.value
+    .map(group => {
+      if (group.trackId !== trackId) return group
+
+      return {
+        ...group,
+        comments: group.comments.filter(comment => comment.id !== commentId),
+      }
+    })
+    .filter(group => group.comments.length > 0)
+}
+
+function applyCommentStatusChanged(data: {
+  projectId: number
+  trackId: number
+  commentId: number
+  parentCommentId: number | null
+  isResolved: boolean
+  updatedAt: string
+}) {
+  const trackId = String(data.trackId)
+  const commentId = String(data.commentId)
+
+  const targetGroup = commentGroups.value.find(group =>
+    group.trackId === trackId &&
+    group.comments.some(comment => comment.id === commentId),
+  )
+
+  if (!targetGroup) return
+
+  targetGroup.resolved = data.isResolved
+}
+
+function handleSocketError(error: {
+  code: number
+  message: string
+}) {
+  console.error('[댓글 웹소켓 에러]', error)
+}
+
+function handleResolveComment(payload: {
+  trackId: string
+  measure: number
+}) {
+  const targetGroup = commentGroups.value.find(group =>
+    group.trackId === payload.trackId && group.measure === payload.measure,
+  )
+
+  const firstComment = targetGroup?.comments[0]
+
+  if (!firstComment) return
+
+  socketService.publish('COMMENT_STATUS_CHANGE', {
+    commentId: Number(firstComment.id),
+  })
+}
+
+function handleDeleteComment(payload: {
+  commentId: number
+}) {
+  socketService.publish('COMMENT_DELETE', {
+    commentId: payload.commentId,
+  })
+}
+
+const commentGroups = ref<TrackMeasureCommentGroup[]>([])
 
 function handleRename(nextName: string) {
   const trimmedName = nextName.trim()
@@ -421,7 +509,7 @@ function handleCloseSidePanel() {
 }
 
 function handleHoverMeasure(payload: { trackId: string | null, measure: number | null }) {
-  console.log('호버 이벤트 수신:', payload)
+ // console.log('호버 이벤트 수신:', payload)
 
   hoveredTrackId.value = payload.trackId
   hoveredMeasure.value = payload.measure
@@ -435,72 +523,24 @@ function handleSubmitInlineComment(payload: {
 }) {
   const trimmed = payload.content.trim()
 
-  if (!trimmed)
-    return
+  if (!trimmed) return
 
-  const addCommentPayload: AddCommentPayload = {
-    projectId: Number(projectId),
-    trackId: parseTrackId(payload.trackId),
+  const trackId = parseTrackId(payload.trackId)
+
+  console.log('[댓글 등록 직전]', {
+    originalTrackId: payload.trackId,
+    parsedTrackId: trackId,
+    trackName: payload.trackName,
+    measure: payload.measure,
+  })
+
+  socketService.publish('COMMENT_ADD', {
+    trackId,
+    parentCommentId: null,
     content: trimmed,
     location: payload.measure,
     mentionedUserIds: [],
-  }
-
-  addComment(addCommentPayload)
-
-  handleSocketMessage({
-    event: 'COMMENT_ADD',
-    data: {
-      commentId: Date.now(),
-      trackId: addCommentPayload.trackId,
-      content: trimmed,
-      location: payload.measure,
-      isResolved: false,
-      mentionedUsers: [],
-      createdBy: {
-        userId: 1,
-        nickname: '사용자',
-      },
-    },
   })
-
-  const target = commentGroups.value.find(group =>
-    group.trackId === payload.trackId && group.measure === payload.measure,
-  )
-
-  const newComment: TimelineComment = {
-    id: crypto.randomUUID(),
-    author: '사용자',
-    content: trimmed,
-    color: '#d93ce6',
-  }
-
-  if (target) {
-    target.comments.push(newComment)
-    target.resolved = false
-  }
-  else {
-    commentGroups.value.push({
-      trackId: payload.trackId,
-      trackName: payload.trackName,
-      measure: payload.measure,
-      resolved: false,
-      comments: [newComment],
-    })
-  }
-}
-
-function handleResolveComment(payload: {
-  trackId: string
-  measure: number
-}) {
-  const targetGroup = commentGroups.value.find(group =>
-    group.trackId === payload.trackId && group.measure === payload.measure,
-  )
-
-  if (targetGroup) {
-    targetGroup.resolved = !targetGroup.resolved
-  }
 }
 
 const aiAnalyzing = ref(false)
@@ -604,6 +644,7 @@ const unlockAudioEngine = async () => {
     @hover-measure="handleHoverMeasure"
     @submit-inline-comment="handleSubmitInlineComment"
     @resolve-comment="handleResolveComment"
+    @delete-comment="handleDeleteComment"
   />
 </div>
 
@@ -618,6 +659,7 @@ const unlockAudioEngine = async () => {
   @hover-measure="handleHoverMeasure"
   @submit-inline-comment="handleSubmitInlineComment"
   @resolve-comment="handleResolveComment"
+  @delete-comment="handleDeleteComment"
 />
         </div>
         

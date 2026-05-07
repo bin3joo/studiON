@@ -89,28 +89,27 @@ public class ProjectEventHandler {
     ) throws IOException {
         projectMemberService.validateProjectMember(projectId, userId);
 
-        sessionManager.remove(projectId, session);
-        boolean hasRemainingSession = userId != null && sessionManager.hasUserSession(projectId, userId);
+        try {
+            sessionManager.remove(projectId, session);
+            boolean hasRemainingSession = userId != null && sessionManager.hasUserSession(projectId, userId);
 
-        session.close();
+            if (hasRemainingSession) {
+                return;
+            }
 
-        if (hasRemainingSession) {
-            return;
+            boolean actuallyLeft = projectPresenceService.removeProjectUser(projectId, userId);
+            if (!actuallyLeft) {
+                return;
+            }
+
+            projectWebSocketBroadcaster.broadcastToProject(
+                    projectId,
+                    ProjectWebSocketEventType.USER_LEFT_PROJECT,
+                    new ProjectUserLeftResponse(userId)
+            );
+        } finally {
+            session.close();
         }
-
-        boolean actuallyLeft = projectPresenceService.removeProjectUser(projectId, userId);
-        if (!actuallyLeft) {
-            return;
-        }
-
-        User user = userService.getUserByUserId(userId);
-
-        projectWebSocketBroadcaster.broadcastToProjectExceptSession(
-                projectId,
-                session.getId(),
-                ProjectWebSocketEventType.USER_LEFT_PROJECT,
-                new ProjectUserLeftResponse(user.getId())
-        );
     }
 
     private void projectRename(

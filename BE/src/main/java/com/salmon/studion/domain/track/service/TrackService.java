@@ -482,9 +482,25 @@ public class TrackService {
     public TrackAddResponse addDefaultTrack(Integer projectId, Integer userId) {
         TrackAddRequest request = new TrackAddRequest();
         request.setProjectId(projectId);
-        request.setName("트랙 1");
+        request.setName("track 1");
         request.setType("audio");
-        return addTrack(request, userId);
+        TrackAddResponse response = addTrack(request, userId);
+
+        Project project = projectService.getProjectOrThrow(projectId);
+        trackRepository.save(Track.create(
+                response.getTrackId(),
+                project,
+                response.getPreTrackId(),
+                response.getPostTrackId(),
+                TrackType.AUDIO,
+                response.getName(),
+                response.getIsSoloed(),
+                response.getIsMuted(),
+                response.getVolume(),
+                response.getPan()
+        ));
+
+        return response;
     }
 
 

@@ -2,8 +2,11 @@ package com.salmon.studion.global.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipCreateResponse;
 import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
+import com.salmon.studion.global.infrastructure.websocket.handler.ClipEventHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +41,7 @@ class ClipEventHandlerTest {
     @BeforeEach
     void setUp() throws Exception {
         lenient().when(session.getUri()).thenReturn(new URI("/ws/projects/" + PROJECT_ID));
+        lenient().when(session.getAttributes()).thenReturn(Map.of("userId", USER_ID));
     }
 
     private WsMessage<Map> wsMessage(String event, Map<String, Object> payload) {
@@ -45,6 +49,38 @@ class ClipEventHandlerTest {
         msg.setEvent(event);
         msg.setPayload(payload);
         return msg;
+    }
+
+    @Nested
+    @DisplayName("CLIP_CREATE")
+    class CreateTest {
+
+        @Test
+        @DisplayName("CREATE 성공 시 전체 브로드캐스트로 응답을 전송한다")
+        void createBroadcastsToAll() throws Exception {
+            ClipCreateResponse response = ClipCreateResponse.builder()
+                    .clipId(10).trackId(2).startBar(0.0).duration(4.0)
+                    .color("#FF0000").audioMetadataId(42).audioStartMs(0).audioDurationMs(8000)
+                    .build();
+            when(clipService.createClip(any(), eq(USER_ID))).thenReturn(response);
+
+            clipEventHandler.handleClipEvent(session, PROJECT_ID, "CLIP_CREATE",
+                    wsMessage("CLIP_CREATE", Map.of(
+                            "projectId", PROJECT_ID,
+                            "trackId", 2,
+                            "startBar", 0.0,
+                            "color", "#FF0000",
+                            "objectKey", "projects/1/audios/test.mp3",
+                            "originalName", "test.mp3",
+                            "storedName", "test.mp3",
+                            "mimeType", "MPEG",
+                            "sizeBytes", 100000,
+                            "durationMs", 8000
+                    )));
+
+            verify(webSocketMessageSender).broadcast(eq(PROJECT_ID), eq("CLIP_CREATE"), eq(response));
+            verify(webSocketMessageSender, never()).sendToSession(any(), any(), any());
+        }
     }
 
     @Nested

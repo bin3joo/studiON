@@ -266,8 +266,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
 <template>
   <div
     ref="rootRef"
-    class="absolute left-0 top-0 z-[100] h-full"
-    :class="trackStore.isCommentMode ? 'pointer-events-auto' : 'pointer-events-none'"
+    class="absolute left-0 top-0 z-100 h-full pointer-events-none"
     :style="{
       width: `${props.timelineWidth}px`,
       minWidth: `${props.timelineWidth}px`,
@@ -292,26 +291,15 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
       </button>
     </div>
     <div
-      v-for="cell in commentCells"
-      :key="`${trackId}-${cell.key}-${pixelPerBar}-${subDivision}`"
-      class="absolute top-0 h-full"
-      :class="[
-        trackStore.isCommentMode ? 'pointer-events-auto' : 'pointer-events-none',
-        isExpanded(cell.location) ? 'z-[500]' : 'z-10'
-      ]"
-      :style="{
-        left: `${cell.left}px`,
-        width: `${cell.width}px`,
-      }"
-      @mouseenter="emit('hover-measure', {
-        trackId,
-        measure: cell.location,
-      })"
-      @mouseleave="emit('hover-measure', {
-        trackId: null,
-        measure: null,
-      })"
-    >
+  v-for="cell in commentCells"
+  :key="`${trackId}-${cell.key}-${pixelPerBar}-${subDivision}`"
+  class="absolute top-0 h-full pointer-events-none"
+  :class="isExpanded(cell.location) ? 'z-500' : 'z-10'"
+  :style="{
+    left: `${cell.left}px`,
+    width: `${cell.width}px`,
+  }"
+>
       <!-- hover된 마디 세로 강조선 -->
       <div
         v-if="isActiveHover(cell.location)"
@@ -346,7 +334,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="isExpanded(cell.location)"
-        class="pointer-events-auto absolute left-0 z-[1200] w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
+        class="pointer-events-auto absolute left-0 z-1200 w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
         :class="expandedPlacement === 'top'
           ? 'bottom-[calc(100%-8px)]'
           : 'top-[calc(100%-8px)]'"

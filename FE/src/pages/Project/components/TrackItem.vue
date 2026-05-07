@@ -637,6 +637,31 @@ const emit = defineEmits<{
   }]
 }>()
 
+//
+const onWorkAreaMouseMove = (e: MouseEvent) => {
+  if(props.isMaster) return;
+
+  //현재 스크롤 위치와 X 좌표를 계산 
+  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
+  const scrollLeft = scrollContainer ?  scrollContainer.scrollLeft : 0;
+  const absoluteX = e.clientX - 224 + scrollLeft; //224는 왼쪽 컨트롤 패널 너비
+
+  //마우스 위치를 바탕으로 정확한 '마디(Measure)' 역산
+  const rawLocation = (absoluteX / trackStore.pixelPerBar) + 1;
+  const snappedLocation = Math.floor((rawLocation - 1) * trackStore.subDivision) / trackStore.subDivision + 1;
+
+  // 코멘트 레이어를 위해 현재 마우스 위치 발송
+  emit('hover-measure', {
+    trackId: String(props.track.trackId),
+    measure: snappedLocation
+  });
+};
+
+const onWorkAreaMouseLeave = () => {
+  if (props.isMaster) return;
+  emit('hover-measure', { trackId: null, measure: null });
+};
+
 </script>
 
 <template>
@@ -838,6 +863,8 @@ const emit = defineEmits<{
       @dragleave="onDragLeave"
       @drop="onDrop"
       @dragstart.prevent.stop
+      @mousemove="onWorkAreaMouseMove"
+      @mouseleave="onWorkAreaMouseLeave"
     >
       <div class="relative h-full border-y border-r border-white/5 bg-card shadow-inner">
       
@@ -953,7 +980,7 @@ const emit = defineEmits<{
           ></div>
         </div>
 
-        <TrackCommentLayer
+    <TrackCommentLayer
   :track-id="String(track.trackId)"
   :track-name="track.name"
   :total-bar-count="trackStore.projectInfo.totalBarCount"
@@ -966,7 +993,7 @@ const emit = defineEmits<{
   @hover-measure="emit('hover-measure', $event)"
   @submit-inline-comment="emit('submit-inline-comment', $event)"
   @resolve-comment="emit('resolve-comment', $event)"
-/>
+  />
       </div> 
 
       

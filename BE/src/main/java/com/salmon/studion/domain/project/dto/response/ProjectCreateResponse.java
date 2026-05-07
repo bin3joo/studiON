@@ -15,6 +15,7 @@ public class ProjectCreateResponse {
 
     private ProjectInfo project;
     private MasterTrackInfo masterTrack;
+    private TrackInfo defaultTrack;
 
     public record ProjectInfo (
             Integer     projectId,
@@ -32,6 +33,18 @@ public class ProjectCreateResponse {
             Integer masterTrackId,
             Boolean isSoloed,
             Boolean isMuted,
+            Double volume,
+            Integer pan
+    ) {}
+
+    public record TrackInfo(
+            Integer trackId,
+            String name,
+            String type,
+            Integer preTrackId,
+            Integer postTrackId,
+            Boolean isMuted,
+            Boolean isSoloed,
             Double volume,
             Integer pan
     ) {}

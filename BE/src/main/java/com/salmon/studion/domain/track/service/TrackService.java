@@ -476,6 +476,18 @@ public class TrackService {
                 .build();
     }
 
+    /*
+        디폴트 트랙을 추가하는 헬퍼메서드
+     */
+    public TrackAddResponse addDefaultTrack(Integer projectId, Integer userId) {
+        TrackAddRequest request = new TrackAddRequest();
+        request.setProjectId(projectId);
+        request.setName("트랙 1");
+        request.setType("audio");
+        return addTrack(request, userId);
+    }
+
+
     private TrackState parseTrackState(String json) {
         try {
             return objectMapper.readValue(json, TrackState.class);

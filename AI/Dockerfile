@@ -3,6 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV UV_LINK_MODE=copy
+ENV UV_CACHE_DIR=/tmp/uv-cache
 ENV PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
@@ -10,7 +11,9 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY . .
-RUN uv sync --frozen --no-dev
+# 메인 AI 서버는 DSP 의존성만 설치하고 CLAP 추론용 torch 계열은 제외한다.
+RUN uv sync --frozen --no-dev --group audio-dsp --no-group audio-ml \
+    && rm -rf /tmp/uv-cache
 
 EXPOSE 8000
 

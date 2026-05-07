@@ -12,6 +12,15 @@ class SocketService {
   connect(projectId: number) {
     if (this.isMockMode) return;
 
+    if (
+  this.ws &&
+  (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) &&
+  this.currentProjectId === projectId
+) {
+  console.log(`[Socket] 이미 프로젝트 ${projectId}에 연결 또는 연결 시도 중`)
+  return
+}
+
     this.currentProjectId = projectId;
     const authStore = useAuthStore();
     const token = authStore.accessToken;
@@ -31,7 +40,7 @@ class SocketService {
     }
 
     // 🌟 2. 백엔드 엔드포인트(/ws/projects/{projectId})에 정확히 맞춥니다.
-    const wsUrl = `${baseUrl}/ws/projects/${projectId}?accessToken=${token}`;
+    const wsUrl = `${baseUrl}/ws/projects/${projectId}?accessToken=${encodeURIComponent(token)}`
     this.ws = new WebSocket(wsUrl);
 
     // 연결 성공 시
@@ -50,7 +59,7 @@ class SocketService {
         // payload 껍데기가 있으면 알맹이만 꺼내고, 없으면 전체를 payload로 씀
         const payload = receivedData.payload ? receivedData.payload : receivedData;
 
-        //console.log(`[Socket 📥] 수신 [${eventType}]:`, payload);
+        console.log(`[Socket 📥] 수신 [${eventType}]:`, payload);
 
         if (eventType && this.listeners.has(eventType)) {
           const callbacks = this.listeners.get(eventType) || [];
@@ -68,8 +77,10 @@ class SocketService {
 
     // 연결 종료 시
     this.ws.onclose = () => {
-      console.log('[Socket] 🔴 웹소켓 연결 해제됨');
-    };
+  console.log('[Socket] 🔴 웹소켓 연결 해제됨')
+  this.ws = null
+  this.currentProjectId = null
+}
   }
 
   // 컴포넌트에서 이벤트 리스너를 등록하는 함수
@@ -84,6 +95,7 @@ class SocketService {
   publish(eventType: string, payload: any) {
     if (this.isMockMode || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.currentProjectId) {
       //console.warn(`[Socket ⚠️] 연결되지 않은 상태에서 전송 시도됨: ${eventType}`);
+
       return;
     }
 
@@ -94,18 +106,33 @@ class SocketService {
     };
 
     this.ws.send(JSON.stringify(message));
-    //console.log(`[Socket 📤] 발신 [${eventType}]:`, payload);
+    console.log(`[Socket 📤] 발신 [${eventType}]:`, payload);
   }
 
-  disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    this.listeners.clear();
-    this.currentProjectId = null;
-    console.log('[Socket] 🔴 웹소켓 수동 연결 해제 완료');
+disconnect() {
+  console.log('[Socket] disconnect 호출됨')
+
+  if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    console.log('[Socket] PROJECT_LEFT 전송 시도')
+    this.publish('PROJECT_LEFT', {})
+
+    setTimeout(() => {
+      this.ws?.close()
+      this.ws = null
+      this.listeners.clear()
+      this.currentProjectId = null
+      console.log('[Socket] 🔴 웹소켓 수동 연결 해제 완료')
+    }, 100)
+
+    return
   }
+
+  console.log('[Socket] OPEN 상태가 아니라 PROJECT_LEFT 전송 안 함', this.ws?.readyState)
+
+  this.ws = null
+  this.listeners.clear()
+  this.currentProjectId = null
+}
 }
 
 export const socketService = new SocketService();

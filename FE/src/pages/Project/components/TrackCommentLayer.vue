@@ -36,6 +36,7 @@ const emit = defineEmits<{
     trackId: string
     measure: number
   }]
+  'track-contextmenu': [event: MouseEvent]
 }>()
 
 const draftComment = ref('')
@@ -299,6 +300,15 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
     left: `${cell.left}px`,
     width: `${cell.width}px`,
   }"
+  @mouseenter="emit('hover-measure', {
+    trackId,
+    measure: cell.location,
+  })"
+  @mouseleave="emit('hover-measure', {
+    trackId: null,
+    measure: null,
+  })"
+  @contextmenu.prevent.stop="emit('track-contextmenu', $event)"
 >
       <!-- hover된 마디 세로 강조선 -->
       <div

@@ -24,6 +24,7 @@ export interface ProjectDetailResponse {
   isSuccess: boolean;
   data: {
     projectId: number;
+    name: string;
     rootNote: string;
     projectMode: string;
     tempo: number;

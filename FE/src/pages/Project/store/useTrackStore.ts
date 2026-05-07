@@ -8,6 +8,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 //음원 처리를 위한 lib
 import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
+import { projectApi } from '../api/project.api'
 
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
 export const useTrackStore = defineStore('track', () => {
@@ -30,6 +31,7 @@ export const useTrackStore = defineStore('track', () => {
 
     const projectInfo = ref({ //프로젝트의 전반적인 정보를 담은 객체 
         projectId: 0,
+        name: '프로젝트',
         tempo: 120.0,
         rootNote: 'C',
         mode: 'major',
@@ -1114,38 +1116,18 @@ export const useTrackStore = defineStore('track', () => {
     const fetchProject = async (projectId: number) => {
         try {
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
-            // const data = await projectApi.getProjectDetail(projectId);
+            const data = await projectApi.getProjectDetail(projectId);
 
-            const data = {
-                projectId: projectId,
-                tempo: 120,
-                rootNote: 'C',
-                mode: 'MAJOR',
-                timeSigNumerator: 4,
-                timeSigDenominator: 4,
-                totalBarCount: 100,
-                tracks: [
-                    {
-                        trackId: 1,
-                        name: "보컬 메인",
-                        volume: 0,
-                        type: "AUDIO",
-                        preTrackId: null,
-                        postTrackId: null,
-                        isMuted: false,
-                        isSoloed: false,
-                        pan: 0,
-                        clips: [] as any[]
-                    },
-                ]
-            };
+console.log('[fetchProject] data:', data)
+console.log('[fetchProject] data.name:', data.name)
 
             if (data) {
                 projectInfo.value = {
                     projectId: data.projectId,
+                    name: data.name,
                     tempo: data.tempo,
                     rootNote: data.rootNote,
-                    mode: data.mode,
+                    mode: data.projectMode,
                     timeSigNumerator: data.timeSigNumerator,
                     timeSigDenominator: data.timeSigDenominator,
                     totalBarCount: data.totalBarCount

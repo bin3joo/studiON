@@ -20,7 +20,6 @@ CriticOutcome = Literal["PASS", "REVISE", "REJECT"]
 WorkflowDispatchType = Literal[
     "start",
     "resume_plan_input",
-    "resume_confirm",
 ]
 RuntimeStatus = Literal[
     "queued",
@@ -38,9 +37,6 @@ DurableJobStatus = Literal[
     "CANCELLED",
     "EXPIRED",
 ]
-UserDecision = Literal["confirm", "cancel"]
-
-
 class WorkflowState(TypedDict, total=False):
     job_id: int
     project_id: int
@@ -98,8 +94,6 @@ class WorkflowState(TypedDict, total=False):
     suggestion_payload: dict
     suggestion_group_id: str | None
     preview_id: str | None
-    preview_action_ids: list[str]
-    preview_suggestion_id: str | None
     preview_status: str | None
     preview_render_no: int
     preview_excerpt_start_ms: int | None
@@ -110,7 +104,6 @@ class WorkflowState(TypedDict, total=False):
     preview_expired_at: str | None
     preview_error_code: str | None
     preview_error_message: str | None
-    user_decision: UserDecision | None
     user_action_required: bool
     validator_mode: str
     validator_result: ValidatorOutcome | None
@@ -118,9 +111,6 @@ class WorkflowState(TypedDict, total=False):
     critic_result: CriticOutcome | None
     revise_count: int
     max_revise_count: int
-    apply_result_id: str | None
-    committed_track_eq_band_id: int | None
-    feedback_event_id: str | None
     latest_artifact_id: str | None
     mongo_artifact_ids: list[str]
     failure_code: str | None
@@ -211,8 +201,6 @@ def build_workflow_initial_state(
         "suggestion_payload": {},
         "suggestion_group_id": None,
         "preview_id": None,
-        "preview_action_ids": [],
-        "preview_suggestion_id": None,
         "preview_status": None,
         "preview_render_no": 1,
         "preview_excerpt_start_ms": None,
@@ -223,7 +211,6 @@ def build_workflow_initial_state(
         "preview_expired_at": None,
         "preview_error_code": None,
         "preview_error_message": None,
-        "user_decision": None,
         "user_action_required": False,
         "validator_mode": "PASS",
         "validator_result": None,
@@ -231,9 +218,6 @@ def build_workflow_initial_state(
         "critic_result": None,
         "revise_count": 0,
         "max_revise_count": 1,
-        "apply_result_id": None,
-        "committed_track_eq_band_id": None,
-        "feedback_event_id": None,
         "latest_artifact_id": None,
         "mongo_artifact_ids": [],
         "failure_code": None,
@@ -265,9 +249,6 @@ def build_apply_initial_state(
         project_id=project_id,
         preview_id=preview_id,
         suggestion_group_id=suggestion_group_id,
-        phase="waiting_for_user_confirm",
-        runtime_status="waiting_for_user",
-        durable_status="WAITING_USER",
         **overrides,
     )
 

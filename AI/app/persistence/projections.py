@@ -142,6 +142,7 @@ class PreviewRenderProjection(BaseModel):
     preview_measure_end: int | None = None
     preview_action_type: str | None = None
     preview_action_track: int | None = None
+    preview_band_specs: list[dict[str, Any]] = Field(default_factory=list)
     preview_excerpt_range: dict[str, int] | None = None
     requested_by: int | None = None
     requested_at: str | None = None
@@ -355,7 +356,10 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
 # action 파라미터와 선택된 region 문맥을 외부 응답 스키마로 매핑한다.
 def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection | None:
     payload = state.get("suggestion_payload") or {}
-    if not payload:
+    plan_payload = state.get("plan_payload") or {}
+    candidate = plan_payload.get("candidate") or {}
+    action = candidate.get("action")
+    if not payload or not isinstance(action, dict):
         return None
 
     group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
@@ -367,9 +371,9 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
         suggestion_id = f"{group_id}-suggestion-{suggestion_index}"
         actions = [
             SuggestionActionProjection(
-                id=action["actionId"],
+                id=str(candidate.get("candidateId") or suggestion_id),
                 suggestion_id=suggestion_id,
-                action_type=action["actionType"],
+                action_type=action.get("actionType"),
                 clip_id=action.get("targetClipId"),
                 start_ms=action.get("startMs"),
                 end_ms=action.get("endMs"),
@@ -383,7 +387,6 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
                 source_track_id=action.get("sourceTrackId"),
                 source_clip_id=action.get("sourceClipId"),
             )
-            for action in suggestion.get("actions", [])
         ]
         suggestions.append(
             SuggestionProjection(
@@ -439,7 +442,7 @@ def _build_preview_render(
     return PreviewRenderProjection(
         id=state["preview_id"],
         job_id=state["job_id"],
-        suggestion_id=state.get("preview_suggestion_id") or suggestion_id,
+        suggestion_id=suggestion_id,
         status=state.get("preview_status")
         or ("FAILED" if state.get("phase") == "failed" else "PROCESSING"),
         render_no=int(state.get("preview_render_no", 1) or 1),
@@ -450,6 +453,7 @@ def _build_preview_render(
         preview_measure_end=preview_region.get("measure_end") if preview_region else None,
         preview_action_type=preview_action.get("action_type") if preview_action else None,
         preview_action_track=preview_action.get("target_track_id") if preview_action else None,
+        preview_band_specs=_resolve_preview_band_specs(state),
         preview_excerpt_range=_build_preview_excerpt_range(state),
         requested_by=state.get("requested_by"),
         requested_at=state.get("preview_requested_at"),
@@ -475,15 +479,15 @@ def _resolve_preview_action_projection(
     state: WorkflowState,
     suggestion_group: SuggestionGroupProjection | None,
 ) -> dict[str, Any] | None:
-    preview_action_ids = [str(action_id) for action_id in state.get("preview_action_ids", [])]
-    if not preview_action_ids or suggestion_group is None:
+    plan_payload = state.get("plan_payload") or {}
+    candidate = plan_payload.get("candidate") or {}
+    action = candidate.get("action")
+    if not isinstance(action, dict):
         return None
-    preview_action_id = preview_action_ids[0]
-    for suggestion in suggestion_group.suggestions:
-        for action in suggestion.actions:
-            if action.id == preview_action_id:
-                return action.model_dump(mode="python")
-    return None
+    return {
+        "action_type": action.get("actionType"),
+        "target_track_id": action.get("targetTrackId"),
+    }
 
 
 def _build_preview_excerpt_range(state: WorkflowState) -> dict[str, int] | None:
@@ -504,37 +508,19 @@ def _build_applied_suggestion(
     state: WorkflowState,
     suggestion_group: SuggestionGroupProjection | None,
 ) -> AppliedSuggestionProjection | None:
-    if not state.get("apply_result_id") and state.get("phase") not in {"failed", "completed"}:
-        return None
-    suggestion_id = None
-    if suggestion_group and suggestion_group.suggestions:
-        suggestion_id = suggestion_group.suggestions[0].id
-    status = (
-        "APPLIED"
-        if state.get("phase") == "completed" and state.get("apply_result_id")
-        else "FAILED"
-    )
-    return AppliedSuggestionProjection(
-        id=state.get("apply_result_id") or f"{state['job_id']}-apply-failed",
-        job_id=state["job_id"],
-        suggestion_id=suggestion_id,
-        before_snapshot_id=state.get("timeline_snapshot_id"),
-        after_snapshot_id=None,
-        applied_by=state.get("requested_by"),
-        status=status,
-    )
+    return None
 
 
 # 최종 사용자 의사결정을 feedback event projection으로 노출한다.
 def _build_feedback_event(state: WorkflowState) -> FeedbackEventProjection | None:
-    feedback_event_id = state.get("feedback_event_id")
-    if not feedback_event_id:
-        return None
-    return FeedbackEventProjection(
-        id=feedback_event_id,
-        job_id=state["job_id"],
-        event_type="AI_EDIT_CONFIRMATION",
-        payload={
-            "decision": state.get("user_decision", "confirm"),
-        },
-    )
+    return None
+
+
+def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, Any]]:
+    payload = state.get("suggestion_payload") or {}
+    preview_band_specs: list[dict[str, Any]] = []
+    for suggestion in payload.get("suggestions", []):
+        for band in suggestion.get("previewBands", []):
+            if isinstance(band, dict):
+                preview_band_specs.append(dict(band))
+    return preview_band_specs

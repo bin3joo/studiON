@@ -136,9 +136,8 @@ def _require_preview_ready(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": preview_id,
         "status": state.get("preview_status"),
-        "suggestion_id": state.get("preview_suggestion_id"),
         "preview_target_region": state.get("selected_region_id"),
-        "preview_action_ids": [*state.get("preview_action_ids", [])],
+        "preview_band_specs": _resolve_preview_band_specs(state),
         "preview_excerpt_range": {
             "start_ms": int(preview_excerpt_range["start_ms"]),
             "end_ms": int(preview_excerpt_range["end_ms"]),
@@ -161,52 +160,47 @@ def _resolve_focus_region(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_preview_action(state: dict[str, Any]) -> dict[str, Any]:
-    payload = state.get("suggestion_payload") or {}
-    preview_action_ids = [str(action_id) for action_id in state.get("preview_action_ids", [])]
-    if len(preview_action_ids) != 1:
+    plan_payload = state.get("plan_payload") or {}
+    candidate = plan_payload.get("candidate") or {}
+    action = candidate.get("action")
+    if not isinstance(action, dict):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Preview compare requires exactly one preview action.",
+            detail="Preview compare requires one materialized preview action.",
         )
-    preview_action_id = preview_action_ids[0]
-    for suggestion in payload.get("suggestions", []):
-        for action in suggestion.get("actions", []):
-            if str(action.get("actionId")) == preview_action_id:
-                return {
-                    "action_id": preview_action_id,
-                    "action_type": action.get("actionType"),
-                    "target_scope": action.get("targetScope"),
-                    "target_track_id": action.get("targetTrackId"),
-                    "target_clip_id": action.get("targetClipId"),
-                    "start_ms": int(action.get("startMs") or 0),
-                    "end_ms": int(action.get("endMs") or 0),
-                    "band_low_hz": action.get("bandLowHz"),
-                    "band_high_hz": action.get("bandHighHz"),
-                    "gain_delta_db": action.get("gainDeltaDb"),
-                    "params": action.get("params") or {},
-                }
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="Preview action was not found in suggestion payload.",
-    )
+    return {
+        "action_id": str(candidate.get("candidateId") or f"{state['job_id']}-plan-candidate-1"),
+        "action_type": action.get("actionType"),
+        "target_scope": action.get("targetScope"),
+        "target_track_id": action.get("targetTrackId"),
+        "target_clip_id": action.get("targetClipId"),
+        "start_ms": int(action.get("startMs") or 0),
+        "end_ms": int(action.get("endMs") or 0),
+        "band_low_hz": action.get("bandLowHz"),
+        "band_high_hz": action.get("bandHighHz"),
+        "gain_delta_db": action.get("gainDeltaDb"),
+        "params": action.get("params") or {},
+    }
 
 
 def _resolve_compare_actions(state: dict[str, Any], *, mode: str) -> list[dict[str, Any]]:
     preview_action = _resolve_preview_action(state)
     if mode == "preview":
         return [preview_action]
-    if mode != "applied":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported preview compare mode '{mode}'.",
-        )
-    if state.get("durable_status") != "COMPLETED" or state.get("user_decision") != "confirm":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Applied compare is only available after confirm completes.",
-        )
-    actions = [*_resolve_auto_fix_actions(state), preview_action]
-    return actions
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Unsupported preview compare mode '{mode}'.",
+    )
+
+
+def _resolve_preview_band_specs(state: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = state.get("suggestion_payload") or {}
+    preview_band_specs: list[dict[str, Any]] = []
+    for suggestion in payload.get("suggestions", []):
+        for band in suggestion.get("previewBands", []):
+            if isinstance(band, dict):
+                preview_band_specs.append(dict(band))
+    return preview_band_specs
 
 
 def _resolve_auto_fix_actions(state: dict[str, Any]) -> list[dict[str, Any]]:

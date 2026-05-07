@@ -43,7 +43,6 @@ ENTRY_PATH_MAP = {
     "fail_workflow": "fail_workflow",
     "wait_user_plan_input": "wait_user_plan_input",
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
-    "wait_user_confirm": "wait_user_confirm",
 }
 
 CLAP_GATE_PATH_MAP = {
@@ -80,12 +79,6 @@ CRITIC_PATH_MAP = {
 USER_ACTION_GATE_PATH_MAP = {
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
     "finalize_output": "finalize_output",
-}
-
-WAIT_CONFIRM_PATH_MAP = {
-    "commit_selected_edit_recipe": "commit_selected_edit_recipe",
-    "finalize_output": "finalize_output",
-    "END": END,
 }
 
 WORKFLOW_NODE_LABELS = {
@@ -128,9 +121,6 @@ WORKFLOW_NODE_LABELS = {
     "user_action_gate": "user_action_gate / 사용자 액션 필요 여부 판단",
     "apply_selected_edit_recipe": "apply_selected_edit_recipe / 선택 액션 적용",
     "render_preview": "render_preview / 프리뷰 렌더링",
-    "wait_user_confirm": "wait_user_confirm / 사용자 확인 대기",
-    "commit_selected_edit_recipe": "commit_selected_edit_recipe / 선택 액션 확정",
-    "emit_feedback_event": "emit_feedback_event / 피드백 이벤트 기록",
     "finalize_output": "finalize_output / 결과 마무리",
     "fail_workflow": "fail_workflow / 실패 종료",
     "__end__": "__end__ / 종료",
@@ -182,9 +172,6 @@ def build_workflow_graph():
     graph.add_node("user_action_gate", nodes.user_action_gate)
     graph.add_node("apply_selected_edit_recipe", nodes.apply_selected_edit_recipe)
     graph.add_node("render_preview", nodes.render_preview)
-    graph.add_node("wait_user_confirm", nodes.wait_user_confirm)
-    graph.add_node("commit_selected_edit_recipe", nodes.commit_selected_edit_recipe)
-    graph.add_node("emit_feedback_event", nodes.emit_feedback_event)
     graph.add_node("finalize_output", nodes.finalize_output)
     graph.add_node("fail_workflow", nodes.fail_workflow)
 
@@ -248,14 +235,7 @@ def build_workflow_graph():
         USER_ACTION_GATE_PATH_MAP,
     )
     graph.add_edge("apply_selected_edit_recipe", "render_preview")
-    graph.add_edge("render_preview", "wait_user_confirm")
-    graph.add_conditional_edges(
-        "wait_user_confirm",
-        edges.route_after_wait_user_confirm,
-        WAIT_CONFIRM_PATH_MAP,
-    )
-    graph.add_edge("commit_selected_edit_recipe", "emit_feedback_event")
-    graph.add_edge("emit_feedback_event", "finalize_output")
+    graph.add_edge("render_preview", "finalize_output")
     graph.add_edge("finalize_output", END)
     graph.add_edge("fail_workflow", END)
 

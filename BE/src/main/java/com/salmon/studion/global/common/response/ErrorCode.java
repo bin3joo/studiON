@@ -59,8 +59,10 @@ public enum ErrorCode {
     // 클립 CL_000
     CLIP_NOT_FOUND(HttpStatus.NOT_FOUND, "CL_001", "클립을 찾을 수 없습니다."),
     CLIP_LOCKED(HttpStatus.CONFLICT, "CL_002", "다른 사용자가 편집 중인 클립입니다."),
-    CLIP_OVERLAP(HttpStatus.CONFLICT, "CL_003", "해당 위치에 클립이 존재합니다.");
+    CLIP_OVERLAP(HttpStatus.CONFLICT, "CL_003", "해당 위치에 클립이 존재합니다."),
 
+    // EQ EQ_000
+    TRACK_EQ_NOT_FOUND(HttpStatus.NOT_FOUND, "EQ_001", "해당 track eq를 찾을 수 없습니다.");
 
     private final HttpStatus status;
     private final String code;

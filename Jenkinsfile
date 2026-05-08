@@ -17,19 +17,46 @@ pipeline {
             }
         }
 
-        stage('Build') {
+        stage('Build App') {
+            when {
+                anyOf {
+                    changeset "BE/**"
+                    changeset "FE/**"
+                    changeset "INFRA/**"
+                    changeset "compose.yaml"
+                    changeset "compose.prod.yaml"
+                }
+            }
             steps {
                 sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml build'
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy App') {
+            when {
+                anyOf {
+                    changeset "BE/**"
+                    changeset "FE/**"
+                    changeset "INFRA/**"
+                    changeset "compose.yaml"
+                    changeset "compose.prod.yaml"
+                }
+            }
             steps {
                 sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml up -d --remove-orphans'
             }
         }
 
-        stage('Status') {
+        stage('Status App') {
+            when {
+                anyOf {
+                    changeset "BE/**"
+                    changeset "FE/**"
+                    changeset "INFRA/**"
+                    changeset "compose.yaml"
+                    changeset "compose.prod.yaml"
+                }
+            }
             steps {
                 sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml ps'
             }
@@ -40,7 +67,10 @@ pipeline {
                 label 'ai-server'
             }
             when {
-                changeset "AI/**"
+                anyOf {
+                    changeset "AI/**"
+                    changeset "compose.ai.yaml"
+                }
             }
             steps {
                 sh '''

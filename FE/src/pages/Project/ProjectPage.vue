@@ -29,6 +29,30 @@ const authStore = useAuthStore(); // Auth 스토어 사용 준비
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
 
+// 재생바 위치에 따른 자동 스크롤 로직
+watch(() => trackStore.playheadPosition, (newBar) => {
+  if (trackStore.isPlaying && timelineContainerRef.value) {
+    const container = timelineContainerRef.value;
+    const playheadPixel = newBar * trackStore.pixelPerBar;
+    const viewportWidth = container.clientWidth;
+    const currentScroll = container.scrollLeft;
+
+    // 화면 우측 30% 지점
+    const rightThreshold = currentScroll + viewportWidth * 0.4;
+    // 화면 좌측 기준
+    const leftThreshold = currentScroll;
+
+    // 플레이헤드가 화면 우측 30% 지점을 넘어가면, 플레이헤드 위치에 맞춰 화면 스크롤
+    if (playheadPixel > rightThreshold) {
+      container.scrollLeft = playheadPixel - viewportWidth * 0.4;
+    } 
+    // 플레이헤드가 화면 좌측 밖으로 나가면 (되감기 등), 좌측에 맞춰 스크롤
+    else if (playheadPixel < leftThreshold) {
+      container.scrollLeft = Math.max(0, playheadPixel - viewportWidth * 0.1);
+    }
+  }
+});
+
 //휠할때 마우스가 가르키는 위치에서 휠되게 
 const handleWheel = (e: WheelEvent) => {
   if (e.ctrlKey || e.metaKey) {

@@ -29,6 +29,8 @@ public enum ErrorCode {
     PROJECT_MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "P_003", "프로젝트 멤버를 찾을 수 없습니다."),
     PROJECT_INVITE_CODE_INVALID(HttpStatus.BAD_REQUEST, "P_004", "유효하지 않은 초대 코드입니다."),
     PROJECT_INVITE_CODE_EXPIRED(HttpStatus.BAD_REQUEST, "P_005", "만료된 초대 코드입니다."),
+    PROJECT_MEMBER_ALREADY_EXISTS(HttpStatus.CONFLICT, "P_006", "이미 프로젝트 멤버입니다."),
+    PROJECT_INVITE_CODE_GENERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,"P_007","고유한 프로젝트 초대코드를 생성하지 못했습니다."),
 
     // 트랙 T_000
     TRACK_NOT_FOUND(HttpStatus.NOT_FOUND, "T_001", "트랙을 찾을 수 없습니다."),

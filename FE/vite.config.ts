@@ -14,7 +14,7 @@ export default defineConfig({
   //바이트에 장착하는 플러그인
   plugins: [vue(), tailwindcss()],
   define: {
-    global: 'window',
+    global: 'globalThis',
   },
   resolve: {
     //dirname 설정파일이 있는 FE폴더, @는 src폴더를 가리킴

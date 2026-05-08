@@ -33,8 +33,8 @@ spring:
 
     mongodb:
       host: ${MONGODB_HOST:localhost}
-      port: ${MONGODB_PORT:27017}
-      database: ${MONGODB_DB:studion}
+      port: ${MONGODB_PORT}
+      database: ${MONGODB_DB}
       uri: ${MONGODB_URI:mongodb://localhost:27017/studion}
 
   security:

@@ -3,8 +3,8 @@ import { nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Check, KeyRound, X } from 'lucide-vue-next'
 import { Button } from '@/shared/ui/button'
-import { joinProject } from '@/pages/Project/api/project.api'
-import type { JoinProjectResponse, ProjectId } from '@/pages/Project/types/project.types'
+import { acceptProjectInviteCode } from '@/pages/Project/api/project.api'
+import type { AcceptInviteCodeResponse, ProjectId } from '@/pages/Project/types/project.types'
 
 const router = useRouter()
 const isInputMode = ref(false)
@@ -28,12 +28,8 @@ async function openInputMode() {
   inviteInputRef.value?.focus()
 }
 
-function extractProjectId(response: JoinProjectResponse): ProjectId | null {
-  return response.data?.projectId
-    ?? response.data?.id
-    ?? response.projectId
-    ?? response.id
-    ?? null
+function extractProjectId(response: AcceptInviteCodeResponse): ProjectId | null {
+  return response.data?.projectId ?? null
 }
 
 async function confirmInviteCode() {
@@ -49,7 +45,7 @@ async function confirmInviteCode() {
   isLoading.value = true
 
   try {
-    const response = await joinProject({ inviteCode: trimmedInviteCode })
+    const response = await acceptProjectInviteCode(trimmedInviteCode)
     const projectId = extractProjectId(response)
 
     if (!projectId) {

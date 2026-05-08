@@ -684,8 +684,9 @@ const unlockAudioEngine = async () => {
     <RemoteCursors />
     <InviteCodeModal
       :open="isInviteModalOpen"
-      :project-id="projectId"
-      @close="handleCloseInvite"
+  :project-id="projectId"
+  :project-name="projectName"
+  @close="isInviteModalOpen = false"
     />
   </div>
 </template>

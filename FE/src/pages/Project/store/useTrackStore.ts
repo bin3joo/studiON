@@ -25,6 +25,7 @@ export const useTrackStore = defineStore('track', () => {
     const trackVolumes = new Map<number, Tone.Volume>();   // 트랙별 볼륨/뮤트 노드
     const trackPanners = new Map<number, Tone.Panner>();   // 트랙별 패닝 노드
     const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
+    const myLockedClips = new Set<number>(); // 내가 직접 잠근(편집 중인) 클립 ID 목록
 
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
@@ -254,11 +255,14 @@ export const useTrackStore = defineStore('track', () => {
 
     // --------------------- 클립 관련 (소켓) ---------------------
     socketService.subscribe('CLIP_LOCK', (data) => {
+        // 내가 직접 잠근 클립이면 내 화면에서는 잠금 표시를 하지 않는다 (자기 자신 차단 방지)
+        if (myLockedClips.has(data.clipId)) return;
+
         const track = trackList.value.find(t => t.clips.some(c => c.clipId === data.clipId));
         if (track) {
             const clip = track.clips.find(c => c.clipId === data.clipId);
             if (clip) {
-                clip.isLocked = data.isLocked; // 내 화면에도 자물쇠 찰칵!
+                clip.isLocked = data.isLocked; // 다른 사람이 잠근 경우에만 자물쇠 찰칵!
             }
         }
     });
@@ -1217,6 +1221,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 1. 내가 클립을 잡았을 때 서버에 Lock 요청
     const lockClip = (clipId: number, trackId: number) => {
+        myLockedClips.add(clipId); // 내가 잠근 목록에 등록 (브로드캐스트 자기차단용)
         socketService.publish('CLIP_LOCK', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
@@ -1226,6 +1231,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 2. 내가 클립에서 마우스를 뗐을 때 서버에 Unlock 요청
     const unlockClip = (clipId: number, trackId: number) => {
+        myLockedClips.delete(clipId); // 내가 잠근 목록에서 제거
         socketService.publish('CLIP_LOCK', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,

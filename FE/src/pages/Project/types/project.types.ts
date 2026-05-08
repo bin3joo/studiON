@@ -78,13 +78,6 @@ export interface CreateProjectData {
   masterTrack: MasterTrackSummary
 }
 
-export interface CreateProjectResponse {
-  code: number
-  message: string
-  isSuccess: boolean
-  data: CreateProjectData
-}
-
 export interface ProjectListMember {
   userId: UserId
   profileImgUrl: string
@@ -111,28 +104,27 @@ export interface FetchProjectsResponse {
   data: FetchProjectsData
 }
 
-export interface JoinProjectRequest {
+export interface ApiResponse<T> {
+  code: number
+  message: string
+  isSuccess: boolean
+  data: T
+}
+
+// 초대코드 생성 응답 data
+export interface CreateProjectInviteCodeData {
+  projectId: number
   inviteCode: string
+  expiresAt: string
 }
 
-export interface JoinProjectData {
-  id?: ProjectId | null
-  projectId?: ProjectId | null
+// 초대코드 생성 응답 전체
+export type CreateInviteCodeResponse = ApiResponse<CreateProjectInviteCodeData>
+
+// 초대코드 입력 성공 응답 data
+export interface AcceptInviteCodeData {
+  projectId: number
 }
 
-export interface JoinProjectResponse {
-  id?: ProjectId | null
-  projectId?: ProjectId | null
-  data?: JoinProjectData | null
-}
-
-export interface InviteCodeData {
-  inviteCode?: string | null
-  code?: string | null
-}
-
-export interface CreateInviteCodeResponse {
-  inviteCode?: string | null
-  code?: string | null
-  data?: InviteCodeData | null
-}
+// 초대코드 입력 응답 전체
+export type AcceptInviteCodeResponse = ApiResponse<AcceptInviteCodeData | null>

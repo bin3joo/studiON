@@ -1,11 +1,10 @@
 //프로젝트 도메인 관련한 백엔드 통신을 모아둠.
 import type {
+  AcceptInviteCodeResponse,
   CreateInviteCodeResponse,
   CreateProjectRequest,
   CreateProjectResponse,
   FetchProjectsResponse,
-  JoinProjectRequest,
-  JoinProjectResponse,
   Mode,
   ProjectId,
   RootNote,
@@ -202,23 +201,27 @@ export async function createProject(
   return response.data
 }
 
-
-// 프로젝트 참여 (초대코드 검증)
-export async function joinProject(payload: JoinProjectRequest): Promise<JoinProjectResponse> {
-  const response = await axiosInstance.post<JoinProjectResponse>(
-    '/api/v1/projects/join',
-    payload,
-  )
-
-  return response.data
-}
-
-//프로젝트 초대코드 생성
-
-export async function createProjectInviteCode(projectId: ProjectId): Promise<CreateInviteCodeResponse> {
+// 프로젝트 초대코드 생성
+// POST /api/v1/projects/{projectId}/invitations
+export async function createProjectInviteCode(
+  projectId: ProjectId,
+): Promise<CreateInviteCodeResponse> {
   const response = await axiosInstance.post<CreateInviteCodeResponse>(
-    `/api/v1/projects/${projectId}/invite-code`,
+    `/api/v1/projects/${projectId}/invitations`,
   )
 
   return response.data
 }
+
+// 프로젝트 초대코드 입력
+// POST /api/v1/invitations/{inviteCode}/accept
+export async function acceptProjectInviteCode(
+  inviteCode: string,
+): Promise<AcceptInviteCodeResponse> {
+  const response = await axiosInstance.post<AcceptInviteCodeResponse>(
+    `/api/v1/invitations/${inviteCode}/accept`,
+  )
+
+  return response.data
+}
+

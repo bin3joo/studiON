@@ -5,15 +5,15 @@ import { createProjectInviteCode } from '@/pages/Project/api/project.api'
 
 interface Props {
   open: boolean
-  projectId: string
+  projectId: string | number
+  projectName?: string
 }
 
-// ✅ 수정 포인트 1: data와 inviteCode 모두에 'null'이 들어올 수 있음을 명시합니다.
 interface InviteResponse {
   data?: {
-    inviteCode?: string | null;
-  } | null;
-  inviteCode?: string | null;
+    inviteCode?: string | null
+  } | null
+  inviteCode?: string | null
 }
 
 const props = defineProps<Props>()
@@ -48,7 +48,7 @@ function resetState() {
 }
 
 function extractInviteCode(response: InviteResponse): string {
-  return response?.data?.inviteCode ?? response?.inviteCode ?? '';
+  return response?.data?.inviteCode ?? response?.inviteCode ?? ''
 }
 
 async function generateInviteCode() {
@@ -57,8 +57,13 @@ async function generateInviteCode() {
   isCopied.value = false
 
   try {
-    // ✅ 수정 포인트 2: projectId(문자열)를 Number()로 감싸서 숫자로 변환해 줍니다.
-    const response = await createProjectInviteCode(Number(props.projectId))
+    const projectId = Number(props.projectId)
+
+    if (Number.isNaN(projectId)) {
+      throw new Error('프로젝트 정보를 확인할 수 없습니다.')
+    }
+
+    const response = await createProjectInviteCode(projectId)
     const nextInviteCode = extractInviteCode(response)
 
     if (!nextInviteCode) {
@@ -116,56 +121,56 @@ const displayedCode = computed(() => {
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4"
+    class="fixed inset-0 z-50 grid place-items-center bg-background/80 px-4 backdrop-blur-sm animate-fade-in"
     @click.self="handleClose"
   >
-    <div class="relative w-full max-w-md rounded-2xl border border-[#ff9800] bg-[#222222] p-7 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
-      <!-- 닫기 버튼 -->
+    <div
+      class="relative w-full max-w-md rounded-2xl border border-primary/40 bg-card p-7 shadow-neon"
+    >
       <button
         type="button"
         aria-label="닫기"
-        class="absolute right-4 top-4 grid h-12 w-12 place-items-center rounded-2xl border border-white/10 text-[#aeb3c3] transition hover:bg-white/5 hover:text-white"
+        class="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-full border border-border text-muted-foreground transition hover:border-primary hover:text-primary"
         @click="handleClose"
       >
-        <X class="h-6 w-6" />
+        <X class="h-3.5 w-3.5" />
       </button>
 
-      <!-- 헤더 -->
       <div class="mb-6 flex items-center gap-3">
-        <div class="grid h-10 w-10 place-items-center rounded-lg text-white">
-          <KeyRound class="h-5 w-5" />
+        <div class="grid h-10 w-10 place-items-center rounded-lg bg-secondary text-primary shadow-neon-sm">
+          <KeyRound class="h-4 w-4" />
         </div>
+
         <div>
-          <h2 class="text-2xl font-extrabold tracking-tight text-white">
+          <h2 class="font-display text-2xl font-extrabold tracking-tight text-foreground">
             코드생성
           </h2>
         </div>
       </div>
 
-      <!-- 안내 문구 -->
       <div class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span class="text-base font-medium text-[#9ca3af]">
+        <span class="text-base font-medium text-muted-foreground">
           초대코드
         </span>
-        <span class="text-2xl font-extrabold text-white">
+
+        <span class="text-2xl font-extrabold text-foreground">
           초대 코드는 5분 동안 유효합니다.
         </span>
       </div>
 
-      <!-- 코드 박스 -->
-      <div class="mb-6 rounded-xl border-2 border-[#9198aa] bg-[#262626] p-3">
-        <div class="flex items-center gap-3">
-          <div class="min-w-0 flex-1 px-3 py-4">
+      <div class="mb-6 rounded-xl border border-primary/40 bg-secondary/40 p-2">
+        <div class="flex items-center gap-2">
+          <div class="min-w-0 flex-1 px-4 py-3">
             <div
-              class="truncate text-2xl font-extrabold tracking-[0.28em]"
-              :class="errorMessage ? 'text-red-400' : 'text-white'"
+              class="truncate font-mono text-xl font-extrabold tracking-[0.3em]"
+              :class="errorMessage ? 'text-destructive' : 'text-primary text-neon'"
             >
               {{ displayedCode }}
             </div>
 
             <p
               v-if="errorMessage"
-              class="mt-2 text-sm text-red-400"
+              class="mt-2 text-sm text-destructive"
             >
               {{ errorMessage }}
             </p>
@@ -173,39 +178,43 @@ const displayedCode = computed(() => {
 
           <button
             type="button"
-            class="grid h-12 w-12 shrink-0 place-items-center rounded-lg text-[#aeb3c3] transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="재생성"
+            class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             :disabled="isLoading"
             @click="generateInviteCode"
           >
             <RefreshCw
-              class="h-6 w-6"
+              class="h-4 w-4"
               :class="isLoading ? 'animate-spin' : ''"
             />
           </button>
 
           <button
             type="button"
-            class="grid h-12 w-12 shrink-0 place-items-center rounded-lg text-[#aeb3c3] transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="복사"
+            class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-40"
+            :class="isCopied
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-border text-muted-foreground hover:border-primary hover:text-primary'"
             :disabled="isLoading || !inviteCode"
             @click="handleCopy"
           >
             <Check
               v-if="isCopied"
-              class="h-6 w-6 text-white"
+              class="h-4 w-4"
             />
             <Copy
               v-else
-              class="h-6 w-6"
+              class="h-4 w-4"
             />
           </button>
         </div>
       </div>
 
-      <!-- 완료 버튼 -->
       <div class="flex justify-center">
         <button
           type="button"
-          class="inline-flex min-w-[152px] items-center justify-center rounded-full bg-white px-8 py-3 text-lg font-extrabold text-black transition hover:bg-white/90"
+          class="inline-flex min-w-[152px] items-center justify-center rounded-full bg-primary px-8 py-3 text-lg font-extrabold text-primary-foreground transition hover:shadow-neon disabled:cursor-not-allowed disabled:opacity-40"
           @click="handleComplete"
         >
           완료

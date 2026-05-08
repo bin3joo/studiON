@@ -46,7 +46,10 @@ public enum SuccessCode {
     COMMENT_LIST_FOUND(HttpStatus.OK, "C_003", "댓글 목록 조회에 성공했습니다."),
     COMMENT_UPDATED(HttpStatus.OK, "C_004", "댓글 수정에 성공했습니다."),
     COMMENT_DELETED(HttpStatus.OK, "C_005", "댓글 삭제에 성공했습니다."),
-    COMMENT_RESOLVED(HttpStatus.OK, "C_006", "댓글 해결 처리에 성공했습니다.");
+    COMMENT_RESOLVED(HttpStatus.OK, "C_006", "댓글 해결 처리에 성공했습니다."),
+
+    // EQ EQ_000
+    EQ_UPDATED(HttpStatus.OK, "EQ_001", "EQ 변경에 성공했습니다.");
 
     private final HttpStatus status;
     private final String code;

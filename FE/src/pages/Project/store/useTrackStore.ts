@@ -109,7 +109,9 @@ export const useTrackStore = defineStore('track', () => {
 
     //복사/잘라내기 한 클립 데이터를 보관할 클립보드
     const clipboardClip = ref<ClipUIState | null>(null);
-    const isCutAction = ref(false); //현재 보관된 데이터가 '잘라내기'로 들어왔는지 여부
+    const isCutAction = ref(false);
+    const uploadingTrackId = ref<number | null>(null);
+    const uploadingBar = ref<number | null>(null); //현재 보관된 데이터가 '잘라내기'로 들어왔는지 여부
 
     // 스토어 내부에 변수와 토글 함수 선언
     const isCommentMode = ref(false);
@@ -270,6 +272,12 @@ export const useTrackStore = defineStore('track', () => {
     //1.신규 클립 업로드 완료 수신
     // 1. 신규 클립 업로드 완료 수신
     socketService.subscribe('CLIP_CREATE', async (data) => {
+        // 업로드 중이던 클립이 백엔드에서 생성되어 돌아왔다면 고스트 클립 해제
+        if (uploadingTrackId.value === data.trackId) {
+            uploadingTrackId.value = null;
+            uploadingBar.value = null;
+        }
+
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (!track) return;
 
@@ -553,6 +561,8 @@ export const useTrackStore = defineStore('track', () => {
     // 실제 오디오 파일 업로드 & 클립 추가 Action
     const uploadAndAddAudioClip = async (file: File, trackId: number, startBar: number) => {
         console.log(`========== [Upload & Add Clip Start (Pessimistic UI)] ==========`);
+        uploadingTrackId.value = trackId;
+        uploadingBar.value = startBar;
 
         // 1. 오디오 파일을 Tone.Player로 임시 로드하여 길이(Duration) 측정
         const tempUrl = URL.createObjectURL(file);
@@ -1315,6 +1325,8 @@ export const useTrackStore = defineStore('track', () => {
         selectTrack,
 
         //오디오 업로드 추가
+        uploadingTrackId,
+        uploadingBar,
         uploadAndAddAudioClip,
 
         //트랙 편집하기

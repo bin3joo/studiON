@@ -4,7 +4,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
 
@@ -925,6 +925,19 @@ const onWorkAreaMouseLeave = () => {
           ></div>
         </div>
         
+        <!-- 파일 업로드 중 임시 고스트 클립 -->
+        <div 
+          v-if="trackStore.uploadingTrackId === track.trackId && trackStore.uploadingBar !== null"
+          class="absolute inset-y-1 z-20 flex flex-col items-center justify-center rounded-md border-2 border-dashed border-gray-400 bg-gray-700/50 text-white"
+          :style="{ 
+            left: `${trackStore.uploadingBar * trackStore.pixelPerBar}px`,
+            width: `${4 * trackStore.pixelPerBar}px`  // 기본 4마디 크기로 표시
+          }"
+        >
+          <Loader2 class="h-6 w-6 animate-spin mb-1" />
+          <span class="text-xs font-bold">업로드 중...</span>
+        </div>
+
      <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
           v-for="clip in track.clips" 
@@ -980,7 +993,6 @@ const onWorkAreaMouseLeave = () => {
 
           <!-- GPU 파형 컴포넌트 -->
          <WaveformWebGL
-          v-if="clip.audio?.cdnUrl"
           :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 

@@ -8,6 +8,7 @@ import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
 import * as Tone from 'tone';
 import WaveformChunk from './WaveformChunk.vue';
+import { Loader2 } from 'lucide-vue-next';
 
 const props = defineProps<{ 
   clip: ClipUIState;
@@ -85,8 +86,9 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
 </script>
 
 <template>
-  <div class="pointer-events-none absolute inset-0 h-full w-full opacity-60 mix-blend-screen">
-    <template v-if="audioData">
+  <div class="pointer-events-none absolute inset-0 h-full w-full">
+    <!-- 파형 렌더링 영역 (mix-blend-screen 적용) -->
+    <div v-if="audioData" class="absolute inset-0 h-full w-full opacity-60 mix-blend-screen">
       <WaveformChunk
         v-for="chunk in chunks"
         :key="chunk.id"
@@ -95,6 +97,12 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
         :chunk-left="chunk.left"
         :chunk-width="chunk.width"
       />
-    </template>
+    </div>
+    
+    <!-- 로딩 스피너 영역 (독립적인 스타일, 높은 z-index) -->
+    <div v-else class="absolute inset-0 flex items-center justify-center z-50 bg-black/60 rounded text-white font-bold text-xs gap-2">
+      <Loader2 class="h-6 w-6 animate-spin text-white drop-shadow-lg" />
+      <span>로딩중...</span>
+    </div>
   </div>
 </template>

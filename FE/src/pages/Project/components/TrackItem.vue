@@ -4,9 +4,10 @@ import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
+import FileSizeWarningModal from './FileSizeWarningModal.vue'
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
@@ -461,6 +462,7 @@ const handleSplit = () => {
 
 // 파일 입력을 위한 참조 변수
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const isFileSizeWarningOpen = ref(false);
 
 // 우클릭 메뉴에서 '오디오 불러오기' 클릭 시 파일 탐색기 열기
 const triggerFileInput = () => {
@@ -475,6 +477,14 @@ const handleFileUpload = (event: Event) => {
   const target = event.target as HTMLInputElement;
   if (target.files && target.files.length > 0) {
     const file = target.files[0];
+
+    // 50MB 제한 (50 * 1024 * 1024 바이트)
+    if (file.size > 50 * 1024 * 1024) {
+      isFileSizeWarningOpen.value = true;
+      target.value = ''; // 초기화
+      return;
+    }
+
     console.log(`[디버그 - 2번 케이스: 탐색기 파일 선택] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
     // 우클릭했던 트랙 ID와 타임라인의 마디(Bar) 위치를 이용해 업로드 액션 실행
     trackStore.uploadAndAddAudioClip(file, menuState.value.targetTrackId, menuState.value.targetBar);
@@ -925,6 +935,19 @@ const onWorkAreaMouseLeave = () => {
           ></div>
         </div>
         
+        <!-- 파일 업로드 중 임시 고스트 클립 -->
+        <div 
+          v-if="trackStore.uploadingTrackId === track.trackId && trackStore.uploadingBar !== null"
+          class="absolute inset-y-1 z-20 flex flex-col items-center justify-center rounded-md border-2 border-dashed border-gray-400 bg-gray-700/50 text-white"
+          :style="{ 
+            left: `${trackStore.uploadingBar * trackStore.pixelPerBar}px`,
+            width: `${4 * trackStore.pixelPerBar}px`  // 기본 4마디 크기로 표시
+          }"
+        >
+          <Loader2 class="h-6 w-6 animate-spin mb-1" />
+          <span class="text-xs font-bold">업로드 중...</span>
+        </div>
+
      <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
           v-for="clip in track.clips" 
@@ -980,7 +1003,6 @@ const onWorkAreaMouseLeave = () => {
 
           <!-- GPU 파형 컴포넌트 -->
          <WaveformWebGL
-          v-if="clip.audio?.cdnUrl"
           :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 
@@ -1133,6 +1155,10 @@ const onWorkAreaMouseLeave = () => {
     </div>
   </Teleport>
 
+  <FileSizeWarningModal
+    :open="isFileSizeWarningOpen"
+    @close="isFileSizeWarningOpen = false"
+  />
 </template>
 <style scoped>
 </style>

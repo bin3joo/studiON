@@ -35,7 +35,8 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.prod.yaml up -d --remove-orphans'
+                // --force-recreate: 기존 컨테이너가 예전 환경변수 가지고 있는 문제 방지
+                sh 'docker compose --env-file .env.prod -f compose.prod.yaml up -d --force-recreate --remove-orphans'
             }
         }
 

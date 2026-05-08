@@ -34,5 +34,22 @@ pipeline {
                 sh 'docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml ps'
             }
         }
+
+        stage('Deploy AI') {
+            agent {
+                label 'ai-server'
+            }
+            when {
+                changeset "AI/**"
+            }
+            steps {
+                sh '''
+                cd /home/ec2-user/deploy/S14P31A205
+                git pull
+                docker compose -f compose.ai.yaml up -d --build --scale ai-worker=3
+                docker compose -f compose.ai.yaml ps
+                '''
+            }
+        }
     }
 }

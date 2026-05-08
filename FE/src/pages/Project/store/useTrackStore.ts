@@ -296,10 +296,15 @@ export const useTrackStore = defineStore('track', () => {
         try {
             const audioInfo = await projectApi.getAudioDetail(projectInfo.value.projectId, data.audioMetadataId);
 
-            // 3. 받아온 정보로 기존 빈 껍데기 클립 상태 업데이트
-            if (newClip.audio) {
-                newClip.audio.cdnUrl = audioInfo.audioUrl;
-                newClip.audio.originalName = audioInfo.originalName;
+            // 3. Vue 반응성 확보: 배열 안의 실제 반응형 객체를 다시 찾아서 audio를 통째로 교체
+            const reactiveClip = track.clips.find(c => c.clipId === data.clipId);
+            if (reactiveClip) {
+                reactiveClip.audio = {
+                    audioMetadataId: data.audioMetadataId,
+                    cdnUrl: audioInfo.audioUrl,
+                    originalName: audioInfo.originalName,
+                    durationMs: data.audioDurationMs,
+                };
 
                 // 4. 오디오 플레이어 노드 생성 및 버퍼 로딩
                 const targetVol = trackVolumes.get(data.trackId);
@@ -307,18 +312,19 @@ export const useTrackStore = defineStore('track', () => {
                     const newPlayer = new Tone.Player().connect(targetVol);
                     await newPlayer.load(audioInfo.audioUrl);
 
-                    const exactStartTimeSec = newClip.start * secondsPerBar.value;
-                    const audioOffsetSec = newClip.audioStartMs / 1000;
-                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, newClip.duration * secondsPerBar.value);
+                    const exactStartTimeSec = reactiveClip.start * secondsPerBar.value;
+                    const audioOffsetSec = reactiveClip.audioStartMs / 1000;
+                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, reactiveClip.duration * secondsPerBar.value);
 
-                    clipPlayers.set(newClip.clipId, newPlayer);
-                    console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 및 동기화 완료 (ID: ${newClip.clipId})`);
+                    clipPlayers.set(reactiveClip.clipId, newPlayer);
+                    console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 및 동기화 완료 (ID: ${reactiveClip.clipId})`);
                 }
             }
         } catch (error) {
             console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
-            if (newClip.audio) {
-                newClip.audio.originalName = "오디오 로딩 실패";
+            const failedClip = track.clips.find(c => c.clipId === data.clipId);
+            if (failedClip && failedClip.audio) {
+                failedClip.audio = { ...failedClip.audio, originalName: "오디오 로딩 실패" };
             }
         }
     });
@@ -407,6 +413,11 @@ export const useTrackStore = defineStore('track', () => {
             const found = t.clips.find(c => c.clipId === data.sourceClipId);
             if (found) { originalClip = found; break; }
         }
+        // 잘라내기(Cut)의 경우 화면에서 이미 삭제되었으므로 로컬 클립보드에서 찾습니다.
+        if (!originalClip && clipboardClip.value && clipboardClip.value.clipId === data.sourceClipId) {
+            originalClip = clipboardClip.value;
+        }
+
         if (!originalClip) {
             console.error(`[에러] 붙여넣기 할 원본 클립(ID: ${data.sourceClipId})을 화면에서 찾을 수 없습니다!`);
             return;
@@ -491,7 +502,10 @@ export const useTrackStore = defineStore('track', () => {
             start: data.splitBar,
             duration: data.newClipDuration,
             audioStartMs: originalClip.audioStartMs + splitOffsetMs,
-            audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs)
+            audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs),
+            isLocked: false,     // 분할로 새로 생긴 클립은 잠금 해제 상태로 초기화
+            isDragging: false,
+            isSelected: false
         };
         // 왼쪽 원본 클립 길이 수정
         originalClip.duration = data.originalDuration;
@@ -603,11 +617,13 @@ export const useTrackStore = defineStore('track', () => {
     const cutClip = (clip: ClipUIState, trackId: number) => {
         clipboardClip.value = { ...JSON.parse(JSON.stringify(clip)), clipId: clip.clipId };
         isCutAction.value = true;
-        // 잘라내기는 백엔드에 요청만 하면 브로드캐스트가 알아서 다 지워줌 (CLIP_DELETE 대신 CLIP_CUT 명세서 사용)
+        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
+        lockClip(clip.clipId, trackId);
         socketService.publish('CLIP_CUT', {
             projectId: projectInfo.value.projectId,
             clipId: clip.clipId
         });
+        unlockClip(clip.clipId, trackId);
     };
 
 
@@ -684,20 +700,25 @@ export const useTrackStore = defineStore('track', () => {
     // 삭제
     const deleteClip = (clipId: number, trackId: number) => {
         console.log(`[통신] 백엔드에 클립 삭제(CLIP_DELETE) 요청 전송`);
+        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
+        lockClip(clipId, trackId);
         socketService.publish('CLIP_DELETE', {
             projectId: projectInfo.value.projectId,
             clipId: clipId
         });
+        unlockClip(clipId, trackId);
     };
 
     // 4. 클립 복제 (Duplicate)
     const duplicateClip = (clip: ClipUIState, trackId: number) => {
         console.log(`[통신] 백엔드에 클립 복제(CLIP_DUPLICATE) 요청 전송`);
-
+        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
+        lockClip(clip.clipId, trackId);
         socketService.publish('CLIP_DUPLICATE', {
             projectId: projectInfo.value.projectId,
             clipId: clip.clipId
         });
+        unlockClip(clip.clipId, trackId);
     };
 
     // 5. 클립 분할 (Split)
@@ -717,11 +738,14 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
+        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
+        lockClip(clipId, trackId);
         socketService.publish('CLIP_SPLIT', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
             splitBar: currentBar
         });
+        unlockClip(clipId, trackId);
     };
 
     // 6. 클립 길이 조절 (Resize / Trim)

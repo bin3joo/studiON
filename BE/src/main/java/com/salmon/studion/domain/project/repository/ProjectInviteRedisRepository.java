@@ -41,9 +41,13 @@ public class ProjectInviteRedisRepository {
 
         return Optional.of(deserialize(storedValue));
     }
+
+    public Optional<String> findActiveInviteCodeByProjectId(Integer projectId) {
+        return Optional.ofNullable(redisTemplate.opsForValue().get(activeInviteKey(projectId)));
+    }
     
     public boolean existsByInviteCode(String inviteCode) {
-        return redisTemplate.hasKey(inviteCodeKey(inviteCode));
+        return Boolean.TRUE.equals(redisTemplate.hasKey(inviteCodeKey(inviteCode)));
     }
     
     public void deleteByInviteCode(String inviteCode) {

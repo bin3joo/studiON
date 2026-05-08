@@ -11,6 +11,10 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class ProjectInviteService {
 
+    private static final int INVITE_CODE_EXPIRATION_MINUTES = 5;
+    private static final int INVITE_CODE_TTL_MINUTES = 10;
+    private static final int MAX_INVITE_CODE_GENERATION_RETRY = 50;
+
     private final ProjectInviteRedisRepository projectInviteRedisRepository;
     private final ProjectInviteCodeGenerator projectInviteCodeGenerator;
 //    private final ProjectInviteRateLimiter projectInviteRateLimiter;

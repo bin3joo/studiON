@@ -82,7 +82,7 @@ logging:
     org.springframework.security: DEBUG
 
 app:
-  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  frontend-url: ${FRONTEND_URL}
 
 server:
   forward-headers-strategy: framework

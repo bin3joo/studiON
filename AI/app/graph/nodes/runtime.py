@@ -6,6 +6,12 @@ from app.graph.nodes.common import append_transition, artifact_id, workflow_upda
 from app.graph.state import WorkflowState, utc_now
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
+from app.services.workflow_preview_renders import (
+    PreviewRenderCreate,
+    PreviewRenderFailedUpdate,
+    PreviewRenderReadyUpdate,
+    get_workflow_preview_render_store,
+)
 from app.services.workflow_preview_renderer import PreviewRenderError, resolve_preview_excerpt_range
 
 
@@ -417,8 +423,21 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
 # 실제로 preview를 만드는 함수가 아님
 # preview 생성을 위한 메타데이터를 만드는 함수 (preview 시작/종료 시간, preivew에 적용할 action)
 def render_preview(state: WorkflowState) -> WorkflowState:
-    preview_id = state.get("preview_id") or f"{state['job_id']}-preview"
+    preview_store = get_workflow_preview_render_store()
     started_at = utc_now()
+    preview_record = preview_store.create_processing_render(
+        PreviewRenderCreate(
+            job_id=state["job_id"],
+            analysis_region_id=str(state.get("selected_region_id") or ""),
+            suggestion_id=_resolve_preview_suggestion_id(state),
+            requested_by=state.get("requested_by"),
+            requested_at=state.get("preview_requested_at") or started_at,
+            started_at=started_at,
+            user_feedback_message=state.get("user_feedback_message"),
+            preserve_clip_id=state.get("preserve_clip_id"),
+        )
+    )
+    preview_id = state.get("preview_id") or f"{state['job_id']}-preview"
     try:
         focus_region = _resolve_preview_focus_region(state)
         preview_band_specs = _resolve_preview_band_specs(state)
@@ -433,13 +452,23 @@ def render_preview(state: WorkflowState) -> WorkflowState:
             project_duration_ms=state.get("project_duration_ms"),
         )
     except PreviewRenderError as exc:
+        completed_at = utc_now()
+        preview_store.mark_failed(
+            PreviewRenderFailedUpdate(
+                record_id=preview_record.id,
+                error_code=exc.code,
+                error_message=exc.message,
+                completed_at=completed_at,
+            )
+        )
         return fail_workflow(
             {
                 **state,
                 "preview_id": preview_id,
                 "preview_status": "FAILED",
+                "preview_render_no": preview_record.render_no,
                 "preview_started_at": started_at,
-                "preview_completed_at": utc_now(),
+                "preview_completed_at": completed_at,
                 "preview_error_code": exc.code,
                 "preview_error_message": exc.message,
                 "failure_code": exc.code,
@@ -447,6 +476,16 @@ def render_preview(state: WorkflowState) -> WorkflowState:
             }
         )
 
+    completed_at = utc_now()
+    preview_store.mark_ready(
+        PreviewRenderReadyUpdate(
+            record_id=preview_record.id,
+            object_key=preview_id,
+            duration_ms=max(excerpt_end_ms - excerpt_start_ms, 1),
+            completed_at=completed_at,
+            expired_at=preview_band_specs[0].get("previewExpiresAt"),
+        )
+    )
     return workflow_update(
         state,
         node="render_preview",
@@ -455,10 +494,11 @@ def render_preview(state: WorkflowState) -> WorkflowState:
         extra={
             "preview_id": preview_id,
             "preview_status": "READY",
+            "preview_render_no": preview_record.render_no,
             "preview_excerpt_start_ms": excerpt_start_ms,
             "preview_excerpt_end_ms": excerpt_end_ms,
             "preview_started_at": started_at,
-            "preview_completed_at": utc_now(),
+            "preview_completed_at": completed_at,
             # Spring은 이 ISO 8601 값을 DATETIME으로 저장하는 계약을 사용한다.
             "preview_expired_at": preview_band_specs[0].get("previewExpiresAt"),
             "preview_error_code": None,
@@ -704,6 +744,14 @@ def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, object]]
             if isinstance(band, dict):
                 preview_band_specs.append(band)
     return preview_band_specs
+
+
+def _resolve_preview_suggestion_id(state: WorkflowState) -> str | None:
+    suggestions = (state.get("suggestion_payload") or {}).get("suggestions", [])
+    if not suggestions:
+        return None
+    suggestion_group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
+    return f"{suggestion_group_id}-suggestion-1"
 
 
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:

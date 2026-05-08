@@ -35,6 +35,8 @@ from app.services.workflow_snapshots import (
     TimelineSnapshotDocument,
     get_workflow_snapshot_store,
 )
+from app.services.workflow_preview_renders import get_workflow_preview_render_store
+from app.services.workflow_preview_renders import PreviewRenderCreate
 from app.services.workflow_worker import run_workflow_dispatch
 
 _TEST_AUDIO_METADATA: dict[int, AudioMetadataRecord] = {}
@@ -139,6 +141,7 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
         "app.services.workflow_jobs.get_settings",
         lambda: settings,
     )
+    monkeypatch.setattr("app.services.workflow_preview_renders.get_settings", lambda: settings)
     monkeypatch.setattr("app.services.workflow_artifacts.get_settings", lambda: settings)
     monkeypatch.setattr("app.services.workflow_snapshots.get_settings", lambda: settings)
     monkeypatch.setattr(
@@ -150,16 +153,20 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: _FakeCLAPInferenceClient(),
     )
     monkeypatch.setattr("app.services.workflow_jobs._mysql_store", None)
+    monkeypatch.setattr("app.services.workflow_preview_renders._mysql_store", None)
     monkeypatch.setattr("app.services.workflow_artifacts._mongo_store", None)
     monkeypatch.setattr("app.services.workflow_snapshots._mongo_store", None)
     store = get_workflow_job_store()
+    preview_store = get_workflow_preview_render_store()
     snapshot_store = get_workflow_snapshot_store()
     artifact_store = get_workflow_artifact_store()
     store.reset()
+    preview_store.reset()
     snapshot_store.reset()
     artifact_store.reset()
     yield
     store.reset()
+    preview_store.reset()
     snapshot_store.reset()
     artifact_store.reset()
     _TEST_AUDIO_METADATA.clear()
@@ -903,6 +910,99 @@ def test_resume_api_infers_dispatch_type_from_waiting_phase(
     assert len(queued_messages) == 2
     assert queued_messages[-1].selected_region_id == plan_input["selected_region_id"]
     assert queued_messages[-1].preserve_clip_id == plan_input["preserve_clip_id"]
+
+
+def test_resume_plan_input_persists_preview_render_and_status_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20026,
+            project_id=30026,
+            project_snapshot=build_project_snapshot(track_ids=[41, 42]),
+            issue_types=["band_overlap"],
+            requested_by=909,
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20026,
+            project_id=30026,
+            dispatch_type="start",
+            requested_by=909,
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20026,
+            project_id=30026,
+            dispatch_type="resume_plan_input",
+            requested_by=909,
+            user_feedback_message="보컬은 살리고 충돌 대역만 더 줄여줘",
+            **build_plan_input(waiting),
+        )
+    )
+
+    preview_records = get_workflow_preview_render_store().list_job_renders(20026)
+
+    assert len(preview_records) == 1
+    assert preview_records[0].analysis_region_id == waiting["ranked_candidate_ids"][0]
+    assert preview_records[0].status == "READY"
+    assert preview_records[0].requested_by == 909
+    assert preview_records[0].user_feedback_message == "보컬은 살리고 충돌 대역만 더 줄여줘"
+    assert preview_records[0].preserve_clip_id == build_plan_input(waiting)["preserve_clip_id"]
+    assert preview_records[0].duration_ms is not None
+    assert preview_records[0].completed_at is not None
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/20026")
+
+    assert response.status_code == 200
+    preview = response.json()["projections"]["preview_render"]
+    assert preview["status"] == "READY"
+    assert preview["render_no"] == 1
+    assert preview["preview_target_region"] == waiting["ranked_candidate_ids"][0]
+    assert preview["id"] == "20026-preview"
+
+
+def test_preview_render_store_accumulates_history_for_same_region() -> None:
+    preview_store = get_workflow_preview_render_store()
+
+    first = preview_store.create_processing_render(
+        PreviewRenderCreate(
+            job_id=29901,
+            analysis_region_id="29901-region-1",
+            suggestion_id="29901-group-suggestion-1",
+            requested_by=100,
+            requested_at="2026-05-08T10:00:00+09:00",
+            started_at="2026-05-08T10:00:01+09:00",
+            user_feedback_message="첫 번째 피드백",
+            preserve_clip_id=7001,
+        )
+    )
+    second = preview_store.create_processing_render(
+        PreviewRenderCreate(
+            job_id=29901,
+            analysis_region_id="29901-region-1",
+            suggestion_id="29901-group-suggestion-1",
+            requested_by=100,
+            requested_at="2026-05-08T10:05:00+09:00",
+            started_at="2026-05-08T10:05:01+09:00",
+            user_feedback_message="두 번째 피드백",
+            preserve_clip_id=7001,
+        )
+    )
+
+    records = preview_store.list_job_renders(29901)
+
+    assert first.render_no == 1
+    assert second.render_no == 2
+    assert len(records) == 2
+    assert records[-1].user_feedback_message == "두 번째 피드백"
 
 
 def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -18,6 +18,7 @@ from app.services.plan_critic_llm import PlanCriticLLMResponse
 from app.services.planning_llm import PlanningLLMError, PlanningLLMResponse
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_audio_metadata import AudioMetadataRecord
+from app.services.workflow_preview_renders import get_workflow_preview_render_store
 from app.services.workflow_preview_renderer import PREVIEW_CONTEXT_PADDING_MS
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
 
@@ -204,25 +205,31 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
 def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     _TEST_AUDIO_METADATA.clear()
     settings = SimpleNamespace(
+        resolved_mysql_url=None,
         mongo_url=None,
         mongo_database="studion_ai",
         mongo_snapshot_collection="timeline_snapshots",
         mongo_artifact_collection="workflow_artifacts",
         audio_root=None,
     )
+    monkeypatch.setattr("app.services.workflow_preview_renders.get_settings", lambda: settings)
     monkeypatch.setattr("app.services.workflow_artifacts.get_settings", lambda: settings)
     monkeypatch.setattr("app.services.workflow_snapshots.get_settings", lambda: settings)
     monkeypatch.setattr(
         "app.services.workflow_snapshots.get_workflow_audio_metadata_store",
         lambda: _FakeAudioMetadataStore(),
     )
+    monkeypatch.setattr("app.services.workflow_preview_renders._mysql_store", None)
     monkeypatch.setattr("app.services.workflow_artifacts._mongo_store", None)
     monkeypatch.setattr("app.services.workflow_snapshots._mongo_store", None)
+    preview_store = get_workflow_preview_render_store()
     artifact_store = get_workflow_artifact_store()
     snapshot_store = analysis_nodes.get_workflow_snapshot_store()
+    preview_store.reset()
     artifact_store.reset()
     snapshot_store.reset()
     yield
+    preview_store.reset()
     artifact_store.reset()
     snapshot_store.reset()
     _TEST_AUDIO_METADATA.clear()

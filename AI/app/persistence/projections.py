@@ -5,6 +5,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.graph.state import ApplyState, RuntimeState, WorkflowState
+from app.services.workflow_preview_renders import (
+    PreviewRenderRecord,
+    get_workflow_preview_render_store,
+)
 
 
 # 런타임 진행 상태를 프론트 polling 응답과 저장 projection에서 공통으로 쓰는 형태로 정리한다.
@@ -430,22 +434,35 @@ def _build_preview_render(
     state: WorkflowState,
     suggestion_group: SuggestionGroupProjection | None,
 ) -> PreviewRenderProjection | None:
-    if not state.get("preview_id"):
+    preview_record = _resolve_latest_preview_record(state)
+    if preview_record is None and not state.get("preview_id"):
         return None
     preview_action = _resolve_preview_action_projection(state, suggestion_group)
-    preview_region = _resolve_preview_region_projection(state)
+    preview_region = _resolve_preview_region_projection(state, preview_record)
     suggestion_id = (
-        suggestion_group.suggestions[0].id
-        if suggestion_group and suggestion_group.suggestions
-        else None
+        preview_record.suggestion_id
+        if preview_record and preview_record.suggestion_id
+        else (
+            suggestion_group.suggestions[0].id
+            if suggestion_group and suggestion_group.suggestions
+            else None
+        )
     )
     return PreviewRenderProjection(
-        id=state["preview_id"],
+        id=state.get("preview_id") or f"{state['job_id']}-preview",
         job_id=state["job_id"],
         suggestion_id=suggestion_id,
-        status=state.get("preview_status")
-        or ("FAILED" if state.get("phase") == "failed" else "PROCESSING"),
-        render_no=int(state.get("preview_render_no", 1) or 1),
+        status=(
+            preview_record.status
+            if preview_record
+            else state.get("preview_status")
+            or ("FAILED" if state.get("phase") == "failed" else "PROCESSING")
+        ),
+        render_no=(
+            int(preview_record.render_no)
+            if preview_record
+            else int(state.get("preview_render_no", 1) or 1)
+        ),
         preview_target_region=preview_region.get("id") if preview_region else None,
         preview_region_start_ms=preview_region.get("start_ms") if preview_region else None,
         preview_region_end_ms=preview_region.get("end_ms") if preview_region else None,
@@ -455,24 +472,67 @@ def _build_preview_render(
         preview_action_track=preview_action.get("target_track_id") if preview_action else None,
         preview_band_specs=_resolve_preview_band_specs(state),
         preview_excerpt_range=_build_preview_excerpt_range(state),
-        requested_by=state.get("requested_by"),
-        requested_at=state.get("preview_requested_at"),
-        started_at=state.get("preview_started_at"),
-        completed_at=state.get("preview_completed_at"),
-        expired_at=state.get("preview_expired_at"),
-        error_code=state.get("preview_error_code") or state.get("failure_code"),
-        error_message=state.get("preview_error_message") or state.get("failure_message"),
+        requested_by=(
+            preview_record.requested_by if preview_record else state.get("requested_by")
+        ),
+        requested_at=(
+            preview_record.requested_at
+            if preview_record
+            else state.get("preview_requested_at")
+        ),
+        started_at=(
+            preview_record.started_at if preview_record else state.get("preview_started_at")
+        ),
+        completed_at=(
+            preview_record.completed_at
+            if preview_record
+            else state.get("preview_completed_at")
+        ),
+        expired_at=(
+            preview_record.expired_at if preview_record else state.get("preview_expired_at")
+        ),
+        error_code=(
+            preview_record.error_code
+            if preview_record
+            else state.get("preview_error_code") or state.get("failure_code")
+        ),
+        error_message=(
+            preview_record.error_message
+            if preview_record
+            else state.get("preview_error_message") or state.get("failure_message")
+        ),
     )
 
 
-def _resolve_preview_region_projection(state: WorkflowState) -> dict[str, Any] | None:
-    selected_region_id = state.get("selected_region_id")
+def _resolve_preview_region_projection(
+    state: WorkflowState,
+    preview_record: PreviewRenderRecord | None = None,
+) -> dict[str, Any] | None:
+    selected_region_id = (
+        preview_record.analysis_region_id
+        if preview_record is not None
+        else state.get("selected_region_id")
+    )
     if selected_region_id is None:
         return None
     for region in state.get("analysis_regions", []):
         if str(region.get("id")) == str(selected_region_id):
             return region
     return None
+
+
+def _resolve_latest_preview_record(state: WorkflowState) -> PreviewRenderRecord | None:
+    preview_store = get_workflow_preview_render_store()
+    selected_region_id = state.get("selected_region_id")
+    record = None
+    if selected_region_id is not None:
+        record = preview_store.get_latest_render(
+            state["job_id"],
+            analysis_region_id=str(selected_region_id),
+        )
+    if record is not None:
+        return record
+    return preview_store.get_latest_render(state["job_id"])
 
 
 def _resolve_preview_action_projection(

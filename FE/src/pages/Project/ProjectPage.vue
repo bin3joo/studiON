@@ -290,6 +290,8 @@ onUnmounted(()=>{
   window.removeEventListener('keydown', unlockAudioEngine, {capture: true});
   // 웹소켓 연결 해제
   socketService.disconnect();
+  // 프로젝트 페이지를 벗어날 때 오디오 재생 즉시 중지
+  trackStore.stopPlay();
 })
 
 interface OnlineUser {

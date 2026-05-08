@@ -7,6 +7,7 @@ import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오
 import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
+import FileSizeWarningModal from './FileSizeWarningModal.vue'
 
 // 트랙리스트로부터 트랙 1개의 데이터를 전달받음
 const props = defineProps<{
@@ -461,6 +462,7 @@ const handleSplit = () => {
 
 // 파일 입력을 위한 참조 변수
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const isFileSizeWarningOpen = ref(false);
 
 // 우클릭 메뉴에서 '오디오 불러오기' 클릭 시 파일 탐색기 열기
 const triggerFileInput = () => {
@@ -475,6 +477,14 @@ const handleFileUpload = (event: Event) => {
   const target = event.target as HTMLInputElement;
   if (target.files && target.files.length > 0) {
     const file = target.files[0];
+
+    // 50MB 제한 (50 * 1024 * 1024 바이트)
+    if (file.size > 50 * 1024 * 1024) {
+      isFileSizeWarningOpen.value = true;
+      target.value = ''; // 초기화
+      return;
+    }
+
     console.log(`[디버그 - 2번 케이스: 탐색기 파일 선택] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
     // 우클릭했던 트랙 ID와 타임라인의 마디(Bar) 위치를 이용해 업로드 액션 실행
     trackStore.uploadAndAddAudioClip(file, menuState.value.targetTrackId, menuState.value.targetBar);
@@ -1145,6 +1155,10 @@ const onWorkAreaMouseLeave = () => {
     </div>
   </Teleport>
 
+  <FileSizeWarningModal
+    :open="isFileSizeWarningOpen"
+    @close="isFileSizeWarningOpen = false"
+  />
 </template>
 <style scoped>
 </style>

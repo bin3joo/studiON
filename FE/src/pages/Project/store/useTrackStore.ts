@@ -609,6 +609,8 @@ export const useTrackStore = defineStore('track', () => {
         } catch (error) {
             console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
             alert("파일 업로드에 실패했습니다.");
+            uploadingTrackId.value = null;
+            uploadingBar.value = null;
         }
     };
     // 1. 복사

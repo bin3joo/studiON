@@ -134,6 +134,8 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   }
   e.stopPropagation(); //이벤트를 부모로 전달 안하기 (트랙의 빈 공간 클릭 방지)
   e.preventDefault(); //이벤트를 브라우저로 전달 안하기 (새 탭으로 열기 방지)클립을 잡을 때 트랙 전체가 드래그 되는 현상 차단
+  // 백엔드에 클립 잠금(Lock) 요청 — 다른 사용자가 동시에 편집 못 하게
+  trackStore.lockClip(clip.clipId, props.track.trackId);
 
   activeClip.value = clip; //현재 드래그하는 클립 상태로 저장
   startMouseX.value = e.clientX; //드래그 시작점의 x좌표 기록
@@ -238,7 +240,12 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     
     // 서버에 통신을 보내서 이동 확정
     trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, activeClip.value.start);
+    // 이동한 당사자의 오디오도 새 위치에 맞춰 재동기화 (브로드캐스트는 위치 동일 시 건너뜀)
+    trackStore.resyncClip(activeClip.value.clipId, activeClip.value.start);
   }
+
+  // Move/롤백 통신 이후에 Unlock을 보내야 백엔드가 정상적으로 처리함
+  trackStore.unlockClip(currentClipId, props.track.trackId);
 
   console.log(`\n========================================`);
   console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
@@ -279,6 +286,8 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
   if(clip.isLocked) return; //클립이 잠겨있으면 리사이즈 금지
   e.stopPropagation(); // 일반 클립 이동(드래그) 이벤트 방지
   e.preventDefault(); // 클립을 잡을 때 트랙 전체가 드래그 되는 현상 차단
+  // 리사이즈 시작 시 클립 잠금
+  trackStore.lockClip(clip.clipId, props.track.trackId);
 
   resizeState.value = {
     clip,
@@ -335,6 +344,9 @@ const onResizePointerUp = (e: PointerEvent) => {
       tartgetClip.duration,
       trimLeftBars
   );
+
+  // Resize 통신 이후에 Unlock을 보내야 백엔드가 정상적으로 처리함
+  trackStore.unlockClip(tartgetClip.clipId, props.track.trackId);
 
   resizeState.value.isResizing = false;
   resizeState.value.clip = null;

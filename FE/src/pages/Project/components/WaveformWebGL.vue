@@ -3,7 +3,7 @@ const audioCache = new Map<string, { channelData: Float32Array, sampleRate: numb
 </script>
 
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue';
+import { computed, onMounted, shallowRef, watch } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
 import * as Tone from 'tone';
@@ -69,7 +69,18 @@ const loadAudioData = async () => {
 };
 
 onMounted(() => {
+  console.log('[Waveform 🔍] onMounted - clipId:', props.clip.clipId, 'cdnUrl:', props.clip.audio?.cdnUrl || '(비어있음)');
   loadAudioData();
+});
+
+// cdnUrl이 비동기로 나중에 채워지는 경우(다른 사용자의 CLIP_CREATE 수신 시)
+// URL이 빈 문자열 → 실제 URL로 변경될 때 파형 데이터를 다시 로딩
+watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
+  console.log('[Waveform 🔍] watch 감지! clipId:', props.clip.clipId, 'oldUrl:', oldUrl || '(없음)', 'newUrl:', newUrl || '(없음)', 'audioData 있음?:', !!audioData.value);
+  if (newUrl && newUrl !== oldUrl && !audioData.value) {
+    console.log('[Waveform 🔍] → loadAudioData 재호출!');
+    loadAudioData();
+  }
 });
 </script>
 

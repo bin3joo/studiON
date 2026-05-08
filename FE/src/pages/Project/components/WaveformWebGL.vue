@@ -42,6 +42,14 @@ const chunks = computed(() => {
   });
 });
 
+// 플레이헤드가 지나간 만큼의 픽셀 너비 계산
+const playedPixelWidth = computed(() => {
+  const diff = trackStore.playheadPosition - props.clip.start;
+  if (diff <= 0) return 0;
+  if (diff >= props.clip.duration) return props.clip.duration * trackStore.pixelPerBar;
+  return diff * trackStore.pixelPerBar;
+});
+
 const loadAudioData = async () => {
   if (!props.clip.audio?.cdnUrl) return;
   const audioUrl = props.clip.audio.cdnUrl;
@@ -87,8 +95,8 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
 
 <template>
   <div class="pointer-events-none absolute inset-0 h-full w-full">
-    <!-- 파형 렌더링 영역 (mix-blend-screen 적용) -->
-    <div v-if="audioData" class="absolute inset-0 h-full w-full opacity-60 mix-blend-screen">
+    <!-- 파형 렌더링 영역 (mix-blend-screen 적용, isolation으로 필터 범위 제한) -->
+    <div v-if="audioData" class="absolute inset-0 h-full w-full opacity-60 mix-blend-screen" style="isolation: isolate;">
       <WaveformChunk
         v-for="chunk in chunks"
         :key="chunk.id"
@@ -97,6 +105,17 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
         :chunk-left="chunk.left"
         :chunk-width="chunk.width"
       />
+      
+      <!-- 플레이헤드가 지나간 파형을 하얗게 만드는 백드롭 필터 오버레이 -->
+      <div 
+        v-if="playedPixelWidth > 0"
+        class="absolute inset-y-0 left-0 pointer-events-none"
+        :style="{ 
+          width: `${playedPixelWidth}px`,
+          backdropFilter: 'brightness(300%) contrast(200%) grayscale(100%)',
+          WebkitBackdropFilter: 'brightness(300%) contrast(200%) grayscale(100%)'
+        }"
+      ></div>
     </div>
     
     <!-- 로딩 스피너 영역 (독립적인 스타일, 높은 z-index) -->

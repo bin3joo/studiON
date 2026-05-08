@@ -9,6 +9,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
 import { projectApi } from '../api/project.api'
+import axios from 'axios'
 
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
 export const useTrackStore = defineStore('track', () => {
@@ -156,7 +157,7 @@ export const useTrackStore = defineStore('track', () => {
     // ==========================================
     // 🌐 웹소켓 수신 (Subscribe) 처리부
     // ==========================================
-       // 백엔드 명세에 맞추어 이벤트 명(`CLIP_PASTE_SUCCESS` 등)을 수정하여 사용
+    // 백엔드 명세에 맞추어 이벤트 명(`CLIP_PASTE_SUCCESS` 등)을 수정하여 사용
 
 
     // --------------------- 트랙 관련 (소켓) ---------------------    
@@ -264,10 +265,11 @@ export const useTrackStore = defineStore('track', () => {
 
     //1.신규 클립 업로드 완료 수신
     // 1. 신규 클립 업로드 완료 수신
-    socketService.subscribe('CLIP_CREATE', (data) => {
+    socketService.subscribe('CLIP_CREATE', async (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (!track) return;
-        // 명세서에 따라 새로 그려질 완벽한 클립 객체 생성
+
+        // 1. 화면에 우선 빈 클립 블록(소리 없는 껍데기) 렌더링
         const newClip: ClipUIState = {
             clipId: data.clipId,
             start: data.startBar,
@@ -277,8 +279,8 @@ export const useTrackStore = defineStore('track', () => {
             color: data.color,
             audio: {
                 audioMetadataId: data.audioMetadataId,
-                originalName: data.originalName || "오디오", // 브로드캐스트에 이름이 오면 사용
-                cdnUrl: "", // 실제 CDN 주소는 프론트에서 S3 주소 조합 등을 통해 세팅
+                originalName: "오디오 로딩 중...", // URL 받아오기 전 임시 텍스트
+                cdnUrl: "", // URL을 아직 모르므로 비워둠
                 durationMs: data.audioDurationMs,
             },
             isSelected: false,
@@ -286,20 +288,38 @@ export const useTrackStore = defineStore('track', () => {
         };
         track.clips.push(newClip);
         checkAndExpandTimeline(newClip.start + newClip.duration);
-        // 오디오 플레이어 노드 연결
-        const targetVol = trackVolumes.get(data.trackId);
-        if (targetVol && newClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
-            newPlayer.load(newClip.audio.cdnUrl).then(() => {
-                const exactStartTimeSec = newClip.start * secondsPerBar.value;
-                const audioOffsetSec = newClip.audioStartMs / 1000;
-                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, newClip.duration * secondsPerBar.value);
-                clipPlayers.set(newClip.clipId, newPlayer);
-            });
+        // 2. 백그라운드에서 오디오 상세 정보(URL) 조회 API 비동기 호출
+        try {
+            const audioInfo = await projectApi.getAudioDetail(projectInfo.value.projectId, data.audioMetadataId);
+
+            // 3. 받아온 정보로 기존 빈 껍데기 클립 상태 업데이트
+            if (newClip.audio) {
+                newClip.audio.cdnUrl = audioInfo.audioUrl;
+                newClip.audio.originalName = audioInfo.originalName;
+
+                // 4. 오디오 플레이어 노드 생성 및 버퍼 로딩
+                const targetVol = trackVolumes.get(data.trackId);
+                if (targetVol) {
+                    const newPlayer = new Tone.Player().connect(targetVol);
+                    await newPlayer.load(audioInfo.audioUrl);
+
+                    const exactStartTimeSec = newClip.start * secondsPerBar.value;
+                    const audioOffsetSec = newClip.audioStartMs / 1000;
+                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, newClip.duration * secondsPerBar.value);
+
+                    clipPlayers.set(newClip.clipId, newPlayer);
+                    console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 및 동기화 완료 (ID: ${newClip.clipId})`);
+                }
+            }
+        } catch (error) {
+            console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
+            if (newClip.audio) {
+                newClip.audio.originalName = "오디오 로딩 실패";
+            }
         }
     });
 
-     socketService.subscribe('CLIP_MOVE', (data) => {
+    socketService.subscribe('CLIP_MOVE', (data) => {
         let targetClip: ClipUIState | null = null;
         let sourceTrack: TrackUIState | null = null;
 
@@ -514,94 +534,55 @@ export const useTrackStore = defineStore('track', () => {
 
     // 실제 오디오 파일 업로드 & 클립 추가 Action
     const uploadAndAddAudioClip = async (file: File, trackId: number, startBar: number) => {
-        console.log(`\n========== [Upload & Add Clip Start] ==========`);
-        console.log(`[Upload] 파일명: ${file.name}, 타겟 트랙: ${trackId}, 시작 마디: ${startBar}`);
+        console.log(`========== [Upload & Add Clip Start (Pessimistic UI)] ==========`);
+
+        // 1. 오디오 파일을 Tone.Player로 임시 로드하여 길이(Duration) 측정
+        const tempUrl = URL.createObjectURL(file);
+        const tempPlayer = new Tone.Player();
+        await tempPlayer.load(tempUrl);
+        const durationMs = Math.round(tempPlayer.buffer.duration * 1000);
+        tempPlayer.dispose();
+        URL.revokeObjectURL(tempUrl);
+
+        // 2. 파일 타입에 따른 MIME 타입 및 포맷팅 설정
+        const mimeType = file.type.includes('wav') ? 'WAV' : 'MPEG';
+
         try {
-            // 1. 임시 Blob URL 생성
-            const cdnUrl = URL.createObjectURL(file);
-            console.log(`[Upload] 1. Blob URL 생성 완료: ${cdnUrl}`);
-
-            // 2. Tone.Player를 먼저 생성하여 오디오를 완벽히 디코딩하고 메모리에 올립니다.
-            const newPlayer = new Tone.Player();
-            console.log(`[Upload] 2. Tone.Player 생성 및 오디오 로드 시작...`);
-            await newPlayer.load(cdnUrl);
-            console.log(`[Upload] 3. 오디오 로드 완료! 버퍼 길이: ${newPlayer.buffer.duration}초`);
-
-            // 3. 연속 업로드 시 브라우저 오디오 정책으로 인해 엔진이 멈추는 현상 방어
-            if (Tone.getContext().state !== 'running') {
-                await Tone.getContext().resume();
-                console.log(`[Upload] 4. AudioContext 상태 복구됨`);
-            }
-
-            // 4. Tone.js가 디코딩한 버퍼에서 100% 정확한 오디오 길이를 추출합니다.
-            const durationMs = newPlayer.buffer.duration * 1000;
-            const tempAudioMetadataId = Date.now(); // 백엔드 업로드 후 실제 ID로 변경 필요
-
-            const metaData = {
-                audioMetadataId: tempAudioMetadataId,
-                cdnUrl: cdnUrl,
+            // 3. 백엔드 API를 통해 S3 Presigned URL(티켓) 발급
+            const uploadTicket = await projectApi.getAudioUploadUrl(projectInfo.value.projectId, {
                 originalName: file.name,
-                durationMs: durationMs
-            };
-
-            // 5. 정확한 길이를 마디(Bar) 단위로 변환 후 서버에 전송
-            const durationBar = (durationMs / 1000) / secondsPerBar.value;
-            console.log(`[Upload] 5. 마디 변환 완료: ${durationBar}마디`);
-
-            const tempClipId = Date.now() + Math.floor(Math.random() * 1000); // 프론트 임시 ID 발급 (Optimistic UI)
-
-            console.log(`[Upload] 6. 서버에 추가 이벤트 전송 중...`);
-            socketService.publish('AUDIO_CLIP_ADD', {
-                tempClipId: tempClipId, // 백엔드가 이 값을 참고해서 나중에 진짜 ID와 매핑해 주면 좋습니다.
-                trackId: trackId,
-                audioMetadataId: tempAudioMetadataId,
-                start: startBar,
-                duration: durationBar
+                mimeType: mimeType,
+                sizeBytes: file.size
+            });
+            // 4. 발급받은 Presigned URL을 사용하여 S3로 직접 파일 전송 (PUT)
+            await axios.put(uploadTicket.uploadUrl, file, {
+                headers: {
+                    'Content-Type': file.type
+                }
             });
 
-            // 6. UI 즉각 반영 (Optimistic UI) 및 믹서(채널) 연결
-            const targetTrack = trackList.value.find(t => t.trackId === trackId);
-            if (targetTrack) {
-                const newClip: ClipUIState = {
-                    clipId: tempClipId,
-                    start: startBar,
-                    duration: durationBar,
-                    audioStartMs: 0,
-                    audioDurationMs: durationMs,
-                    color: "#" + Math.floor(Math.random() * 16777215).toString(16),
-                    audio: metaData,
-                    isSelected: false,
-                    isDragging: false
-                };
+            console.log(`[Upload] S3 파일 업로드 완료 (objectKey: ${uploadTicket.objectKey})`);
+            // 5. 웹소켓으로 클립 생성(CLIP_CREATE) 브로드캐스트 요청 (현재 합의된 백엔드 스펙)
+            socketService.publish('CLIP_CREATE', {
+                projectId: projectInfo.value.projectId,
+                trackId: trackId,
+                startBar: startBar,
+                color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+                objectKey: uploadTicket.objectKey,
+                originalName: file.name,
+                storedName: uploadTicket.storedName,
+                mimeType: mimeType,
+                sizeBytes: file.size,
+                durationMs: durationMs
+            });
 
-                targetTrack.clips.push(newClip);
-                checkAndExpandTimeline(newClip.start + newClip.duration);
-
-                const targetVol = trackVolumes.get(trackId);
-                console.log(`[패닝 디버그] 업로드 - trackId=${trackId}, targetVol 존재=${!!targetVol}, trackVolumes 키:`, [...trackVolumes.keys()], 'trackPanners 키:', [...trackPanners.keys()]);
-                if (targetVol) {
-                    console.log(`[Upload] 7. Player를 트랙 볼륨 노드에 연결합니다.`);
-                    newPlayer.connect(targetVol);
-                    clipPlayers.set(newClip.clipId, newPlayer);
-
-                    resyncClip(newClip.clipId, newClip.start);
-                    console.log(`[Upload] 8. 🚀 업로드 및 스케줄링 완벽 종료! (임시 클립 ID: ${newClip.clipId})`);
-                } else {
-                    console.error(`[Upload 🚨] 타겟 트랙 채널을 찾을 수 없습니다!`);
-                    newPlayer.dispose();
-                }
-            } else {
-                console.error(`[Upload 🚨] 트랙 리스트에서 타겟 트랙을 찾을 수 없습니다!`);
-                newPlayer.dispose();
-            }
+            console.log(`[Upload] 백엔드로 CLIP_CREATE 발신 완료. 렌더링은 브로드캐스트 수신 후 진행됩니다.`);
+            // 프론트엔드 로직 종료 (렌더링은 수신부에서 일괄 처리)
         } catch (error) {
-            console.error(`[디버그 - 3번 케이스: Tone.js 디코딩 실패] 에러 발생:`, error);
-            console.warn(`[힌트] 24-bit 정수형이나 ADPCM 등 브라우저 Web Audio API가 지원하지 않는 압축 포맷의 WAV 파일일 확률이 높습니다.`);
-            alert("오디오 파일을 불러오는 데 실패했습니다. (브라우저가 지원하지 않는 특수 포맷일 수 있습니다)");
+            console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
+            alert("파일 업로드에 실패했습니다.");
         }
-        console.log(`========== [Upload & Add Clip End] ==========\n`);
     };
-
     // 1. 복사
     const copyClip = (clip: ClipUIState) => {
         // 프론트 클립보드 저장
@@ -613,7 +594,7 @@ export const useTrackStore = defineStore('track', () => {
             clipId: clip.clipId
         });
     };
-    
+
     // 잘라내기
     const cutClip = (clip: ClipUIState, trackId: number) => {
         clipboardClip.value = { ...JSON.parse(JSON.stringify(clip)), clipId: clip.clipId };
@@ -1186,8 +1167,8 @@ export const useTrackStore = defineStore('track', () => {
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 
-console.log('[fetchProject] data:', data)
-console.log('[fetchProject] data.name:', data.name)
+            console.log('[fetchProject] data:', data)
+            console.log('[fetchProject] data.name:', data.name)
 
             if (data) {
                 const MIN_TOTAL_BAR_COUNT = 100
@@ -1202,7 +1183,7 @@ console.log('[fetchProject] data.name:', data.name)
 
                     // 핵심: 백엔드가 0을 내려줘도 화면 작업 영역은 최소 100마디 확보
                     totalBarCount: Math.max(data.totalBarCount ?? 0, MIN_TOTAL_BAR_COUNT),
-            }
+                }
                 bpm.value = data.tempo;
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({

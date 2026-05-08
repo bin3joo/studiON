@@ -37,6 +37,22 @@ export interface ProjectDetailResponse {
   }
 }
 
+// --- [타입 선언부] ---
+export interface AudioDetailResponse {
+  code: string;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    audioMetadataId: number;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+    durationMs: number;
+    audioUrl: string; // ✨ 백엔드에서 반환해주는 실제 오디오 URL
+  }
+}
+
+
 // ==============================
 // 프로젝트 생성 기본값
 // ==============================
@@ -144,6 +160,12 @@ export const projectApi = {
     return response.data.data;
   },
 
+  // [추가] 오디오 단건 상세 조회 (오디오 URL 획득용)
+  getAudioDetail: async (projectId: number, audioMetadataId: number) => {
+    const response = await axiosInstance.get<AudioDetailResponse>(`/api/v1/projects/${projectId}/audios/${audioMetadataId}`);
+    return response.data.data;
+  },
+
   // S3 업로드 URL 발급
   getAudioUploadUrl: async (projectId: number, payload: GetUploadUrlRequest) => {
     const response = await axiosInstance.post<GetUploadUrlResponse>(`/api/v1/projects/${projectId}/audios/upload-url`, payload);
@@ -173,30 +195,30 @@ export async function createProject(
 ): Promise<CreateProjectResponse> {
 
   const response = await axiosInstance.post<CreateProjectResponse>(
-      '/api/v1/projects',
-      payload,
-    )
+    '/api/v1/projects',
+    payload,
+  )
 
-    return response.data
-  }
+  return response.data
+}
 
 
 // 프로젝트 참여 (초대코드 검증)
 export async function joinProject(payload: JoinProjectRequest): Promise<JoinProjectResponse> {
   const response = await axiosInstance.post<JoinProjectResponse>(
-      '/api/v1/projects/join',
-      payload,
-    )
+    '/api/v1/projects/join',
+    payload,
+  )
 
-    return response.data
-  }
+  return response.data
+}
 
 //프로젝트 초대코드 생성
 
 export async function createProjectInviteCode(projectId: ProjectId): Promise<CreateInviteCodeResponse> {
   const response = await axiosInstance.post<CreateInviteCodeResponse>(
-      `/api/v1/projects/${projectId}/invite-code`,
-    )
+    `/api/v1/projects/${projectId}/invite-code`,
+  )
 
-    return response.data
-  }
+  return response.data
+}

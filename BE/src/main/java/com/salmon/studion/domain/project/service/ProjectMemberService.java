@@ -7,6 +7,7 @@ import com.salmon.studion.domain.project.repository.ProjectMemberRepository;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,7 +19,11 @@ public class ProjectMemberService {
     private final ProjectMemberRepository projectMemberRepository;
 
     public void createProjectMember(Project project, User user) {
-        projectMemberRepository.save(ProjectMember.create(project, user));
+        try {
+            projectMemberRepository.save(ProjectMember.create(project, user));
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.PROJECT_MEMBER_ALREADY_EXISTS);
+        }
     }
 
     public List<Integer> getProjectIdsByUserId(Integer userId) {
@@ -36,6 +41,10 @@ public class ProjectMemberService {
         if (!projectMemberRepository.existsByProject_IdAndUser_Id(projectId, userId)) {
             throw new BusinessException(ErrorCode.PROJECT_ACCESS_DENIED);
         }
+    }
+
+    public boolean isProjectMember(Integer projectId, Integer userId) {
+        return projectMemberRepository.existsByProject_IdAndUser_Id(projectId, userId);
     }
 
     public List<Integer> getProjectMemberUserIds(Integer projectId, List<Integer> mentionedUserIds) {

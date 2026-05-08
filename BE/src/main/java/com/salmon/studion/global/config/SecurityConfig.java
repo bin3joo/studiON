@@ -58,7 +58,7 @@ public class SecurityConfig {
                                                                 "/api/v1/auth/positions",
                                                                 "/api/v1/auth/exchange",
                                                                 "/api/v1/auth/reissue",
-                                                                "/api/ws/**")
+                                                                "/ws/**")
                                                 .permitAll()
                                                 .anyRequest().authenticated())
                                 .oauth2Login(oauth2 -> oauth2

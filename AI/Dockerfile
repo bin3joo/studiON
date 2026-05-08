@@ -11,8 +11,8 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY . .
-# 메인 AI 서버는 DSP 의존성만 설치하고 CLAP 추론용 torch 계열은 제외한다.
-RUN uv sync --frozen --no-dev --group audio-dsp --no-group audio-ml \
+# 메인 AI 서버는 DSP 의존성만 설치하고, ML 추론은 외부 CLAP 서비스에 위임한다.
+RUN uv sync --frozen --no-dev --group audio-dsp \
     && rm -rf /tmp/uv-cache
 
 EXPOSE 8000

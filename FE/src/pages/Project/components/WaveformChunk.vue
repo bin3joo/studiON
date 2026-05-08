@@ -64,7 +64,7 @@ onMounted(async () => {
   await nextTick();
   if (!canvasRef.value) return;
 
-  const workerUrl = new URL('@/core/workers/waveform.worker.ts', import.meta.url).href;
+  const workerUrl = new URL('../../../core/workers/waveform.worker.ts', import.meta.url).href;
   worker = new Worker(workerUrl, { type: 'module' });
 
   // 캔버스 제어권 워커로 이전

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
-import workerUrl from '../../../core/workers/waveform.worker.ts?worker&url';
+import WaveformWorker from '../../../core/workers/waveform.worker.ts?worker';
 
 const props = defineProps<{
   clip: ClipUIState;
@@ -65,7 +65,7 @@ onMounted(async () => {
   await nextTick();
   if (!canvasRef.value) return;
 
-  worker = new Worker(workerUrl, { type: 'module' });
+  worker = new WaveformWorker();
 
   // 캔버스 제어권 워커로 이전
   const offscreenCanvas = canvasRef.value.transferControlToOffscreen();

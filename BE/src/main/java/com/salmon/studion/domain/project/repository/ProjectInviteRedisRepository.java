@@ -16,8 +16,8 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class ProjectInviteRedisRepository {
 
-    private static final String INVITE_CODE_KEY = "project:invite:code:%s";     // invite:code:{inviteCode}
-    private static final String ACTIVE_INVITE_KEY = "invite:project:%d}:code";  // invite:project:{projectId}:code
+    private static final String INVITE_CODE_KEY = "invite:code:%s";     // invite:code:{inviteCode}
+    private static final String ACTIVE_INVITE_KEY = "invite:project:%d:code";  // invite:project:{projectId}:code
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;

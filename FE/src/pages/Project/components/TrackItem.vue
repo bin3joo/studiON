@@ -983,14 +983,25 @@ const onWorkAreaMouseLeave = () => {
             @pointercancel.stop="onResizePointerUp"
           ></div>
 
-          <!-- 이름표 (마스터에선 숨김) -->
-          <!-- 잠금 표시 아이콘 -->
+          <!-- 반복되는 반투명 잠금 배경 패턴 -->
+          <div 
+            v-if="clip.isLocked && !isMaster"
+            class="absolute inset-0 z-20 flex items-center justify-evenly overflow-hidden pointer-events-none bg-red-500/10"
+          >
+            <Lock 
+              v-for="i in Math.max(1, Math.ceil(clip.duration / 2))" 
+              :key="'lock-pattern-'+i"
+              class="h-10 w-10 text-white/20 shrink-0" 
+            />
+          </div>
+
+          <!-- 우측 상단 잠금 표시 아이콘 (진하고 명확하게 강조) -->
           <div 
             v-if="clip.isLocked && !isMaster" 
-            class="absolute right-1 top-1 z-30 text-white drop-shadow-md"
-            title="잠긴 클립 (이동 및 수정 불가)"
+            class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-red-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
+            title="다른 사용자가 편집 중입니다 (이동 및 수정 불가)"
           >
-            <Lock class="h-3 w-3 opacity-80" />
+            <Lock class="h-3 w-3" />
           </div>
           <div 
             v-if="!isMaster"

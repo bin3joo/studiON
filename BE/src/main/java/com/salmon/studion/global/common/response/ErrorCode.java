@@ -67,7 +67,7 @@ public enum ErrorCode {
     AI_FASTAPI_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "AI_002", "AI 서버 작업 대기 시간이 초과되었습니다."),
     AI_JOB_ALREADY_EXISTS(HttpStatus.CONFLICT, "AI_003", "이미 존재하는 AI job 입니다."),
     AI_JOB_NOT_FOUND(HttpStatus.NOT_FOUND, "AI_004", "AI job을 찾을 수 없습니다."),
-    AI_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "AI_005", "AI 서버 응답 형식이 올바르지 않습니다.");
+    AI_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "AI_005", "AI 서버 응답 형식이 올바르지 않습니다."),
 
     // EQ EQ_000
     TRACK_EQ_NOT_FOUND(HttpStatus.NOT_FOUND, "EQ_001", "해당 track eq를 찾을 수 없습니다.");

@@ -84,4 +84,6 @@ app:
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
 
 ai:
-  server-url: ${AI_SERVER_URL}
+  fastapi:
+    base-url: ${FASTAPI_URL:http://localhost:8000/api/v1}
+    timeout-seconds: 5

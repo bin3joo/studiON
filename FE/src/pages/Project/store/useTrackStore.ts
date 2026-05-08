@@ -165,29 +165,35 @@ export const useTrackStore = defineStore('track', () => {
         // 이미 그려져있으면 무시 (Optimistic UI 중복 방지)
         if (trackList.value.some(t => t.trackId === data.trackId)) return;
 
-        const newTrack: TrackUIState = {
-            trackId: data.trackId,
-            name: data.name,
-            type: data.type.toLowerCase(),
-            preTrackId: data.preTrackId,
-            postTrackId: data.postTrackId,
-            isMuted: data.isMuted,
-            isSoloed: data.isSoloed,
-            volume: data.volume,
-            pan: data.pan,
-            clips: [],
-            height: 100,
-            isSelected: false
-        };
-        trackList.value.push(newTrack);
+        try {
+            const newTrack: TrackUIState = {
+                trackId: data.trackId,
+                name: data.name || `트랙 ${trackList.value.length + 1}`,
+                type: (data.type || 'audio').toLowerCase(),
+                preTrackId: data.preTrackId || null,
+                postTrackId: data.postTrackId || null,
+                isMuted: data.isMuted || false,
+                isSoloed: data.isSoloed || false,
+                volume: data.volume ?? 0,
+                pan: data.pan ?? 0,
+                clips: [],
+                height: 100,
+                isSelected: false
+            };
+            
+            trackList.value.push(newTrack);
+            console.log(`[TRACK_ADD] 화면에 트랙 렌더링 성공! 현재 총 트랙 수: ${trackList.value.length}`);
 
-        const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
-        const vol = new Tone.Volume(newTrack.volume).connect(panner);
-        panner.channelCount = 2; panner.channelCountMode = "explicit";
-        vol.channelCount = 2; vol.channelCountMode = "explicit";
+            const panner = new Tone.Panner((newTrack.pan) / 100).connect(masterVolume);
+            const vol = new Tone.Volume(newTrack.volume).connect(panner);
+            panner.channelCount = 2; panner.channelCountMode = "explicit";
+            vol.channelCount = 2; vol.channelCountMode = "explicit";
 
-        trackVolumes.set(newTrack.trackId, vol);
-        trackPanners.set(newTrack.trackId, panner);
+            trackVolumes.set(newTrack.trackId, vol);
+            trackPanners.set(newTrack.trackId, panner);
+        } catch (error) {
+            console.error('[TRACK_ADD] 프론트엔드 트랙 추가 중 에러 발생:', error);
+        }
     });
 
     socketService.subscribe('TRACK_DELETE', (data) => {

@@ -28,7 +28,7 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             }
         )
 
-    selected_region_id = str(selected_region["id"])
+    selected_region_id = int(selected_region["id"])
     preserve_clip_id = state.get("preserve_clip_id")
     if preserve_clip_id is None:
         return fail_workflow(
@@ -167,7 +167,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             job_id=state["job_id"],
             artifact_type="execution_plan",
             payload={
-                "selectedRegionId": str(selected_region["id"]),
+                "selectedRegionId": int(selected_region["id"]),
                 "issueType": selected_region.get("issue_type"),
                 "preserveClipId": state.get("preserve_clip_id"),
                 "planPayload": deepcopy(plan_payload),
@@ -247,7 +247,7 @@ def _normalize_plan_payload(
     candidate = deepcopy(plan_payload.get("candidate") or {})
     action = deepcopy(candidate.get("action") or {})
 
-    selected_region_id = str(region["id"])
+    selected_region_id = int(region["id"])
     plan_payload["selectedRegionId"] = selected_region_id
     plan_payload["preserveClipId"] = preserve_clip_id
     plan_payload["userFeedbackMessage"] = state.get("user_feedback_message")

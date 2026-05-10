@@ -50,7 +50,7 @@ class WorkflowRunRequest(BaseModel):
     )
     validator_mode: str = "PASS"
     critic_mode: str = "PASS"
-    selected_region_id: str | None = None
+    selected_region_id: int | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
 

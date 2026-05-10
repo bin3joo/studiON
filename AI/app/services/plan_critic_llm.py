@@ -26,7 +26,7 @@ class PlanCriticLLMClient(Protocol):
     def review_plan(
         self,
         *,
-        selected_region_id: str,
+        selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
         region: dict[str, object],
@@ -57,7 +57,7 @@ class HTTPPlanCriticLLMClient:
     def review_plan(
         self,
         *,
-        selected_region_id: str,
+        selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
         region: dict[str, object],

@@ -386,6 +386,7 @@ const hoveredTrackId = ref<string | null>(null)
     author: data.author.nickname,
     content: data.content,
     color: '#d93ce6',
+    profileImageUrl: data.author.profileImgUrl,
   }
 
   if (target) {

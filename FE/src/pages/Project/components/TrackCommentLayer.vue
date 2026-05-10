@@ -1,10 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
 import { SmilePlus, ArrowUpCircle, X, Check, Trash2 } from 'lucide-vue-next'
-import type { TrackMeasureCommentGroup } from '../types/comment.types'
+import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
+import type { TrackMeasureCommentGroup, TimelineComment } from '../types/comment.types'
 import { useTrackStore } from '../store/useTrackStore';
 
 const trackStore = useTrackStore();
+const authStore = useAuthStore()
+
+const currentUserProfileImageUrl = computed(() => {
+  if (!authStore.accessToken) return null
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
+    return payload.profileImgUrl || null
+  } catch(e) {
+    return null
+  }
+})
 
 type Placement = 'top' | 'bottom'
 
@@ -356,11 +368,17 @@ function parseMentions(content: string) {
         @mousedown.stop.prevent="openCommentCluster(cluster, $event)"
       >
         <template v-if="cluster.items.length === 1">
-          <div class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: getAuthorColor(cluster.items[0].group.comments[0]?.author || '') }"></div>
+          <div class="flex h-[18px] w-[18px] overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: cluster.items[0].group.comments[0]?.profileImageUrl ? 'transparent' : getAuthorColor(cluster.items[0].group.comments[0]?.author || '') }">
+            <img v-if="cluster.items[0].group.comments[0]?.profileImageUrl" :src="cluster.items[0].group.comments[0]?.profileImageUrl || undefined" class="h-full w-full object-cover" />
+            <span v-else class="text-[8px] font-bold text-white/90">{{ cluster.items[0].group.comments[0]?.author?.slice(0, 2) || '' }}</span>
+          </div>
         </template>
         <template v-else>
           <div class="flex items-center gap-1">
-            <div class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: getAuthorColor(cluster.items[0].group.comments[0]?.author || '') }"></div>
+            <div class="flex h-[18px] w-[18px] overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: cluster.items[0].group.comments[0]?.profileImageUrl ? 'transparent' : getAuthorColor(cluster.items[0].group.comments[0]?.author || '') }">
+              <img v-if="cluster.items[0].group.comments[0]?.profileImageUrl" :src="cluster.items[0].group.comments[0]?.profileImageUrl || undefined" class="h-full w-full object-cover" />
+              <span v-else class="text-[8px] font-bold text-white/90">{{ cluster.items[0].group.comments[0]?.author?.slice(0, 2) || '' }}</span>
+            </div>
             <span class="text-[10px] font-bold text-white">{{ cluster.items.length }}</span>
           </div>
         </template>
@@ -406,7 +424,10 @@ function parseMentions(content: string) {
         @mouseenter="isButtonHovered = true"
         @mouseleave="onButtonMouseLeave"
       >
-        <div class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: getAuthorColor(getPreviewComment(activeCellLocation)?.author || '') }"></div>
+        <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: getPreviewComment(activeCellLocation)?.profileImageUrl ? 'transparent' : getAuthorColor(getPreviewComment(activeCellLocation)?.author || '') }">
+          <img v-if="getPreviewComment(activeCellLocation)?.profileImageUrl" :src="getPreviewComment(activeCellLocation)?.profileImageUrl || undefined" class="h-full w-full object-cover" />
+          <span v-else class="text-[9px] font-bold text-white/90">{{ getPreviewComment(activeCellLocation)?.author?.slice(0, 2) || '' }}</span>
+        </div>
         <div class="shrink-0 text-[11px] font-medium text-white/60">
           {{ getPreviewComment(activeCellLocation)?.author }}
         </div>
@@ -418,7 +439,7 @@ function parseMentions(content: string) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="expandedMeasure !== null"
-        class="pointer-events-auto absolute z-[120] w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl"
+        class="pointer-events-auto absolute z-120 w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl"
         :class="[
           expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]',
           getCommentGroup(expandedMeasure) ? 'p-3' : 'px-2.5 py-1.5'
@@ -430,12 +451,15 @@ function parseMentions(content: string) {
         <!-- 말풍선 꼬리 (Arrow) -->
         <div 
           class="absolute left-1/2 -translate-x-1/2 h-3.5 w-3.5 rotate-45 border-white/20 bg-[#1c1c1c]"
-          :class="expandedPlacement === 'top' ? '-bottom-[7.5px] border-b border-r' : '-top-[7.5px] border-t border-l'"
+          :class="expandedPlacement === 'top' ? 'bottom-[-7.5px] border-b border-r' : 'top-[-7.5px] border-t border-l'"
         ></div>
 
         <!-- 새 댓글 달기 (Empty State) -->
         <div v-if="!getCommentGroup(expandedMeasure)" class="relative z-10 flex items-center gap-2">
-          <div class="h-2.5 w-2.5 shrink-0 rounded-full bg-[#FF3DCB]"></div>
+          <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
+            <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
+            <span v-else class="text-[9px] font-bold text-white/90">나</span>
+          </div>
           <input
             v-model="draftComment"
             type="text"
@@ -471,7 +495,10 @@ function parseMentions(content: string) {
             >
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <div class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: comment.color || getAuthorColor(comment.author) }"></div>
+                  <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: comment.profileImageUrl ? 'transparent' : (comment.color || getAuthorColor(comment.author)) }">
+                    <img v-if="comment.profileImageUrl" :src="comment.profileImageUrl || undefined" class="h-full w-full object-cover" />
+                    <span v-else class="text-[9px] font-bold text-white/90">{{ comment.author.slice(0, 2) }}</span>
+                  </div>
                   <span class="text-[11px] font-medium text-white/60">{{ comment.author }}</span>
                 </div>
                 <div class="flex items-center gap-1">
@@ -514,7 +541,10 @@ function parseMentions(content: string) {
 
           <!-- 댓글 입력 줄 -->
           <div class="mt-3 flex items-center gap-2">
-            <div class="h-2.5 w-2.5 shrink-0 rounded-full bg-[#FF3DCB]"></div>
+            <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
+              <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
+              <span v-else class="text-[9px] font-bold text-white/90">나</span>
+            </div>
             <div class="flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
               <input
                 v-model="draftComment"

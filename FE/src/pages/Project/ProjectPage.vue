@@ -73,7 +73,7 @@ const handleWheel = (e: WheelEvent) => {
 //스페이스바 단축키 핸들러
 const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // 입력창(input, textarea)에 포커스가 있을 때는 단축키를 무시해야 합니다. (이름/볼륨 수정 중 스페이스바 띄어쓰기 보호)
-  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if ((e.target instanceof HTMLInputElement && e.target.type !== 'range') || e.target instanceof HTMLTextAreaElement) return;
 
   // 대소문자 상관없이 순수하게 C키만 눌렀을 때 코멘트 모드 전환
   if(e.code === 'KeyC' && !e.ctrlKey && !e.metaKey) {
@@ -386,6 +386,7 @@ const hoveredTrackId = ref<string | null>(null)
     author: data.author.nickname,
     content: data.content,
     color: '#d93ce6',
+    profileImageUrl: data.author.profileImgUrl,
   }
 
   if (target) {
@@ -630,6 +631,73 @@ const unlockAudioEngine = async () => {
   window.removeEventListener('keydown', unlockAudioEngine);
 }
 
+// 툴바 액션 핸들러
+function handleActionCopy() {
+  if (trackStore.selectedClip) {
+    trackStore.copyClip(trackStore.selectedClip);
+  }
+}
+
+function handleActionCut() {
+  if (trackStore.selectedClip && trackStore.selectedTrackId) {
+    trackStore.cutClip(trackStore.selectedClip, trackStore.selectedTrackId);
+    trackStore.deselectAll();
+  }
+}
+
+function handleActionPaste() {
+  if (trackStore.clipboardClip) {
+    let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
+    let targetBar = trackStore.playheadPosition;
+
+    if (targetTrackId) {
+      trackStore.pasteClip(targetTrackId, targetBar);
+    }
+  }
+}
+
+function handleActionDuplicate() {
+  if (trackStore.selectedClip && trackStore.selectedTrackId) {
+    trackStore.duplicateClip(trackStore.selectedClip, trackStore.selectedTrackId);
+  }
+}
+
+function handleActionSplit() {
+  const currentBar = trackStore.playheadPosition;
+
+  if (trackStore.selectedClip && trackStore.selectedTrackId) {
+    trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
+  } else {
+    let hasSplit = false;
+    trackStore.trackList.forEach(track => {
+      const clipUnderPlayhead = track.clips.find(c => 
+        currentBar > c.start && currentBar < c.start + c.duration
+      );
+      if (clipUnderPlayhead) {
+        trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
+        hasSplit = true;
+      }
+    });
+
+    if (!hasSplit) {
+      console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
+    }
+  }
+}
+
+function handleActionDelete() {
+  if (trackStore.selectedClip && trackStore.selectedTrackId) {
+    trackStore.deleteClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
+    trackStore.deselectAll();
+  } else if (trackStore.selectedTrackId) {
+    trackStore.deleteTrack(trackStore.selectedTrackId);
+  }
+}
+
+function handleActionAddTrack() {
+  trackStore.addTrack();
+}
+
 </script>
 
 <template>
@@ -652,9 +720,16 @@ const unlockAudioEngine = async () => {
 />
     <!-- 재생 컨트롤러 컴포넌트 추가 -->
     <PlayController
-  :ai-analyzing="aiAnalyzing"
-  @run-ai-analysis="runAiAnalysis"
-/>
+      :ai-analyzing="aiAnalyzing"
+      @run-ai-analysis="runAiAnalysis"
+      @action-copy="handleActionCopy"
+      @action-cut="handleActionCut"
+      @action-paste="handleActionPaste"
+      @action-duplicate="handleActionDuplicate"
+      @action-split="handleActionSplit"
+      @action-delete="handleActionDelete"
+      @action-add-track="handleActionAddTrack"
+    />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
     <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
 

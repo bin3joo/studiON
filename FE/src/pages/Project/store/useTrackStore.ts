@@ -379,12 +379,34 @@ export const useTrackStore = defineStore('track', () => {
         for (const t of trackList.value) {
             const clip = t.clips.find(c => c.clipId === data.clipId);
             if (clip) {
-                clip.start = data.after.startBar;
-                clip.duration = data.after.length;
-                // 🚨 보완: 왼쪽을 잘랐다면 실제 오디오 시작점(Trim)도 갱신해야 합니다.
-                if (data.after.audioStartMs !== undefined) {
-                    clip.audioStartMs = data.after.audioStartMs;
+                const beforeStart = data.before.startBar;
+                const beforeDuration = data.before.length;
+                const afterStart = data.after.startBar;
+                const afterDuration = data.after.length;
+
+                console.log(`[CLIP_RESIZE 수신] clipId: ${data.clipId}`);
+                console.log(`  - before: start=${beforeStart}, duration=${beforeDuration}`);
+                console.log(`  - after: start=${afterStart}, duration=${afterDuration}`);
+                console.log(`  - 현재 로컬 상태: start=${clip.start}, duration=${clip.duration}`);
+
+                // 내가 보낸 리사이즈 요청이라 이미 로컬 상태가 갱신되어 있다면 이중 적용(파형 밀림 현상) 방지
+                if (Math.abs(clip.start - afterStart) < 0.0001 && Math.abs(clip.duration - afterDuration) < 0.0001) {
+                    console.log(`  => (스킵) 이미 로컬 상태가 최신입니다 (내가 보낸 요청).`);
+                    break;
                 }
+
+                // 백엔드와 동일한 공식으로 프론트에서 계산하여 동기화
+                const msPerBar = secondsPerBar.value * 1000;
+                const newAudioStartMs = Math.round(clip.audioStartMs + (afterStart - beforeStart) * msPerBar);
+                const newAudioDurationMs = Math.round(afterDuration * msPerBar);
+
+                console.log(`  => (적용) 오디오 갱신: audioStartMs ${clip.audioStartMs} -> ${newAudioStartMs}, audioDurationMs ${clip.audioDurationMs} -> ${newAudioDurationMs}`);
+
+                clip.start = afterStart;
+                clip.duration = afterDuration;
+                clip.audioStartMs = newAudioStartMs;
+                clip.audioDurationMs = newAudioDurationMs;
+
                 resyncClip(clip.clipId, clip.start);
                 break; // 찾았으니 탈출
             }

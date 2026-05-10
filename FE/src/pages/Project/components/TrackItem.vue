@@ -679,12 +679,25 @@ const finishEditPan = () => {
   trackStore.setTrackPan(props.track.trackId, val);
 };
 
-// ==========================================
-// 트랙 이름 수정 로직
-// ==========================================
 const isEditingName = ref(false);
 const nameInputRef = ref<HTMLInputElement | null>(null);
 const editNameValue = ref('');
+const isDragDisabled = ref(false);
+const isCommentExpanded = ref(false);
+
+const handleMouseDown = (e: MouseEvent) => {
+  const target = e.target as HTMLElement;
+  // 볼륨/팬 슬라이더(input), 각종 버튼, 텍스트 에디터 등을 클릭했을 때는 트랙 전체 드래그 속성을 즉시 끕니다.
+  if (target.closest('input, button, .interactive-control, [role="slider"]')) {
+    isDragDisabled.value = true;
+  } else {
+    isDragDisabled.value = false;
+  }
+};
+
+const handleDragStart = (e: DragEvent) => {
+  emit('dragstart', e);
+};
 
 const startEditName = async () => {
   if (props.isMaster) return; // 마스터 트랙은 수정 금지
@@ -734,14 +747,13 @@ const emit = defineEmits<{
 const onWorkAreaMouseMove = (e: MouseEvent) => {
   if(props.isMaster) return;
 
-  //현재 스크롤 위치와 X 좌표를 계산 
-  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
-  const scrollLeft = scrollContainer ?  scrollContainer.scrollLeft : 0;
-  const absoluteX = e.clientX - 224 + scrollLeft; //224는 왼쪽 컨트롤 패널 너비
+  const target = e.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  const absoluteX = e.clientX - rect.left;
 
   //마우스 위치를 바탕으로 정확한 '마디(Measure)' 역산
   const rawLocation = (absoluteX / trackStore.pixelPerBar) + 1;
-  const snappedLocation = Math.floor((rawLocation - 1) * trackStore.subDivision) / trackStore.subDivision + 1;
+  const snappedLocation = Math.round((rawLocation - 1) * trackStore.subDivision) / trackStore.subDivision + 1;
 
   // 코멘트 레이어를 위해 현재 마우스 위치 발송
   emit('hover-measure', {
@@ -771,63 +783,76 @@ const onWorkAreaMouseLeave = () => {
     :aria-label="`트랙: ${track.name}`" 
     class="flex border-b border-border group w-max min-w-full" 
     :data-track-id="track.trackId" 
-    :class="{ 'relative z-50': track.clips.some(c => c.isDragging) }"
+    :class="[
+      isCommentExpanded ? 'relative z-[100]' :
+      track.clips.some(c => c.isDragging) ? 'relative z-50' :
+      (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
+    ]"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828] cursor-pointer"
-      :class="track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border'"
+      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828]"
+      :class="[
+        track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border',
+        isMaster ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+      ]"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
       }"
+      :draggable="!isMaster && !isDragDisabled"
+      @mousedown.capture="handleMouseDown"
+      @dragstart="handleDragStart"
+      @dragend="emit('dragend', $event)"
       @pointerdown.stop="trackStore.selectTrack(track.trackId)"
     >
     <!--빈틈 막는거-->
     <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
-      <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
+    <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
       <div class="flex items-center justify-between gap-2">
-        <div 
-          class="flex min-w-0 flex-1 items-center gap-1.5 cursor-grab active:cursor-grabbing"
-          :draggable="!isMaster"
-          @dragstart="emit('dragstart', $event)"
-          @dragend="emit('dragend', $event)"
-        >
-         <!-- 수정 모드: 인풋창 -->
-          <input
-            v-if="isEditingName"
-            ref="nameInputRef"
-            type="text"
-            v-model="editNameValue"
-            @blur="finishEditName"
-            @keydown.enter="finishEditName"
-            @keydown.esc="isEditingName = false"
-            @keydown.delete.stop
-            @mousedown.stop 
-            class="w-full truncate bg-transparent text-sm font-bold tracking-wide text-white outline-none border-b border-primary/50"
-          />
-          <!-- 일반 모드: 텍스트 -->
-          <span 
-            v-else 
-            class="truncate text-sm font-bold tracking-wide text-white"
-            @dblclick="!isMaster && startEditName()"
-          >
-            {{ track.name }}
-          </span>
+        <div class="flex min-w-0 flex-1 items-center gap-1.5">
+          <!-- 드래그 핸들 (시각적 힌트) -->
+          <GripVertical v-if="!isMaster" class="h-3.5 w-3.5 shrink-0 text-white/30 pointer-events-none" />
           
-          <!-- 연필 아이콘 -->
-          <button 
-            v-if="!isMaster && !isEditingName" 
-            aria-label="트랙 이름 수정" 
-            class="shrink-0 text-muted-foreground transition hover:text-white"
-            @click.stop="startEditName"
-            @mousedown.stop
-          >
-            <Pencil class="h-3 w-3" />
-          </button>
+          <div class="flex min-w-0 flex-1 items-center gap-1.5">
+           <!-- 수정 모드: 인풋창 -->
+            <input
+              v-if="isEditingName"
+              ref="nameInputRef"
+              type="text"
+              v-model="editNameValue"
+              @blur="finishEditName"
+              @keydown.enter="finishEditName"
+              @keydown.esc="isEditingName = false"
+              @keydown.delete.stop
+              @mousedown.stop 
+              @dragstart.prevent.stop
+              class="w-full truncate bg-transparent text-sm font-bold tracking-wide text-white outline-none border-b border-primary/50"
+            />
+            <!-- 일반 모드: 텍스트 -->
+            <span 
+              v-else 
+              class="truncate text-sm font-bold tracking-wide text-white interactive-control"
+              @dblclick="!isMaster && startEditName()"
+              @mousedown.stop
+            >
+              {{ track.name }}
+            </span>
+            
+            <!-- 연필 아이콘 -->
+            <button 
+              v-if="!isMaster && !isEditingName" 
+              aria-label="트랙 이름 수정" 
+              class="shrink-0 text-muted-foreground transition hover:text-white"
+              @click.stop="startEditName"
+              @mousedown.stop
+            >
+              <Pencil class="h-3 w-3" />
+            </button>
+          </div>
         </div>
 
-       <div class="flex shrink-0 items-center gap-1">
+       <div class="flex shrink-0 items-center gap-1" @mousedown.stop>
           <!-- 뮤트 버튼 -->
           <button 
             v-if="!isMaster"

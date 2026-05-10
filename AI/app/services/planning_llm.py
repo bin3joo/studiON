@@ -37,7 +37,7 @@ class PlanningLLMClient(Protocol):
     def generate_plan(
         self,
         *,
-        selected_region_id: str,
+        selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
         region: dict[str, object],
@@ -64,7 +64,7 @@ class HTTPPlanningLLMClient:
     def generate_plan(
         self,
         *,
-        selected_region_id: str,
+        selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
         region: dict[str, object],

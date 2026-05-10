@@ -66,14 +66,14 @@ class WorkflowState(TypedDict, total=False):
     track_role_confidences: dict[int, float]
     issue_types: list[IssueType]
     detected_issues: list[IssueType]
-    analysis_region_ids: list[str]
+    analysis_region_ids: list[int]
     analysis_regions: list[dict]
     master_clipping_candidates: list[dict]
     master_clipping_contributors: list[dict]
     promoted_track_clipping_regions: list[dict]
-    ranked_candidate_ids: list[str]
-    ranking_scores: dict[str, float]
-    selected_region_id: str | None
+    ranked_candidate_ids: list[int]
+    ranking_scores: dict[int, float]
+    selected_region_id: int | None
     preserve_clip_id: int | None
     user_feedback_message: str | None
     clip_feature_artifact_id: str | None

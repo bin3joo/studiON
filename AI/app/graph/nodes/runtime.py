@@ -103,11 +103,7 @@ def auto_fix_sibilance(state: WorkflowState) -> WorkflowState:
 
     if sibilance_fix_applied:
         recipes = [_build_sibilance_fix_recipe(region) for region in sibilance_regions]
-        region_ids = [
-            str(region.get("id"))
-            for region in sibilance_regions
-            if region.get("id") is not None
-        ]
+        region_ids = [int(region["id"]) for region in sibilance_regions if region.get("id") is not None]
         track_ids = sorted(
             {
                 int(region.get("track_id") or 0)
@@ -187,7 +183,7 @@ def log_sibilance_fix(state: WorkflowState) -> WorkflowState:
                     "recipeArtifactId": state.get("auto_fix_recipe_artifact_id"),
                     "applied": True,
                     "regionIds": [
-                        str(region.get("id"))
+                        int(region["id"])
                         for region in sibilance_regions
                         if region.get("id") is not None
                     ],
@@ -629,10 +625,10 @@ def _entry_failure(
 def _validate_plan_input_selection(state: WorkflowState) -> tuple[str, str] | None:
     selected_region_id = state.get("selected_region_id")
     preserve_clip_id = state.get("preserve_clip_id")
-    ranked_candidate_ids = [str(region_id) for region_id in state.get("ranked_candidate_ids", [])]
+    ranked_candidate_ids = [int(region_id) for region_id in state.get("ranked_candidate_ids", [])]
     if selected_region_id is None or preserve_clip_id is None:
         return None
-    if str(selected_region_id) not in ranked_candidate_ids:
+    if int(selected_region_id) not in ranked_candidate_ids:
         return (
             "INVALID_SELECTED_REGION",
             "selected_region_id must reference a ranked user-action candidate.",
@@ -641,7 +637,7 @@ def _validate_plan_input_selection(state: WorkflowState) -> tuple[str, str] | No
         (
             region
             for region in state.get("analysis_regions", [])
-            if str(region.get("id")) == str(selected_region_id)
+            if int(region["id"]) == int(selected_region_id)
         ),
         None,
     )
@@ -688,7 +684,7 @@ def _resolve_preview_focus_region(state: WorkflowState) -> dict[str, object]:
             "프리뷰 렌더링에는 선택된 문제 구간 정보가 필요합니다.",
         )
     for region in state.get("analysis_regions", []):
-        if str(region.get("id")) == str(selected_region_id):
+        if int(region["id"]) == int(selected_region_id):
             return region
     raise PreviewRenderError(
         "PREVIEW_REGION_NOT_FOUND",
@@ -759,7 +755,7 @@ def _build_non_user_issue_recipe_groups(state: WorkflowState) -> list[dict[str, 
             {
                 "issueType": issue_type,
                 "regionIds": [
-                    str(region.get("id")) for region in regions if region.get("id") is not None
+                    int(region["id"]) for region in regions if region.get("id") is not None
                 ],
                 "trackIds": sorted(
                     {

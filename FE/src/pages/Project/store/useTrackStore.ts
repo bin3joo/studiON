@@ -26,6 +26,8 @@ export const useTrackStore = defineStore('track', () => {
     const trackPanners = new Map<number, Tone.Panner>();   // 트랙별 패닝 노드
     const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
     const myLockedClips = new Set<number>(); // 내가 직접 잠근(편집 중인) 클립 ID 목록
+    const pendingDuplicateOriginalClipIds = new Set<number>(); // 내가 복제한 클립의 원본 ID 목록 (백엔드 강제 락 해제용)
+    const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
@@ -420,15 +422,11 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
-    // 삭제된 클립들을 임시 보관하는 캐시 (다른 사람이 잘라내기 한 클립을 붙여넣기 할 때 복원하기 위함)
-    const deletedClipsCache = new Map<number, ClipUIState>();
-
     socketService.subscribe('CLIP_DELETE', (data) => {
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
             if (index !== -1) {
-                const [deletedClip] = t.clips.splice(index, 1);
-                deletedClipsCache.set(deletedClip.clipId, deletedClip);
+                t.clips.splice(index, 1);
                 break; // 찾았으니 탈출
             }
         }
@@ -441,8 +439,9 @@ export const useTrackStore = defineStore('track', () => {
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
             if (index !== -1) {
-                const [deletedClip] = t.clips.splice(index, 1);
-                deletedClipsCache.set(deletedClip.clipId, deletedClip);
+                // 잘라낸 원본 클립을 지우기 전에 임시 보관소에 깊은 복사로 저장 (다른 유저가 붙여넣을 때 원본 데이터를 참조하기 위함)
+                cutClipsMap.set(data.clipId, JSON.parse(JSON.stringify(t.clips[index])));
+                t.clips.splice(index, 1);
                 break;
             }
         }
@@ -458,14 +457,13 @@ export const useTrackStore = defineStore('track', () => {
             const found = t.clips.find(c => c.clipId === data.sourceClipId);
             if (found) { originalClip = found; break; }
         }
-        // 내가 직접 잘라내기(Cut) 한 경우 내 로컬 클립보드에서 찾습니다.
+        // 잘라내기(Cut)의 경우 화면에서 이미 삭제되었으므로 내 로컬 클립보드에서 찾습니다.
         if (!originalClip && clipboardClip.value && clipboardClip.value.clipId === data.sourceClipId) {
             originalClip = clipboardClip.value;
         }
-        
-        // 다른 사람이 잘라내기(Cut) 한 경우, 내 화면에선 이미 지워졌으므로 메모리 캐시에서 찾습니다.
-        if (!originalClip && deletedClipsCache.has(data.sourceClipId)) {
-            originalClip = deletedClipsCache.get(data.sourceClipId) || null;
+        // 내가 자른게 아니고 다른 사람이 자른 클립이라면, 임시 보관소(cutClipsMap)에서 찾습니다.
+        if (!originalClip && cutClipsMap.has(data.sourceClipId)) {
+            originalClip = cutClipsMap.get(data.sourceClipId) || null;
         }
 
         if (!originalClip) {
@@ -496,10 +494,15 @@ export const useTrackStore = defineStore('track', () => {
             isInitiator = true;
         }
         resolveClipOverlap(pastedClip, targetTrack, isInitiator);
+
+        // 화면 렌더링이 무사히 끝난 후 잘라내기 클립보드 비우기
+        if (isCutAction.value) {
+            clipboardClip.value = null;
+            isCutAction.value = false;
+        }
     });
     
     // 내가 복제/붙여넣기 요청한 건인지 확인하기 위한 로컬 상태
-    const pendingDuplicateClipIds = new Set<number>();
     const pendingPasteCount = ref(0);
 
     // 3. 클립 복제 수신
@@ -525,11 +528,16 @@ export const useTrackStore = defineStore('track', () => {
         // [원복] 오디오 플레이어 미리 로드 (끊김 방지)
         loadClipPlayer(duplicatedClip, data.targetTrackId);
 
-        // 내가 복제 요청한 클립이라면, 백엔드가 강제로 걸어둔 새 클립의 Lock을 해제합니다.
-        const isInitiator = pendingDuplicateClipIds.has(data.clipId);
+        // 내가 복제 요청을 보낸 클립이라면 백엔드가 새 클립에 강제로 건 락을 해제
+        const isInitiator = pendingDuplicateOriginalClipIds.has(data.clipId);
         if (isInitiator) {
-            pendingDuplicateClipIds.delete(data.clipId);
-            unlockClip(data.newClipId, data.targetTrackId);
+            pendingDuplicateOriginalClipIds.delete(data.clipId);
+            // 소켓 통신을 통해 새 클립(newClipId)의 잠금을 즉시 해제 요청
+            socketService.publish('CLIP_LOCK', {
+                projectId: projectInfo.value.projectId,
+                clipId: data.newClipId,
+                isLocked: false
+            });
         }
 
         // 겹침 방지: 생성된 클립이 기존 클립과 겹치면 끝나는 위치 바로 뒤로 밀어냅니다.
@@ -763,7 +771,7 @@ export const useTrackStore = defineStore('track', () => {
         console.log(`[통신] 백엔드에 클립 복제(CLIP_DUPLICATE) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clip.clipId, trackId);
-        pendingDuplicateClipIds.add(clip.clipId);
+        pendingDuplicateOriginalClipIds.add(clip.clipId);
         socketService.publish('CLIP_DUPLICATE', {
             projectId: projectInfo.value.projectId,
             clipId: clip.clipId

@@ -110,7 +110,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
         def generate_plan(
             self,
             *,
-            selected_region_id: str,
+            selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
             region: dict[str, object],
@@ -181,7 +181,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
         def review_plan(
             self,
             *,
-            selected_region_id: str,
+            selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
             region: dict[str, object],
@@ -388,14 +388,14 @@ def test_materialize_execution_plan_fails_before_internal_approval() -> None:
         project_id=20041,
         analysis_regions=[
             {
-                "id": "region-1",
+                "id": 1,
                 "issue_type": "clipping",
                 "start_ms": 0,
                 "end_ms": 400,
                 "affected_clip_ids": [1],
             }
         ],
-        selected_region_id="region-1",
+        selected_region_id=1,
         preserve_clip_id=1,
         plan_status="DRAFT",
         plan_payload={
@@ -466,7 +466,7 @@ def test_workflow_planning_agent_uses_llm_plan_payload_when_available(
         def generate_plan(
             self,
             *,
-            selected_region_id: str,
+            selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
             region: dict[str, object],
@@ -525,7 +525,7 @@ def test_workflow_planning_agent_fails_when_llm_call_fails(
         def generate_plan(
             self,
             *,
-            selected_region_id: str,
+            selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
             region: dict[str, object],
@@ -756,7 +756,7 @@ def test_render_preview_succeeds_without_audio_file_generation() -> None:
         build_workflow_initial_state(
             job_id=10019,
             project_id=20019,
-            selected_region_id="region-1",
+            selected_region_id=1,
             preview_id="10019-preview",
             suggestion_group_id="10019-group",
             plan_payload={
@@ -796,7 +796,7 @@ def test_render_preview_succeeds_without_audio_file_generation() -> None:
             },
             analysis_regions=[
                 {
-                    "id": "region-1",
+                    "id": 1,
                     "issue_type": "band_overlap",
                     "start_ms": 0,
                     "end_ms": 800,
@@ -982,7 +982,7 @@ def test_merge_analysis_keeps_all_regions_without_issue_cap() -> None:
     initial["clip_index"] = context.clip_index
     initial["analysis_regions"] = [
         {
-            "id": f"job-all-regions-band-overlap-region-{index}",
+            "id": index + 1,
             "issue_type": "band_overlap",
             "summary": "Detected likely masking conflict in low-mid body band.",
             "start_ms": 1000 + (index * 500),
@@ -1003,9 +1003,7 @@ def test_merge_analysis_keeps_all_regions_without_issue_cap() -> None:
     result = nodes.merge_analysis(initial)
 
     assert len(result["analysis_regions"]) == 5
-    assert [region["id"] for region in result["analysis_regions"]] == [
-        f"job-all-regions-band-overlap-region-{index}" for index in range(5)
-    ]
+    assert [region["id"] for region in result["analysis_regions"]] == [index + 1 for index in range(5)]
 
 
 def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
@@ -1016,7 +1014,7 @@ def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
     )
     initial["analysis_regions"] = [
         {
-            "id": "job-merge-dedup-clipping-region-1",
+            "id": 1,
             "issue_type": "clipping",
             "summary": "Lower score clipping region.",
             "start_ms": 1200,
@@ -1033,10 +1031,10 @@ def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-a"],
+            "affected_clip_ids": [101],
         },
         {
-            "id": "job-merge-dedup-clipping-region-2",
+            "id": 2,
             "issue_type": "clipping",
             "summary": "Higher score clipping region.",
             "start_ms": 1200,
@@ -1053,10 +1051,10 @@ def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-b"],
+            "affected_clip_ids": [102],
         },
         {
-            "id": "job-merge-dedup-band-overlap-region-1",
+            "id": 3,
             "issue_type": "band_overlap",
             "summary": "Separate issue should remain.",
             "start_ms": 1800,
@@ -1073,22 +1071,22 @@ def test_merge_analysis_keeps_highest_score_region_for_same_key() -> None:
             "window_count": 2,
             "measure_start": 1,
             "measure_end": 2,
-            "affected_clip_ids": ["clip-c", "clip-d"],
+            "affected_clip_ids": [103, 104],
         },
     ]
 
     result = nodes.merge_analysis(initial)
 
     assert [region["id"] for region in result["analysis_regions"]] == [
-        "job-merge-dedup-clipping-region-2",
-        "job-merge-dedup-band-overlap-region-1",
+        2,
+        3,
     ]
     assert result["detected_issues"] == ["clipping", "band_overlap"]
     assert result["analysis_region_ids"] == [
-        "job-merge-dedup-clipping-region-2",
-        "job-merge-dedup-band-overlap-region-1",
+        2,
+        3,
     ]
-    assert result["analysis_regions"][0]["affected_clip_ids"] == ["clip-b"]
+    assert result["analysis_regions"][0]["affected_clip_ids"] == [102]
 
 
 def test_merge_analysis_keeps_distinct_time_ranges() -> None:
@@ -1099,7 +1097,7 @@ def test_merge_analysis_keeps_distinct_time_ranges() -> None:
     )
     initial["analysis_regions"] = [
         {
-            "id": "job-merge-time-clipping-region-1",
+            "id": 11,
             "issue_type": "clipping",
             "summary": "Earlier clipping region.",
             "start_ms": 500,
@@ -1116,10 +1114,10 @@ def test_merge_analysis_keeps_distinct_time_ranges() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-1"],
+            "affected_clip_ids": [201],
         },
         {
-            "id": "job-merge-time-clipping-region-2",
+            "id": 12,
             "issue_type": "clipping",
             "summary": "Later clipping region.",
             "start_ms": 900,
@@ -1136,19 +1134,19 @@ def test_merge_analysis_keeps_distinct_time_ranges() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-2"],
+            "affected_clip_ids": [202],
         },
     ]
 
     result = nodes.merge_analysis(initial)
 
     assert [region["id"] for region in result["analysis_regions"]] == [
-        "job-merge-time-clipping-region-1",
-        "job-merge-time-clipping-region-2",
+        11,
+        12,
     ]
     assert result["analysis_region_ids"] == [
-        "job-merge-time-clipping-region-1",
-        "job-merge-time-clipping-region-2",
+        11,
+        12,
     ]
 
 
@@ -1160,7 +1158,7 @@ def test_merge_analysis_uses_score_as_third_sort_key() -> None:
     )
     initial["analysis_regions"] = [
         {
-            "id": "job-merge-sort-clipping-region-1",
+            "id": 21,
             "issue_type": "clipping",
             "summary": "Lower score duplicate ordering candidate.",
             "start_ms": 800,
@@ -1177,10 +1175,10 @@ def test_merge_analysis_uses_score_as_third_sort_key() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-1"],
+            "affected_clip_ids": [301],
         },
         {
-            "id": "job-merge-sort-clipping-region-2",
+            "id": 22,
             "issue_type": "clipping",
             "summary": "Higher score duplicate ordering candidate.",
             "start_ms": 800,
@@ -1197,15 +1195,15 @@ def test_merge_analysis_uses_score_as_third_sort_key() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-2"],
+            "affected_clip_ids": [302],
         },
     ]
 
     result = nodes.merge_analysis(initial)
 
     assert [region["id"] for region in result["analysis_regions"]] == [
-        "job-merge-sort-clipping-region-2",
-        "job-merge-sort-clipping-region-1",
+        22,
+        21,
     ]
 
 
@@ -1217,7 +1215,7 @@ def test_candidate_ranking_ignores_auto_fix_only_regions_for_user_candidates() -
     )
     initial["analysis_regions"] = [
         {
-            "id": "job-ranking-autofix-sibilance-region-1",
+            "id": 31,
             "issue_type": "sibilance",
             "summary": "Auto-fix only sibilance region.",
             "start_ms": 900,
@@ -1234,10 +1232,10 @@ def test_candidate_ranking_ignores_auto_fix_only_regions_for_user_candidates() -
             "window_count": 2,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-a"],
+            "affected_clip_ids": [401],
         },
         {
-            "id": "job-ranking-autofix-band-overlap-region-1",
+            "id": 32,
             "issue_type": "band_overlap",
             "summary": "User-facing overlap region.",
             "start_ms": 1000,
@@ -1254,16 +1252,14 @@ def test_candidate_ranking_ignores_auto_fix_only_regions_for_user_candidates() -
             "window_count": 2,
             "measure_start": 1,
             "measure_end": 2,
-            "affected_clip_ids": ["clip-b", "clip-c"],
+            "affected_clip_ids": [402, 403],
         },
     ]
 
     result = nodes.candidate_ranking(initial)
 
-    assert result["ranking_scores"]["job-ranking-autofix-sibilance-region-1"] > 0
-    assert result["ranked_candidate_ids"] == [
-        "job-ranking-autofix-band-overlap-region-1"
-    ]
+    assert result["ranking_scores"][31] > 0
+    assert result["ranked_candidate_ids"] == [32]
 
 
 def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
@@ -1274,7 +1270,7 @@ def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
     )
     initial["analysis_regions"] = [
         {
-            "id": "job-ranking-priority-band-overlap-region-1",
+            "id": 41,
             "issue_type": "band_overlap",
             "summary": "Strong overlap region.",
             "start_ms": 1400,
@@ -1291,10 +1287,10 @@ def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
             "window_count": 3,
             "measure_start": 1,
             "measure_end": 2,
-            "affected_clip_ids": ["clip-c", "clip-d"],
+            "affected_clip_ids": [501, 502],
         },
         {
-            "id": "job-ranking-priority-clipping-region-1",
+            "id": 42,
             "issue_type": "clipping",
             "summary": "Critical clipping should outrank overlap.",
             "start_ms": 1600,
@@ -1311,17 +1307,14 @@ def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-a"],
+            "affected_clip_ids": [503],
         },
     ]
 
     result = nodes.candidate_ranking(initial)
 
-    assert result["ranking_scores"]["job-ranking-priority-clipping-region-1"] > 0
-    assert result["ranked_candidate_ids"] == [
-        "job-ranking-priority-band-overlap-region-1",
-        "job-ranking-priority-clipping-region-1",
-    ]
+    assert result["ranking_scores"][42] > 0
+    assert result["ranked_candidate_ids"] == [41, 42]
 
 
 def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> None:
@@ -1332,7 +1325,7 @@ def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> Non
     )
     initial["analysis_regions"] = [
         {
-            "id": "job-ranking-tie-high-band-region-1",
+            "id": 51,
             "issue_type": "high_band_harshness",
             "summary": "Earlier high-band region.",
             "start_ms": 900,
@@ -1349,10 +1342,10 @@ def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> Non
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-a"],
+            "affected_clip_ids": [601],
         },
         {
-            "id": "job-ranking-tie-high-band-region-2",
+            "id": 52,
             "issue_type": "high_band_harshness",
             "summary": "Later but more severe high-band region.",
             "start_ms": 1200,
@@ -1369,10 +1362,10 @@ def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> Non
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-b"],
+            "affected_clip_ids": [602],
         },
         {
-            "id": "job-ranking-tie-high-band-region-3",
+            "id": 53,
             "issue_type": "high_band_harshness",
             "summary": "Same weighted score but earlier start.",
             "start_ms": 600,
@@ -1389,17 +1382,13 @@ def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> Non
             "window_count": 1,
             "measure_start": 1,
             "measure_end": 1,
-            "affected_clip_ids": ["clip-c"],
+            "affected_clip_ids": [603],
         },
     ]
 
     result = nodes.candidate_ranking(initial)
 
-    assert result["ranked_candidate_ids"] == [
-        "job-ranking-tie-high-band-region-3",
-        "job-ranking-tie-high-band-region-2",
-        "job-ranking-tie-high-band-region-1",
-    ]
+    assert result["ranked_candidate_ids"] == [53, 52, 51]
 
 
 def test_run_workflow_graph_derives_timeline_metadata_from_project_snapshot() -> None:

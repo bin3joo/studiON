@@ -49,7 +49,7 @@ def test_http_planning_llm_client_sends_gms_chat_completions_shape(
     )
 
     response = client.generate_plan(
-        selected_region_id="region-1",
+        selected_region_id=1,
         preserve_clip_id=10,
         user_feedback_message="keep vocal",
         region={"issue_type": "band_overlap", "start_ms": 1000, "end_ms": 2200},
@@ -96,7 +96,7 @@ def test_http_planning_llm_client_rejects_invalid_json_payload(
 
     with pytest.raises(PlanningLLMError) as exc_info:
         client.generate_plan(
-            selected_region_id="region-1",
+            selected_region_id=1,
             preserve_clip_id=10,
             user_feedback_message=None,
             region={"issue_type": "clipping", "start_ms": 1000, "end_ms": 2200},

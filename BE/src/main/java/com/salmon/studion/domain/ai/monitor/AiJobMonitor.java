@@ -2,12 +2,15 @@ package com.salmon.studion.domain.ai.monitor;
 
 import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.response.AiWorkflowStatusResponse;
+import com.salmon.studion.domain.ai.entity.AiAnalysisJob;
+import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.ai.websocket.AiJobEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.Map;
@@ -24,6 +27,7 @@ public class AiJobMonitor {
     private final FastApiClient fastApiClient;
     private final TaskScheduler taskScheduler;
     private final AiJobEventPublisher aiJobEventPublisher;
+    private final AiAnalysisJobRepository aiAnalysisJobRepository;
 
     private final Map<Integer, ScheduledFuture<?>> pollingTasks = new ConcurrentHashMap<>();
     private final Map<Integer, String> lastStateKeys = new ConcurrentHashMap<>();
@@ -54,6 +58,8 @@ public class AiJobMonitor {
     private void poll(Integer jobId, Integer projectId) {
         try {
             AiWorkflowStatusResponse response = fastApiClient.getWorkflowStatus(jobId);
+            syncJobSnapshot(jobId, response);
+
             String stateKey = buildStateKey(response);
             String previousStateKey = lastStateKeys.put(jobId, stateKey);
 
@@ -72,6 +78,11 @@ public class AiJobMonitor {
         } catch (Exception e) {
             log.error("AI job polling 실패 | jobId={} projectId={}", jobId, projectId, e);
         }
+    }
+
+    @Transactional
+    protected void syncJobSnapshot(Integer jobId, AiWorkflowStatusResponse response) {
+        aiAnalysisJobRepository.findById(jobId).ifPresent(job -> job.syncStatus(response.getJob()));
     }
 
     private String buildStateKey(AiWorkflowStatusResponse response) {

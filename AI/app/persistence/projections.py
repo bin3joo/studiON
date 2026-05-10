@@ -35,7 +35,7 @@ class AnalysisJobProjection(BaseModel):
 
 # 개별 분석 region을 프론트/저장 계층이 바로 쓰기 좋은 형태로 정규화한다.
 class AnalysisRegionProjection(BaseModel):
-    id: str
+    id: int
     job_id: int
     region_type: str = "ISSUE_REGION"
     issue_type: str | None = None
@@ -73,7 +73,7 @@ class TrackVocalPredictionProjection(BaseModel):
 
 # 정책 retrieval 결과를 요약해서 외부로 노출한다.
 class PlanStateProjection(BaseModel):
-    selected_region_id: str | None = None
+    selected_region_id: int | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
     status: str | None = None
@@ -118,7 +118,7 @@ class SuggestionProjection(BaseModel):
 class SuggestionGroupProjection(BaseModel):
     id: str
     job_id: int
-    region_id: str | None = None
+    region_id: int | None = None
     start_ms: int | None = None
     end_ms: int | None = None
     measure_start: int | None = None
@@ -135,7 +135,7 @@ class PreviewRenderProjection(BaseModel):
     suggestion_id: str | None = None
     status: str
     render_no: int = 1
-    preview_target_region: str | None = None
+    preview_target_region: int | None = None
     preview_region_start_ms: int | None = None
     preview_region_end_ms: int | None = None
     preview_measure_start: int | None = None
@@ -470,7 +470,7 @@ def _resolve_preview_region_projection(state: WorkflowState) -> dict[str, Any] |
     if selected_region_id is None:
         return None
     for region in state.get("analysis_regions", []):
-        if str(region.get("id")) == str(selected_region_id):
+        if int(region["id"]) == int(selected_region_id):
             return region
     return None
 

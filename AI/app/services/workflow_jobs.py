@@ -25,7 +25,7 @@ class WorkflowDispatchMessage(BaseModel):
     project_id: int
     dispatch_type: WorkflowDispatchType
     requested_by: int | None = None
-    selected_region_id: str | None = None
+    selected_region_id: int | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
 

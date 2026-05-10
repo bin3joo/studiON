@@ -195,6 +195,23 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
           }
         }
         break;
+
+      case 'KeyD': // 복제(Duplicate)
+        e.preventDefault();
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.duplicateClip(trackStore.selectedClip, trackStore.selectedTrackId);
+        }
+        break;
+    }
+  }
+
+  // Shift 키와 함께 누른 경우
+  if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    switch (e.code) {
+      case 'KeyT': // 트랙 추가
+        e.preventDefault();
+        trackStore.addTrack();
+        break;
     }
   }
 };

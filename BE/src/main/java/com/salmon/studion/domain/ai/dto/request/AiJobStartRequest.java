@@ -4,15 +4,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.util.List;
 
 @Getter
-@Setter
-@NoArgsConstructor
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class AiJobStartRequest {
 
     @NotNull
@@ -41,4 +41,20 @@ public class AiJobStartRequest {
     @NotNull
     @JsonProperty("project_snapshot")
     private ProjectSnapshotRequest projectSnapshotRequest;
+
+    public static AiJobStartRequest create(
+            Integer jobId,
+            AiJobStartApiRequest request,
+            Integer requestedBy
+    ) {
+        return new AiJobStartRequest(
+                jobId,
+                request.getProjectId(),
+                requestedBy,
+                request.getIssueTypes(),
+                request.getValidatorMode(),
+                request.getCriticMode(),
+                request.getProjectSnapshot()
+        );
+    }
 }

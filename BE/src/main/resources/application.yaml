@@ -74,6 +74,8 @@ websocket:
     - http://localhost:5173
 
 logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS,Asia/Seoul} [%thread] %-5level %logger{36} - %msg%n"
   level:
     root: INFO
     com.salmon.studion: DEBUG

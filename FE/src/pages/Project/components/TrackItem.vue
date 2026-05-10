@@ -900,27 +900,21 @@ const onWorkAreaMouseLeave = () => {
           @pointerdown.stop="trackStore.selectTrack(track.trackId)"
         ></div>
 
-      <!--마디 세로줄 렌더링-->
-        <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">
-          <div 
-            v-for="bar in trackStore.projectInfo.totalBarCount" 
-            :key="bar"
-            class="absolute top-0 bottom-0 border-l"
-            :style="{
-              left: `${(bar - 1) * trackStore.pixelPerBar}px`,
-              borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45', // 4마디 단위 밝은 선 유지
-            }"
-          >
-            <template v-if="trackStore.subDivision > 1">
-              <div
-                v-for="sub in trackStore.subDivision - 1"
-                :key="sub"
-                class="absolute top-0 bottom-0 border-l border-white/5"
-                :style="{ left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px` }"
-              ></div>
-            </template>
-          </div>
-        </div>
+      <!--마디 세로줄 렌더링 (CSS 배경 패턴으로 DOM 0개 — 성능 최적화)-->
+        <div 
+          aria-hidden="true" 
+          class="pointer-events-none absolute inset-0 z-0"
+          :style="{
+            backgroundImage: [
+              `repeating-linear-gradient(to right, #505567 0px, #505567 1px, transparent 1px, transparent ${trackStore.pixelPerBar * 4}px)`,
+              `repeating-linear-gradient(to right, #393C45 0px, #393C45 1px, transparent 1px, transparent ${trackStore.pixelPerBar}px)`,
+              trackStore.subDivision > 1
+                ? `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${trackStore.pixelPerBar / trackStore.subDivision}px)`
+                : ''
+            ].filter(Boolean).join(','),
+            backgroundSize: '100% 100%'
+          }"
+        ></div>
 
         <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
         <div v-if="isMaster">
@@ -1043,19 +1037,16 @@ const onWorkAreaMouseLeave = () => {
   @resolve-comment="emit('resolve-comment', $event)"
   @delete-comment="emit('delete-comment', $event)"
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
+  @track-pointerdown="trackStore.selectTrack(track.trackId)"
 />
       </div> 
 
       
 
-      <!--재생바-->
+      <!--재생바 (DOM 직접 조작으로 이동 — Vue 반응성 우회)-->
       <div 
-        class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
-        :style="{ 
-           transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
-            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)',
-            willChange: 'transform'
-        }"
+        class="playhead-line pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
+        style="box-shadow: 0 0 8px hsl(var(--primary) / 0.8); will-change: transform;"
       ></div>
 
     </div>

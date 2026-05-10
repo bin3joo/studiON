@@ -95,6 +95,12 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
     }
     return;
   }
+  // Shift + T: 트랙 추가 단축키
+  if (e.shiftKey && e.code === 'KeyT') {
+    e.preventDefault();
+    trackStore.addTrack();
+    return;
+  }
 
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
@@ -103,6 +109,13 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
         e.preventDefault();
         if (trackStore.selectedClip) {
           trackStore.copyClip(trackStore.selectedClip);
+        }
+        break;
+        
+      case 'KeyD': // 복제
+        e.preventDefault();
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.duplicateClip(trackStore.selectedClip, trackStore.selectedTrackId);
         }
         break;
         

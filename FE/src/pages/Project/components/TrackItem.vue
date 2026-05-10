@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {ref, computed, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
-import { Pencil, VolumeX } from 'lucide-vue-next';
+import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
 import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
@@ -21,28 +21,43 @@ const props = defineProps<{
 //스토어 사용
 const trackStore = useTrackStore();
 
+// 클립이 겹칠 경우 나중에 생성된 클립(clipId가 큼)이 뒤에(아래에) 깔리도록 내림차순 정렬
+const sortedClips = computed(() => {
+  return [...props.track.clips].sort((a, b) => b.clipId - a.clipId);
+});
+
 // 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
+// 사용자 요청: "나뉘지 않고 하나로 이어진 것처럼 보이게" 하려면 전체를 아우르는 단일 블록 반환
 const masterBackgroundBlocks = computed(() => {
-  if (!props.isMaster) return [];
+  if (!props.isMaster || props.track.clips.length === 0) return [];
+  
+  const minStart = Math.min(...props.track.clips.map(c => c.start));
+  const maxEnd = Math.max(...props.track.clips.map(c => c.start + c.duration));
+  
+  return [{ start: minStart, end: maxEnd }];
+});
+
+// 마스터 트랙 전용: 오디오 클립 사이의 텅 빈 공간(묵음) 구간만 계산 (여기에만 0 진폭 가로선을 그림)
+const masterGapLines = computed(() => {
+  if (!props.isMaster || props.track.clips.length <= 1) return [];
   
   const intervals = props.track.clips.map(c => ({ start: c.start, end: c.start + c.duration }));
   intervals.sort((a, b) => a.start - b.start);
   
-  const merged = [];
-  if (intervals.length > 0) {
-    let current = { ...intervals[0] };
-    for (let i = 1; i < intervals.length; i++) {
-      const next = intervals[i];
-      if (current.end >= next.start) {
-        current.end = Math.max(current.end, next.end); // 구간 연장
-      } else {
-        merged.push(current);
-        current = { ...next };
-      }
+  const gaps = [];
+  let currentEnd = intervals[0].end;
+  
+  for (let i = 1; i < intervals.length; i++) {
+    const next = intervals[i];
+    if (next.start > currentEnd) {
+      gaps.push({ start: currentEnd, end: next.start });
+      currentEnd = next.end;
+    } else {
+      currentEnd = Math.max(currentEnd, next.end);
     }
-    merged.push(current);
   }
-  return merged;
+  
+  return gaps;
 });
 
 
@@ -768,7 +783,8 @@ const onWorkAreaMouseLeave = () => {
             :class="track.isMuted ? 'bg-red-500/20 text-red-500 border-red-500/50' : 'border-white/30 bg-white/10 text-white hover:bg-white/20'"
             class="grid h-6 w-7 place-items-center rounded border transition"
           >
-            <VolumeX class="h-3.5 w-3.5" />
+            <VolumeX v-if="track.isMuted" class="h-3.5 w-3.5" />
+            <Volume2 v-else class="h-3.5 w-3.5" />
           </button>
           
           <!-- 솔로 버튼 -->
@@ -900,30 +916,25 @@ const onWorkAreaMouseLeave = () => {
           @pointerdown.stop="trackStore.selectTrack(track.trackId)"
         ></div>
 
-      <!--마디 세로줄 렌더링-->
-        <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">
-          <div 
-            v-for="bar in trackStore.projectInfo.totalBarCount" 
-            :key="bar"
-            class="absolute top-0 bottom-0 border-l"
-            :style="{
-              left: `${(bar - 1) * trackStore.pixelPerBar}px`,
-              borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45', // 4마디 단위 밝은 선 유지
-            }"
-          >
-            <template v-if="trackStore.subDivision > 1">
-              <div
-                v-for="sub in trackStore.subDivision - 1"
-                :key="sub"
-                class="absolute top-0 bottom-0 border-l border-white/5"
-                :style="{ left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px` }"
-              ></div>
-            </template>
-          </div>
-        </div>
+      <!--마디 세로줄 렌더링 (CSS 배경 패턴으로 DOM 0개 — 성능 최적화)-->
+        <div 
+          aria-hidden="true" 
+          class="pointer-events-none absolute inset-0 z-0"
+          :style="{
+            backgroundImage: [
+              `repeating-linear-gradient(to right, #505567 0px, #505567 1px, transparent 1px, transparent ${trackStore.pixelPerBar * 4}px)`,
+              `repeating-linear-gradient(to right, #393C45 0px, #393C45 1px, transparent 1px, transparent ${trackStore.pixelPerBar}px)`,
+              trackStore.subDivision > 1
+                ? `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${trackStore.pixelPerBar / trackStore.subDivision}px)`
+                : ''
+            ].filter(Boolean).join(','),
+            backgroundSize: '100% 100%'
+          }"
+        ></div>
 
         <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
         <div v-if="isMaster">
+          <!-- 1. 전체 배경 블록 -->
           <div 
             v-for="(block, idx) in masterBackgroundBlocks" 
             :key="'bg-'+idx"
@@ -933,6 +944,19 @@ const onWorkAreaMouseLeave = () => {
               width: `${(block.end - block.start) * trackStore.pixelPerBar}px`
             }"
           ></div>
+          
+          <!-- 2. 클립 사이의 텅 빈 구간(묵음)에만 0 진폭 가로 선 그리기 -->
+          <div 
+            v-for="(gap, idx) in masterGapLines" 
+            :key="'gap-'+idx"
+            class="absolute inset-y-1 z-0 flex items-center"
+            :style="{
+              left: `${gap.start * trackStore.pixelPerBar}px`,
+              width: `${(gap.end - gap.start) * trackStore.pixelPerBar}px`
+            }"
+          >
+            <div class="w-full h-[1px] bg-[#D4CED2] opacity-30 mix-blend-screen"></div>
+          </div>
         </div>
         
         <!-- 파일 업로드 중 임시 고스트 클립 -->
@@ -950,7 +974,7 @@ const onWorkAreaMouseLeave = () => {
 
      <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
-          v-for="clip in track.clips" 
+          v-for="clip in sortedClips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 rounded-md"
@@ -1043,19 +1067,16 @@ const onWorkAreaMouseLeave = () => {
   @resolve-comment="emit('resolve-comment', $event)"
   @delete-comment="emit('delete-comment', $event)"
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
+  @track-pointerdown="trackStore.selectTrack(track.trackId)"
 />
       </div> 
 
       
 
-      <!--재생바-->
+      <!--재생바 (DOM 직접 조작으로 이동 — Vue 반응성 우회)-->
       <div 
-        class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
-        :style="{ 
-           transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
-            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)',
-            willChange: 'transform'
-        }"
+        class="playhead-line pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
+        style="box-shadow: 0 0 8px hsl(var(--primary) / 0.8); will-change: transform;"
       ></div>
 
     </div>

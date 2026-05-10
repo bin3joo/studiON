@@ -298,7 +298,8 @@ export const useTrackStore = defineStore('track', () => {
                 durationMs: data.audioDurationMs,
             },
             isSelected: false,
-            isDragging: false
+            isDragging: false,
+            isLocked: false
         };
         track.clips.push(newClip);
         checkAndExpandTimeline(newClip.start + newClip.duration);
@@ -316,19 +317,13 @@ export const useTrackStore = defineStore('track', () => {
                     durationMs: data.audioDurationMs,
                 };
 
-                // 4. 오디오 플레이어 노드 생성 및 버퍼 로딩
-                const targetVol = trackVolumes.get(data.trackId);
-                if (targetVol) {
-                    const newPlayer = new Tone.Player().connect(targetVol);
-                    await newPlayer.load(audioInfo.audioUrl);
-
-                    const exactStartTimeSec = reactiveClip.start * secondsPerBar.value;
-                    const audioOffsetSec = reactiveClip.audioStartMs / 1000;
-                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, reactiveClip.duration * secondsPerBar.value);
-
-                    clipPlayers.set(reactiveClip.clipId, newPlayer);
-                    console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 및 동기화 완료 (ID: ${reactiveClip.clipId})`);
-                }
+                // [원복] 오디오 Culling 시 디코딩 부하로 인한 끊김이 발생하여 미리 로딩
+                loadClipPlayer(reactiveClip, data.trackId);
+                console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 예약 완료 (ID: ${reactiveClip.clipId})`);
+                
+                // 겹침 방지 (업로드한 당사자만 서버에 반영)
+                const isInitiator = uploadingTrackId.value === track.trackId;
+                resolveClipOverlap(reactiveClip, track, isInitiator);
             }
         } catch (error) {
             console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
@@ -390,6 +385,43 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
 
+    // 겹침 방지 및 자동 뒤로 밀어내기 유틸리티 함수
+    const resolveClipOverlap = (clip: ClipUIState, track: TrackUIState, isInitiator: boolean) => {
+        let hasOverlap = true;
+        let safetyCounter = 0;
+        const epsilon = 0.001;
+
+        let resolvedStart = clip.start;
+        const duration = clip.duration;
+
+        while (hasOverlap && safetyCounter < 100) {
+            hasOverlap = false;
+            safetyCounter++;
+            for (const existingClip of track.clips) {
+                if (existingClip.clipId === clip.clipId) continue; // 자기 자신 건너뛰기
+
+                const existingStart = existingClip.start;
+                const existingEnd = existingClip.start + existingClip.duration;
+                const desiredEnd = resolvedStart + duration;
+
+                if (resolvedStart < existingEnd - epsilon && desiredEnd > existingStart + epsilon) {
+                    hasOverlap = true;
+                    resolvedStart = existingEnd; // 겹치면 해당 클립의 맨 뒤로 밀어냄
+                    break; // 처음부터 다시 겹침 여부 검사
+                }
+            }
+        }
+
+        if (resolvedStart !== clip.start) {
+            clip.start = resolvedStart;
+            // 내가 복제/생성을 지시한 당사자라면 백엔드에도 위치 이동을 동기화합니다.
+            if (isInitiator) {
+                console.log(`[Overlap Resolution] 클립 겹침 감지됨. 서버로 이동 요청 전송 (새 위치: ${resolvedStart})`);
+                confirmMoveClip(clip.clipId, track.trackId, resolvedStart);
+            }
+        }
+    };
+
     socketService.subscribe('CLIP_DELETE', (data) => {
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
@@ -438,8 +470,10 @@ export const useTrackStore = defineStore('track', () => {
             console.error(`[에러] 붙여넣기 할 원본 클립(ID: ${data.sourceClipId})을 화면에서 찾을 수 없습니다!`);
             return;
         }
+        
         const targetTrack = trackList.value.find(t => t.trackId === data.targetTrackId);
         if (!targetTrack) return;
+        
         // 원본 클립을 완벽하게 복제(Deep Copy)한 뒤, 백엔드가 지정해준 위치와 ID만 변경
         const pastedClip: ClipUIState = {
             ...JSON.parse(JSON.stringify(originalClip)),
@@ -451,17 +485,15 @@ export const useTrackStore = defineStore('track', () => {
         };
         targetTrack.clips.push(pastedClip);
         checkAndExpandTimeline(pastedClip.start + pastedClip.duration);
-        // 오디오 플레이어 복제 및 스케줄링
-        const targetVol = trackVolumes.get(data.targetTrackId);
-        if (targetVol && pastedClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
-            newPlayer.load(pastedClip.audio.cdnUrl).then(() => {
-                const exactStartTimeSec = pastedClip.start * secondsPerBar.value;
-                const audioOffsetSec = pastedClip.audioStartMs / 1000;
-                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, pastedClip.duration * secondsPerBar.value);
-                clipPlayers.set(pastedClip.clipId, newPlayer);
-            });
+        // [원복] 오디오 플레이어 미리 로드 (끊김 방지)
+        loadClipPlayer(pastedClip, data.targetTrackId);
+
+        let isInitiator = false;
+        if (pendingPasteCount.value > 0) {
+            pendingPasteCount.value--;
+            isInitiator = true;
         }
+        resolveClipOverlap(pastedClip, targetTrack, isInitiator);
 
         // 화면 렌더링이 무사히 끝난 후 잘라내기 클립보드 비우기
         if (isCutAction.value) {
@@ -469,6 +501,10 @@ export const useTrackStore = defineStore('track', () => {
             isCutAction.value = false;
         }
     });
+    
+    // 내가 복제/붙여넣기 요청한 건인지 확인하기 위한 로컬 상태
+    const pendingPasteCount = ref(0);
+
     // 3. 클립 복제 수신
     socketService.subscribe('CLIP_DUPLICATE', (data) => {
         let originalClip: ClipUIState | null = null;
@@ -489,20 +525,12 @@ export const useTrackStore = defineStore('track', () => {
         };
         targetTrack.clips.push(duplicatedClip);
         checkAndExpandTimeline(duplicatedClip.start + duplicatedClip.duration);
-        // 오디오 엔진 연결
-        const targetVol = trackVolumes.get(data.targetTrackId);
-        if (targetVol && duplicatedClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
-            newPlayer.load(duplicatedClip.audio.cdnUrl).then(() => {
-                const exactStartTimeSec = duplicatedClip.start * secondsPerBar.value;
-                const audioOffsetSec = duplicatedClip.audioStartMs / 1000;
-                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, duplicatedClip.duration * secondsPerBar.value);
-                clipPlayers.set(duplicatedClip.clipId, newPlayer);
-            });
-        }
-        
+        // [원복] 오디오 플레이어 미리 로드 (끊김 방지)
+        loadClipPlayer(duplicatedClip, data.targetTrackId);
+
         // 내가 복제 요청을 보낸 클립이라면 백엔드가 새 클립에 강제로 건 락을 해제
-        if (pendingDuplicateOriginalClipIds.has(data.clipId)) {
+        const isInitiator = pendingDuplicateOriginalClipIds.has(data.clipId);
+        if (isInitiator) {
             pendingDuplicateOriginalClipIds.delete(data.clipId);
             // 소켓 통신을 통해 새 클립(newClipId)의 잠금을 즉시 해제 요청
             socketService.publish('CLIP_LOCK', {
@@ -511,6 +539,9 @@ export const useTrackStore = defineStore('track', () => {
                 isLocked: false
             });
         }
+
+        // 겹침 방지: 생성된 클립이 기존 클립과 겹치면 끝나는 위치 바로 뒤로 밀어냅니다.
+        resolveClipOverlap(duplicatedClip, targetTrack, isInitiator);
     });
     // 4. 클립 분할 수신
     socketService.subscribe('CLIP_SPLIT', async (data) => {
@@ -546,19 +577,11 @@ export const useTrackStore = defineStore('track', () => {
         originalClip.duration = data.originalDuration;
         originalClip.audioDurationMs = splitOffsetMs;
         targetTrack.clips.push(rightClip);
-        // 왼쪽 클립 오디오 재설정
+        // 왼쪽 클립 오디오 재설정 (resyncClip 내부 로직이 동작)
         resyncClip(originalClip.clipId, originalClip.start);
-        // 오른쪽 새 클립 오디오 셋팅
-        const targetVol = trackVolumes.get(targetTrack.trackId);
-        if (targetVol && rightClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
-            await newPlayer.load(rightClip.audio.cdnUrl);
-
-            const exactStartTimeSec = rightClip.start * secondsPerBar.value;
-            const audioOffsetSec = rightClip.audioStartMs / 1000;
-            newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, rightClip.duration * secondsPerBar.value);
-            clipPlayers.set(rightClip.clipId, newPlayer);
-        }
+        
+        // [원복] 오디오 플레이어 미리 로드
+        loadClipPlayer(rightClip, targetTrack.trackId);
         // 분할 작업 완료 후 재생 재개
         if (wasPlaying) {
             const currentOffset = playheadPosition.value * secondsPerBar.value;
@@ -723,6 +746,7 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         console.log(`[통신] 백엔드에 붙여넣기(CLIP_PASTE) 요청 전송`);
+        pendingPasteCount.value++;
         socketService.publish('CLIP_PASTE', {
             projectId: projectInfo.value.projectId,
             targetTrackId: targetTrackId,
@@ -853,8 +877,10 @@ export const useTrackStore = defineStore('track', () => {
             const vol = trackVolumes.get(t.trackId);
             if (vol) {
                 if (isAnySoloed) {
-                    vol.mute = !t.isSoloed;
+                    // 솔로 모드일 때: 현재 트랙이 솔로가 아니거나, 혹은 솔로더라도 명시적으로 음소거된 상태면 소리를 끕니다.
+                    vol.mute = !t.isSoloed || t.isMuted;
                 } else {
+                    // 솔로 모드가 아닐 때: 트랙의 음소거 상태를 그대로 따릅니다.
                     vol.mute = t.isMuted;
                 }
             }
@@ -932,20 +958,20 @@ export const useTrackStore = defineStore('track', () => {
         });
     };
 
-    // 볼륨 UI 정중앙(0dB) 비선형 매핑 로직
+    // 볼륨 UI 0dB 매핑 (80% 지점에 위치)
     const getVolumePercent = (vol: number) => {
         if (vol <= 0) {
-            return ((vol + 60) / 60) * 50;
+            return ((vol + 60) / 60) * 80;
         } else {
-            return 50 + (vol / 6) * 50;
+            return 80 + (vol / 6) * 20;
         }
     };
 
     const getVolumeFromPercent = (percent: number) => {
-        if (percent <= 50) {
-            return (percent / 50) * 60 - 60;
+        if (percent <= 80) {
+            return (percent / 80) * 60 - 60;
         } else {
-            return ((percent - 50) / 50) * 6;
+            return ((percent - 80) / 20) * 6;
         }
     };
 
@@ -1075,28 +1101,81 @@ export const useTrackStore = defineStore('track', () => {
                 Tone.getTransport().pause();
                 isPlaying.value = false;
                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                // 일시정지 시 최종 위치를 반응형 ref에도 확정 (PlayController, TimelineRuler 동기화)
+                playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
             }
         } catch (e) {
             console.error("재생 에러:", e);
         }
     };
 
-    // 시간 재생바 UI 업데이트 루프 (루프 감시 로그 추가)
+    // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
+    const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
+        if (!clip.audio?.cdnUrl) return;
+        const targetVol = trackVolumes.get(trackId);
+        if (!targetVol) return;
+
+        if (!clipPlayers.has(clip.clipId)) {
+            const newPlayer = new Tone.Player().connect(targetVol);
+            clipPlayers.set(clip.clipId, newPlayer);
+
+            newPlayer.load(clip.audio.cdnUrl).then(() => {
+                const exactStartTimeSec = clip.start * secondsPerBar.value;
+                const audioOffsetSec = clip.audioStartMs / 1000;
+                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
+            }).catch(e => {
+                console.error("[Audio Load Error]:", e);
+                clipPlayers.delete(clip.clipId);
+            });
+        }
+    };
+
+    // [성능 최적화] 재생바 UI 업데이트 루프
+    // Vue 반응성(ref) 대신 DOM을 직접 조작하여 초당 1,300회 이상의 Vue re-render를 원천 차단
+    let lastReactiveUpdate = 0; // PlayController 디스플레이용 마지막 갱신 시각
+    const REACTIVE_UPDATE_INTERVAL = 250; // PlayController(마디/박자 표시)는 250ms마다만 갱신 (4fps)
+
+    // 사용자가 타임라인 스크러빙(드래그)으로 재생바를 옮길 때, 정지 상태라면 즉시 DOM 위치 동기화
+    watch(playheadPosition, (newBar) => {
+        if (!isPlaying.value) {
+            const px = newBar * pixelPerBar.value;
+            const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
+            for (let i = 0; i < playheadEls.length; i++) {
+                playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+            }
+        }
+    });
+
     const updatePlayheadLoop = () => {
         if (!isPlaying.value) return;
 
-        playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
+        const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
+        const px = currentPositionBar * pixelPerBar.value;
+
+        // 1. DOM 직접 조작: 모든 재생바 요소의 transform을 한 번에 갱신 (Vue 반응성 완전 우회)
+        const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
+        for (let i = 0; i < playheadEls.length; i++) {
+            playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+        }
+
+        // 2. Vue 반응형 ref는 PlayController 숫자 디스플레이(마디.박자) 전용으로 저빈도 갱신
+        const now = performance.now();
+        if (now - lastReactiveUpdate > REACTIVE_UPDATE_INTERVAL) {
+            playheadPosition.value = currentPositionBar;
+            lastReactiveUpdate = now;
+        }
 
         if (debugLoopCount < 5) {
-            console.log(`🔄 [루프 확인 ${debugLoopCount + 1}/5] 시계가 흐르고 있나요? -> Transport 초: ${Tone.getTransport().seconds.toFixed(4)}, 재생바 마디: ${playheadPosition.value.toFixed(4)}`);
+            console.log(`🔄 [루프 확인 ${debugLoopCount + 1}/5] 시계가 흐르고 있나요? -> Transport 초: ${Tone.getTransport().seconds.toFixed(4)}, 재생바 마디: ${currentPositionBar.toFixed(4)}`);
             debugLoopCount++;
         }
 
-        if (playheadPosition.value >= projectInfo.value.totalBarCount) {
+        if (currentPositionBar >= projectInfo.value.totalBarCount) {
             console.log("⏹️ [재생 종료] 끝까지 도달하여 정지합니다.");
             stopPlay();
             return;
         }
+
         animationFrameId = requestAnimationFrame(updatePlayheadLoop);
     }
 
@@ -1106,6 +1185,11 @@ export const useTrackStore = defineStore('track', () => {
         isPlaying.value = false;
         playheadPosition.value = 0;
         cancelAnimationFrame(animationFrameId);
+        // DOM 직접 조작: 재생바를 처음 위치로 리셋
+        const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
+        for (let i = 0; i < playheadEls.length; i++) {
+            playheadEls[i].style.transform = `translate3d(calc(0px - 50%), 0, 0)`;
+        }
     };
 
     //마우스 휠 방향에 따라 줌 배율을 조절하는 함수

@@ -1,84 +1,120 @@
-//뷰 컴포넌트에서 워커파일로 넘겨줄 데이터들의 이름과 타입을 정의하는 설께도
-//오디오 파형, 색상, 도화지, 1픽셀당 들어가는 오디오 샘플 개수등
+/**
+ * 파형 렌더링 Worker (Pool 방식 호환)
+ *
+ * 동작 원리:
+ *   1. 'init' 메시지를 받으면 내부에 OffscreenCanvas를 생성합니다. (Worker 1개당 1개)
+ *   2. 'render' 메시지를 받으면 파형을 그린 뒤, transferToImageBitmap()으로 결과를 생성합니다.
+ *   3. ImageBitmap과 requestId를 메인 스레드로 반환합니다.
+ *
+ * 이 방식의 장점:
+ *   - OffscreenCanvas는 Worker 내부에서만 존재 → 브라우저의 컨텍스트 개수 제한에 걸리지 않음
+ *   - Worker를 재사용하므로 매번 생성/파괴에 따른 메모리 누수 없음
+ *   - 매 프레임 clearRect() 후 다시 그리므로 GPU 메모리 누적 없음
+ */
 
-interface WorkerMessage {
-  channelData?: Float32Array;
-  color?: string;
-  canvas?: OffscreenCanvas;
-  width?: number;
-  height?: number;
-  samplesPerPixel?: number;    
-  startSampleOffset?: number;
+interface InitMessage {
+  type: 'init';
 }
 
-let targetCanvas : OffscreenCanvas | null = null; //캔버스를 전역을로 기억하기
+interface RenderMessage {
+  type: 'render';
+  requestId: number;
+  channelData: Float32Array;
+  color: string;
+  width: number;
+  height: number;
+  samplesPerPixel: number;
+  startSampleOffset: number;
+}
 
-//메인 스레드에서 worker.postMessage로 던저준 데이터를 받아서 해체한 후 변수에 담는다.
+type WorkerMessage = InitMessage | RenderMessage;
+
+let offscreenCanvas: OffscreenCanvas | null = null;
+let ctx: OffscreenCanvasRenderingContext2D | null = null;
+
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
-  const { channelData, color, canvas, width, height, samplesPerPixel, startSampleOffset } = e.data;
-// 최초 로딩 시 캔버스 제어권을 받아 전역 변수에 저장
-  if (canvas) {
-    targetCanvas = canvas;
-    return; // 캔버스만 받았을 때는 그리지 않고 대기
+  const msg = e.data;
+
+  // 초기화: Worker 내부에 OffscreenCanvas를 한 번만 생성
+  if (msg.type === 'init') {
+    // 초기 크기는 임의값 — render 시 동적으로 조정됨
+    offscreenCanvas = new OffscreenCanvas(1, 1);
+    ctx = offscreenCanvas.getContext('2d');
+    return;
   }
 
-  // 데이터 검증
-  if (!targetCanvas || !channelData || width === undefined || height === undefined || samplesPerPixel === undefined || startSampleOffset === undefined) return;
+  // 렌더 요청
+  if (msg.type === 'render') {
+    const { requestId, channelData, color, width, height, samplesPerPixel, startSampleOffset } = msg;
 
-  //2d 컨텍스트를 가져온다.이 컨텍스트 객체에 그려라(그리기 명령을 수행할 주체)
-  const ctx = targetCanvas.getContext('2d');
-  if (!ctx) return;
-
-  // 워커 내부에서 직접 오프스크린 캔버스의 크기를 변경!
-  targetCanvas.width = width;
-  targetCanvas.height = height;
-
-  // 1. 도화지 초기화
-  ctx.clearRect(0, 0, width, height);
-
-  // 2. 펜 설정 (색상과 두께 지정)
-  ctx.strokeStyle = color || '#D4CED2';
-  ctx.lineWidth = 1;
-  
-  // 3. 선 그리기 시작
-  ctx.beginPath();
-
-  //가운데 기준점 캔버스 높이의 절반값을 구해 정중앙 기준선으로 삼는다. Y좌표는 위로 갈수록 숫자가 작고 아래로 갈수록 숫자가 커진다.
-  //Y값 보정 공식  
-  const centerY = height / 2;
-
-  // 오디오 데이터를 순회하며 픽셀 단위로 최소/최대 높이
-  for (let x = 0; x < width; x += 1) {
-    const start = Math.floor(startSampleOffset + x * samplesPerPixel);
-    const end = Math.floor(startSampleOffset + (x + 1) * samplesPerPixel);
-    //계산된 위치가 실제 오디오 데이터 길이보다 길어진면 렌더링을 중단하고 배열의 끝을 넘어 읽지 않도록 끝을 보정함.
-    if (start >= channelData.length) break;
-
-    const actualEnd = Math.min(end, channelData.length);
-    //가장낮은 음수 갑과 가장 높은 양수를 구해서 수직선의 양끝을 이음    
-    let min = 1.0;
-    let max = -1.0;
-
-    for (let i = start; i < actualEnd; i += 1) {
-      const value = channelData[i];
-      if (value < min) min = value;
-      if (value > max) max = value;
+    if (!offscreenCanvas || !ctx) {
+      // 혹시 init이 아직 안 왔으면 즉석 생성 (방어)
+      offscreenCanvas = new OffscreenCanvas(width, height);
+      ctx = offscreenCanvas.getContext('2d');
     }
-    //소리가 완전히 없는무음 구간이더라도 캔버스에서 선이 끊어져 보이지 않게 보정해줌.최소 두께를 화면 전체 높이의 0.2%로 설정하고 
-    const minHeightClip = 2.0 / height;
-    if (max - min < minHeightClip) {
+
+    if (!ctx || width <= 0 || height <= 0) {
+      (self as unknown as Worker).postMessage({ requestId, bitmap: null });
+      return;
+    }
+
+    // 캔버스 크기를 요청에 맞게 조정 (기존 내용은 자동으로 초기화됨)
+    offscreenCanvas.width = width;
+    offscreenCanvas.height = height;
+
+    // 1. 도화지 초기화
+    ctx.clearRect(0, 0, width, height);
+
+    // 2. 펜 설정 (색상과 두께 지정)
+    ctx.strokeStyle = color || '#D4CED2';
+    ctx.lineWidth = 1;
+
+    // 3. 선 그리기 시작
+    ctx.beginPath();
+
+    // 가운데 기준점
+    const centerY = height / 2;
+
+    // 오디오 데이터를 순회하며 픽셀 단위로 최소/최대 높이
+    for (let x = 0; x < width; x += 1) {
+      const start = Math.floor(startSampleOffset + x * samplesPerPixel);
+      const end = Math.floor(startSampleOffset + (x + 1) * samplesPerPixel);
+      // 계산된 위치가 실제 오디오 데이터 길이보다 길어지면 렌더링을 중단
+      if (start >= channelData.length) break;
+
+      const actualEnd = Math.min(end, channelData.length);
+      // 가장 낮은 음수 값과 가장 높은 양수를 구해서 수직선의 양끝을 이음
+      let min = 1.0;
+      let max = -1.0;
+
+      for (let i = start; i < actualEnd; i += 1) {
+        const value = channelData[i];
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+
+      // 소리가 완전히 없는 무음 구간이더라도 캔버스에서 선이 끊어져 보이지 않게 보정
+      const minHeightClip = 2.0 / height;
+      if (max - min < minHeightClip) {
         max = minHeightClip / 2;
         min = -minHeightClip / 2;
+      }
+
+      // 브라우저 2D 캔버스는 맨위가 0이고 아래로 갈수록 숫자가 커진다.
+      const yTop = centerY - (max * centerY);
+      const yBottom = centerY - (min * centerY);
+
+      // X좌표에 맞춰 위에서 아래로 세로선을 쭉 그음
+      ctx.moveTo(x, yTop);
+      ctx.lineTo(x, yBottom);
     }
-    //브라우저 2D 캔버스는 맨위가 0이고 아래로 갈수록 숫자가 커진다.
-    const yTop = centerY - (max * centerY);
-    const yBottom = centerY - (min * centerY);
 
-    // X좌표에 맞춰 위에서 아래로 세로선을 쭉 rmtsmsep
-    ctx.moveTo(x, yTop);
-    ctx.lineTo(x, yBottom);
+    // 4. 화면에 출력!
+    ctx.stroke();
+
+    // 5. ImageBitmap으로 변환하여 메인 스레드로 반환
+    const bitmap = offscreenCanvas.transferToImageBitmap();
+    (self as unknown as Worker).postMessage({ requestId, bitmap }, [bitmap]);
+    return;
   }
-
-  // 4. 화면에 출력!
-  ctx.stroke();
 };

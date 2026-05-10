@@ -76,7 +76,7 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   }
 
   // 스페이스바 처리
-  if(e.code === 'Space'){
+  if(e.code === 'Space' || e.key === ' '){
     e.preventDefault(); // 여기서 브라우저 기본 스크롤 동작을 완벽히 차단.
     await Tone.start(); 
     trackStore.togglePlay();
@@ -95,6 +95,12 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
     }
     return;
   }
+  // Shift + T: 트랙 추가 단축키
+  if (e.shiftKey && e.code === 'KeyT') {
+    e.preventDefault();
+    trackStore.addTrack();
+    return;
+  }
 
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
@@ -103,6 +109,13 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
         e.preventDefault();
         if (trackStore.selectedClip) {
           trackStore.copyClip(trackStore.selectedClip);
+        }
+        break;
+        
+      case 'KeyD': // 복제
+        e.preventDefault();
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.duplicateClip(trackStore.selectedClip, trackStore.selectedTrackId);
         }
         break;
         
@@ -281,8 +294,8 @@ onMounted(async () => {
     }
   }
   
-  //키보드 이벤트 리스너 등록
-  window.addEventListener('keydown', handleKeyDown);
+  //키보드 이벤트 리스너 등록 (캡처링 단계에서 가로채서 버튼 클릭 등 방지)
+  window.addEventListener('keydown', handleKeyDown, { capture: true });
   //  마우스 이동 감지
   window.addEventListener('mousemove', updateMousePos);
 
@@ -299,7 +312,7 @@ if(timelineContainerRef.value) {
 
 onUnmounted(()=>{
   //키보드 이벤트 제거
-  window.removeEventListener('keydown',handleKeyDown);
+  window.removeEventListener('keydown', handleKeyDown, { capture: true });
   // 마우스 감지해제
   window.removeEventListener('mousemove', updateMousePos);
   //오디오 제한 해제 리스너 제거

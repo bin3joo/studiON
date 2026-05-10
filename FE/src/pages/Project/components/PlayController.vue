@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
-import { Play, Pause, Square, Sparkles, ChevronDown } from 'lucide-vue-next';
+import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus } from 'lucide-vue-next';
 import * as Tone from 'tone';
 
 const trackStore = useTrackStore();
@@ -57,6 +57,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'run-ai-analysis'): void
+  (e: 'action-copy'): void
+  (e: 'action-cut'): void
+  (e: 'action-paste'): void
+  (e: 'action-duplicate'): void
+  (e: 'action-split'): void
+  (e: 'action-delete'): void
+  (e: 'action-add-track'): void
 }>()
 </script>
 
@@ -82,6 +89,32 @@ const emit = defineEmits<{
         <span class="text-muted-foreground" aria-hidden="true">/</span>
         <span class="tabular-nums text-muted-foreground">{{ formattedPosition.total }}</span>
       </div>
+
+    </div>
+
+    <!-- 단축키 도구 모음 (타임라인 1에 맞춤) -->
+    <div class="absolute left-[224px] flex items-center gap-1" role="group" aria-label="클립 및 트랙 도구">
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="트랙 추가 (Shift + T)" @click="emit('action-add-track')">
+        <ListPlus class="h-4 w-4" />
+      </button>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복사 (Ctrl/Cmd + C)" @click="emit('action-copy')">
+        <Copy class="h-4 w-4" />
+      </button>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="잘라내기 (Ctrl/Cmd + X)" @click="emit('action-cut')">
+        <Scissors class="h-4 w-4" />
+      </button>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="붙여넣기 (Ctrl/Cmd + V)" @click="emit('action-paste')">
+        <ClipboardPaste class="h-4 w-4" />
+      </button>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="분할 (Ctrl/Cmd + E)" @click="emit('action-split')">
+        <Split class="h-4 w-4" />
+      </button>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복제 (Ctrl/Cmd + D)" @click="emit('action-duplicate')">
+        <CopyPlus class="h-4 w-4" />
+      </button>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-red-400" title="삭제 (Del/Backspace)" @click="emit('action-delete')">
+        <Trash2 class="h-4 w-4" />
+      </button>
     </div>
 
     <!--absolute left-1/2 flex -translate-x-1/2 : 버튼을 정확히 가운데 배치 role='group' 그룹으로 묶어줌-->

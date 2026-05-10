@@ -1152,7 +1152,6 @@ const onWorkAreaMouseLeave = () => {
   @delete-comment="emit('delete-comment', $event)"
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
   @track-pointerdown="trackStore.selectTrack(track.trackId)"
-  @comment-expanded="isCommentExpanded = $event"
 />
       </div> 
 

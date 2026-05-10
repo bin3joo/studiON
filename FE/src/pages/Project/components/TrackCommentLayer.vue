@@ -101,8 +101,8 @@ function updateCellLocation(newVal: number) {
   activeCellLeft.value = (bar - 1) * props.pixelPerBar + sub * subCellW
 }
 
-watch(() => props.hoveredMeasure, (newVal) => {
-  if (newVal === null || props.hoveredTrackId !== props.trackId) {
+watch(() => [props.hoveredMeasure, props.hoveredTrackId], ([newMeasure, newTrackId]) => {
+  if (newMeasure === null || newTrackId !== props.trackId) {
     if (hideTimeout) return
     hideTimeout = setTimeout(() => {
       activeCellLocation.value = null
@@ -118,7 +118,7 @@ watch(() => props.hoveredMeasure, (newVal) => {
   // 버튼에 마우스가 올라가 있다면 위치를 고정 (마우스가 옆으로 살짝 새어도 도망가지 않음)
   if (isButtonHovered.value) return
 
-  updateCellLocation(newVal)
+  updateCellLocation(newMeasure as number)
 }, { immediate: true })
 
 function isSameLocation(a: number, b: number) {

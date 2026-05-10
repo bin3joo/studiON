@@ -27,27 +27,37 @@ const sortedClips = computed(() => {
 });
 
 // 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
+// 사용자 요청: "나뉘지 않고 하나로 이어진 것처럼 보이게" 하려면 전체를 아우르는 단일 블록 반환
 const masterBackgroundBlocks = computed(() => {
-  if (!props.isMaster) return [];
+  if (!props.isMaster || props.track.clips.length === 0) return [];
+  
+  const minStart = Math.min(...props.track.clips.map(c => c.start));
+  const maxEnd = Math.max(...props.track.clips.map(c => c.start + c.duration));
+  
+  return [{ start: minStart, end: maxEnd }];
+});
+
+// 마스터 트랙 전용: 오디오 클립 사이의 텅 빈 공간(묵음) 구간만 계산 (여기에만 0 진폭 가로선을 그림)
+const masterGapLines = computed(() => {
+  if (!props.isMaster || props.track.clips.length <= 1) return [];
   
   const intervals = props.track.clips.map(c => ({ start: c.start, end: c.start + c.duration }));
   intervals.sort((a, b) => a.start - b.start);
   
-  const merged = [];
-  if (intervals.length > 0) {
-    let current = { ...intervals[0] };
-    for (let i = 1; i < intervals.length; i++) {
-      const next = intervals[i];
-      if (current.end >= next.start) {
-        current.end = Math.max(current.end, next.end); // 구간 연장
-      } else {
-        merged.push(current);
-        current = { ...next };
-      }
+  const gaps = [];
+  let currentEnd = intervals[0].end;
+  
+  for (let i = 1; i < intervals.length; i++) {
+    const next = intervals[i];
+    if (next.start > currentEnd) {
+      gaps.push({ start: currentEnd, end: next.start });
+      currentEnd = next.end;
+    } else {
+      currentEnd = Math.max(currentEnd, next.end);
     }
-    merged.push(current);
   }
-  return merged;
+  
+  return gaps;
 });
 
 
@@ -924,6 +934,7 @@ const onWorkAreaMouseLeave = () => {
 
         <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
         <div v-if="isMaster">
+          <!-- 1. 전체 배경 블록 -->
           <div 
             v-for="(block, idx) in masterBackgroundBlocks" 
             :key="'bg-'+idx"
@@ -933,6 +944,19 @@ const onWorkAreaMouseLeave = () => {
               width: `${(block.end - block.start) * trackStore.pixelPerBar}px`
             }"
           ></div>
+          
+          <!-- 2. 클립 사이의 텅 빈 구간(묵음)에만 0 진폭 가로 선 그리기 -->
+          <div 
+            v-for="(gap, idx) in masterGapLines" 
+            :key="'gap-'+idx"
+            class="absolute inset-y-1 z-0 flex items-center"
+            :style="{
+              left: `${gap.start * trackStore.pixelPerBar}px`,
+              width: `${(gap.end - gap.start) * trackStore.pixelPerBar}px`
+            }"
+          >
+            <div class="w-full h-[1px] bg-[#D4CED2] opacity-30 mix-blend-screen"></div>
+          </div>
         </div>
         
         <!-- 파일 업로드 중 임시 고스트 클립 -->

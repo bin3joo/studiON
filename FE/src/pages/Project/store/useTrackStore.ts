@@ -29,6 +29,12 @@ export const useTrackStore = defineStore('track', () => {
     const pendingDuplicateOriginalClipIds = new Set<number>(); // 내가 복제한 클립의 원본 ID 목록 (백엔드 강제 락 해제용)
     const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
+    // 재생바 자동 스크롤용 타임라인 컨테이너 DOM 참조 (ProjectPage에서 전달받음)
+    let timelineContainer: HTMLElement | null = null;
+    const setTimelineContainer = (el: HTMLElement | null) => {
+        timelineContainer = el;
+    };
+
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
     //<trackUIstate[]>로 UI용 트랙데이터만 들어올수 있음을 선언 ref이므로 추가 삭제시 화면이 반응함 
@@ -1143,6 +1149,17 @@ export const useTrackStore = defineStore('track', () => {
             for (let i = 0; i < playheadEls.length; i++) {
                 playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
             }
+            
+            // 정지 상태 스크러빙 시 진행 오버레이 갱신
+            const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
+            for (let i = 0; i < clipEls.length; i++) {
+                const clipEl = clipEls[i];
+                const clipLeft = parseFloat(clipEl.style.left) || 0;
+                const clipWidth = parseFloat(clipEl.style.width) || 0;
+                if (clipWidth <= 0) continue;
+                const progressPx = Math.max(0, Math.min(px - clipLeft, clipWidth));
+                clipEl.style.setProperty('--progress-px', `${progressPx}px`);
+            }
         }
     });
 
@@ -1156,6 +1173,30 @@ export const useTrackStore = defineStore('track', () => {
         const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
         for (let i = 0; i < playheadEls.length; i++) {
             playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+        }
+
+        // 1-1. 재생바 자동 스크롤: 재생바가 화면 중앙(50%)을 넘어가면 매 프레임마다 부드럽게 따라감
+        if (timelineContainer) {
+            const relativeX = px - timelineContainer.scrollLeft;
+            const threshold = timelineContainer.clientWidth * 0.5;
+            if (relativeX > threshold) {
+                // 목표 스크롤 위치를 향해 부드럽게 보간(lerp)하여 이동 (급격한 점프 방지)
+                const targetScrollLeft = px - threshold;
+                const currentScrollLeft = timelineContainer.scrollLeft;
+                const lerpFactor = 0.12; // 보간 계수: 작을수록 더 부드럽고, 클수록 빠르게 따라감
+                timelineContainer.scrollLeft = currentScrollLeft + (targetScrollLeft - currentScrollLeft) * lerpFactor;
+            }
+        }
+
+        // 1-2. 재생바 좌측 파형 밝게 표시: 각 클립의 진행 비율에 맞춰 오버레이 너비 갱신
+        const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
+        for (let i = 0; i < clipEls.length; i++) {
+            const clipEl = clipEls[i];
+            const clipLeft = parseFloat(clipEl.style.left) || 0;
+            const clipWidth = parseFloat(clipEl.style.width) || 0;
+            if (clipWidth <= 0) continue;
+            const progressPx = Math.max(0, Math.min(px - clipLeft, clipWidth));
+            clipEl.style.setProperty('--progress-px', `${progressPx}px`);
         }
 
         // 2. Vue 반응형 ref는 PlayController 숫자 디스플레이(마디.박자) 전용으로 저빈도 갱신
@@ -1189,6 +1230,11 @@ export const useTrackStore = defineStore('track', () => {
         const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
         for (let i = 0; i < playheadEls.length; i++) {
             playheadEls[i].style.transform = `translate3d(calc(0px - 50%), 0, 0)`;
+        }
+        // 재생바 오버레이도 모두 리셋
+        const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
+        for (let i = 0; i < clipEls.length; i++) {
+            clipEls[i].style.setProperty('--progress-px', `0px`);
         }
     };
 
@@ -1448,5 +1494,6 @@ export const useTrackStore = defineStore('track', () => {
         reorderTrack,
         lockClip,
         unlockClip,
+        setTimelineContainer,
     };
 });

@@ -26,6 +26,7 @@ export const useTrackStore = defineStore('track', () => {
     const trackPanners = new Map<number, Tone.Panner>();   // 트랙별 패닝 노드
     const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
     const myLockedClips = new Set<number>(); // 내가 직접 잠근(편집 중인) 클립 ID 목록
+    const pendingDuplicateOriginalClipIds = new Set<number>(); // 내가 복제한 클립의 원본 ID 목록 (백엔드 강제 락 해제용)
 
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
@@ -438,7 +439,8 @@ export const useTrackStore = defineStore('track', () => {
             clipId: data.clipId,
             start: data.targetStartBar,
             isSelected: false,
-            isDragging: false
+            isDragging: false,
+            isLocked: false
         };
         targetTrack.clips.push(pastedClip);
         checkAndExpandTimeline(pastedClip.start + pastedClip.duration);
@@ -469,7 +471,8 @@ export const useTrackStore = defineStore('track', () => {
             clipId: data.newClipId,
             start: data.targetStartBar,
             isSelected: false,
-            isDragging: false
+            isDragging: false,
+            isLocked: false
         };
         targetTrack.clips.push(duplicatedClip);
         checkAndExpandTimeline(duplicatedClip.start + duplicatedClip.duration);
@@ -482,6 +485,17 @@ export const useTrackStore = defineStore('track', () => {
                 const audioOffsetSec = duplicatedClip.audioStartMs / 1000;
                 newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, duplicatedClip.duration * secondsPerBar.value);
                 clipPlayers.set(duplicatedClip.clipId, newPlayer);
+            });
+        }
+        
+        // 내가 복제 요청을 보낸 클립이라면 백엔드가 새 클립에 강제로 건 락을 해제
+        if (pendingDuplicateOriginalClipIds.has(data.clipId)) {
+            pendingDuplicateOriginalClipIds.delete(data.clipId);
+            // 소켓 통신을 통해 새 클립(newClipId)의 잠금을 즉시 해제 요청
+            socketService.publish('CLIP_LOCK', {
+                projectId: projectInfo.value.projectId,
+                clipId: data.newClipId,
+                isLocked: false
             });
         }
     });
@@ -726,6 +740,7 @@ export const useTrackStore = defineStore('track', () => {
         console.log(`[통신] 백엔드에 클립 복제(CLIP_DUPLICATE) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clip.clipId, trackId);
+        pendingDuplicateOriginalClipIds.add(clip.clipId);
         socketService.publish('CLIP_DUPLICATE', {
             projectId: projectInfo.value.projectId,
             clipId: clip.clipId

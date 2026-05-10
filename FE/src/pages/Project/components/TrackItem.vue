@@ -4,7 +4,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
 import FileSizeWarningModal from './FileSizeWarningModal.vue'
@@ -292,6 +292,8 @@ const resizeState = ref({
   startX: 0,
   origStart: 0,
   origDuration: 0,
+  origAudioStartMs: 0,
+  origAudioDurationMs: 0,
   isResizing: false
 });
 
@@ -311,6 +313,8 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
     startX: e.clientX,
     origStart: clip.start,
     origDuration: clip.duration,
+    origAudioStartMs: clip.audioStartMs,
+    origAudioDurationMs: clip.audioDurationMs,
     isResizing: true
   };
 
@@ -322,24 +326,61 @@ const onResizePointerMove = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
 
   const state = resizeState.value;
-  const tartgetClip = state.clip as ClipUIState;
+  const targetClip = state.clip as ClipUIState;
   const deltaX = e.clientX - state.startX;
   let deltaBar = deltaX / trackStore.pixelPerBar;
 
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
 
+  // 음원의 전체 길이를 마디 단위로 계산 (이 길이를 넘어서 늘릴 수 없음)
+  const totalAudioDurationMs = targetClip.audio?.durationMs ?? Infinity;
+  const maxAudioBars = totalAudioDurationMs / (trackStore.secondsPerBar * 1000);
+
   if (state.side === 'right') {
-    tartgetClip.duration = Math.max(minDuration, state.origDuration + deltaBar);
+    // 오른쪽 리사이즈: duration만 변화
+    let newDuration = state.origDuration + deltaBar;
+    
+    // 겹침 방지: 오른쪽에 있는 가장 가까운 클립의 시작점을 넘어갈 수 없음
+    // 백엔드의 엄격한 부동소수점 검증을 통과하기 위해 0.01 마디의 미세한 간격을 둡니다 (화면상 구분 불가)
+    const nextClip = props.track.clips
+      .filter(c => c.start >= state.origStart + state.origDuration - 0.001 && c.clipId !== targetClip.clipId)
+      .sort((a, b) => a.start - b.start)[0];
+    if (nextClip) {
+      newDuration = Math.min(newDuration, nextClip.start - state.origStart - 0.01);
+    }
+
+    // 음원 최대 길이 제한: 현재 audioStartMs부터 남은 오디오 길이까지만 늘릴 수 있음
+    const remainingAudioBars = (totalAudioDurationMs - state.origAudioStartMs) / (trackStore.secondsPerBar * 1000);
+    newDuration = Math.min(newDuration, remainingAudioBars);
+    newDuration = Math.max(minDuration, newDuration);
+    targetClip.duration = newDuration;
+    // 오디오 재생 범위도 같이 업데이트 (줄인 범위 밖 소리 차단)
+    targetClip.audioDurationMs = newDuration * trackStore.secondsPerBar * 1000;
   } else if (state.side === 'left') {
     // 왼쪽을 줄일 때는 시작점(start)과 길이(duration)가 동시에 변함
     const maxDelta = state.origDuration - minDuration;
-    const boundedDelta = Math.min(deltaBar, maxDelta);
+    let boundedDelta = Math.min(deltaBar, maxDelta);
     
-    // 0마디 뚫고 나가지 않게
-    const finalDelta = state.origStart + boundedDelta < 0 ? -state.origStart : boundedDelta;
+    // 겹침 방지: 왼쪽에 있는 가장 가까운 클립의 끝점을 넘어갈 수 없음
+    const prevClip = props.track.clips
+      .filter(c => c.start + c.duration <= state.origStart + 0.001 && c.clipId !== targetClip.clipId)
+      .sort((a, b) => (b.start + b.duration) - (a.start + a.duration))[0];
+    const minAllowedStart = prevClip ? prevClip.start + prevClip.duration + 0.01 : 0;
+    
+    // 시작점이 minAllowedStart 뚫고 나가지 않게
+    if (state.origStart + boundedDelta < minAllowedStart) {
+      boundedDelta = minAllowedStart - state.origStart;
+    }
 
-    tartgetClip.start = state.origStart + finalDelta;
-    tartgetClip.duration = state.origDuration - finalDelta;
+    // audioStartMs가 0 미만이 되지 않게 (왼쪽으로 확장 시 오디오 시작점 제한)
+    const newAudioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
+    if (newAudioStartMs < 0) boundedDelta = -state.origAudioStartMs / (trackStore.secondsPerBar * 1000);
+
+    targetClip.start = state.origStart + boundedDelta;
+    targetClip.duration = state.origDuration - boundedDelta;
+    // 왼쪽 리사이즈 시 오디오 시작점 이동 (줄인 만큼 오디오 시작점을 뒤로)
+    targetClip.audioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
+    targetClip.audioDurationMs = targetClip.duration * trackStore.secondsPerBar * 1000;
   }
 };
 
@@ -348,21 +389,33 @@ const onResizePointerUp = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
 
   const state = resizeState.value;
-  const tartgetClip = state.clip as ClipUIState;
+  const targetClip = state.clip as ClipUIState;
   
   // 백엔드 요청: 변경된 값 확정 (왼쪽을 얼마나 잘라냈는지 trimLeftBars 전달)
-  const trimLeftBars = state.side === 'left' ? (tartgetClip.start - state.origStart) : 0;
+  const trimLeftBars = state.side === 'left' ? (targetClip.start - state.origStart) : 0;
   
+  // 부동소수점 정밀도 문제로 인한 오차 방지 (백엔드 CLIP_OVERLAP 오작동 해결)
+  // 소수점 3자리까지만 남기고 자름으로써 백엔드의 깐깐한 수치 비교를 무사통과시킴
+  const safeStart = Number(targetClip.start.toFixed(3));
+  const safeDuration = Number(targetClip.duration.toFixed(3));
+  const safeTrimLeft = Number(trimLeftBars.toFixed(3));
+
   trackStore.resizeClip(
-      tartgetClip.clipId, 
+      targetClip.clipId, 
       props.track.trackId, 
-      tartgetClip.start, 
-      tartgetClip.duration,
-      trimLeftBars
+      safeStart, 
+      safeDuration,
+      safeTrimLeft
   );
 
+  // 리사이즈 후 오디오 플레이어를 새 범위에 맞게 재동기화
+  trackStore.resyncClip(targetClip.clipId, safeStart);
+
   // Resize 통신 이후에 Unlock을 보내야 백엔드가 정상적으로 처리함
-  trackStore.unlockClip(tartgetClip.clipId, props.track.trackId);
+  // nextTick으로 감싸서 통신이 먼저 처리되도록 보장
+  nextTick(() => {
+    trackStore.unlockClip(targetClip.clipId, props.track.trackId);
+  });
 
   resizeState.value.isResizing = false;
   resizeState.value.clip = null;
@@ -972,12 +1025,12 @@ const onWorkAreaMouseLeave = () => {
           <span class="text-xs font-bold">업로드 중...</span>
         </div>
 
-     <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
+      <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
           v-for="clip in sortedClips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
-          class="absolute inset-y-1 z-10 rounded-md"
+          class="clip-container absolute inset-y-1 z-10 rounded-md"
           :class="[
             isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
             clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
@@ -997,15 +1050,18 @@ const onWorkAreaMouseLeave = () => {
           @pointercancel="!isMaster && onClipPointerUp($event)"
           @contextmenu.prevent.stop="!isMaster && onClipRightClick($event, clip, track.trackId)"
         >
-          <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) -->
+          <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
             v-if="!isMaster"
-            class="absolute left-0 top-0 bottom-0 w-2.5 z-20 cursor-w-resize hover:bg-white/30"
+            class="group absolute left-0 top-0 bottom-0 w-3 z-20 cursor-w-resize flex items-center justify-center rounded-l-md transition-colors hover:bg-white/20"
+            :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
             @pointermove.stop="onResizePointerMove"
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
-          ></div>
+          >
+            <GripVertical class="h-4 w-4 text-white/50 group-hover:text-white/80 transition-colors" />
+          </div>
 
           <!-- 반복되는 반투명 잠금 배경 패턴 -->
           <div 
@@ -1041,15 +1097,18 @@ const onWorkAreaMouseLeave = () => {
           :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 
-          <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) -->
+          <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
             v-if="!isMaster"
-            class="absolute right-0 top-0 bottom-0 w-2.5 z-20 cursor-e-resize hover:bg-white/30"
+            class="group absolute right-0 top-0 bottom-0 w-3 z-20 cursor-e-resize flex items-center justify-center rounded-r-md transition-colors hover:bg-white/20"
+            :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'right')"
             @pointermove.stop="onResizePointerMove"
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
-          ></div>
+          >
+            <GripVertical class="h-4 w-4 text-white/50 group-hover:text-white/80 transition-colors" />
+          </div>
         </div>
 
     <TrackCommentLayer

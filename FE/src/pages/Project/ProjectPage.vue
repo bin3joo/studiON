@@ -29,6 +29,12 @@ const authStore = useAuthStore(); // Auth 스토어 사용 준비
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
 
+// 재생바 자동 스크롤: 스토어의 RAF 루프에서 직접 컨테이너를 조작하도록 컨테이너 참조를 전달
+watch(timelineContainerRef, (el) => {
+  trackStore.setTimelineContainer(el);
+}, { immediate: true });
+
+
 //휠할때 마우스가 가르키는 위치에서 휠되게 
 const handleWheel = (e: WheelEvent) => {
   if (e.ctrlKey || e.metaKey) {

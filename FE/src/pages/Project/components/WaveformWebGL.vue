@@ -87,8 +87,11 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
 
 <template>
   <div class="pointer-events-none absolute inset-0 h-full w-full">
-    <!-- 파형 렌더링 영역 (mix-blend-screen 적용) -->
-    <div v-if="audioData" class="absolute inset-0 h-full w-full opacity-60 mix-blend-screen">
+    <!-- 파형 렌더링 영역 (mix-blend-screen 적용, 좌측은 밝게, 우측은 어둡게 마스킹) -->
+    <div v-if="audioData" 
+         class="absolute inset-0 h-full w-full mix-blend-screen"
+         style="mask-image: linear-gradient(to right, rgba(0,0,0,1) var(--progress-px, 0px), rgba(0,0,0,0.4) var(--progress-px, 0px)); -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) var(--progress-px, 0px), rgba(0,0,0,0.4) var(--progress-px, 0px));"
+    >
       <WaveformChunk
         v-for="chunk in chunks"
         :key="chunk.id"

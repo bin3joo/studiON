@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
-import { SmilePlus, ArrowUp, X, Check, Trash2 } from 'lucide-vue-next'
+import { SmilePlus, ArrowUpCircle, X, Check, Trash2 } from 'lucide-vue-next'
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import { useTrackStore } from '../store/useTrackStore';
 
@@ -45,7 +45,8 @@ const emit = defineEmits<{
 
 const draftComment = ref('')
 const expandedMeasure = ref<number | null>(null)
-const expandedPlacement = ref<Placement>('top')
+const expandedCellLeft = ref(0)
+const expandedPlacement = ref<Placement>('bottom')
 const rootRef = ref<HTMLElement | null>(null)
 
 const COMMENT_BOX_HEIGHT = 280
@@ -55,15 +56,30 @@ const VIEWPORT_MARGIN = 24
 const activeCellLocation = ref<number | null>(null)
 const activeCellLeft = ref(0)
 
-watch(() => props.hoveredMeasure, (newVal) => {
-  // 코멘트 박스가 열려있을 때는 호버 위치를 업데이트하지 않음 (열린 위치 유지)
-  if (expandedMeasure.value !== null) return
-
-  if (newVal === null || props.hoveredTrackId !== props.trackId) {
-    activeCellLocation.value = null
-    return
+// 작성자별 고유 색상 생성기 (간단한 해시)
+const userColors = ['#00D06C', '#FFD700', '#FF3DCB', '#00E5FF', '#FF5722', '#B400FF']
+function getAuthorColor(authorName: string) {
+  if (!authorName) return userColors[0]
+  let hash = 0
+  for (let i = 0; i < authorName.length; i++) {
+    hash = authorName.charCodeAt(i) + ((hash << 5) - hash)
   }
+  return userColors[Math.abs(hash) % userColors.length]
+}
 
+let hideTimeout: ReturnType<typeof setTimeout> | null = null
+const isButtonHovered = ref(false)
+
+const onButtonMouseLeave = () => {
+  isButtonHovered.value = false
+  if (props.hoveredTrackId !== props.trackId || props.hoveredMeasure === null) {
+    activeCellLocation.value = null
+  } else {
+    updateCellLocation(props.hoveredMeasure)
+  }
+}
+
+function updateCellLocation(newVal: number) {
   activeCellLocation.value = newVal
   const safeSubDivision = Math.max(1, props.subDivision)
   const totalSubs = Math.round((newVal - 1) * safeSubDivision)
@@ -71,6 +87,26 @@ watch(() => props.hoveredMeasure, (newVal) => {
   const sub = totalSubs % safeSubDivision
   const subCellW = props.pixelPerBar / safeSubDivision
   activeCellLeft.value = (bar - 1) * props.pixelPerBar + sub * subCellW
+}
+
+watch(() => props.hoveredMeasure, (newVal) => {
+  if (newVal === null || props.hoveredTrackId !== props.trackId) {
+    if (hideTimeout) return
+    hideTimeout = setTimeout(() => {
+      activeCellLocation.value = null
+    }, 50)
+    return
+  }
+
+  if (hideTimeout) {
+    clearTimeout(hideTimeout)
+    hideTimeout = null
+  }
+
+  // 버튼에 마우스가 올라가 있다면 위치를 고정 (마우스가 옆으로 살짝 새어도 도망가지 않음)
+  if (isButtonHovered.value) return
+
+  updateCellLocation(newVal)
 }, { immediate: true })
 
 function isSameLocation(a: number, b: number) {
@@ -103,11 +139,22 @@ function isExpanded(location: number) {
 }
 
 async function openCommentBox(measure: number, event?: MouseEvent) {
+  isButtonHovered.value = false
   document.dispatchEvent(new CustomEvent('close-other-comments', { detail: props.trackId }))
   
   expandedMeasure.value = measure
-  draftComment.value = ''
-  emit('comment-expanded', true)
+
+  const safeSubDivision = Math.max(1, props.subDivision)
+  const totalSubs = Math.round((measure - 1) * safeSubDivision)
+  const bar = Math.floor(totalSubs / safeSubDivision) + 1
+  const sub = totalSubs % safeSubDivision
+  const subCellW = props.pixelPerBar / safeSubDivision
+  expandedCellLeft.value = (bar - 1) * props.pixelPerBar + sub * subCellW
+
+  nextTick(() => {
+    draftComment.value = ''
+    emit('comment-expanded', true)
+  })
 
   if (event) {
     const triggerRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -277,6 +324,15 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
   activeCellLeft.value = firstItem.x
   openCommentBox(firstItem.measure, event)
 }
+function parseMentions(content: string) {
+  if (!content) return []
+  const regex = /(@\S+)/g
+  const parts = content.split(regex)
+  return parts.map(part => ({
+    text: part,
+    isMention: part.startsWith('@')
+  }))
+}
 </script>
 
 <template>
@@ -294,15 +350,19 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
         v-for="cluster in clusteredCommentMarkers"
         :key="`${trackId}-cluster-${cluster.x}-${cluster.items.length}`"
         type="button"
-        class="pointer-events-auto absolute top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-400 text-black shadow-md transition hover:scale-110"
-        :class="cluster.items.length > 1
-          ? 'grid min-h-6 min-w-6 place-items-center px-1.5 text-[11px] font-bold'
-          : 'h-3 w-3'"
+        class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 translate-x-0.5 flex h-[22px] min-w-[22px] items-center justify-center rounded-[6px] border px-1.5 shadow-md transition hover:border-primary before:absolute before:-inset-3 before:content-['']"
+        :class="cluster.items[0].group.resolved ? 'border-green-500 bg-[#1c1c1c]' : 'border-white/20 bg-[#1c1c1c]'"
         :style="{ left: `${cluster.x}px` }"
         @mousedown.stop.prevent="openCommentCluster(cluster, $event)"
       >
-        <template v-if="cluster.items.length > 1">
-          {{ cluster.items.length }}
+        <template v-if="cluster.items.length === 1">
+          <div class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: getAuthorColor(cluster.items[0].group.comments[0]?.author || '') }"></div>
+        </template>
+        <template v-else>
+          <div class="flex items-center gap-1">
+            <div class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: getAuthorColor(cluster.items[0].group.comments[0]?.author || '') }"></div>
+            <span class="text-[10px] font-bold text-white">{{ cluster.items.length }}</span>
+          </div>
         </template>
       </button>
     </div>
@@ -327,133 +387,148 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
       <button
         v-if="activeCellLocation !== null && !hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
         type="button"
-        class="pointer-events-auto absolute top-3 z-40 grid h-9 w-9 -translate-x-1/2 place-items-center rounded-full border border-border bg-background/95 text-foreground shadow-md transition hover:border-primary hover:text-primary"
+        class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 grid h-7 w-7 translate-x-0.5 place-items-center rounded-full border border-white/20 bg-[#282828] text-white shadow-md transition hover:border-primary hover:text-primary before:absolute before:-inset-4 before:content-['']"
         :style="{ left: `${activeCellLeft}px` }"
         @mousedown.stop.prevent="openCommentBox(activeCellLocation, $event)"
+        @mouseenter="isButtonHovered = true"
+        @mouseleave="onButtonMouseLeave"
       >
-        <SmilePlus class="h-4 w-4" />
+        <SmilePlus class="h-4 w-4 relative z-10" />
       </button>
 
       <!-- 댓글 있는 경우: hover 시 preview -->
       <button
         v-if="activeCellLocation !== null && hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
         type="button"
-        class="pointer-events-auto absolute top-3 z-40 w-[240px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#353535] p-3 text-left shadow-xl transition hover:border-primary/60"
+        class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 flex h-[26px] max-w-[300px] translate-x-0.5 items-center gap-2 overflow-hidden whitespace-nowrap rounded-[6px] border border-white/20 bg-[#1c1c1c] px-2.5 shadow-xl transition hover:border-primary"
         :style="{ left: `${activeCellLeft}px` }"
         @mousedown.stop.prevent="openCommentBox(activeCellLocation, $event)"
+        @mouseenter="isButtonHovered = true"
+        @mouseleave="onButtonMouseLeave"
       >
-        <div class="mb-1 text-xs font-medium text-[#b5b7c4]">
+        <div class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: getAuthorColor(getPreviewComment(activeCellLocation)?.author || '') }"></div>
+        <div class="shrink-0 text-[11px] font-medium text-white/60">
           {{ getPreviewComment(activeCellLocation)?.author }}
         </div>
-        <p class="line-clamp-2 text-sm text-white">
+        <p class="truncate text-[11px] text-white">
           {{ getPreviewComment(activeCellLocation)?.content }}
         </p>
       </button>
 
       <!-- 확장 댓글 박스 -->
       <div
-        v-if="activeCellLocation !== null && isExpanded(activeCellLocation)"
-        class="pointer-events-auto absolute z-[1200] w-[320px] -translate-x-1/2 rounded-2xl border border-white/15 bg-[#353535] p-4 shadow-2xl"
-        :class="expandedPlacement === 'top'
-          ? 'bottom-[calc(100%-8px)]'
-          : 'top-[calc(100%-8px)]'"
-        :style="{ left: `${activeCellLeft}px` }"
+        v-if="expandedMeasure !== null"
+        class="pointer-events-auto absolute z-[120] w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl"
+        :class="[
+          expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]',
+          getCommentGroup(expandedMeasure) ? 'p-3' : 'px-2.5 py-1.5'
+        ]"
+        :style="{ left: `calc(${expandedCellLeft}px + 13px)` }"
+        @mousedown.stop
         @click.stop
       >
-        <div class="mb-4 flex items-center justify-end gap-2">
-          <button
-            v-if="getCommentGroup(activeCellLocation)"
-            type="button"
-            class="grid h-9 w-9 place-items-center rounded-full border border-white/10 text-[#cdd2dc] transition hover:bg-white/5 hover:text-white"
-            @click.stop="emit('resolve-comment', {
-              trackId,
-              measure: activeCellLocation,
-            })"
-          >
-            <Check class="h-5 w-5" />
-          </button>
+        <!-- 말풍선 꼬리 (Arrow) -->
+        <div 
+          class="absolute left-1/2 -translate-x-1/2 h-3.5 w-3.5 rotate-45 border-white/20 bg-[#1c1c1c]"
+          :class="expandedPlacement === 'top' ? '-bottom-[7.5px] border-b border-r' : '-top-[7.5px] border-t border-l'"
+        ></div>
 
+        <!-- 새 댓글 달기 (Empty State) -->
+        <div v-if="!getCommentGroup(expandedMeasure)" class="relative z-10 flex items-center gap-2">
+          <div class="h-2.5 w-2.5 shrink-0 rounded-full bg-[#FF3DCB]"></div>
+          <input
+            v-model="draftComment"
+            type="text"
+            placeholder="댓글 추가"
+            class="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/40"
+            @keydown.enter.prevent="submitComment(expandedMeasure)"
+          />
           <button
-            type="button"
-            class="grid h-9 w-9 place-items-center rounded-full border border-white/10 text-[#cdd2dc] transition hover:bg-white/5 hover:text-white"
-            @click.stop="closeCommentBox"
+            class="shrink-0 transition hover:scale-110 disabled:opacity-50"
+            :disabled="!draftComment.trim()"
+            @click="submitComment(expandedMeasure)"
           >
-            <X class="h-5 w-5" />
+            <ArrowUpCircle class="h-4 w-4 text-white/40 hover:text-white" />
+          </button>
+          <button
+            class="shrink-0 transition hover:scale-110"
+            @click.stop="closeCommentBox"
+            title="닫기"
+          >
+            <X class="h-4 w-4 text-white/40 hover:text-white" />
           </button>
         </div>
 
-        <template v-if="getCommentGroup(activeCellLocation)">
-          <div
-            v-for="comment in getCommentGroup(activeCellLocation)?.comments"
-            :key="comment.id"
-            class="mb-4 flex gap-3 last:mb-0"
-            :class="getCommentGroup(activeCellLocation)?.resolved ? 'opacity-50' : ''"
-          >
+        <!-- 댓글 목록 & 입력 (Populated State) -->
+        <div v-else class="relative z-10 flex flex-col">
+          <!-- 댓글 목록 -->
+          <div class="flex max-h-[300px] flex-col gap-3 overflow-y-auto custom-scrollbar">
             <div
-              class="mt-1 h-6 w-6 shrink-0 rounded-full"
-              :style="{ backgroundColor: comment.color }"
-            />
-
-            <div class="min-w-0 flex-1">
-              <div class="mb-1 flex items-start justify-between gap-2">
-  <div class="flex min-w-0 items-center gap-2">
-    <div class="truncate text-sm font-medium text-[#b5b7c4]">
-      {{ comment.author }}
-    </div>
-
-    <span
-      v-if="getCommentGroup(activeCellLocation)?.resolved"
-      class="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-[11px] text-green-400"
-    >
-      해결됨
-    </span>
-  </div>
-
-  <button
-    type="button"
-    class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[#8f93a5] transition hover:bg-white/5 hover:text-red-400"
-    @click.stop="requestDeleteComment(comment.id)"
-  >
-    <Trash2 class="h-4 w-4" />
-  </button>
-</div>
-
-              <div
-                v-if="comment.mention"
-                class="mb-1 text-[15px] font-semibold text-[#ff33b8]"
-              >
-                {{ comment.mention }}
+              v-for="(comment, idx) in getCommentGroup(expandedMeasure)?.comments || []"
+              :key="comment.id"
+              class="group flex flex-col gap-1"
+              :class="getCommentGroup(expandedMeasure)?.resolved ? 'opacity-50' : ''"
+            >
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: comment.color || getAuthorColor(comment.author) }"></div>
+                  <span class="text-[11px] font-medium text-white/60">{{ comment.author }}</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button
+                    class="opacity-0 transition-opacity group-hover:opacity-100"
+                    @click.stop="requestDeleteComment(comment.id)"
+                    title="삭제"
+                  >
+                    <Trash2 class="h-3.5 w-3.5 text-white/40 hover:text-red-400" />
+                  </button>
+                  <button
+                    v-if="idx === 0"
+                    class="transition-colors"
+                    :class="getCommentGroup(expandedMeasure)?.resolved ? 'text-green-500' : 'text-white hover:text-green-400'"
+                    @click.stop="emit('resolve-comment', { trackId, measure: expandedMeasure })"
+                    title="해결됨 표시"
+                  >
+                    <Check class="h-4 w-4" />
+                  </button>
+                  <button
+                    v-if="idx === 0"
+                    class="text-white hover:text-white/60 transition-colors"
+                    @click.stop="closeCommentBox"
+                    title="닫기"
+                  >
+                    <X class="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-
-              <p class="text-[15px] leading-relaxed text-white">
-                {{ comment.content }}
-              </p>
+              <div class="pl-[18px]">
+                <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-white">
+                  <template v-for="(part, i) in parseMentions(comment.mention ? comment.mention + ' \n' + comment.content : comment.content)" :key="i">
+                    <span v-if="part.isMention" class="font-medium text-[#FF3DCB]">{{ part.text }}</span>
+                    <span v-else>{{ part.text }}</span>
+                  </template>
+                </p>
+              </div>
             </div>
           </div>
-        </template>
 
-        <div
-          class="mt-4 flex gap-3"
-          :class="getCommentGroup(activeCellLocation) ? 'border-t border-white/10 pt-4' : ''"
-        >
-          <div class="mt-1 h-6 w-6 shrink-0 rounded-full bg-fuchsia-500" />
-
-          <div class="flex-1">
-            <div class="flex items-center rounded-2xl border border-white/10 bg-[#313131] pl-4 pr-2">
+          <!-- 댓글 입력 줄 -->
+          <div class="mt-3 flex items-center gap-2">
+            <div class="h-2.5 w-2.5 shrink-0 rounded-full bg-[#FF3DCB]"></div>
+            <div class="flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
               <input
                 v-model="draftComment"
                 type="text"
                 placeholder="댓글 추가"
-                class="h-12 w-full bg-transparent text-[15px] text-white placeholder:text-[#a6a8b3] focus:outline-none"
-                @keydown.enter="submitComment(activeCellLocation!)"
-              >
-
+                class="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/40"
+                @keydown.enter.prevent="submitComment(expandedMeasure)"
+              />
               <button
-                type="button"
-                class="grid h-10 w-10 place-items-center rounded-full text-[#8f93a5] transition hover:text-white"
-                @click="submitComment(activeCellLocation!)"
+                class="shrink-0 transition hover:scale-110 disabled:opacity-50"
+                :disabled="!draftComment.trim()"
+                @click="submitComment(expandedMeasure)"
               >
-                <ArrowUp class="h-6 w-6" />
+                <ArrowUpCircle class="h-4 w-4 text-white/40 hover:text-white" />
               </button>
             </div>
           </div>

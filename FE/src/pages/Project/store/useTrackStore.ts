@@ -1070,6 +1070,17 @@ export const useTrackStore = defineStore('track', () => {
     let lastReactiveUpdate = 0; // PlayController 디스플레이용 마지막 갱신 시각
     const REACTIVE_UPDATE_INTERVAL = 250; // PlayController(마디/박자 표시)는 250ms마다만 갱신 (4fps)
 
+    // 사용자가 타임라인 스크러빙(드래그)으로 재생바를 옮길 때, 정지 상태라면 즉시 DOM 위치 동기화
+    watch(playheadPosition, (newBar) => {
+        if (!isPlaying.value) {
+            const px = newBar * pixelPerBar.value;
+            const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
+            for (let i = 0; i < playheadEls.length; i++) {
+                playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+            }
+        }
+    });
+
     const updatePlayheadLoop = () => {
         if (!isPlaying.value) return;
 

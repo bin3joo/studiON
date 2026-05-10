@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {ref, computed, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
-import { Pencil, VolumeX } from 'lucide-vue-next';
+import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
 import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
@@ -20,6 +20,11 @@ const props = defineProps<{
 
 //스토어 사용
 const trackStore = useTrackStore();
+
+// 클립이 겹칠 경우 나중에 생성된 클립(clipId가 큼)이 뒤에(아래에) 깔리도록 내림차순 정렬
+const sortedClips = computed(() => {
+  return [...props.track.clips].sort((a, b) => b.clipId - a.clipId);
+});
 
 // 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
 const masterBackgroundBlocks = computed(() => {
@@ -768,7 +773,8 @@ const onWorkAreaMouseLeave = () => {
             :class="track.isMuted ? 'bg-red-500/20 text-red-500 border-red-500/50' : 'border-white/30 bg-white/10 text-white hover:bg-white/20'"
             class="grid h-6 w-7 place-items-center rounded border transition"
           >
-            <VolumeX class="h-3.5 w-3.5" />
+            <VolumeX v-if="track.isMuted" class="h-3.5 w-3.5" />
+            <Volume2 v-else class="h-3.5 w-3.5" />
           </button>
           
           <!-- 솔로 버튼 -->
@@ -944,7 +950,7 @@ const onWorkAreaMouseLeave = () => {
 
      <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
-          v-for="clip in track.clips" 
+          v-for="clip in sortedClips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="absolute inset-y-1 z-10 rounded-md"

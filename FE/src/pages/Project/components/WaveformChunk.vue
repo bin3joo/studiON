@@ -107,8 +107,7 @@ onMounted(async () => {
       }
     });
   }, {
-    root: document.querySelector('.custom-scrollbar'), // 스크롤 가능한 가장 가까운 조상
-    rootMargin: '300px', // 좌우로 여유를 주어 스크롤 전 미리 렌더링
+    rootMargin: '500px 500px', // 좌우 스크롤을 대비하여 여유를 넉넉하게 줌
     threshold: 0
   });
 

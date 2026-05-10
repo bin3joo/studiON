@@ -76,7 +76,7 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   }
 
   // 스페이스바 처리
-  if(e.code === 'Space'){
+  if(e.code === 'Space' || e.key === ' '){
     e.preventDefault(); // 여기서 브라우저 기본 스크롤 동작을 완벽히 차단.
     await Tone.start(); 
     trackStore.togglePlay();
@@ -277,8 +277,8 @@ onMounted(async () => {
     }
   }
   
-  //키보드 이벤트 리스너 등록
-  window.addEventListener('keydown', handleKeyDown);
+  //키보드 이벤트 리스너 등록 (캡처링 단계에서 가로채서 버튼 클릭 등 방지)
+  window.addEventListener('keydown', handleKeyDown, { capture: true });
   //  마우스 이동 감지
   window.addEventListener('mousemove', updateMousePos);
 
@@ -295,7 +295,7 @@ if(timelineContainerRef.value) {
 
 onUnmounted(()=>{
   //키보드 이벤트 제거
-  window.removeEventListener('keydown',handleKeyDown);
+  window.removeEventListener('keydown', handleKeyDown, { capture: true });
   // 마우스 감지해제
   window.removeEventListener('mousemove', updateMousePos);
   //오디오 제한 해제 리스너 제거

@@ -318,6 +318,10 @@ export const useTrackStore = defineStore('track', () => {
                 // [원복] 오디오 Culling 시 디코딩 부하로 인한 끊김이 발생하여 미리 로딩
                 loadClipPlayer(reactiveClip, data.trackId);
                 console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 예약 완료 (ID: ${reactiveClip.clipId})`);
+                
+                // 겹침 방지 (업로드한 당사자만 서버에 반영)
+                const isInitiator = uploadingTrackId.value === track.trackId;
+                resolveClipOverlap(reactiveClip, track, isInitiator);
             }
         } catch (error) {
             console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
@@ -378,6 +382,43 @@ export const useTrackStore = defineStore('track', () => {
             }
         }
     });
+
+    // 겹침 방지 및 자동 뒤로 밀어내기 유틸리티 함수
+    const resolveClipOverlap = (clip: ClipUIState, track: TrackUIState, isInitiator: boolean) => {
+        let hasOverlap = true;
+        let safetyCounter = 0;
+        const epsilon = 0.001;
+
+        let resolvedStart = clip.start;
+        const duration = clip.duration;
+
+        while (hasOverlap && safetyCounter < 100) {
+            hasOverlap = false;
+            safetyCounter++;
+            for (const existingClip of track.clips) {
+                if (existingClip.clipId === clip.clipId) continue; // 자기 자신 건너뛰기
+
+                const existingStart = existingClip.start;
+                const existingEnd = existingClip.start + existingClip.duration;
+                const desiredEnd = resolvedStart + duration;
+
+                if (resolvedStart < existingEnd - epsilon && desiredEnd > existingStart + epsilon) {
+                    hasOverlap = true;
+                    resolvedStart = existingEnd; // 겹치면 해당 클립의 맨 뒤로 밀어냄
+                    break; // 처음부터 다시 겹침 여부 검사
+                }
+            }
+        }
+
+        if (resolvedStart !== clip.start) {
+            clip.start = resolvedStart;
+            // 내가 복제/생성을 지시한 당사자라면 백엔드에도 위치 이동을 동기화합니다.
+            if (isInitiator) {
+                console.log(`[Overlap Resolution] 클립 겹침 감지됨. 서버로 이동 요청 전송 (새 위치: ${resolvedStart})`);
+                confirmMoveClip(clip.clipId, track.trackId, resolvedStart);
+            }
+        }
+    };
 
     // 삭제된 클립들을 임시 보관하는 캐시 (다른 사람이 잘라내기 한 클립을 붙여넣기 할 때 복원하기 위함)
     const deletedClipsCache = new Map<number, ClipUIState>();
@@ -448,9 +489,18 @@ export const useTrackStore = defineStore('track', () => {
         checkAndExpandTimeline(pastedClip.start + pastedClip.duration);
         // [원복] 오디오 플레이어 미리 로드 (끊김 방지)
         loadClipPlayer(pastedClip, data.targetTrackId);
+
+        let isInitiator = false;
+        if (pendingPasteCount.value > 0) {
+            pendingPasteCount.value--;
+            isInitiator = true;
+        }
+        resolveClipOverlap(pastedClip, targetTrack, isInitiator);
     });
-    // 내가 복제 요청한 원본 클립 ID를 임시 저장 (백엔드가 새 클립에 강제로 건 락을 해제하기 위함)
+    
+    // 내가 복제/붙여넣기 요청한 건인지 확인하기 위한 로컬 상태
     const pendingDuplicateClipIds = new Set<number>();
+    const pendingPasteCount = ref(0);
 
     // 3. 클립 복제 수신
     socketService.subscribe('CLIP_DUPLICATE', (data) => {
@@ -476,10 +526,14 @@ export const useTrackStore = defineStore('track', () => {
         loadClipPlayer(duplicatedClip, data.targetTrackId);
 
         // 내가 복제 요청한 클립이라면, 백엔드가 강제로 걸어둔 새 클립의 Lock을 해제합니다.
-        if (pendingDuplicateClipIds.has(data.clipId)) {
+        const isInitiator = pendingDuplicateClipIds.has(data.clipId);
+        if (isInitiator) {
             pendingDuplicateClipIds.delete(data.clipId);
             unlockClip(data.newClipId, data.targetTrackId);
         }
+
+        // 겹침 방지: 생성된 클립이 기존 클립과 겹치면 끝나는 위치 바로 뒤로 밀어냅니다.
+        resolveClipOverlap(duplicatedClip, targetTrack, isInitiator);
     });
     // 4. 클립 분할 수신
     socketService.subscribe('CLIP_SPLIT', async (data) => {
@@ -684,6 +738,7 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         console.log(`[통신] 백엔드에 붙여넣기(CLIP_PASTE) 요청 전송`);
+        pendingPasteCount.value++;
         socketService.publish('CLIP_PASTE', {
             projectId: projectInfo.value.projectId,
             targetTrackId: targetTrackId,
@@ -814,8 +869,10 @@ export const useTrackStore = defineStore('track', () => {
             const vol = trackVolumes.get(t.trackId);
             if (vol) {
                 if (isAnySoloed) {
-                    vol.mute = !t.isSoloed;
+                    // 솔로 모드일 때: 현재 트랙이 솔로가 아니거나, 혹은 솔로더라도 명시적으로 음소거된 상태면 소리를 끕니다.
+                    vol.mute = !t.isSoloed || t.isMuted;
                 } else {
+                    // 솔로 모드가 아닐 때: 트랙의 음소거 상태를 그대로 따릅니다.
                     vol.mute = t.isMuted;
                 }
             }
@@ -893,20 +950,20 @@ export const useTrackStore = defineStore('track', () => {
         });
     };
 
-    // 볼륨 UI 정중앙(0dB) 비선형 매핑 로직
+    // 볼륨 UI 0dB 매핑 (80% 지점에 위치)
     const getVolumePercent = (vol: number) => {
         if (vol <= 0) {
-            return ((vol + 60) / 60) * 50;
+            return ((vol + 60) / 60) * 80;
         } else {
-            return 50 + (vol / 6) * 50;
+            return 80 + (vol / 6) * 20;
         }
     };
 
     const getVolumeFromPercent = (percent: number) => {
-        if (percent <= 50) {
-            return (percent / 50) * 60 - 60;
+        if (percent <= 80) {
+            return (percent / 80) * 60 - 60;
         } else {
-            return ((percent - 50) / 50) * 6;
+            return ((percent - 80) / 20) * 6;
         }
     };
 

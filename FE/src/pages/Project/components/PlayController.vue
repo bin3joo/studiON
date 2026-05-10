@@ -87,24 +87,17 @@ const emit = defineEmits<{
     <!--absolute left-1/2 flex -translate-x-1/2 : 버튼을 정확히 가운데 배치 role='group' 그룹으로 묶어줌-->
     <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤">
       <button 
-        :aria-label="trackStore.isPlaying ? '현재 재생 중' : '재생 시작'"
+        :aria-label="trackStore.isPlaying ? '일시정지' : '재생 시작'"
         :class="[
           'grid h-8 w-10 place-items-center rounded border transition',
           trackStore.isPlaying 
             ? 'border-primary bg-primary/20 text-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)]' 
-            : 'border-white/10 bg-white/5 text-white hover:bg-white/10'
+            : 'border-white/10 bg-white/5 text-white hover:bg-white/10 active:scale-95'
         ]"
-        @click="handlePlay"
+        @click="trackStore.isPlaying ? handlePause() : handlePlay()"
       >
-        <Play class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
-      </button>
-
-      <button 
-        aria-label="일시정지" 
-        class="grid h-8 w-10 place-items-center rounded border border-white/10 bg-white/5 text-white transition hover:bg-white/10 active:scale-95" 
-        @click="handlePause"
-      >
-        <Pause class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+        <Pause v-if="trackStore.isPlaying" class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+        <Play v-else class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
       </button>
 
       <button 

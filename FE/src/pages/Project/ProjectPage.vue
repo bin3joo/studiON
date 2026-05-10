@@ -73,7 +73,7 @@ const handleWheel = (e: WheelEvent) => {
 //스페이스바 단축키 핸들러
 const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // 입력창(input, textarea)에 포커스가 있을 때는 단축키를 무시해야 합니다. (이름/볼륨 수정 중 스페이스바 띄어쓰기 보호)
-  if(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if ((e.target instanceof HTMLInputElement && e.target.type !== 'range') || e.target instanceof HTMLTextAreaElement) return;
 
   // 대소문자 상관없이 순수하게 C키만 눌렀을 때 코멘트 모드 전환
   if(e.code === 'KeyC' && !e.ctrlKey && !e.metaKey) {

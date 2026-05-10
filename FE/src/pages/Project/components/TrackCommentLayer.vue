@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
 import { SmilePlus, ArrowUp, X, Check, Trash2 } from 'lucide-vue-next'
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import { useTrackStore } from '../store/useTrackStore';
@@ -40,6 +40,7 @@ const emit = defineEmits<{
   }]
   'track-contextmenu': [event: MouseEvent]
   'track-pointerdown': [event: MouseEvent]
+  'comment-expanded': [isExpanded: boolean]
 }>()
 
 const draftComment = ref('')
@@ -54,33 +55,23 @@ const VIEWPORT_MARGIN = 24
 const activeCellLocation = ref<number | null>(null)
 const activeCellLeft = ref(0)
 
-function calcCellFromMouseX(clientX: number) {
-  if (!rootRef.value) return null
-  const rect = rootRef.value.getBoundingClientRect()
-  const x = clientX - rect.left
-  const safeSubDivision = Math.max(1, props.subDivision)
-  const subCellW = props.pixelPerBar / safeSubDivision
-  const bar = Math.floor(x / props.pixelPerBar) + 1
-  const sub = Math.floor((x % props.pixelPerBar) / subCellW)
-  const location = bar + sub / safeSubDivision
-  const left = (bar - 1) * props.pixelPerBar + sub * subCellW
-  return { location, left }
-}
-
-function onOverlayMouseMove(e: MouseEvent) {
-  const cell = calcCellFromMouseX(e.clientX)
-  if (!cell) return
-  activeCellLocation.value = cell.location
-  activeCellLeft.value = cell.left
-  emit('hover-measure', { trackId: props.trackId, measure: cell.location })
-}
-
-function onOverlayMouseLeave() {
-  // 확장된 댓글 박스가 있으면 위치를 유지
+watch(() => props.hoveredMeasure, (newVal) => {
+  // 코멘트 박스가 열려있을 때는 호버 위치를 업데이트하지 않음 (열린 위치 유지)
   if (expandedMeasure.value !== null) return
-  activeCellLocation.value = null
-  emit('hover-measure', { trackId: null, measure: null })
-}
+
+  if (newVal === null || props.hoveredTrackId !== props.trackId) {
+    activeCellLocation.value = null
+    return
+  }
+
+  activeCellLocation.value = newVal
+  const safeSubDivision = Math.max(1, props.subDivision)
+  const totalSubs = Math.round((newVal - 1) * safeSubDivision)
+  const bar = Math.floor(totalSubs / safeSubDivision) + 1
+  const sub = totalSubs % safeSubDivision
+  const subCellW = props.pixelPerBar / safeSubDivision
+  activeCellLeft.value = (bar - 1) * props.pixelPerBar + sub * subCellW
+}, { immediate: true })
 
 function isSameLocation(a: number, b: number) {
   return Math.abs(a - b) < 0.0001
@@ -112,8 +103,11 @@ function isExpanded(location: number) {
 }
 
 async function openCommentBox(measure: number, event?: MouseEvent) {
+  document.dispatchEvent(new CustomEvent('close-other-comments', { detail: props.trackId }))
+  
   expandedMeasure.value = measure
   draftComment.value = ''
+  emit('comment-expanded', true)
 
   if (event) {
     const triggerRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -141,6 +135,7 @@ function closeCommentBox() {
   draftComment.value = ''
   activeCellLocation.value = null
   emit('hover-measure', { trackId: null, measure: null })
+  emit('comment-expanded', false)
 }
 
 function submitComment(measure: number) {
@@ -181,12 +176,21 @@ function handleOutsideClick(event: MouseEvent) {
   }
 }
 
+function handleCloseOtherComments(e: Event) {
+  const customEvent = e as CustomEvent
+  if (customEvent.detail !== props.trackId) {
+    closeCommentBox()
+  }
+}
+
 onMounted(() => {
   document.addEventListener('mousedown', handleOutsideClick)
+  document.addEventListener('close-other-comments', handleCloseOtherComments)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleOutsideClick)
+  document.removeEventListener('close-other-comments', handleCloseOtherComments)
 })
 
 // 댓글 마커 클러스터링
@@ -278,7 +282,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
 <template>
   <div
     ref="rootRef"
-    class="absolute left-0 top-0 z-0 h-full pointer-events-none"
+    class="absolute left-0 top-0 h-full pointer-events-none"
     :style="{
       width: `${props.timelineWidth}px`,
       minWidth: `${props.timelineWidth}px`,
@@ -295,7 +299,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
           ? 'grid min-h-6 min-w-6 place-items-center px-1.5 text-[11px] font-bold'
           : 'h-3 w-3'"
         :style="{ left: `${cluster.x}px` }"
-        @click.stop="openCommentCluster(cluster, $event)"
+        @mousedown.stop.prevent="openCommentCluster(cluster, $event)"
       >
         <template v-if="cluster.items.length > 1">
           {{ cluster.items.length }}
@@ -305,11 +309,10 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
 
     <!-- [성능 최적화] 투명 오버레이 1개로 수만 개의 셀 div를 대체 -->
     <div
-      class="absolute top-0 left-0 h-full pointer-events-auto z-0"
+      class="absolute top-0 left-0 h-full pointer-events-none"
+      :class="trackStore.isCommentMode ? 'z-20' : 'z-auto'"
       :data-track-id="props.trackId"
       :style="{ width: `${props.timelineWidth}px` }"
-      @mousemove="onOverlayMouseMove"
-      @mouseleave="onOverlayMouseLeave"
       @pointerdown.stop="emit('track-pointerdown', $event)"
       @contextmenu.prevent.stop="emit('track-contextmenu', $event)"
     >
@@ -326,7 +329,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
         type="button"
         class="pointer-events-auto absolute top-3 z-40 grid h-9 w-9 -translate-x-1/2 place-items-center rounded-full border border-border bg-background/95 text-foreground shadow-md transition hover:border-primary hover:text-primary"
         :style="{ left: `${activeCellLeft}px` }"
-        @click.stop="openCommentBox(activeCellLocation, $event)"
+        @mousedown.stop.prevent="openCommentBox(activeCellLocation, $event)"
       >
         <SmilePlus class="h-4 w-4" />
       </button>
@@ -337,7 +340,7 @@ function openCommentCluster(cluster: CommentCluster, event: MouseEvent) {
         type="button"
         class="pointer-events-auto absolute top-3 z-40 w-[240px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#353535] p-3 text-left shadow-xl transition hover:border-primary/60"
         :style="{ left: `${activeCellLeft}px` }"
-        @click.stop="openCommentBox(activeCellLocation, $event)"
+        @mousedown.stop.prevent="openCommentBox(activeCellLocation, $event)"
       >
         <div class="mb-1 text-xs font-medium text-[#b5b7c4]">
           {{ getPreviewComment(activeCellLocation)?.author }}

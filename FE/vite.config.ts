@@ -31,6 +31,27 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  
+  // 빌드 시 청크 용량 경고 해결 및 최적화 설정
+  build: {
+    chunkSizeWarningLimit: 1000, // 경고 기준을 500KB -> 1000KB로 상향 (Tone.js 등 무거운 라이브러리 감안)
+    rollupOptions: {
+      output: {
+        // 용량이 큰 라이브러리들을 별도의 js 파일로 쪼개어(Code Splitting) 브라우저 캐싱 최적화
+        manualChunks(id) {
+          if (id.includes('node_modules/tone')) {
+            return 'tone';
+          }
+          if (id.includes('node_modules/vue') || id.includes('node_modules/pinia') || id.includes('node_modules/vue-router')) {
+            return 'vue-vendor';
+          }
+          if (id.includes('node_modules/lucide-vue-next') || id.includes('node_modules/wavesurfer.js')) {
+            return 'ui-vendor';
+          }
+        }
+      }
+    }
   }
 
 

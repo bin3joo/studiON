@@ -191,6 +191,16 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
         break;
     }
   }
+
+  // Shift 키와 함께 누른 경우
+  if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    switch (e.code) {
+      case 'KeyT': // 트랙 추가
+        e.preventDefault();
+        trackStore.addTrack();
+        break;
+    }
+  }
 };
 //사용자가 기존에 사용하던 테마 임시 저장
 let previousTheme = '';

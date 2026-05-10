@@ -27,6 +27,7 @@ export const useTrackStore = defineStore('track', () => {
     const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
     const myLockedClips = new Set<number>(); // 내가 직접 잠근(편집 중인) 클립 ID 목록
     const pendingDuplicateOriginalClipIds = new Set<number>(); // 내가 복제한 클립의 원본 ID 목록 (백엔드 강제 락 해제용)
+    const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
@@ -406,6 +407,8 @@ export const useTrackStore = defineStore('track', () => {
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
             if (index !== -1) {
+                // 잘라낸 원본 클립을 지우기 전에 임시 보관소에 깊은 복사로 저장 (다른 유저가 붙여넣을 때 원본 데이터를 참조하기 위함)
+                cutClipsMap.set(data.clipId, JSON.parse(JSON.stringify(t.clips[index])));
                 t.clips.splice(index, 1);
                 break;
             }
@@ -422,9 +425,13 @@ export const useTrackStore = defineStore('track', () => {
             const found = t.clips.find(c => c.clipId === data.sourceClipId);
             if (found) { originalClip = found; break; }
         }
-        // 잘라내기(Cut)의 경우 화면에서 이미 삭제되었으므로 로컬 클립보드에서 찾습니다.
+        // 잘라내기(Cut)의 경우 화면에서 이미 삭제되었으므로 내 로컬 클립보드에서 찾습니다.
         if (!originalClip && clipboardClip.value && clipboardClip.value.clipId === data.sourceClipId) {
             originalClip = clipboardClip.value;
+        }
+        // 내가 자른게 아니고 다른 사람이 자른 클립이라면, 임시 보관소(cutClipsMap)에서 찾습니다.
+        if (!originalClip && cutClipsMap.has(data.sourceClipId)) {
+            originalClip = cutClipsMap.get(data.sourceClipId) || null;
         }
 
         if (!originalClip) {
@@ -454,6 +461,12 @@ export const useTrackStore = defineStore('track', () => {
                 newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, pastedClip.duration * secondsPerBar.value);
                 clipPlayers.set(pastedClip.clipId, newPlayer);
             });
+        }
+
+        // 화면 렌더링이 무사히 끝난 후 잘라내기 클립보드 비우기
+        if (isCutAction.value) {
+            clipboardClip.value = null;
+            isCutAction.value = false;
         }
     });
     // 3. 클립 복제 수신
@@ -715,12 +728,6 @@ export const useTrackStore = defineStore('track', () => {
             targetTrackId: targetTrackId,
             targetStartBar: resolvedStart
         });
-
-        // 잘라내기 처리
-        if (isCutAction.value) {
-            clipboardClip.value = null;
-            isCutAction.value = false;
-        }
     };
 
     // 삭제

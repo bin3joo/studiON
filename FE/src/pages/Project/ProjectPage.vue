@@ -182,6 +182,13 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
           }
         }
         break;
+
+      case 'KeyD': // 복제(Duplicate)
+        e.preventDefault();
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.duplicateClip(trackStore.selectedClip, trackStore.selectedTrackId);
+        }
+        break;
     }
   }
 };

@@ -53,19 +53,4 @@ export interface TrackEqBandState {
 export interface TrackEqState {
   bands: TrackEqBandState[]
 }
-
-export interface TrackUIState {
-  trackId: number
-  name: string
-  type: string
-  preTrackId: number | null
-  postTrackId: number | null
-  volume: number
-  pan: number
-  isMuted: boolean
-  isSoloed: boolean
-  clips: ClipUIState[]
-  height: number
-  isSelected?: boolean
-  eq?: TrackEqState
-}
+

@@ -162,10 +162,12 @@ onUnmounted(() => {
   <div 
     aria-label="타임라인 눈금자 및 재생 바 영역"
     class="sticky top-0 z-40 flex h-7 border-b border-border bg-card select-none w-max min-w-full"
+    style="will-change: transform;"
   >
     <div 
       aria-label="트랙 헤더 정렬 공간"
       class="sticky left-0 z-50 w-[224px] shrink-0 border-r border-border bg-card"
+      style="will-change: transform;"
     ></div>
 
     <div 

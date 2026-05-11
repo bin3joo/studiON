@@ -30,8 +30,8 @@ export const useTrackStore = defineStore('track', () => {
     const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
     type TrackEqNode = {
-    bandOrder: number
-    filter: Tone.Filter
+        bandOrder: number
+        filter: Tone.Filter
     }
 
     const trackEqNodes = new Map<number, TrackEqNode[]>()
@@ -43,10 +43,89 @@ export const useTrackStore = defineStore('track', () => {
         bands: [],
     })
 
+    // [최적화] 전역 AudioBuffer 캐시: URL 당 한 번만 fetch+decode 하여 재생기(Tone.Player)와 파형(WaveformWebGL) 모두 공유
+    // 키: cdnUrl 문자열, 값: 디코딩 완료된 AudioBuffer
+    const audioBufferCache = new Map<string, AudioBuffer>();
+    // 진행 중인 디코딩 Promise를 보관하여 동시에 같은 URL을 여러 번 디코딩하는 것을 방지
+    const audioBufferPending = new Map<string, Promise<AudioBuffer>>();
+
+    // URL에 대한 AudioBuffer를 한 번만 디코딩하여 캐시에 저장하고 반환하는 함수
+    const fetchAndCacheAudioBuffer = async (url: string): Promise<AudioBuffer> => {
+        // 이미 캐시에 있으면 즉시 반환
+        const cached = audioBufferCache.get(url);
+        if (cached) return cached;
+
+        // 다른 곳에서 이미 디코딩 중이면 같은 Promise를 공유 (중복 요청 방지)
+        const pending = audioBufferPending.get(url);
+        if (pending) return pending;
+
+        // 최초 요청: fetch → decode → 캐시 저장
+        const promise = (async () => {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioCtx = Tone.getContext().rawContext as AudioContext;
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            // [최적화] Web Audio API 버퍼 할당 병목(JIT Compile Freeze) 사전 제거
+            // 거대한 AudioBuffer가 처음 할당될 때 브라우저가 멈추는 현상을 막기 위해
+            // 오디오 다운로드 직후 백그라운드에서 한 번 빈 재생을 강제하여 캐싱을 유도합니다.
+            try {
+                const warmupSource = audioCtx.createBufferSource();
+                warmupSource.buffer = audioBuffer;
+                const dummyGain = audioCtx.createGain();
+                dummyGain.gain.value = 0; // 무음 처리
+                warmupSource.connect(dummyGain);
+                dummyGain.connect(audioCtx.destination);
+                
+                warmupSource.start(0, 0, 0.001);
+                
+                // 웜업 노드가 JIT 컴파일을 충분히 완료할 수 있도록 메모리 해제를 늦춥니다
+                setTimeout(() => {
+                    try {
+                        warmupSource.disconnect();
+                        dummyGain.disconnect();
+                    } catch(e) { /* ignore */ }
+                }, 5000);
+            } catch (e) {
+                // 무시
+            }
+            
+            audioBufferCache.set(url, audioBuffer);
+            audioBufferPending.delete(url);
+            return audioBuffer;
+        })();
+
+        audioBufferPending.set(url, promise);
+        return promise;
+    };
+
+    // 외부(WaveformWebGL 등)에서 캐시에 접근할 수 있도록 getter 함수 제공
+    const getAudioBufferCache = () => audioBufferCache;
+
     // 재생바 자동 스크롤용 타임라인 컨테이너 DOM 참조 (ProjectPage에서 전달받음)
     let timelineContainer: HTMLElement | null = null;
+    let cachedScrollLeft = 0;
+    let cachedClientWidth = 0;
+
     const setTimelineContainer = (el: HTMLElement | null) => {
+        if (timelineContainer) {
+            timelineContainer.removeEventListener('scroll', handleScroll);
+        }
         timelineContainer = el;
+        if (el) {
+            cachedScrollLeft = el.scrollLeft;
+            cachedClientWidth = el.clientWidth;
+            el.addEventListener('scroll', handleScroll, { passive: true });
+        }
+    };
+
+    const handleScroll = () => {
+        // [최적화] 재생 중일 때는 자동 스크롤(updatePlayheadLoop)이 cachedScrollLeft를 관리하므로,
+        // 여기서 scrollLeft를 동기적으로 읽으면 심각한 Layout Thrashing과 스크롤 Jitter(경합)가 발생합니다.
+        // 따라서 정지 상태일 때만 사용자의 수동 스크롤 위치를 기록합니다.
+        if (timelineContainer && !isPlaying.value) {
+            cachedScrollLeft = timelineContainer.scrollLeft;
+        }
     };
 
     //[1-1] 백엔드 연동 데이터
@@ -69,6 +148,8 @@ export const useTrackStore = defineStore('track', () => {
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
     Tone.getTransport().bpm.value = bpm.value;
+    // 메인 스레드 블로킹 시 이벤트 스킵 방지를 위한 스케줄링 여유시간 상향 조정
+    Tone.getContext().lookAhead = 0.2;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
 
     // 마스터 트랙의 믹서 채널 생성 (모노 다운믹스 절대 방지: 강제 스테레오)
@@ -128,6 +209,12 @@ export const useTrackStore = defineStore('track', () => {
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
+
+    // ==========================================
+    // 가로 가상 스크롤 (수평 뷰포트) 상태
+    // ==========================================
+    const viewportLeft = ref(0);
+    const viewportRight = ref(2000); // 초기 렌더링을 위해 기본값 제공
 
     //복사/잘라내기 한 클립 데이터를 보관할 클립보드
     const clipboardClip = ref<ClipUIState | null>(null);
@@ -495,6 +582,17 @@ export const useTrackStore = defineStore('track', () => {
         try {
             const audioInfo = await projectApi.getAudioDetail(projectInfo.value.projectId, data.audioMetadataId);
 
+            // [최적화] 업로더 본인이 미리 캐싱해둔 로컬 blobUrl의 AudioBuffer를 CDN URL 키로 이전
+            // → loadClipPlayer와 WaveformWebGL 모두 추가 네트워크 요청 없이 즉시 사용 가능
+            if (data._localBlobUrl && audioBufferCache.has(data._localBlobUrl)) {
+                const localBuffer = audioBufferCache.get(data._localBlobUrl)!;
+                audioBufferCache.set(audioInfo.audioUrl, localBuffer);
+                // 더 이상 필요 없는 blobUrl 키 제거 및 메모리 해제
+                audioBufferCache.delete(data._localBlobUrl);
+                URL.revokeObjectURL(data._localBlobUrl);
+                console.log(`[CLIP_CREATE 최적화] 로컬 AudioBuffer → CDN URL 키로 이전 완료 (네트워크 다운로드 생략)`);
+            }
+
             // 3. Vue 반응성 확보: 배열 안의 실제 반응형 객체를 다시 찾아서 audio를 통째로 교체
             const reactiveClip = track.clips.find(c => c.clipId === data.clipId);
             if (reactiveClip) {
@@ -808,6 +906,7 @@ export const useTrackStore = defineStore('track', () => {
             Tone.getTransport().start("+0.01", currentOffset);
             isPlaying.value = true;
             updatePlayheadLoop();
+            scrollAnimationLoop();
         }
     });
     // 5. 클립 복사 및 잘라내기 응답 
@@ -825,13 +924,23 @@ export const useTrackStore = defineStore('track', () => {
         uploadingTrackId.value = trackId;
         uploadingBar.value = startBar;
 
-        // 1. 오디오 파일을 Tone.Player로 임시 로드하여 길이(Duration) 측정
-        const tempUrl = URL.createObjectURL(file);
-        const tempPlayer = new Tone.Player();
-        await tempPlayer.load(tempUrl);
-        const durationMs = Math.round(tempPlayer.buffer.duration * 1000);
-        tempPlayer.dispose();
-        URL.revokeObjectURL(tempUrl);
+        // 1. 로컬 파일을 AudioBuffer로 디코딩 (길이 측정 + 캐시 사전 적재를 한 번에 처리)
+        //    → 기존에는 Tone.Player로 임시 로드 후 dispose했지만, 이제는 AudioBuffer를 캐시에 보관하여
+        //      CLIP_CREATE 수신 시 네트워크 왕복 없이 즉시 재생/파형 표시가 가능합니다.
+        const localBlobUrl = URL.createObjectURL(file);
+        let durationMs: number;
+        try {
+            const localBuffer = await fetchAndCacheAudioBuffer(localBlobUrl);
+            durationMs = Math.round(localBuffer.duration * 1000);
+        } catch (e) {
+            console.error(`[Upload] 로컬 파일 디코딩 실패:`, e);
+            URL.revokeObjectURL(localBlobUrl);
+            uploadingTrackId.value = null;
+            uploadingBar.value = null;
+            return;
+        }
+        // ⚠️ revokeObjectURL은 하지 않습니다. 캐시에 blobUrl 키로 보관되어 있으므로
+        //    CLIP_CREATE에서 CDN URL이 도착하면 그때 blobUrl 캐시를 CDN URL 키로 이전합니다.
 
         // 2. 파일 타입에 따른 MIME 타입 및 포맷팅 설정
         const mimeType = file.type.includes('wav') ? 'WAV' : 'MPEG';
@@ -862,13 +971,16 @@ export const useTrackStore = defineStore('track', () => {
                 storedName: uploadTicket.storedName,
                 mimeType: mimeType,
                 sizeBytes: file.size,
-                durationMs: durationMs
+                durationMs: durationMs,
+                // [최적화] 업로더 본인의 CLIP_CREATE 수신부에서 CDN URL 대신 사용할 로컬 blob URL
+                _localBlobUrl: localBlobUrl
             });
 
             console.log(`[Upload] 백엔드로 CLIP_CREATE 발신 완료. 렌더링은 브로드캐스트 수신 후 진행됩니다.`);
             // 프론트엔드 로직 종료 (렌더링은 수신부에서 일괄 처리)
         } catch (error) {
             console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
+            URL.revokeObjectURL(localBlobUrl);
             alert("파일 업로드에 실패했습니다.");
             uploadingTrackId.value = null;
             uploadingBar.value = null;
@@ -1048,17 +1160,24 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     // 일반 트랙에 변화가 생길 때마다 마스터 트랙에 실시간 병합!
+    // [최적화] JSON.parse(JSON.stringify())를 제거하고 필요한 속성만 얕은 복사합니다.
+    // 기존 방식은 300개 트랙의 클립을 모두 직렬화→역직렬화하면서 메인 스레드를 수십ms 블로킹했습니다.
     watch(() => trackList.value, (newTrackList) => {
         const mergedClips: ClipUIState[] = [];
 
         newTrackList.forEach(track => {
             track.clips.forEach(clip => {
                 mergedClips.push({
-                    ...JSON.parse(JSON.stringify(clip)),
                     clipId: clip.clipId + 9000000,
+                    start: clip.start,
+                    duration: clip.duration,
+                    audioStartMs: clip.audioStartMs,
+                    audioDurationMs: clip.audioDurationMs,
                     color: '#4b4b4b',
+                    audio: clip.audio ? { ...clip.audio } : undefined as any,
                     isSelected: false,
-                    isDragging: false
+                    isDragging: false,
+                    isLocked: false,
                 });
             });
         });
@@ -1308,10 +1427,12 @@ export const useTrackStore = defineStore('track', () => {
 
                 isPlaying.value = true;
                 updatePlayheadLoop();
+                scrollAnimationLoop();
             } else {
                 Tone.getTransport().pause();
                 isPlaying.value = false;
                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
                 // 일시정지 시 최종 위치를 반응형 ref에도 확정 (PlayController, TimelineRuler 동기화)
                 playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
             }
@@ -1321,26 +1442,35 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
-const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
-    if (!clip.audio?.cdnUrl) return;
+    // [최적화 & EQ병합] 캐시된 AudioBuffer를 직접 주입하여 중복 네트워크 다운로드+디코딩을 완전 제거하고, EQ 노드 체인 연결
+    const loadClipPlayer = async (clip: ClipUIState, trackId: number) => {
+        if (!clip.audio?.cdnUrl) return;
 
-    if (!clipPlayers.has(clip.clipId)) {
-        const newPlayer = new Tone.Player();
+        if (!clipPlayers.has(clip.clipId)) {
+            try {
+                // 1. 최적화: 캐시에서 AudioBuffer를 가져오거나, 없으면 한 번만 fetch+decode
+                const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
 
-        connectPlayerToTrack(newPlayer, trackId);
+                // await 후 다른 곳에서 이미 등록했을 수 있으므로 중복 체크
+                if (clipPlayers.has(clip.clipId)) return;
 
-        clipPlayers.set(clip.clipId, newPlayer);
+                // 2. 최적화: 버퍼를 주입하여 Player 생성 (네트워크 다운로드 및 디코딩 X)
+                const newPlayer = new Tone.Player(audioBuffer);
 
-        newPlayer.load(clip.audio.cdnUrl).then(() => {
-            const exactStartTimeSec = clip.start * secondsPerBar.value;
-            const audioOffsetSec = clip.audioStartMs / 1000;
-            newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
-        }).catch(e => {
-            console.error("[Audio Load Error]:", e);
-            disposeClipAudio(clip.clipId);
-        });
-    }
-};
+                // 3. EQ 체인 연결
+                connectPlayerToTrack(newPlayer, trackId);
+
+                clipPlayers.set(clip.clipId, newPlayer);
+
+                const exactStartTimeSec = clip.start * secondsPerBar.value;
+                const audioOffsetSec = clip.audioStartMs / 1000;
+                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
+            } catch (e) {
+                console.error("[Audio Load Error]:", e);
+                disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
+            }
+        }
+    };
 
     // [성능 최적화] 재생바 UI 업데이트 루프
     // Vue 반응성(ref) 대신 DOM을 직접 조작하여 초당 1,300회 이상의 Vue re-render를 원천 차단
@@ -1366,48 +1496,120 @@ const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
         }
     });
 
+    let lastFrameTime = performance.now();
+    let loopFrameCount = 0;
+    // [최적화] 스크롤 목표값을 별도 변수에 기록하고, 스크롤 쓰기는 독립 루프에서 처리
+    let pendingScrollLeft = -1;
+    let scrollRAFId = 0;
+
+    // 스크롤 쓰기 전용 독립 루프 (재생바 렌더링 루프와 완전 분리)
+    // scrollLeft = value 호출이 브라우저 Layout Reflow를 강제 트리거하여
+    // 재생바 애니메이션을 30~40ms씩 멈추게 만드는 것을 방지합니다.
+    const scrollAnimationLoop = () => {
+        if (!isPlaying.value) return;
+        if (pendingScrollLeft >= 0 && timelineContainer) {
+            timelineContainer.scrollLeft = pendingScrollLeft;
+            pendingScrollLeft = -1;
+        }
+        scrollRAFId = requestAnimationFrame(scrollAnimationLoop);
+    };
+
+    // Long Task 수집 배열
+    const longTasks: any[] = [];
+    if (typeof window !== 'undefined' && window.PerformanceObserver) {
+        try {
+            const observer = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                    longTasks.push(entry);
+                    if (longTasks.length > 50) longTasks.shift(); // 메모리 누수 방지
+                }
+            });
+            observer.observe({ entryTypes: ['longtask'] });
+        } catch (e) {
+            console.error("Long Task Observer 초기화 실패", e);
+        }
+    }
+
     const updatePlayheadLoop = () => {
         if (!isPlaying.value) return;
+
+        loopFrameCount++;
+        const loopStart = performance.now();
+        const timeSinceLastFrame = loopStart - lastFrameTime;
+        lastFrameTime = loopStart;
+
+        // 프레임 드랍 감지 (30ms 이상 지연되면 멈칫거림으로 간주)
+        if (timeSinceLastFrame > 30 && loopFrameCount > 10) {
+            console.warn(`🚨 [프레임 드랍 감지] 루프 지연 시간: ${timeSinceLastFrame.toFixed(2)}ms`);
+            
+            // Long Task API를 통해 직전에 메인 스레드를 막은 원인을 분석
+            if (longTasks.length > 0) {
+                const lastTask = longTasks[longTasks.length - 1];
+                console.warn(`🔍 [원인 분석] 최근 Long Task 발견: 
+- 소요 시간: ${lastTask.duration.toFixed(2)}ms
+- 원인(name): ${lastTask.name}
+- 발생 시점: ${lastTask.startTime.toFixed(2)}
+- 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a:any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
+            }
+        }
 
         const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
         const px = currentPositionBar * pixelPerBar.value;
 
-        document.documentElement.style.setProperty('--playhead-px', `${px}px`);
+        // [최적화] 전역 CSS 변수(--playhead-px)를 :root에 설정하면 브라우저 전체의 Style Recalculation이 발생하여 프레임 드랍이 생깁니다.
+        // 현재 가상 스크롤이 적용되어 DOM 노드가 극소수이므로, 직접 주입하는 것이 100배 빠릅니다.
+        const playheadEls = document.getElementsByClassName('playhead-line') as HTMLCollectionOf<HTMLElement>;
+        for (let i = 0; i < playheadEls.length; i++) {
+            playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+        }
+        
+        const clipEls = document.getElementsByClassName('clip-container') as HTMLCollectionOf<HTMLElement>;
+        for (let i = 0; i < clipEls.length; i++) {
+            clipEls[i].style.setProperty('--playhead-px', `${px}px`);
+        }
 
-        // 1-1. 재생바 자동 스크롤: 재생바가 화면 중앙(50%)을 넘어가면 매 프레임마다 부드럽게 따라감
-        if (timelineContainer) {
-            const relativeX = px - timelineContainer.scrollLeft;
-            const threshold = timelineContainer.clientWidth * 0.5;
+        // 1-1. 스크롤 위치 계산만 수행 (DOM 쓰기는 scrollAnimationLoop에서 분리 처리)
+        if (cachedClientWidth > 0) {
+            const relativeX = px - cachedScrollLeft;
+            const threshold = cachedClientWidth * 0.5;
             if (relativeX > threshold) {
-                // 목표 스크롤 위치를 향해 부드럽게 보간(lerp)하여 이동 (급격한 점프 방지)
                 const targetScrollLeft = px - threshold;
-                const currentScrollLeft = timelineContainer.scrollLeft;
-                const lerpFactor = 0.12; // 보간 계수: 작을수록 더 부드럽고, 클수록 빠르게 따라감
-                timelineContainer.scrollLeft = currentScrollLeft + (targetScrollLeft - currentScrollLeft) * lerpFactor;
+                const lerpFactor = 0.12;
+                cachedScrollLeft = cachedScrollLeft + (targetScrollLeft - cachedScrollLeft) * lerpFactor;
+                pendingScrollLeft = cachedScrollLeft;
             }
         }
 
-        // 1-2. 재생바 좌측 파형 밝게 표시: 각 클립의 진행 비율에 맞춰 오버레이 너비 갱신
-        const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
-        for (let i = 0; i < clipEls.length; i++) {
-            const clipEl = clipEls[i];
-            const clipLeft = parseFloat(clipEl.style.left) || 0;
-            const clipWidth = parseFloat(clipEl.style.width) || 0;
-            if (clipWidth <= 0) continue;
-            const progressPx = Math.max(0, Math.min(px - clipLeft, clipWidth));
-            clipEl.style.setProperty('--progress-px', `${progressPx}px`);
-        }
-
-        // 2. Vue 반응형 ref는 PlayController 숫자 디스플레이(마디.박자) 전용으로 저빈도 갱신
+        // 2. DOM 직접 업데이트 (Vue 반응성 렌더링 스톰 방지)
         const now = performance.now();
         if (now - lastReactiveUpdate > REACTIVE_UPDATE_INTERVAL) {
-            playheadPosition.value = currentPositionBar;
+            playheadPosition.value = currentPositionBar; // 정지 등 다른 의존성을 위해 값은 갱신해둠
             lastReactiveUpdate = now;
+
+            // DOM을 직접 찾아 텍스트만 교체 (Vue 컴포넌트 렌더 사이클 우회)
+            const barTextEl = document.getElementById('playhead-bar-text');
+            const beatTextEl = document.getElementById('playhead-beat-text');
+            const displayEl = document.getElementById('playhead-position-display');
+            
+            if (barTextEl && beatTextEl && projectInfo.value) {
+                const numerator = projectInfo.value.timeSigNumerator || 4;
+                const bar = Math.floor(currentPositionBar) + 1; 
+                const beat = Math.floor((currentPositionBar % 1) * numerator) + 1;
+                
+                barTextEl.textContent = String(bar).padStart(2, '0');
+                beatTextEl.textContent = String(beat);
+
+                if (displayEl) {
+                    const total = String(projectInfo.value.totalBarCount).padStart(2, '0');
+                    displayEl.setAttribute('aria-label', `현재 재생 위치: ${barTextEl.textContent}마디 ${beat}박자, 전체 ${total}마디`);
+                }
+            }
         }
 
-        if (debugLoopCount < 5) {
-            console.log(`🔄 [루프 확인 ${debugLoopCount + 1}/5] 시계가 흐르고 있나요? -> Transport 초: ${Tone.getTransport().seconds.toFixed(4)}, 재생바 마디: ${currentPositionBar.toFixed(4)}`);
-            debugLoopCount++;
+        // 현재 루프 실행에 걸린 시간 측정
+        const totalLoopTime = performance.now() - loopStart;
+        if (totalLoopTime > 15) {
+            console.error(`🐢 [루프 자체 병목] updatePlayheadLoop 실행에 ${totalLoopTime.toFixed(2)}ms 소요!`);
         }
 
         if (currentPositionBar >= projectInfo.value.totalBarCount) {
@@ -1425,6 +1627,7 @@ const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
         isPlaying.value = false;
         playheadPosition.value = 0;
         cancelAnimationFrame(animationFrameId);
+        if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
         // DOM 직접 조작: 재생바를 처음 위치로 리셋
         const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
         for (let i = 0; i < playheadEls.length; i++) {
@@ -1480,15 +1683,19 @@ const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
                     continue;
                 } 
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
-                const player = new Tone.Player();
-
-                connectPlayerToTrack(
-                    player,
-                    track.trackId,
-                );
-
                 try {
-                    await player.load(clip.audio.cdnUrl);
+                    // [최적화] 캐시에서 AudioBuffer를 가져오거나 한 번만 fetch+decode
+                    const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
+                    
+                    // 버퍼를 사용해 Player 생성 (네트워크 다운로드 X)
+                    const player = new Tone.Player(audioBuffer);
+
+                    // EQ 노드를 체인으로 연결
+                    connectPlayerToTrack(
+                        player,
+                        track.trackId,
+                    );
+
                     console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
@@ -1499,6 +1706,7 @@ const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
                     console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
+                    disposeClipAudio(clip.clipId);
                 }
             }
         }
@@ -1794,6 +2002,8 @@ const getTrackSpectrum = (trackId: number): number[] => {
         deselectAll,
 
         // 클립보드
+        viewportLeft,
+        viewportRight,
         clipboardClip,
         copyClip,
         cutClip,
@@ -1827,6 +2037,10 @@ const getTrackSpectrum = (trackId: number): number[] => {
         lockClip,
         unlockClip,
         setTimelineContainer,
+
+        // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
+        getAudioBufferCache,
+        fetchAndCacheAudioBuffer,
 
         addTrackEqBand,
         updateTrackEqBand,

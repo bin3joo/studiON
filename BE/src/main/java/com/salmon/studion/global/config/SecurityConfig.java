@@ -39,6 +39,7 @@ public class SecurityConfig {
                                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                                 .authorizeHttpRequests(auth -> auth
                                                 .requestMatchers(
+                                                                "/error",
                                                                 // "/**",
                                                                 // "/api/v1/**", // [개발 단계] 모두 통과
                                                                 // "/api/v1/auth/**",

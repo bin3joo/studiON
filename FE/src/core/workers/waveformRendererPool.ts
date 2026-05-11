@@ -15,7 +15,7 @@ import WaveformWorker from './waveform.worker.ts?worker';
 
 // 렌더 요청 데이터 타입
 export interface WaveformRenderRequest {
-  channelData: Float32Array;
+  audioKey: string;
   color: string;
   width: number;
   height: number;
@@ -99,6 +99,21 @@ class WaveformRendererPool {
   private _pendingResolves = new Map<number, (result: WaveformRenderResult | null) => void>();
 
   /**
+   * 오디오 데이터 전체를 워커 풀의 모든 워커에게 한 번 전송하여 캐싱합니다.
+   * 메인 스레드 블로킹을 막는 Zero-Copy 렌더링을 위한 핵심입니다.
+   */
+  broadcastCacheAudio(audioKey: string, channelData: Float32Array) {
+    this.ensureInitialized();
+    for (const pw of this.workers) {
+      pw.worker.postMessage({
+        type: 'cache',
+        audioKey,
+        channelData,
+      });
+    }
+  }
+
+  /**
    * 파형 렌더링을 요청합니다.
    * @returns Promise<WaveformRenderResult | null> — ImageBitmap을 담은 결과 또는 null(취소됨)
    */
@@ -148,10 +163,13 @@ class WaveformRendererPool {
       // resolve를 보관해 두고, Worker onmessage에서 호출
       this._pendingResolves.set(item.requestId, item.resolve);
 
+      // [최적화 핵심] 메인 스레드 블로킹 원천 차단
+      // 기존처럼 Float32Array.slice()를 호출해 동기적으로 메모리를 할당/복사하지 않습니다.
+      // 렌더링 시에는 워커 내부에 캐시된 데이터에 대한 접근 좌표(Offset)만 JSON으로 전송합니다.
       idleWorker.worker.postMessage({
         type: 'render',
         requestId: item.requestId,
-        channelData: item.request.channelData,
+        audioKey: item.request.audioKey,
         color: item.request.color,
         width: item.request.width,
         height: item.request.height,

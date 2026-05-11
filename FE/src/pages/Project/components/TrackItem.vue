@@ -1158,9 +1158,9 @@ const onWorkAreaMouseLeave = () => {
       
 
       <!--재생바 (DOM 직접 조작으로 이동 — Vue 반응성 우회)-->
-      <div 
+    <div 
         class="playhead-line pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
-        style="box-shadow: 0 0 8px hsl(var(--primary) / 0.8); will-change: transform;"
+        style="box-shadow: 0 0 8px hsl(var(--primary) / 0.8); will-change: transform; transform: translate3d(calc(var(--playhead-px, 0px) - 50%), 0, 0);"
       ></div>
 
     </div>

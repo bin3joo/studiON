@@ -194,7 +194,7 @@ const emit = defineEmits<{
 
     <!--트랙 추가 버튼-->
     <div class="flex border-b border-border group w-max min-w-full h-[100px]">
-      <div class="sticky left-0 z-60 flex w-[224px] shrink-0 items-center justify-center border-r border-border bg-[#1c1c1c]">
+      <div class="sticky left-0 z-60 flex w-[224px] shrink-0 items-center justify-center border-r border-border bg-[#1c1c1c]" style="will-change: transform;">
         <button 
           @click="trackStore.addTrack" 
           class="flex items-center gap-2 rounded-md border border-white/20 px-6 py-2.5 text-sm font-semibold text-gray-300 hover:text-white hover:bg-white/10 hover:border-white/40 transition-all duration-200"

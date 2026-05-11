@@ -16,10 +16,16 @@ interface InitMessage {
   type: 'init';
 }
 
+interface CacheMessage {
+  type: 'cache';
+  audioKey: string;
+  channelData: Float32Array;
+}
+
 interface RenderMessage {
   type: 'render';
   requestId: number;
-  channelData: Float32Array;
+  audioKey: string;
   color: string;
   width: number;
   height: number;
@@ -27,10 +33,11 @@ interface RenderMessage {
   startSampleOffset: number;
 }
 
-type WorkerMessage = InitMessage | RenderMessage;
+type WorkerMessage = InitMessage | CacheMessage | RenderMessage;
 
 let offscreenCanvas: OffscreenCanvas | null = null;
 let ctx: OffscreenCanvasRenderingContext2D | null = null;
+const audioCache = new Map<string, Float32Array>();
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
@@ -43,9 +50,22 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     return;
   }
 
+  // 데이터 캐싱
+  if (msg.type === 'cache') {
+    audioCache.set(msg.audioKey, msg.channelData);
+    return;
+  }
+
   // 렌더 요청
   if (msg.type === 'render') {
-    const { requestId, channelData, color, width, height, samplesPerPixel, startSampleOffset } = msg;
+    const { requestId, audioKey, color, width, height, samplesPerPixel, startSampleOffset } = msg;
+
+    const channelData = audioCache.get(audioKey);
+    if (!channelData) {
+      // 캐시된 데이터가 없으면 렌더링 중단
+      (self as unknown as Worker).postMessage({ requestId, bitmap: null });
+      return;
+    }
 
     if (!offscreenCanvas || !ctx) {
       // 혹시 init이 아직 안 왔으면 즉석 생성 (방어)
@@ -87,7 +107,9 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       let min = 1.0;
       let max = -1.0;
 
-      for (let i = start; i < actualEnd; i += 1) {
+      // [최적화] 픽셀당 너무 많은 샘플이 들어갈 경우, 최대 100개만 샘플링하여 워커 CPU 과부하 및 렉(Stutter) 방지
+      const step = Math.max(1, Math.floor((actualEnd - start) / 100));
+      for (let i = start; i < actualEnd; i += step) {
         const value = channelData[i];
         if (value < min) min = value;
         if (value > max) max = value;

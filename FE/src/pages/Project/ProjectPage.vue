@@ -71,6 +71,19 @@ const handleWheel = (e: WheelEvent) => {
   }
 };
 
+let scrollRafId: number | null = null;
+const handleHorizontalScroll = (e: Event) => {
+  if (scrollRafId) return;
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = null;
+    const target = e.target as HTMLElement;
+    if (target) {
+      trackStore.viewportLeft = target.scrollLeft;
+      trackStore.viewportRight = target.scrollLeft + target.clientWidth;
+    }
+  });
+};
+
 //스페이스바 단축키 핸들러
 const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // 입력창(input, textarea)에 포커스가 있을 때는 단축키를 무시해야 합니다. (이름/볼륨 수정 중 스페이스바 띄어쓰기 보호)
@@ -780,10 +793,11 @@ function handleActionAddTrack() {
       <div 
         ref="timelineContainerRef" 
         class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
-        @pointerdown.stop
+        @pointerdown.stop="trackStore.deselectAll()"
+        @scroll="handleHorizontalScroll"
       >
         <!-- 눈금자 -->
-        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
+        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
           <TimelineRuler />
         </div>
 
@@ -806,7 +820,7 @@ function handleActionAddTrack() {
 </div>
 
         <!-- 마스터 트랙 -->
-        <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
+        <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]" style="will-change: transform;">
           <TrackItem
   :track="trackStore.masterTrack"
   :is-master="true"

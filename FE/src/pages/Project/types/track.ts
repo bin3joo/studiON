@@ -1,4 +1,4 @@
-import type { ClipDto, ClipUIState } from "./clip";
+import type { ClipDto, ClipUIState, TrackEqState } from "./clip";
 
 // REST API 응답 규격
 export interface TrackDto {
@@ -22,4 +22,5 @@ export interface TrackUIState extends TrackDto {
     clips: ClipUIState[]; //클립을 오버라이드
     //왜? 순수 배열 데이터에서 화면을 그리는 상태(선택됨, isSelected)같은 정보를 같이 다루기 위해서
     color?: string;//  트랙별 띠 색
+    eq?: TrackEqState;
 }

@@ -181,25 +181,22 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
         if (trackStore.selectedClip && trackStore.selectedTrackId) {
           // 1. 선택된 클립이 명확히 있으면 그 클립만 안전하게 분할
           trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
-        } else {
-          // 2. 선택된 클립이 없다면? -> 재생바(Playhead) 선에 닿아있는 모든 트랙의 클립을 동시 분할
-          let hasSplit = false;
-          
-          trackStore.trackList.forEach(track => {
+        } else if (trackStore.selectedTrackId) {
+          // 2. 선택된 클립이 없다면, 선택된 트랙이 있는지 확인하고 해당 트랙의 클립만 분할
+          const track = trackStore.trackList.find(t => t.trackId === trackStore.selectedTrackId);
+          if (track) {
             const clipUnderPlayhead = track.clips.find(c => 
               currentBar > c.start && currentBar < c.start + c.duration
             );
-            
-            // 재생바 아래에 깔린 클립이 발견되면 즉시 분할 스토어 액션 호출
             if (clipUnderPlayhead) {
               trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
-              hasSplit = true;
+            } else {
+              alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
             }
-          });
-
-          if (!hasSplit) {
-            console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
           }
+        } else {
+          // 3. 아무것도 선택되지 않은 경우 분할 취소
+          alert("분할할 클립이나 트랙을 선택해 주세요.");
         }
         break;
       }
@@ -715,21 +712,20 @@ function handleActionSplit() {
 
   if (trackStore.selectedClip && trackStore.selectedTrackId) {
     trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
-  } else {
-    let hasSplit = false;
-    trackStore.trackList.forEach(track => {
+  } else if (trackStore.selectedTrackId) {
+    const track = trackStore.trackList.find(t => t.trackId === trackStore.selectedTrackId);
+    if (track) {
       const clipUnderPlayhead = track.clips.find(c => 
         currentBar > c.start && currentBar < c.start + c.duration
       );
       if (clipUnderPlayhead) {
         trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
-        hasSplit = true;
+      } else {
+        alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
       }
-    });
-
-    if (!hasSplit) {
-      console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
     }
+  } else {
+    alert("분할할 클립이나 트랙을 선택해 주세요.");
   }
 }
 

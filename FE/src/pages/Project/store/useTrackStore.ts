@@ -403,6 +403,25 @@ export const useTrackStore = defineStore('track', () => {
         if (selectedTrackId.value === data.trackId) deselectAll();
     });
 
+    socketService.subscribePersistent('TRACK_REORDER', (data) => {
+        const { trackId, preTrackId, postTrackId } = data;
+        const trackIndex = trackList.value.findIndex(t => t.trackId === trackId);
+        if (trackIndex === -1) return;
+
+        const [track] = trackList.value.splice(trackIndex, 1);
+
+        let newIndex = 0;
+        if (preTrackId) {
+            const preIndex = trackList.value.findIndex(t => t.trackId === preTrackId);
+            if (preIndex !== -1) newIndex = preIndex + 1;
+        } else if (postTrackId) {
+            const postIndex = trackList.value.findIndex(t => t.trackId === postTrackId);
+            if (postIndex !== -1) newIndex = postIndex;
+        }
+
+        trackList.value.splice(newIndex, 0, track);
+    });
+
     socketService.subscribePersistent('TRACK_RENAME', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) track.name = data.name;
@@ -1413,11 +1432,8 @@ const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
         isPlaying.value = false;
         playheadPosition.value = 0;
         cancelAnimationFrame(animationFrameId);
-        // DOM 직접 조작: 재생바를 처음 위치로 리셋
-        const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
-        for (let i = 0; i < playheadEls.length; i++) {
-            playheadEls[i].style.transform = `translate3d(calc(0px - 50%), 0, 0)`;
-        }
+        // CSS 변수 갱신 방식을 통해 모든 재생 헤드의 위치를 0px로 정상 리셋 (변수 연결 고리 유지)
+        document.documentElement.style.setProperty('--playhead-px', `0px`);
         // 재생바 오버레이도 모두 리셋
         const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
         for (let i = 0; i < clipEls.length; i++) {

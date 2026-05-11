@@ -65,7 +65,7 @@ public class ClipService {
     private static final String CLIP_LOCK_KEY = "project:%d:clip:%d:lock";
     private static final String CLIP_EVENT_SEQ_KEY = "project:%d:clip:event:seq";
     private static final String CLIP_STATE_KEY = "project:%d:clips";
-    private static final String CLIP_ID_SEQ_KEY = "project:%d:clip:id_seq";
+    private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
     private static final String CLIP_CLIPBOARD_KEY = "project:%d:user:%d:clipboard";
     private static final String DELETED_CLIPS_KEY = "project:%d:deleted_clips";
 
@@ -229,7 +229,7 @@ public class ClipService {
                 / project.getTimeSigNumerator();
 
         Integer clipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         ClipState state = ClipState.builder()
                 .clipId(clipId)
@@ -514,7 +514,7 @@ public class ClipService {
         }
 
         Integer newClipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         double msPerBar = (double) original.getAudioDurationMs() / original.getDuration();
 
@@ -667,7 +667,7 @@ public class ClipService {
         }
 
         Integer newClipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         ClipState newClip = ClipState.builder()
                 .clipId(newClipId)
@@ -731,7 +731,7 @@ public class ClipService {
         Double targetStartBar = original.getStart() + original.getDuration();
 
         Integer newClipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         ClipState newClip = ClipState.builder()
                 .clipId(newClipId)

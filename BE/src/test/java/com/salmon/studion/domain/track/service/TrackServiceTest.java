@@ -58,7 +58,7 @@ class TrackServiceTest {
 
     private static final Integer PROJECT_ID = 1;
     private static final String TRACKS_KEY = "project:1:tracks";
-    private static final String TRACK_ID_SEQ_KEY = "project:1:track:id_seq";
+    private static final String TRACK_ID_SEQ_KEY = "global:track:id_seq";
     private static final String EVENT_SEQ_KEY = "project:1:event:seq";
 
     private Map<String, String> store;
@@ -158,6 +158,39 @@ class TrackServiceTest {
         req.setTrackId(trackId);
         req.setPan(pan);
         return req;
+    }
+
+    @Nested
+    @DisplayName("전역 시퀀스")
+    class GlobalSequenceTest {
+
+        @Test
+        @DisplayName("서로 다른 프로젝트의 트랙 추가는 동일한 전역 시퀀스 키를 사용한다")
+        void differentProjectsUseSameGlobalKey() {
+            Integer projectId2 = 2;
+            lenient().when(projectService.getProjectOrThrow(projectId2)).thenReturn(mock(Project.class));
+
+            String tracks2Key = "project:2:tracks";
+            lenient().doAnswer(inv -> null)
+                    .when(hashOperations).get(eq(tracks2Key), any());
+            lenient().doAnswer(inv -> new HashMap<>())
+                    .when(hashOperations).entries(eq(tracks2Key));
+
+            when(valueOperations.increment(TRACK_ID_SEQ_KEY)).thenReturn(1L).thenReturn(2L);
+            when(valueOperations.increment("project:1:event:seq")).thenReturn(1L);
+            when(valueOperations.increment("project:2:event:seq")).thenReturn(1L);
+
+            TrackAddRequest req1 = addRequest("track1", "audio");
+            TrackAddRequest req2 = addRequest("track1", "audio");
+            req2.setProjectId(projectId2);
+
+            trackService.addTrack(req1, 0);
+            trackService.addTrack(req2, 0);
+
+            verify(valueOperations, times(2)).increment(TRACK_ID_SEQ_KEY);
+            verify(valueOperations, never()).increment("project:1:track:id_seq");
+            verify(valueOperations, never()).increment("project:2:track:id_seq");
+        }
     }
 
     @Nested

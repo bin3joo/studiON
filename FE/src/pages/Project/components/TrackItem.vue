@@ -799,6 +799,7 @@ const onWorkAreaMouseLeave = () => {
       track.clips.some(c => c.isDragging) ? 'relative z-50' :
       (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
     ]"
+    style="content-visibility: auto; contain-intrinsic-size: 100px; contain: layout paint style;"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
@@ -809,7 +810,8 @@ const onWorkAreaMouseLeave = () => {
       ]"
       :style="{ 
         width: '224px', 
-        borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
+        borderLeft: `4px solid ${track.color || '#FF3DCB'}`,
+        willChange: 'transform'
       }"
       :draggable="!isMaster && !isDragDisabled"
       @mousedown.capture="handleMouseDown"
@@ -819,7 +821,7 @@ const onWorkAreaMouseLeave = () => {
     >
     <!--빈틈 막는거-->
     <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
-    <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
+    <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card" style="will-change: transform;"></div>
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 flex-1 items-center gap-1.5">
           <!-- 드래그 핸들 (시각적 힌트) -->
@@ -1078,7 +1080,7 @@ const onWorkAreaMouseLeave = () => {
             width: `${clip.duration * trackStore.pixelPerBar}px`,
             borderColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`), 
             backgroundColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`), 
-            boxShadow: isMaster ? 'none' : (clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'),
+            boxShadow: isMaster ? 'none' : (clip.isDragging ? '0 8px 16px rgba(0,0,0,0.6)' : clip.isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : 'none'),
             transform: clip.isDragging ? `translateY(${dragoffsetY}px)` : 'none'
           }"
           @pointerdown="!isMaster && onClipPointerDown($event, clip); !isMaster && trackStore.selectClip(clip, track.trackId);"

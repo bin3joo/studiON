@@ -7,6 +7,7 @@ import { computed, onMounted, shallowRef, watch } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
 import WaveformChunk from './WaveformChunk.vue';
+import { waveformRendererPool } from '../../../core/workers/waveformRendererPool';
 import { Loader2 } from 'lucide-vue-next';
 
 const props = defineProps<{ 
@@ -19,7 +20,9 @@ const trackStore = useTrackStore();
 const audioData = shallowRef<{ channelData: Float32Array, sampleRate: number } | null>(null);
 
 // 브라우저 렌더링 한계치를 피하기 위한 최대 캔버스 너비 (안전하게 8000픽셀로 설정)
-const MAX_CANVAS_WIDTH = 8000;
+// [최적화] 기존 8000에서 2000으로 대폭 축소.
+// ImageBitmap을 GPU로 업로드할 때 발생하는 메인 스레드 멈춤(Stutter) 현상을 최소화합니다.
+const MAX_CANVAS_WIDTH = 2000;
 
 // 전체 길이를 바탕으로 청크 조각들을 계산
 const chunks = computed(() => {
@@ -56,7 +59,9 @@ const loadAudioData = async () => {
       const audioBuffer = await trackStore.fetchAndCacheAudioBuffer(audioUrl);
       
       cached = {
-        channelData: new Float32Array(audioBuffer.getChannelData(0)),
+        // [최적화] getChannelData()의 참조를 그대로 사용 (new Float32Array 복사 제거)
+        // WAV 50MB 파일 기준 약 50MB의 불필요한 메모리 할당과 GC 부하가 사라집니다.
+        channelData: audioBuffer.getChannelData(0),
         sampleRate: audioBuffer.sampleRate
       };
       audioCache.set(audioUrl, cached);
@@ -65,6 +70,9 @@ const loadAudioData = async () => {
       return;
     }
   }
+
+  // [최적화] 메인 스레드 렌더링 병목을 없애기 위해 오디오 로드 시점에 전체 워커 풀에 배열을 단 1회 브로드캐스트 캐싱합니다.
+  waveformRendererPool.broadcastCacheAudio(audioUrl, cached!.channelData);
   
   audioData.value = cached;
 };
@@ -90,7 +98,7 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
     <!-- 파형 렌더링 영역 (mix-blend-screen 적용, 좌측은 밝게, 우측은 어둡게 마스킹) -->
     <div v-if="audioData" 
          class="absolute inset-0 h-full w-full mix-blend-screen"
-         style="mask-image: linear-gradient(to right, rgba(0,0,0,1) var(--progress-px, 0px), rgba(0,0,0,0.4) var(--progress-px, 0px)); -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) var(--progress-px, 0px), rgba(0,0,0,0.4) var(--progress-px, 0px));"
+         style="mask-image: linear-gradient(to right, rgba(0,0,0,1) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px)), rgba(0,0,0,0.4) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px))); -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px)), rgba(0,0,0,0.4) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px)));"
     >
       <WaveformChunk
         v-for="chunk in chunks"

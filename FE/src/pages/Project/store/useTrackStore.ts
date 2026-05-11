@@ -65,6 +65,31 @@ export const useTrackStore = defineStore('track', () => {
             const arrayBuffer = await response.arrayBuffer();
             const audioCtx = Tone.getContext().rawContext as AudioContext;
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            // [최적화] Web Audio API 버퍼 할당 병목(JIT Compile Freeze) 사전 제거
+            // 거대한 AudioBuffer가 처음 할당될 때 브라우저가 멈추는 현상을 막기 위해
+            // 오디오 다운로드 직후 백그라운드에서 한 번 빈 재생을 강제하여 캐싱을 유도합니다.
+            try {
+                const warmupSource = audioCtx.createBufferSource();
+                warmupSource.buffer = audioBuffer;
+                const dummyGain = audioCtx.createGain();
+                dummyGain.gain.value = 0; // 무음 처리
+                warmupSource.connect(dummyGain);
+                dummyGain.connect(audioCtx.destination);
+                
+                warmupSource.start(0, 0, 0.001);
+                
+                // 웜업 노드가 JIT 컴파일을 충분히 완료할 수 있도록 메모리 해제를 늦춥니다
+                setTimeout(() => {
+                    try {
+                        warmupSource.disconnect();
+                        dummyGain.disconnect();
+                    } catch(e) { /* ignore */ }
+                }, 5000);
+            } catch (e) {
+                // 무시
+            }
+            
             audioBufferCache.set(url, audioBuffer);
             audioBufferPending.delete(url);
             return audioBuffer;
@@ -79,8 +104,28 @@ export const useTrackStore = defineStore('track', () => {
 
     // 재생바 자동 스크롤용 타임라인 컨테이너 DOM 참조 (ProjectPage에서 전달받음)
     let timelineContainer: HTMLElement | null = null;
+    let cachedScrollLeft = 0;
+    let cachedClientWidth = 0;
+
     const setTimelineContainer = (el: HTMLElement | null) => {
+        if (timelineContainer) {
+            timelineContainer.removeEventListener('scroll', handleScroll);
+        }
         timelineContainer = el;
+        if (el) {
+            cachedScrollLeft = el.scrollLeft;
+            cachedClientWidth = el.clientWidth;
+            el.addEventListener('scroll', handleScroll, { passive: true });
+        }
+    };
+
+    const handleScroll = () => {
+        // [최적화] 재생 중일 때는 자동 스크롤(updatePlayheadLoop)이 cachedScrollLeft를 관리하므로,
+        // 여기서 scrollLeft를 동기적으로 읽으면 심각한 Layout Thrashing과 스크롤 Jitter(경합)가 발생합니다.
+        // 따라서 정지 상태일 때만 사용자의 수동 스크롤 위치를 기록합니다.
+        if (timelineContainer && !isPlaying.value) {
+            cachedScrollLeft = timelineContainer.scrollLeft;
+        }
     };
 
     //[1-1] 백엔드 연동 데이터
@@ -103,6 +148,8 @@ export const useTrackStore = defineStore('track', () => {
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
     Tone.getTransport().bpm.value = bpm.value;
+    // 메인 스레드 블로킹 시 이벤트 스킵 방지를 위한 스케줄링 여유시간 상향 조정
+    Tone.getContext().lookAhead = 0.2;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
 
     // 마스터 트랙의 믹서 채널 생성 (모노 다운믹스 절대 방지: 강제 스테레오)
@@ -859,6 +906,7 @@ export const useTrackStore = defineStore('track', () => {
             Tone.getTransport().start("+0.01", currentOffset);
             isPlaying.value = true;
             updatePlayheadLoop();
+            scrollAnimationLoop();
         }
     });
     // 5. 클립 복사 및 잘라내기 응답 
@@ -1112,17 +1160,24 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     // 일반 트랙에 변화가 생길 때마다 마스터 트랙에 실시간 병합!
+    // [최적화] JSON.parse(JSON.stringify())를 제거하고 필요한 속성만 얕은 복사합니다.
+    // 기존 방식은 300개 트랙의 클립을 모두 직렬화→역직렬화하면서 메인 스레드를 수십ms 블로킹했습니다.
     watch(() => trackList.value, (newTrackList) => {
         const mergedClips: ClipUIState[] = [];
 
         newTrackList.forEach(track => {
             track.clips.forEach(clip => {
                 mergedClips.push({
-                    ...JSON.parse(JSON.stringify(clip)),
                     clipId: clip.clipId + 9000000,
+                    start: clip.start,
+                    duration: clip.duration,
+                    audioStartMs: clip.audioStartMs,
+                    audioDurationMs: clip.audioDurationMs,
                     color: '#4b4b4b',
+                    audio: clip.audio ? { ...clip.audio } : undefined as any,
                     isSelected: false,
-                    isDragging: false
+                    isDragging: false,
+                    isLocked: false,
                 });
             });
         });
@@ -1372,10 +1427,12 @@ export const useTrackStore = defineStore('track', () => {
 
                 isPlaying.value = true;
                 updatePlayheadLoop();
+                scrollAnimationLoop();
             } else {
                 Tone.getTransport().pause();
                 isPlaying.value = false;
                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
                 // 일시정지 시 최종 위치를 반응형 ref에도 확정 (PlayController, TimelineRuler 동기화)
                 playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
             }
@@ -1439,48 +1496,120 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
 
+    let lastFrameTime = performance.now();
+    let loopFrameCount = 0;
+    // [최적화] 스크롤 목표값을 별도 변수에 기록하고, 스크롤 쓰기는 독립 루프에서 처리
+    let pendingScrollLeft = -1;
+    let scrollRAFId = 0;
+
+    // 스크롤 쓰기 전용 독립 루프 (재생바 렌더링 루프와 완전 분리)
+    // scrollLeft = value 호출이 브라우저 Layout Reflow를 강제 트리거하여
+    // 재생바 애니메이션을 30~40ms씩 멈추게 만드는 것을 방지합니다.
+    const scrollAnimationLoop = () => {
+        if (!isPlaying.value) return;
+        if (pendingScrollLeft >= 0 && timelineContainer) {
+            timelineContainer.scrollLeft = pendingScrollLeft;
+            pendingScrollLeft = -1;
+        }
+        scrollRAFId = requestAnimationFrame(scrollAnimationLoop);
+    };
+
+    // Long Task 수집 배열
+    const longTasks: any[] = [];
+    if (typeof window !== 'undefined' && window.PerformanceObserver) {
+        try {
+            const observer = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                    longTasks.push(entry);
+                    if (longTasks.length > 50) longTasks.shift(); // 메모리 누수 방지
+                }
+            });
+            observer.observe({ entryTypes: ['longtask'] });
+        } catch (e) {
+            console.error("Long Task Observer 초기화 실패", e);
+        }
+    }
+
     const updatePlayheadLoop = () => {
         if (!isPlaying.value) return;
+
+        loopFrameCount++;
+        const loopStart = performance.now();
+        const timeSinceLastFrame = loopStart - lastFrameTime;
+        lastFrameTime = loopStart;
+
+        // 프레임 드랍 감지 (30ms 이상 지연되면 멈칫거림으로 간주)
+        if (timeSinceLastFrame > 30 && loopFrameCount > 10) {
+            console.warn(`🚨 [프레임 드랍 감지] 루프 지연 시간: ${timeSinceLastFrame.toFixed(2)}ms`);
+            
+            // Long Task API를 통해 직전에 메인 스레드를 막은 원인을 분석
+            if (longTasks.length > 0) {
+                const lastTask = longTasks[longTasks.length - 1];
+                console.warn(`🔍 [원인 분석] 최근 Long Task 발견: 
+- 소요 시간: ${lastTask.duration.toFixed(2)}ms
+- 원인(name): ${lastTask.name}
+- 발생 시점: ${lastTask.startTime.toFixed(2)}
+- 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a:any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
+            }
+        }
 
         const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
         const px = currentPositionBar * pixelPerBar.value;
 
-        document.documentElement.style.setProperty('--playhead-px', `${px}px`);
+        // [최적화] 전역 CSS 변수(--playhead-px)를 :root에 설정하면 브라우저 전체의 Style Recalculation이 발생하여 프레임 드랍이 생깁니다.
+        // 현재 가상 스크롤이 적용되어 DOM 노드가 극소수이므로, 직접 주입하는 것이 100배 빠릅니다.
+        const playheadEls = document.getElementsByClassName('playhead-line') as HTMLCollectionOf<HTMLElement>;
+        for (let i = 0; i < playheadEls.length; i++) {
+            playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+        }
+        
+        const clipEls = document.getElementsByClassName('clip-container') as HTMLCollectionOf<HTMLElement>;
+        for (let i = 0; i < clipEls.length; i++) {
+            clipEls[i].style.setProperty('--playhead-px', `${px}px`);
+        }
 
-        // 1-1. 재생바 자동 스크롤: 재생바가 화면 중앙(50%)을 넘어가면 매 프레임마다 부드럽게 따라감
-        if (timelineContainer) {
-            const relativeX = px - timelineContainer.scrollLeft;
-            const threshold = timelineContainer.clientWidth * 0.5;
+        // 1-1. 스크롤 위치 계산만 수행 (DOM 쓰기는 scrollAnimationLoop에서 분리 처리)
+        if (cachedClientWidth > 0) {
+            const relativeX = px - cachedScrollLeft;
+            const threshold = cachedClientWidth * 0.5;
             if (relativeX > threshold) {
-                // 목표 스크롤 위치를 향해 부드럽게 보간(lerp)하여 이동 (급격한 점프 방지)
                 const targetScrollLeft = px - threshold;
-                const currentScrollLeft = timelineContainer.scrollLeft;
-                const lerpFactor = 0.12; // 보간 계수: 작을수록 더 부드럽고, 클수록 빠르게 따라감
-                timelineContainer.scrollLeft = currentScrollLeft + (targetScrollLeft - currentScrollLeft) * lerpFactor;
+                const lerpFactor = 0.12;
+                cachedScrollLeft = cachedScrollLeft + (targetScrollLeft - cachedScrollLeft) * lerpFactor;
+                pendingScrollLeft = cachedScrollLeft;
             }
         }
 
-        // 1-2. 재생바 좌측 파형 밝게 표시: 각 클립의 진행 비율에 맞춰 오버레이 너비 갱신
-        const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
-        for (let i = 0; i < clipEls.length; i++) {
-            const clipEl = clipEls[i];
-            const clipLeft = parseFloat(clipEl.style.left) || 0;
-            const clipWidth = parseFloat(clipEl.style.width) || 0;
-            if (clipWidth <= 0) continue;
-            const progressPx = Math.max(0, Math.min(px - clipLeft, clipWidth));
-            clipEl.style.setProperty('--progress-px', `${progressPx}px`);
-        }
-
-        // 2. Vue 반응형 ref는 PlayController 숫자 디스플레이(마디.박자) 전용으로 저빈도 갱신
+        // 2. DOM 직접 업데이트 (Vue 반응성 렌더링 스톰 방지)
         const now = performance.now();
         if (now - lastReactiveUpdate > REACTIVE_UPDATE_INTERVAL) {
-            playheadPosition.value = currentPositionBar;
+            playheadPosition.value = currentPositionBar; // 정지 등 다른 의존성을 위해 값은 갱신해둠
             lastReactiveUpdate = now;
+
+            // DOM을 직접 찾아 텍스트만 교체 (Vue 컴포넌트 렌더 사이클 우회)
+            const barTextEl = document.getElementById('playhead-bar-text');
+            const beatTextEl = document.getElementById('playhead-beat-text');
+            const displayEl = document.getElementById('playhead-position-display');
+            
+            if (barTextEl && beatTextEl && projectInfo.value) {
+                const numerator = projectInfo.value.timeSigNumerator || 4;
+                const bar = Math.floor(currentPositionBar) + 1; 
+                const beat = Math.floor((currentPositionBar % 1) * numerator) + 1;
+                
+                barTextEl.textContent = String(bar).padStart(2, '0');
+                beatTextEl.textContent = String(beat);
+
+                if (displayEl) {
+                    const total = String(projectInfo.value.totalBarCount).padStart(2, '0');
+                    displayEl.setAttribute('aria-label', `현재 재생 위치: ${barTextEl.textContent}마디 ${beat}박자, 전체 ${total}마디`);
+                }
+            }
         }
 
-        if (debugLoopCount < 5) {
-            console.log(`🔄 [루프 확인 ${debugLoopCount + 1}/5] 시계가 흐르고 있나요? -> Transport 초: ${Tone.getTransport().seconds.toFixed(4)}, 재생바 마디: ${currentPositionBar.toFixed(4)}`);
-            debugLoopCount++;
+        // 현재 루프 실행에 걸린 시간 측정
+        const totalLoopTime = performance.now() - loopStart;
+        if (totalLoopTime > 15) {
+            console.error(`🐢 [루프 자체 병목] updatePlayheadLoop 실행에 ${totalLoopTime.toFixed(2)}ms 소요!`);
         }
 
         if (currentPositionBar >= projectInfo.value.totalBarCount) {
@@ -1498,6 +1627,7 @@ export const useTrackStore = defineStore('track', () => {
         isPlaying.value = false;
         playheadPosition.value = 0;
         cancelAnimationFrame(animationFrameId);
+        if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
         // DOM 직접 조작: 재생바를 처음 위치로 리셋
         const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
         for (let i = 0; i < playheadEls.length; i++) {

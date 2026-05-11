@@ -718,6 +718,7 @@ export const useTrackStore = defineStore('track', () => {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.clipId,
             start: data.targetStartBar,
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -758,6 +759,7 @@ export const useTrackStore = defineStore('track', () => {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.newClipId,
             start: data.targetStartBar,
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -796,6 +798,7 @@ export const useTrackStore = defineStore('track', () => {
         const splitOffsetBars = data.splitBar - originalClip.start;
         const splitOffsetMs = splitOffsetBars * (originalClip.audioDurationMs / originalClip.duration);
         // 백엔드 명세에 맞춰서 오른쪽 새 클립 생성
+        // 주의: JSON.parse(stringify) 과정에서 audio 객체의 참조 무결성이 깨지거나 값이 유실될 수 있으므로 명시적 얕은 복사본을 할당합니다.
         const rightClip: ClipUIState = {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.newClipId,
@@ -803,6 +806,7 @@ export const useTrackStore = defineStore('track', () => {
             duration: data.newClipDuration,
             audioStartMs: originalClip.audioStartMs + splitOffsetMs,
             audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs),
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isLocked: false,     // 분할로 새로 생긴 클립은 잠금 해제 상태로 초기화
             isDragging: false,
             isSelected: false
@@ -997,8 +1001,16 @@ export const useTrackStore = defineStore('track', () => {
         unlockClip(clip.clipId, trackId);
     };
 
+    let lastSplitTime = 0;
+
     // 5. 클립 분할 (Split)
     const splitClip = async (clipId: number, trackId: number) => {
+        const now = Date.now();
+        if (now - lastSplitTime < 500) {
+            console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
+            return;
+        }
+        lastSplitTime = now;
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) return;
 

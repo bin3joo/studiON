@@ -1423,6 +1423,11 @@ const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
         for (let i = 0; i < clipEls.length; i++) {
             clipEls[i].style.setProperty('--progress-px', `0px`);
         }
+
+        // 타임라인 스크롤 위치를 맨 처음(0)으로 부드럽게 복귀
+        if (timelineContainer) {
+            timelineContainer.scrollTo({ left: 0, behavior: 'smooth' });
+        }
     };
 
     //마우스 휠 방향에 따라 줌 배율을 조절하는 함수

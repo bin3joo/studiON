@@ -124,7 +124,7 @@ export const useTrackStore = defineStore('track', () => {
         trackList.value.forEach(t => t.isSelected = false);
     };
     //1마디당 걸리는 시간 계산
-    const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
+    const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
@@ -590,7 +590,7 @@ export const useTrackStore = defineStore('track', () => {
                 }
 
                 // 백엔드와 동일한 공식으로 프론트에서 계산하여 동기화
-                const msPerBar = secondsPerBar.value * 1000;
+                const msPerBar = clip.audioDurationMs / clip.duration;
                 const newAudioStartMs = Math.round(clip.audioStartMs + (afterStart - beforeStart) * msPerBar);
                 const newAudioDurationMs = Math.round(afterDuration * msPerBar);
 
@@ -780,7 +780,7 @@ export const useTrackStore = defineStore('track', () => {
             isPlaying.value = false;
         }
         const splitOffsetBars = data.splitBar - originalClip.start;
-        const splitOffsetMs = splitOffsetBars * secondsPerBar.value * 1000;
+        const splitOffsetMs = splitOffsetBars * (originalClip.audioDurationMs / originalClip.duration);
         // 백엔드 명세에 맞춰서 오른쪽 새 클립 생성
         const rightClip: ClipUIState = {
             ...JSON.parse(JSON.stringify(originalClip)),

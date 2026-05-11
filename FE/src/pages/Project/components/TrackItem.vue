@@ -254,10 +254,14 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
       trackStore.moveClipToTrack(activeClip.value.clipId, props.track.trackId, finalTrackId);
     }
     
+    // 서버 통신 시 부동소수점 오차로 인한 백엔드 충돌 방지
+    const safeStart = Number(activeClip.value.start.toFixed(3));
+    activeClip.value.start = safeStart; // 로컬 상태도 안전한 값으로 보정
+    
     // 서버에 통신을 보내서 이동 확정
-    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, activeClip.value.start);
+    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, safeStart);
     // 이동한 당사자의 오디오도 새 위치에 맞춰 재동기화 (브로드캐스트는 위치 동일 시 건너뜀)
-    trackStore.resyncClip(activeClip.value.clipId, activeClip.value.start);
+    trackStore.resyncClip(activeClip.value.clipId, safeStart);
   }
 
   // Move/롤백 통신 이후에 Unlock을 보내야 백엔드가 정상적으로 처리함
@@ -333,7 +337,10 @@ const onResizePointerMove = (e: PointerEvent) => {
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
 
   // 음원의 전체 길이를 마디 단위로 계산 (이 길이를 넘어서 늘릴 수 없음)
-  const totalAudioDurationMs = targetClip.audio?.durationMs ?? Infinity;
+  // 백엔드 데이터 누락이나 목업 클립인 경우, Infinity 대신 현재 가시적인 오디오 길이의 끝을 최대치로 사용하여 무한 드래그 버그 방지
+  const totalAudioDurationMs = (targetClip.audio?.durationMs && targetClip.audio.durationMs > 0)
+    ? targetClip.audio.durationMs
+    : (targetClip.audioStartMs + targetClip.audioDurationMs);
   const maxAudioBars = totalAudioDurationMs / (trackStore.secondsPerBar * 1000);
 
   if (state.side === 'right') {
@@ -399,6 +406,15 @@ const onResizePointerUp = (e: PointerEvent) => {
   const safeStart = Number(targetClip.start.toFixed(3));
   const safeDuration = Number(targetClip.duration.toFixed(3));
   const safeTrimLeft = Number(trimLeftBars.toFixed(3));
+
+  // 로컬 상태도 안전한 값으로 동기화 (이중 연산 방지 스킵 로직 작동을 위해 필수!)
+  targetClip.start = safeStart;
+  targetClip.duration = safeDuration;
+  
+  if (state.side === 'left') {
+    targetClip.audioStartMs = state.origAudioStartMs + safeTrimLeft * trackStore.secondsPerBar * 1000;
+  }
+  targetClip.audioDurationMs = safeDuration * trackStore.secondsPerBar * 1000;
 
   trackStore.resizeClip(
       targetClip.clipId, 

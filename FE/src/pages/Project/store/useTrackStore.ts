@@ -30,8 +30,8 @@ export const useTrackStore = defineStore('track', () => {
     const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
     type ClipEqNode = {
-    bandOrder: number
-    filter: Tone.Filter
+        bandOrder: number
+        filter: Tone.Filter
     }
 
     const clipEqNodes = new Map<number, ClipEqNode[]>()
@@ -40,8 +40,42 @@ export const useTrackStore = defineStore('track', () => {
     const MAX_EQ_BANDS = 5
 
     const createDefaultClipEq = (): ClipEqState => ({
-    bands: [],
+        bands: [],
     })
+
+    // [최적화] 전역 AudioBuffer 캐시: URL 당 한 번만 fetch+decode 하여 재생기(Tone.Player)와 파형(WaveformWebGL) 모두 공유
+    // 키: cdnUrl 문자열, 값: 디코딩 완료된 AudioBuffer
+    const audioBufferCache = new Map<string, AudioBuffer>();
+    // 진행 중인 디코딩 Promise를 보관하여 동시에 같은 URL을 여러 번 디코딩하는 것을 방지
+    const audioBufferPending = new Map<string, Promise<AudioBuffer>>();
+
+    // URL에 대한 AudioBuffer를 한 번만 디코딩하여 캐시에 저장하고 반환하는 함수
+    const fetchAndCacheAudioBuffer = async (url: string): Promise<AudioBuffer> => {
+        // 이미 캐시에 있으면 즉시 반환
+        const cached = audioBufferCache.get(url);
+        if (cached) return cached;
+
+        // 다른 곳에서 이미 디코딩 중이면 같은 Promise를 공유 (중복 요청 방지)
+        const pending = audioBufferPending.get(url);
+        if (pending) return pending;
+
+        // 최초 요청: fetch → decode → 캐시 저장
+        const promise = (async () => {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioCtx = Tone.getContext().rawContext as AudioContext;
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            audioBufferCache.set(url, audioBuffer);
+            audioBufferPending.delete(url);
+            return audioBuffer;
+        })();
+
+        audioBufferPending.set(url, promise);
+        return promise;
+    };
+
+    // 외부(WaveformWebGL 등)에서 캐시에 접근할 수 있도록 getter 함수 제공
+    const getAudioBufferCache = () => audioBufferCache;
 
     // 재생바 자동 스크롤용 타임라인 컨테이너 DOM 참조 (ProjectPage에서 전달받음)
     let timelineContainer: HTMLElement | null = null;
@@ -454,6 +488,17 @@ function disposeClipAudio(clipId: number) {
         try {
             const audioInfo = await projectApi.getAudioDetail(projectInfo.value.projectId, data.audioMetadataId);
 
+            // [최적화] 업로더 본인이 미리 캐싱해둔 로컬 blobUrl의 AudioBuffer를 CDN URL 키로 이전
+            // → loadClipPlayer와 WaveformWebGL 모두 추가 네트워크 요청 없이 즉시 사용 가능
+            if (data._localBlobUrl && audioBufferCache.has(data._localBlobUrl)) {
+                const localBuffer = audioBufferCache.get(data._localBlobUrl)!;
+                audioBufferCache.set(audioInfo.audioUrl, localBuffer);
+                // 더 이상 필요 없는 blobUrl 키 제거 및 메모리 해제
+                audioBufferCache.delete(data._localBlobUrl);
+                URL.revokeObjectURL(data._localBlobUrl);
+                console.log(`[CLIP_CREATE 최적화] 로컬 AudioBuffer → CDN URL 키로 이전 완료 (네트워크 다운로드 생략)`);
+            }
+
             // 3. Vue 반응성 확보: 배열 안의 실제 반응형 객체를 다시 찾아서 audio를 통째로 교체
             const reactiveClip = track.clips.find(c => c.clipId === data.clipId);
             if (reactiveClip) {
@@ -785,13 +830,23 @@ function disposeClipAudio(clipId: number) {
         uploadingTrackId.value = trackId;
         uploadingBar.value = startBar;
 
-        // 1. 오디오 파일을 Tone.Player로 임시 로드하여 길이(Duration) 측정
-        const tempUrl = URL.createObjectURL(file);
-        const tempPlayer = new Tone.Player();
-        await tempPlayer.load(tempUrl);
-        const durationMs = Math.round(tempPlayer.buffer.duration * 1000);
-        tempPlayer.dispose();
-        URL.revokeObjectURL(tempUrl);
+        // 1. 로컬 파일을 AudioBuffer로 디코딩 (길이 측정 + 캐시 사전 적재를 한 번에 처리)
+        //    → 기존에는 Tone.Player로 임시 로드 후 dispose했지만, 이제는 AudioBuffer를 캐시에 보관하여
+        //      CLIP_CREATE 수신 시 네트워크 왕복 없이 즉시 재생/파형 표시가 가능합니다.
+        const localBlobUrl = URL.createObjectURL(file);
+        let durationMs: number;
+        try {
+            const localBuffer = await fetchAndCacheAudioBuffer(localBlobUrl);
+            durationMs = Math.round(localBuffer.duration * 1000);
+        } catch (e) {
+            console.error(`[Upload] 로컬 파일 디코딩 실패:`, e);
+            URL.revokeObjectURL(localBlobUrl);
+            uploadingTrackId.value = null;
+            uploadingBar.value = null;
+            return;
+        }
+        // ⚠️ revokeObjectURL은 하지 않습니다. 캐시에 blobUrl 키로 보관되어 있으므로
+        //    CLIP_CREATE에서 CDN URL이 도착하면 그때 blobUrl 캐시를 CDN URL 키로 이전합니다.
 
         // 2. 파일 타입에 따른 MIME 타입 및 포맷팅 설정
         const mimeType = file.type.includes('wav') ? 'WAV' : 'MPEG';
@@ -822,13 +877,16 @@ function disposeClipAudio(clipId: number) {
                 storedName: uploadTicket.storedName,
                 mimeType: mimeType,
                 sizeBytes: file.size,
-                durationMs: durationMs
+                durationMs: durationMs,
+                // [최적화] 업로더 본인의 CLIP_CREATE 수신부에서 CDN URL 대신 사용할 로컬 blob URL
+                _localBlobUrl: localBlobUrl
             });
 
             console.log(`[Upload] 백엔드로 CLIP_CREATE 발신 완료. 렌더링은 브로드캐스트 수신 후 진행됩니다.`);
             // 프론트엔드 로직 종료 (렌더링은 수신부에서 일괄 처리)
         } catch (error) {
             console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
+            URL.revokeObjectURL(localBlobUrl);
             alert("파일 업로드에 실패했습니다.");
             uploadingTrackId.value = null;
             uploadingBar.value = null;
@@ -1281,28 +1339,38 @@ function disposeClipAudio(clipId: number) {
     };
 
     // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
-    const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
-    if (!clip.audio?.cdnUrl) return;
-    const targetVol = trackVolumes.get(trackId);
-    if (!targetVol) return;
+    // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
+    // [최적화 & EQ병합] 캐시된 AudioBuffer를 직접 주입하여 중복 네트워크 다운로드+디코딩을 완전 제거하고, EQ 노드 체인 연결
+    const loadClipPlayer = async (clip: ClipUIState, trackId: number) => {
+        if (!clip.audio?.cdnUrl) return;
+        const targetVol = trackVolumes.get(trackId);
+        if (!targetVol) return;
 
-    if (!clipPlayers.has(clip.clipId)) {
-        const newPlayer = new Tone.Player();
+        if (!clipPlayers.has(clip.clipId)) {
+            try {
+                // 1. 최적화: 캐시에서 AudioBuffer를 가져오거나, 없으면 한 번만 fetch+decode
+                const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
 
-        connectPlayerToTrackWithEq(newPlayer, clip, trackId);
+                // await 후 다른 곳에서 이미 등록했을 수 있으므로 중복 체크
+                if (clipPlayers.has(clip.clipId)) return;
 
-        clipPlayers.set(clip.clipId, newPlayer);
+                // 2. 최적화: 버퍼를 주입하여 Player 생성 (네트워크 다운로드 및 디코딩 X)
+                const newPlayer = new Tone.Player(audioBuffer);
 
-        newPlayer.load(clip.audio.cdnUrl).then(() => {
-            const exactStartTimeSec = clip.start * secondsPerBar.value;
-            const audioOffsetSec = clip.audioStartMs / 1000;
-            newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
-        }).catch(e => {
-            console.error("[Audio Load Error]:", e);
-            disposeClipAudio(clip.clipId);
-        });
-    }
-};
+                // 3. EQ 병합: targetVol에 바로 꽂지 않고, EQ 필터 체인을 거쳐서 연결
+                connectPlayerToTrackWithEq(newPlayer, clip, trackId);
+
+                clipPlayers.set(clip.clipId, newPlayer);
+
+                const exactStartTimeSec = clip.start * secondsPerBar.value;
+                const audioOffsetSec = clip.audioStartMs / 1000;
+                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
+            } catch (e) {
+                console.error("[Audio Load Error]:", e);
+                disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
+            }
+        }
+    };
 
     // [성능 최적화] 재생바 UI 업데이트 루프
     // Vue 반응성(ref) 대신 DOM을 직접 조작하여 초당 1,300회 이상의 Vue re-render를 원천 차단
@@ -1441,16 +1509,21 @@ function disposeClipAudio(clipId: number) {
                     continue;
                 } 
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
-                const player = new Tone.Player();
-
-                connectPlayerToTrackWithEq(
-                    player,
-                    clip,
-                    track.trackId,
-                );
 
                 try {
-                    await player.load(clip.audio.cdnUrl);
+                    // [최적화] 캐시에서 AudioBuffer를 가져오거나 한 번만 fetch+decode
+                    const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
+                    
+                    // 버퍼를 사용해 Player 생성 (네트워크 다운로드 X)
+                    const player = new Tone.Player(audioBuffer);
+
+                    // EQ 노드를 체인으로 연결
+                    connectPlayerToTrackWithEq(
+                        player,
+                        clip,
+                        track.trackId,
+                    );
+
                     console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
@@ -1461,6 +1534,7 @@ function disposeClipAudio(clipId: number) {
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
                     console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
+                    disposeClipAudio(clip.clipId);
                 }
             }
         }
@@ -1790,5 +1864,9 @@ const getClipSpectrum = (clipId: number): number[] => {
         addClipEqBand,
         updateClipEqBand,
         getClipSpectrum,
+
+        // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
+        getAudioBufferCache,
+        fetchAndCacheAudioBuffer,
     };
 });

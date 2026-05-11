@@ -6,7 +6,6 @@ const audioCache = new Map<string, { channelData: Float32Array, sampleRate: numb
 import { computed, onMounted, shallowRef, watch } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
-import * as Tone from 'tone';
 import WaveformChunk from './WaveformChunk.vue';
 import { Loader2 } from 'lucide-vue-next';
 
@@ -42,18 +41,19 @@ const chunks = computed(() => {
   });
 });
 
+// [최적화] 스토어의 전역 AudioBuffer 캐시를 활용하여 중복 fetch+decode 완전 제거
+// 재생기(Tone.Player)와 파형 렌더링이 동일한 디코딩 결과를 공유합니다.
 const loadAudioData = async () => {
   if (!props.clip.audio?.cdnUrl) return;
   const audioUrl = props.clip.audio.cdnUrl;
   
+  // 파형 전용 로컬 캐시 확인 (channelData 추출 결과 재사용)
   let cached = audioCache.get(audioUrl);
   
   if (!cached) {
     try {
-      const response = await fetch(audioUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      const audioCtx = Tone.getContext().rawContext as AudioContext;
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      // 스토어의 전역 캐시에서 AudioBuffer를 가져옴 (이미 디코딩되어 있으면 즉시 반환)
+      const audioBuffer = await trackStore.fetchAndCacheAudioBuffer(audioUrl);
       
       cached = {
         channelData: new Float32Array(audioBuffer.getChannelData(0)),

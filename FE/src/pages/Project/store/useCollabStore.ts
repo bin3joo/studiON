@@ -7,7 +7,7 @@ export const useCollabStore = defineStore('collab', () => {
     const remoteCursors = ref<Record<string, { x: number, y: number, color: string, nickname: string }>>({});
 
     // 1. 서버에서 남의 커서 움직임 데이터가 오면 스토어 업데이트
-    socketService.subscribe('CURSOR_MOVE', (data) => {
+    socketService.subscribePersistent('CURSOR_MOVE', (data) => {
         remoteCursors.value[data.userId] = {
             x: data.x,
             y: data.y,

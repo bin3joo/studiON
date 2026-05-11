@@ -140,7 +140,7 @@ public class TrackService {
         request.validate();
 
         // 프로젝트 존재여부 확인
-        projectService.getProjectOrThrow(request.getProjectId());
+        Project project = projectService.getProjectOrThrow(request.getProjectId());
 
         Integer newTrackId = redisTemplate.opsForValue()
                 .increment(TRACK_ID_SEQ_KEY).intValue();
@@ -162,12 +162,13 @@ public class TrackService {
                 .pan(0)
                 .build();
 
+        // Redis에 저장
         saveTrackToRedis(request.getProjectId(), newTrack);
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
 
-        // 저장 실패 시에도 브로드캐스트는 진행
+        // MongoDB에 이벤트 저장(저장 실패 시에도 브로드캐스트는 진행)
         try {
             saveTrackAddOrDeleteEvent(
                     "TRACK_ADD",
@@ -179,6 +180,25 @@ public class TrackService {
                     null);
         } catch (Exception e) {
             log.error("[MongoDB 이벤트 저장 실패]: event=TRACK_ADD, trackId={}", newTrackId, e);
+        }
+
+        // RDB에 저장
+        try {
+            trackRepository.save(Track.create(
+                            newTrackId,
+                            project,
+                            lastTrackId,
+                            null,
+                            TrackType.valueOf(request.getType().toUpperCase()),
+                            request.getName(),
+                            false,
+                            false,
+                            0.0,
+                            0
+                    )
+            );
+        } catch (Exception e) {
+            log.error("[RDB 트랙 저장 실패]: trackId={}", newTrackId, e);
         }
 
         return TrackAddResponse.builder()
@@ -484,23 +504,8 @@ public class TrackService {
         request.setProjectId(projectId);
         request.setName("track 1");
         request.setType("audio");
-        TrackAddResponse response = addTrack(request, userId);
 
-        Project project = projectService.getProjectOrThrow(projectId);
-        trackRepository.save(Track.create(
-                response.getTrackId(),
-                project,
-                response.getPreTrackId(),
-                response.getPostTrackId(),
-                TrackType.AUDIO,
-                response.getName(),
-                response.getIsSoloed(),
-                response.getIsMuted(),
-                response.getVolume(),
-                response.getPan()
-        ));
-
-        return response;
+        return addTrack(request, userId);
     }
 
 

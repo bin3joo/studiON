@@ -48,6 +48,8 @@ class TrackServiceTest {
 
     @Mock private ProjectService projectService;
     @Mock private RedisTemplate<String, String> redisTemplate;
+    @Mock private com.salmon.studion.domain.track.repository.TrackRepository trackRepository;
+    @Mock private com.salmon.studion.domain.track.repository.TrackEventRepository trackEventRepository;
     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks private TrackService trackService;

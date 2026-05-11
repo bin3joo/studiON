@@ -891,6 +891,10 @@ export const useTrackStore = defineStore('track', () => {
             const found = t.clips.find(c => c.clipId === data.clipId);
             if (found) { originalClip = found; targetTrack = t; break; }
         }
+
+        // 분할 응답이 왔으므로 대기 목록에서 제거
+        pendingSplitOriginalClipIds.delete(data.clipId);
+
         if (!originalClip || !targetTrack) return;
         
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
@@ -1127,6 +1131,8 @@ export const useTrackStore = defineStore('track', () => {
         });
         unlockClip(clip.clipId, trackId);
     };
+    // 서버 응답 대기 중인 클립 ID 목록 (네트워크 지연 시 연속 분할 방지용)
+    const pendingSplitOriginalClipIds = new Set<number>();
 
     let lastSplitTime = 0;
 
@@ -1137,6 +1143,12 @@ export const useTrackStore = defineStore('track', () => {
             console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
             return;
         }
+        
+        if (pendingSplitOriginalClipIds.has(clipId)) {
+            console.warn("이전 분할 요청이 처리 중입니다. (네트워크 대기)");
+            return;
+        }
+
         lastSplitTime = now;
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) return;
@@ -1147,7 +1159,8 @@ export const useTrackStore = defineStore('track', () => {
 
         const currentBar = playheadPosition.value;
 
-        if (currentBar <= originalClip.start || currentBar >= originalClip.start + originalClip.duration) {
+        const EPSILON = 0.0001; // 부동소수점 오차 방어
+        if (currentBar <= originalClip.start + EPSILON || currentBar >= originalClip.start + originalClip.duration - EPSILON) {
             alert("재생바(Playhead)가 클립 위에 있어야 분할할 수 있습니다.");
             return;
         }
@@ -1155,6 +1168,7 @@ export const useTrackStore = defineStore('track', () => {
         console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clipId, trackId);
+        pendingSplitOriginalClipIds.add(clipId);
         socketService.publish('CLIP_SPLIT', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,

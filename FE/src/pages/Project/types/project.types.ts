@@ -36,17 +36,28 @@ export interface CreateProjectResponse {
       projectId: number
       name: string
       rootNote: RootNote
-      projectMode: Mode
+      mode: Mode
       tempo: number
       timeSigNumerator: number
       timeSigDenominator: number
       totalBarCount: number
-      totalPlayTime: number
+      totalPlayTimeMs: number
     }
     masterTrack: {
       masterTrackId: number
       isSoloed: boolean
       isMuted: boolean
+      volume: number
+      pan: number
+    }
+    defaultTrack: {
+      trackId: number
+      name: string
+      type: string
+      preTrackId: number | null
+      postTrackId: number | null
+      isMuted: boolean
+      isSoloed: boolean
       volume: number
       pan: number
     }
@@ -57,12 +68,12 @@ export interface ProjectSummary {
   projectId: ProjectId
   name: string
   rootNote: RootNote
-  projectMode: Mode
+  mode: Mode
   tempo: number
   timeSigNumerator: number
   timeSigDenominator: number
   totalBarCount: number
-  totalPlayTime: number
+  totalPlayTimeMs: number
 }
 
 export interface MasterTrackSummary {

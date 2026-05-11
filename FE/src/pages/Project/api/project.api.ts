@@ -25,14 +25,20 @@ export interface ProjectDetailResponse {
     projectId: number;
     name: string;
     rootNote: string;
-    projectMode: string;
+    mode: string;
     tempo: number;
     timeSigNumerator: number;
     timeSigDenominator: number;
     totalBarCount: number;
-    totalPlayTime: number;
+    totalPlayTimeMs: number;
+    masterTrack: {
+      masterTrackId: number;
+      isSoloed: boolean;
+      isMuted: boolean;
+      volume: number;
+      pan: number;
+    };
     tracks: TrackDto[];
-
   }
 }
 
@@ -56,8 +62,7 @@ export interface AudioDetailResponse {
 // 프로젝트 생성 기본값
 // ==============================
 
-const MOCK_PROJECT_CREATE_DELAY_MS = 400;
-const MOCK_PROJECT_LIST_DELAY_MS = 300;
+
 const DEFAULT_PROJECT_NAME = '새 프로젝트';
 const DEFAULT_ROOT_NOTE: RootNote = 'C';
 const DEFAULT_MODE: Mode = 'Major';

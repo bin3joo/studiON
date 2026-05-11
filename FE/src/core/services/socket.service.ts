@@ -3,15 +3,13 @@ import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 type EventHandler = (data: any) => void;
 
 class SocketService {
-  public isMockMode = false;
+
 
   private ws: WebSocket | null = null;
   private currentProjectId: number | null = null;
   private listeners: Map<string, EventHandler[]> = new Map();
 
   connect(projectId: number) {
-    if (this.isMockMode) return;
-
     if (
   this.ws &&
   (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) &&
@@ -93,7 +91,7 @@ class SocketService {
 
   // 서버로 메시지 발신
   publish(eventType: string, payload: any) {
-    if (this.isMockMode || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.currentProjectId) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.currentProjectId) {
       //console.warn(`[Socket ⚠️] 연결되지 않은 상태에서 전송 시도됨: ${eventType}`);
 
       return;

@@ -12,6 +12,7 @@ const errorMessage = ref('')
 
 onMounted(async () => {
   const loginCode = new URLSearchParams(window.location.search).get('code')
+  authStore.clearAccessToken();
 
   if (!loginCode) {
     errorMessage.value = '로그인 코드가 없습니다.'

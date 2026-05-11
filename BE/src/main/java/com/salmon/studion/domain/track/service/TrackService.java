@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
 public class TrackService {
 
     private static final String TRACKS_KEY = "project:%d:tracks";
-    private static final String TRACK_ID_SEQ_KEY = "project:%d:track:id_seq";
+    private static final String TRACK_ID_SEQ_KEY = "global:track:id_seq";
     private static final String EVENT_SEQ_KEY = "project:%d:event:seq";
     private static final String DELETED_TRACKS_KEY = "project:%d:deleted_tracks";
 
@@ -143,7 +143,7 @@ public class TrackService {
         projectService.getProjectOrThrow(request.getProjectId());
 
         Integer newTrackId = redisTemplate.opsForValue()
-                .increment(String.format(TRACK_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(TRACK_ID_SEQ_KEY).intValue();
 
         Integer lastTrackId = findLastTrackId(request.getProjectId());
         if (lastTrackId != null) {

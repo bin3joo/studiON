@@ -121,7 +121,7 @@ const displayedCode = computed(() => {
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 grid place-items-center bg-background/80 px-4 backdrop-blur-sm animate-fade-in"
+    class="fixed inset-0 z-9999 grid place-items-center bg-background/80 px-4 backdrop-blur-sm animate-fade-in"
     @click.self="handleClose"
   >
     <div

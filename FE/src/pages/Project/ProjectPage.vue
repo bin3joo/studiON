@@ -6,7 +6,6 @@ import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
 import ProjectHeader from './components/ProjectHeader.vue'
 import TrackList from './components/TrackList.vue' //트랙 리스트 컴포넌트
 import InviteCodeModal from './components/InviteCodeModal.vue'
-import ProjectAiSection from './components/ProjectAiSection.vue'
 import ProjectSidePanel from './components/ProjectSidePanel.vue'
 import TimelineRuler from './components/TimelineRuler.vue' //타임라인 눈금자
 import PlayController from './components/PlayController.vue' //재생 컨트롤러
@@ -17,6 +16,8 @@ import RemoteCursors from './components/RemoteCursors.vue' //커서 컴포넌트
 import { useCollabStore } from './store/useCollabStore';//공동 작업 스토어 
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
+import ProjectEqPanel from './components/ProjectEqPanel.vue'
+import type { ClipEqBandState } from './types'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -592,6 +593,51 @@ const unlockAudioEngine = async () => {
   window.removeEventListener('keydown', unlockAudioEngine);
 }
 
+const selectedEqTrack = computed(() => {
+  const selectedTrackId = trackStore.selectedTrackId
+
+  if (!selectedTrackId) return null
+
+  return trackStore.trackList.find(track =>
+    track.trackId === selectedTrackId
+  ) ?? null
+})
+
+function handleApplyAiEq() {
+  console.log('AI EQ 적용')
+}
+
+function handleCancelAiEq() {
+  aiConflict.value = null
+}
+
+function handleAddEqBand(payload: {
+  frequencyHz: number
+  gainDeltaDb: number
+}) {
+  if (!trackStore.selectedClip || !trackStore.selectedTrackId) return
+
+  trackStore.addClipEqBand(
+    trackStore.selectedTrackId,
+    trackStore.selectedClip.clipId,
+    payload,
+  )
+}
+
+function handleUpdateEqBand(payload: {
+  bandOrder: number
+  patch: Partial<ClipEqBandState>
+}) {
+  if (!trackStore.selectedClip || !trackStore.selectedTrackId) return
+
+  trackStore.updateClipEqBand(
+    trackStore.selectedTrackId,
+    trackStore.selectedClip.clipId,
+    payload.bandOrder,
+    payload.patch,
+  )
+}
+
 </script>
 
 <template>
@@ -636,7 +682,7 @@ const unlockAudioEngine = async () => {
   />
 
         <!--  [세로 스크롤] -->
-        <div class="w-max min-w-full pb-[100px] flex-1">
+        <div class="w-max min-w-full pb-4 flex-1">
   <TrackList
     :hovered-measure="hoveredMeasure"
     :hovered-track-id="hoveredTrackId"
@@ -664,6 +710,17 @@ const unlockAudioEngine = async () => {
         </div>
         
       </div>
+
+      <ProjectEqPanel
+  :selected-track="selectedEqTrack"
+  :selected-clip="trackStore.selectedClip"
+  :ai-analyzing="aiAnalyzing"
+  :ai-analyzed="!!aiConflict"
+  @apply-ai-eq="handleApplyAiEq"
+  @cancel-ai-eq="handleCancelAiEq"
+  @add-eq-band="handleAddEqBand"
+  @update-eq-band="handleUpdateEqBand"
+/>
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
 
     <section class="px-6 py-4">
@@ -676,8 +733,7 @@ const unlockAudioEngine = async () => {
         />
       </div>
     </section>
-
-    <ProjectAiSection /> -->
+ -->
     </main>
 
     <!-- 협업자 커서 렌더링 -->

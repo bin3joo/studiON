@@ -4,7 +4,7 @@ import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
 import { ref, computed, watch } from 'vue';
 //트랙과 클립의 타입
-import type { TrackUIState, ClipUIState } from '../types';
+import type { TrackUIState, ClipUIState, ClipEqState, ClipEqBandState } from '../types';
 //음원 처리를 위한 lib
 import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
@@ -25,7 +25,18 @@ export const useTrackStore = defineStore('track', () => {
     const trackVolumes = new Map<number, Tone.Volume>();   // 트랙별 볼륨/뮤트 노드
     const trackPanners = new Map<number, Tone.Panner>();   // 트랙별 패닝 노드
     const clipPlayers = new Map<number, Tone.Player>(); //클립별 오디오 플레이어
-    const myLockedClips = new Set<number>(); // 내가 직접 잠근(편집 중인) 클립 ID 목록
+    type ClipEqNode = {
+        bandOrder: number
+        filter: Tone.Filter
+    }
+
+    const clipEqNodes = new Map<number, ClipEqNode[]>()
+    const clipAnalyzers = new Map<number, Tone.FFT>()
+    const MAX_EQ_BANDS = 5
+
+    const DEFAULT_CLIP_EQ: ClipEqState = {
+        bands: [],
+    }
 
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
@@ -155,6 +166,147 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+    function clampNumber(value: number, min: number, max: number) {
+        return Math.max(min, Math.min(max, value))
+    }
+
+    function clampFrequency(frequencyHz: number) {
+        return Math.round(clampNumber(frequencyHz, 20, 20000))
+    }
+
+    function clampGain(gainDeltaDb: number) {
+        return Math.round(clampNumber(gainDeltaDb, -12, 12) * 10) / 10
+    }
+
+    function clampQ(q: number) {
+        return Math.round(clampNumber(q, 0.1, 10) * 100) / 100
+    }
+
+    function getClipEq(clip: ClipUIState): ClipEqState {
+        return {
+            bands: clip.eq?.bands ?? [],
+        }
+    }
+
+    function findClip(trackId: number, clipId: number) {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track) return null
+
+        return track.clips.find(clip => clip.clipId === clipId) ?? null
+    }
+
+    function createToneFilterFromBand(band: ClipEqBandState) {
+        const type =
+            band.eqTypeCode === 2
+                ? 'lowshelf'
+                : band.eqTypeCode === 3
+                    ? 'highshelf'
+                    : 'peaking'
+
+        const filter = new Tone.Filter({
+            type,
+            frequency: band.frequencyHz,
+            Q: band.q,
+            gain: band.gainDeltaDb,
+        })
+
+        filter.channelCount = 2
+        filter.channelCountMode = 'explicit'
+
+        return filter
+    }
+
+    function disposeClipEqNodes(clipId: number) {
+        const nodes = clipEqNodes.get(clipId)
+        if (!nodes) return
+
+        nodes.forEach(node => {
+            node.filter.dispose()
+        })
+
+        clipEqNodes.delete(clipId)
+    }
+
+    function createClipEqNodes(clip: ClipUIState): ClipEqNode[] {
+        disposeClipEqNodes(clip.clipId)
+
+        const eq = getClipEq(clip)
+        const nodes = eq.bands.map(band => ({
+            bandOrder: band.bandOrder,
+            filter: createToneFilterFromBand(band),
+        }))
+
+        clipEqNodes.set(clip.clipId, nodes)
+
+        return nodes
+    }
+
+    function connectPlayerToTrackWithEq(
+        player: Tone.Player,
+        clip: ClipUIState,
+        trackId: number,
+    ) {
+        const targetVol = trackVolumes.get(trackId)
+        if (!targetVol) return
+
+        const eqNodes = createClipEqNodes(clip)
+
+        const oldAnalyzer = clipAnalyzers.get(clip.clipId)
+        if (oldAnalyzer) {
+            oldAnalyzer.dispose()
+            clipAnalyzers.delete(clip.clipId)
+        }
+
+        const analyzer = new Tone.FFT(1024)
+        clipAnalyzers.set(clip.clipId, analyzer)
+
+        player.disconnect()
+
+        if (eqNodes.length > 0) {
+            player.chain(
+                ...eqNodes.map(node => node.filter),
+                analyzer,
+                targetVol,
+            )
+        } else {
+            player.chain(
+                analyzer,
+                targetVol,
+            )
+        }
+    }
+
+    const getClipSpectrum = (clipId: number): number[] => {
+        const analyzer = clipAnalyzers.get(clipId)
+
+        if (!analyzer) return []
+
+        const values = analyzer.getValue()
+
+        return Array.from(values).map(value => {
+            if (typeof value !== 'number') return -100
+            if (!Number.isFinite(value)) return -100
+            return value
+        })
+    }
+
+    function disposeClipAudio(clipId: number) {
+        const player = clipPlayers.get(clipId)
+
+        if (player) {
+            player.unsync().stop().dispose()
+            clipPlayers.delete(clipId)
+        }
+
+        disposeClipEqNodes(clipId)
+
+        const analyzer = clipAnalyzers.get(clipId)
+        if (analyzer) {
+            analyzer.dispose()
+            clipAnalyzers.delete(clipId)
+        }
+    }
+
     // ==========================================
     // 🌐 웹소켓 수신 (Subscribe) 처리부
     // ==========================================
@@ -196,11 +348,7 @@ export const useTrackStore = defineStore('track', () => {
         if (index !== -1) {
             // 🚨 보완: 트랙을 지우기 전에, 트랙 안에 있던 모든 클립의 오디오 메모리를 완전 해제!
             trackList.value[index].clips.forEach(clip => {
-                const player = clipPlayers.get(clip.clipId);
-                if (player) {
-                    player.unsync().stop().dispose();
-                    clipPlayers.delete(clip.clipId);
-                }
+                disposeClipAudio(clip.clipId);
             });
 
             // 트랙 삭제 및 믹서 노드 해제
@@ -255,14 +403,11 @@ export const useTrackStore = defineStore('track', () => {
 
     // --------------------- 클립 관련 (소켓) ---------------------
     socketService.subscribe('CLIP_LOCK', (data) => {
-        // 내가 직접 잠근 클립이면 내 화면에서는 잠금 표시를 하지 않는다 (자기 자신 차단 방지)
-        if (myLockedClips.has(data.clipId)) return;
-
         const track = trackList.value.find(t => t.clips.some(c => c.clipId === data.clipId));
         if (track) {
             const clip = track.clips.find(c => c.clipId === data.clipId);
             if (clip) {
-                clip.isLocked = data.isLocked; // 다른 사람이 잠근 경우에만 자물쇠 찰칵!
+                clip.isLocked = data.isLocked; // 내 화면에도 자물쇠 찰칵!
             }
         }
     });
@@ -296,35 +441,44 @@ export const useTrackStore = defineStore('track', () => {
         try {
             const audioInfo = await projectApi.getAudioDetail(projectInfo.value.projectId, data.audioMetadataId);
 
-            // 3. Vue 반응성 확보: 배열 안의 실제 반응형 객체를 다시 찾아서 audio를 통째로 교체
-            const reactiveClip = track.clips.find(c => c.clipId === data.clipId);
-            if (reactiveClip) {
-                reactiveClip.audio = {
-                    audioMetadataId: data.audioMetadataId,
-                    cdnUrl: audioInfo.audioUrl,
-                    originalName: audioInfo.originalName,
-                    durationMs: data.audioDurationMs,
-                };
+            // 3. 받아온 정보로 기존 빈 껍데기 클립 상태 업데이트
+            if (newClip.audio) {
+                newClip.audio.cdnUrl = audioInfo.audioUrl;
+                newClip.audio.originalName = audioInfo.originalName;
 
-                // 4. 오디오 플레이어 노드 생성 및 버퍼 로딩
-                const targetVol = trackVolumes.get(data.trackId);
-                if (targetVol) {
-                    const newPlayer = new Tone.Player().connect(targetVol);
-                    await newPlayer.load(audioInfo.audioUrl);
+                const reactiveClip = track.clips.find(c => c.clipId === data.clipId)
 
-                    const exactStartTimeSec = reactiveClip.start * secondsPerBar.value;
-                    const audioOffsetSec = reactiveClip.audioStartMs / 1000;
-                    newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, reactiveClip.duration * secondsPerBar.value);
+if (!reactiveClip) return
 
-                    clipPlayers.set(reactiveClip.clipId, newPlayer);
-                    console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 및 동기화 완료 (ID: ${reactiveClip.clipId})`);
-                }
+// 4. 오디오 플레이어 노드 생성 및 버퍼 로딩
+const targetVol = trackVolumes.get(data.trackId)
+
+if (targetVol) {
+  const newPlayer = new Tone.Player()
+
+  connectPlayerToTrackWithEq(newPlayer, reactiveClip, data.trackId)
+
+  await newPlayer.load(audioInfo.audioUrl)
+
+  const exactStartTimeSec = reactiveClip.start * secondsPerBar.value
+  const audioOffsetSec = reactiveClip.audioStartMs / 1000
+
+  newPlayer
+    .sync()
+    .start(
+      exactStartTimeSec,
+      audioOffsetSec,
+      reactiveClip.duration * secondsPerBar.value,
+    )
+
+  clipPlayers.set(reactiveClip.clipId, newPlayer)
+}
+                
             }
         } catch (error) {
             console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
-            const failedClip = track.clips.find(c => c.clipId === data.clipId);
-            if (failedClip && failedClip.audio) {
-                failedClip.audio = { ...failedClip.audio, originalName: "오디오 로딩 실패" };
+            if (newClip.audio) {
+                newClip.audio.originalName = "오디오 로딩 실패";
             }
         }
     });
@@ -354,9 +508,10 @@ export const useTrackStore = defineStore('track', () => {
 
                 targetTrack.clips.push(targetClip);
 
-                const newVolNode = trackVolumes.get(data.after.trackId);
                 const player = clipPlayers.get(data.clipId);
-                if (newVolNode && player) { player.disconnect(); player.connect(newVolNode); }
+                if (player) {
+                    connectPlayerToTrackWithEq(player, targetClip, data.after.trackId);
+                }
             }
         }
 
@@ -388,8 +543,7 @@ export const useTrackStore = defineStore('track', () => {
                 break; // 찾았으니 탈출
             }
         }
-        const player = clipPlayers.get(data.clipId);
-        if (player) { player.unsync().stop().dispose(); clipPlayers.delete(data.clipId); }
+        disposeClipAudio(data.clipId);
     });
 
     socketService.subscribe('CLIP_CUT', (data) => {
@@ -401,8 +555,7 @@ export const useTrackStore = defineStore('track', () => {
                 break;
             }
         }
-        const player = clipPlayers.get(data.clipId);
-        if (player) { player.unsync().stop().dispose(); clipPlayers.delete(data.clipId); }
+        disposeClipAudio(data.clipId);
     });
 
     // 2. 클립 붙여넣기 수신 (가장 중요: sourceClipId를 통한 복제)
@@ -413,11 +566,6 @@ export const useTrackStore = defineStore('track', () => {
             const found = t.clips.find(c => c.clipId === data.sourceClipId);
             if (found) { originalClip = found; break; }
         }
-        // 잘라내기(Cut)의 경우 화면에서 이미 삭제되었으므로 로컬 클립보드에서 찾습니다.
-        if (!originalClip && clipboardClip.value && clipboardClip.value.clipId === data.sourceClipId) {
-            originalClip = clipboardClip.value;
-        }
-
         if (!originalClip) {
             console.error(`[에러] 붙여넣기 할 원본 클립(ID: ${data.sourceClipId})을 화면에서 찾을 수 없습니다!`);
             return;
@@ -437,7 +585,8 @@ export const useTrackStore = defineStore('track', () => {
         // 오디오 플레이어 복제 및 스케줄링
         const targetVol = trackVolumes.get(data.targetTrackId);
         if (targetVol && pastedClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
+            const newPlayer = new Tone.Player();
+            connectPlayerToTrackWithEq(newPlayer, pastedClip, data.targetTrackId);
             newPlayer.load(pastedClip.audio.cdnUrl).then(() => {
                 const exactStartTimeSec = pastedClip.start * secondsPerBar.value;
                 const audioOffsetSec = pastedClip.audioStartMs / 1000;
@@ -468,7 +617,8 @@ export const useTrackStore = defineStore('track', () => {
         // 오디오 엔진 연결
         const targetVol = trackVolumes.get(data.targetTrackId);
         if (targetVol && duplicatedClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
+            const newPlayer = new Tone.Player();
+            connectPlayerToTrackWithEq(newPlayer, duplicatedClip, data.targetTrackId);
             newPlayer.load(duplicatedClip.audio.cdnUrl).then(() => {
                 const exactStartTimeSec = duplicatedClip.start * secondsPerBar.value;
                 const audioOffsetSec = duplicatedClip.audioStartMs / 1000;
@@ -502,10 +652,7 @@ export const useTrackStore = defineStore('track', () => {
             start: data.splitBar,
             duration: data.newClipDuration,
             audioStartMs: originalClip.audioStartMs + splitOffsetMs,
-            audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs),
-            isLocked: false,     // 분할로 새로 생긴 클립은 잠금 해제 상태로 초기화
-            isDragging: false,
-            isSelected: false
+            audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs)
         };
         // 왼쪽 원본 클립 길이 수정
         originalClip.duration = data.originalDuration;
@@ -516,7 +663,8 @@ export const useTrackStore = defineStore('track', () => {
         // 오른쪽 새 클립 오디오 셋팅
         const targetVol = trackVolumes.get(targetTrack.trackId);
         if (targetVol && rightClip.audio?.cdnUrl) {
-            const newPlayer = new Tone.Player().connect(targetVol);
+            const newPlayer = new Tone.Player();
+            connectPlayerToTrackWithEq(newPlayer, rightClip, targetTrack.trackId);
             await newPlayer.load(rightClip.audio.cdnUrl);
 
             const exactStartTimeSec = rightClip.start * secondsPerBar.value;
@@ -542,8 +690,7 @@ export const useTrackStore = defineStore('track', () => {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
             if (index !== -1) { t.clips.splice(index, 1); break; }
         }
-        const player = clipPlayers.get(data.clipId);
-        if (player) { player.unsync().stop().dispose(); clipPlayers.delete(data.clipId); }
+        disposeClipAudio(data.clipId);
     });
 
     // ==========================================
@@ -617,13 +764,11 @@ export const useTrackStore = defineStore('track', () => {
     const cutClip = (clip: ClipUIState, trackId: number) => {
         clipboardClip.value = { ...JSON.parse(JSON.stringify(clip)), clipId: clip.clipId };
         isCutAction.value = true;
-        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
-        lockClip(clip.clipId, trackId);
+        // 잘라내기는 백엔드에 요청만 하면 브로드캐스트가 알아서 다 지워줌 (CLIP_DELETE 대신 CLIP_CUT 명세서 사용)
         socketService.publish('CLIP_CUT', {
             projectId: projectInfo.value.projectId,
             clipId: clip.clipId
         });
-        unlockClip(clip.clipId, trackId);
     };
 
 
@@ -700,25 +845,20 @@ export const useTrackStore = defineStore('track', () => {
     // 삭제
     const deleteClip = (clipId: number, trackId: number) => {
         console.log(`[통신] 백엔드에 클립 삭제(CLIP_DELETE) 요청 전송`);
-        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
-        lockClip(clipId, trackId);
         socketService.publish('CLIP_DELETE', {
             projectId: projectInfo.value.projectId,
             clipId: clipId
         });
-        unlockClip(clipId, trackId);
     };
 
     // 4. 클립 복제 (Duplicate)
     const duplicateClip = (clip: ClipUIState, trackId: number) => {
         console.log(`[통신] 백엔드에 클립 복제(CLIP_DUPLICATE) 요청 전송`);
-        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
-        lockClip(clip.clipId, trackId);
+
         socketService.publish('CLIP_DUPLICATE', {
             projectId: projectInfo.value.projectId,
             clipId: clip.clipId
         });
-        unlockClip(clip.clipId, trackId);
     };
 
     // 5. 클립 분할 (Split)
@@ -738,14 +878,11 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
-        // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
-        lockClip(clipId, trackId);
         socketService.publish('CLIP_SPLIT', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
             splitBar: currentBar
         });
-        unlockClip(clipId, trackId);
     };
 
     // 6. 클립 길이 조절 (Resize / Trim)
@@ -1117,7 +1254,8 @@ export const useTrackStore = defineStore('track', () => {
                 }
 
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
-                const player = new Tone.Player().connect(vol);
+                const player = new Tone.Player();
+                connectPlayerToTrackWithEq(player, clip, track.trackId);
 
                 try {
                     await player.load(clip.audio.cdnUrl);
@@ -1189,6 +1327,110 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+    const addClipEqBand = (
+        trackId: number,
+        clipId: number,
+        payload: {
+            frequencyHz: number
+            gainDeltaDb: number
+        },
+    ) => {
+        const clip = findClip(trackId, clipId)
+        if (!clip) return
+
+        const currentBands = clip.eq?.bands ?? []
+
+        if (currentBands.length >= MAX_EQ_BANDS) {
+            console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
+            return
+        }
+
+        const nextBandOrder =
+            currentBands.length > 0
+                ? Math.max(...currentBands.map(band => band.bandOrder)) + 1
+                : 1
+
+        const nextBand: ClipEqBandState = {
+            bandOrder: nextBandOrder,
+            eqTypeCode: 1, // 1 = BELL
+            frequencyHz: clampFrequency(payload.frequencyHz),
+            q: 1,
+            gainDeltaDb: clampGain(payload.gainDeltaDb),
+            sourceTypeCode: 2, // 2 = USER_MANUAL
+            jobId: null,
+            suggestionActionId: null,
+            appliedSuggestionId: null,
+        }
+
+        clip.eq = {
+            bands: [
+                ...currentBands,
+                nextBand,
+            ],
+        }
+
+        const player = clipPlayers.get(clipId)
+        if (player) {
+            connectPlayerToTrackWithEq(player, clip, trackId)
+        }
+    }
+
+    const updateClipEqBand = (
+  trackId: number,
+  clipId: number,
+  bandOrder: number,
+  patch: Partial<ClipEqBandState>,
+) => {
+  const clip = findClip(trackId, clipId)
+  if (!clip?.eq) return
+
+  const nextBands = clip.eq.bands.map((band): ClipEqBandState => {
+    if (band.bandOrder !== bandOrder) return band
+
+    return {
+      ...band,
+      ...patch,
+      frequencyHz: patch.frequencyHz !== undefined
+        ? clampFrequency(patch.frequencyHz)
+        : band.frequencyHz,
+      gainDeltaDb: patch.gainDeltaDb !== undefined
+        ? clampGain(patch.gainDeltaDb)
+        : band.gainDeltaDb,
+      q: patch.q !== undefined
+        ? clampQ(patch.q)
+        : band.q,
+    }
+  })
+
+  const updatedBand = nextBands.find(band => band.bandOrder === bandOrder)
+
+  if (!updatedBand) return
+
+  clip.eq = {
+    bands: nextBands,
+  }
+
+  const nodes = clipEqNodes.get(clipId)
+  const targetNode = nodes?.find(node => node.bandOrder === bandOrder)
+
+  if (targetNode) {
+    targetNode.filter.frequency.rampTo(updatedBand.frequencyHz, 0.03)
+    targetNode.filter.gain.rampTo(updatedBand.gainDeltaDb, 0.03)
+    targetNode.filter.Q.rampTo(updatedBand.q, 0.03)
+  }
+  else {
+    const player = clipPlayers.get(clipId)
+
+    if (player) {
+      connectPlayerToTrackWithEq(
+        player,
+        clip,
+        trackId,
+      )
+    }
+  }
+}
+
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
         try {
@@ -1220,6 +1462,7 @@ export const useTrackStore = defineStore('track', () => {
                     isSelected: false,
                     clips: track.clips.map((clip): ClipUIState => ({
                         ...clip,
+                        eq: DEFAULT_CLIP_EQ,
                         isSelected: false,
                         isDragging: false
                     }))
@@ -1245,7 +1488,6 @@ export const useTrackStore = defineStore('track', () => {
 
     // 1. 내가 클립을 잡았을 때 서버에 Lock 요청
     const lockClip = (clipId: number, trackId: number) => {
-        myLockedClips.add(clipId); // 내가 잠근 목록에 등록 (브로드캐스트 자기차단용)
         socketService.publish('CLIP_LOCK', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
@@ -1255,7 +1497,6 @@ export const useTrackStore = defineStore('track', () => {
 
     // 2. 내가 클립에서 마우스를 뗐을 때 서버에 Unlock 요청
     const unlockClip = (clipId: number, trackId: number) => {
-        myLockedClips.delete(clipId); // 내가 잠근 목록에서 제거
         socketService.publish('CLIP_LOCK', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
@@ -1326,6 +1567,9 @@ export const useTrackStore = defineStore('track', () => {
         getVolumeFromPercent,
         renameTrack,
         reorderTrack,
+        addClipEqBand,
+        updateClipEqBand,
+        getClipSpectrum,
         lockClip,
         unlockClip,
     };

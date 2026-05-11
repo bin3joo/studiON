@@ -21,9 +21,20 @@ const props = defineProps<{
 //스토어 사용
 const trackStore = useTrackStore();
 
-// 클립이 겹칠 경우 나중에 생성된 클립(clipId가 큼)이 뒤에(아래에) 깔리도록 내림차순 정렬
-const sortedClips = computed(() => {
-  return [...props.track.clips].sort((a, b) => b.clipId - a.clipId);
+// 뷰포트 내에 존재하는 클립만 필터링하여 렌더링하는 가로 가상 스크롤 적용 (정렬 포함)
+const visibleClips = computed(() => {
+  const left = trackStore.viewportLeft;
+  const right = trackStore.viewportRight;
+  const buffer = 1000; // 좌우 1000px 여유 공간
+  
+  return [...props.track.clips]
+    .filter(clip => {
+      const clipLeft = clip.start * trackStore.pixelPerBar;
+      const clipRight = clipLeft + (clip.duration * trackStore.pixelPerBar);
+      return clipRight >= (left - buffer) && clipLeft <= (right + buffer);
+    })
+    // 클립이 겹칠 경우 나중에 생성된 클립(clipId가 큼)이 뒤에(아래에) 깔리도록 내림차순 정렬
+    .sort((a, b) => b.clipId - a.clipId);
 });
 
 // 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
@@ -784,7 +795,7 @@ const onWorkAreaMouseLeave = () => {
     class="flex border-b border-border group w-max min-w-full" 
     :data-track-id="track.trackId" 
     :class="[
-      isCommentExpanded ? 'relative z-[100]' :
+      isCommentExpanded ? 'relative z-100' :
       track.clips.some(c => c.isDragging) ? 'relative z-50' :
       (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
     ]"
@@ -1033,7 +1044,7 @@ const onWorkAreaMouseLeave = () => {
               width: `${(gap.end - gap.start) * trackStore.pixelPerBar}px`
             }"
           >
-            <div class="w-full h-[1px] bg-[#D4CED2] opacity-30 mix-blend-screen"></div>
+            <div class="w-full h-px bg-[#D4CED2] opacity-30 mix-blend-screen"></div>
           </div>
         </div>
         
@@ -1052,7 +1063,7 @@ const onWorkAreaMouseLeave = () => {
 
       <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
-          v-for="clip in sortedClips" 
+          v-for="clip in visibleClips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
           class="clip-container absolute inset-y-1 z-10 rounded-md"
@@ -1063,6 +1074,7 @@ const onWorkAreaMouseLeave = () => {
           ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
+            '--clip-left-px': `${clip.start * trackStore.pixelPerBar}px`,
             width: `${clip.duration * trackStore.pixelPerBar}px`,
             borderColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? clip.color : `${clip.color}80`), 
             backgroundColor: isMaster ? 'transparent' : (clip.isSelected || clip.isDragging ? `${clip.color}66` : `${clip.color}33`), 

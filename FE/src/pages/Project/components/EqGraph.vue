@@ -1,319 +1,634 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Loader2 } from 'lucide-vue-next'
-import type { ClipEqBandState } from '../types'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import type { TrackEqBandState } from '../types'
 
-const props = defineProps<{
-  title: string
-  freqLabels: string[]
-  dbLabels: string[]
-  bands: ClipEqBandState[]
-  spectrumData?: number[]
+const props = withDefaults(defineProps<{
+  title?: string
+  freqLabels?: string[]
+  dbLabels?: string[]
+  bands: TrackEqBandState[]
+  spectrumData: number[]
+  interactive?: boolean
   after?: boolean
   loading?: boolean
-  interactive?: boolean
-}>()
+}>(), {
+  title: '',
+  freqLabels: () => ['20', '50', '100', '200', '500', '1K', '2K', '5K', '10K', '20K'],
+  dbLabels: () => ['+12', '+9', '+6', '+3', '0', '-3', '-6', '-9', '-12'],
+  interactive: false,
+  after: false,
+  loading: false,
+})
 
 const emit = defineEmits<{
-  'add-band': [payload: {
-    frequencyHz: number
-    gainDeltaDb: number
-  }]
-  'update-band': [payload: {
-    bandOrder: number
-    patch: Partial<ClipEqBandState>
-  }]
+  'add-band': [payload: { frequencyHz: number; gainDeltaDb: number }]
+  'update-band': [payload: { bandOrder: number; patch: Partial<TrackEqBandState> }]
+  'remove-band': [payload: { bandOrder: number }]
 }>()
+
+const svgRef = ref<SVGSVGElement | null>(null)
+const activeBandOrder = ref<number | null>(null)
+const draggingBandOrder = ref<number | null>(null)
+const hoverFreqHz = ref<number | null>(null)
+const hoverGainDb = ref<number | null>(null)
+
+const VIEWBOX_WIDTH = 1600
+const VIEWBOX_HEIGHT = 420
+
+const PADDING = {
+  top: 20,
+  right: 60,
+  bottom: 44,
+  left: 18,
+}
 
 const MIN_FREQ = 20
 const MAX_FREQ = 20000
-const MIN_GAIN_DB = -12
-const MAX_GAIN_DB = 12
-const GRAPH_WIDTH = 1000
-const GRAPH_HEIGHT = 240
-const MAX_BANDS = 5
-const SPECTRUM_BAR_COUNT = 44
+const MIN_DB = -12
+const MAX_DB = 12
 
-const graphRef = ref<HTMLElement | null>(null)
-const activeBandOrder = ref<number | null>(null)
+const SPECTRUM_MIN_DB = -96
+const SPECTRUM_MAX_DB = -18
 
-const centerY = computed(() => gainToY(0))
+const plotWidth = VIEWBOX_WIDTH - PADDING.left - PADDING.right
+const plotHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
 
-const sortedBands = computed(() => {
-  return [...props.bands].sort((a, b) => a.frequencyHz - b.frequencyHz)
+const majorFreqs = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+const minorFreqs = [
+  30, 40, 60, 70, 80, 90,
+  150, 300, 400, 600, 700, 800, 900,
+  1500, 3000, 4000, 6000, 7000, 8000, 9000,
+  15000,
+]
+const dbTicks = [12, 9, 6, 3, 0, -3, -6, -9, -12]
+
+const orderedBands = computed(() =>
+  [...props.bands].sort((a, b) => a.bandOrder - b.bandOrder),
+)
+
+const activeBand = computed(() => {
+  if (activeBandOrder.value == null) return null
+  return orderedBands.value.find(band => band.bandOrder === activeBandOrder.value) ?? null
 })
 
-const spectrumBars = computed(() => {
-  const values = props.spectrumData ?? []
-
-  if (values.length === 0) {
-    return Array.from({ length: SPECTRUM_BAR_COUNT }, () => 0)
-  }
-
-  return Array.from({ length: SPECTRUM_BAR_COUNT }, (_, index) => {
-    const ratio = index / Math.max(1, SPECTRUM_BAR_COUNT - 1)
-
-    const minLog = Math.log10(MIN_FREQ)
-    const maxLog = Math.log10(MAX_FREQ)
-    const frequency = Math.pow(10, minLog + ratio * (maxLog - minLog))
-
-    // Tone.FFT(1024)는 dB 배열을 반환하며, 표시용으로 24kHz Nyquist를 기준으로 매핑합니다.
-    const nyquist = 24000
-    const fftIndex = Math.round((frequency / nyquist) * (values.length - 1))
-    const safeIndex = clamp(fftIndex, 0, values.length - 1)
-
-    const db = values[safeIndex] ?? -100
-    const normalized = clamp((db + 100) / 80, 0, 1)
-
-    return normalized
-  })
-})
-
-const curvePath = computed(() => {
-  const points = [
-    { x: 0, y: centerY.value },
-    ...sortedBands.value.map(band => ({
-      x: frequencyToX(band.frequencyHz),
-      y: gainToY(band.gainDeltaDb),
-    })),
-    { x: GRAPH_WIDTH, y: centerY.value },
-  ]
-
-  if (points.length === 2) {
-    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
-  }
-
-  let path = `M ${points[0].x} ${points[0].y}`
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i - 1] ?? points[i]
-    const p1 = points[i]
-    const p2 = points[i + 1]
-    const p3 = points[i + 2] ?? p2
-
-    const cp1x = p1.x + (p2.x - p0.x) / 6
-    const cp1y = p1.y + (p2.y - p0.y) / 6
-    const cp2x = p2.x - (p3.x - p1.x) / 6
-    const cp2y = p2.y - (p3.y - p1.y) / 6
-
-    path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`
-  }
-
-  return path
-})
+watch(
+  () => props.bands,
+  (bands) => {
+    if (
+      activeBandOrder.value != null &&
+      !bands.some(band => band.bandOrder === activeBandOrder.value)
+    ) {
+      activeBandOrder.value = null
+    }
+  },
+  { deep: true },
+)
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
-function frequencyToX(frequencyHz: number) {
-  const clampedFreq = clamp(frequencyHz, MIN_FREQ, MAX_FREQ)
-
-  const minLog = Math.log10(MIN_FREQ)
-  const maxLog = Math.log10(MAX_FREQ)
-  const valueLog = Math.log10(clampedFreq)
-
-  return ((valueLog - minLog) / (maxLog - minLog)) * GRAPH_WIDTH
+function round(value: number, precision = 1) {
+  const factor = 10 ** precision
+  return Math.round(value * factor) / factor
 }
 
-function xToFrequency(x: number, width: number) {
-  const ratio = clamp(x / width, 0, 1)
-  const minLog = Math.log10(MIN_FREQ)
-  const maxLog = Math.log10(MAX_FREQ)
+function log10(value: number) {
+  return Math.log(value) / Math.LN10
+}
 
-  return Math.round(
-    Math.pow(10, minLog + ratio * (maxLog - minLog)),
-  )
+function freqToX(freqHz: number) {
+  const clamped = clamp(freqHz, MIN_FREQ, MAX_FREQ)
+  const min = log10(MIN_FREQ)
+  const max = log10(MAX_FREQ)
+  const ratio = (log10(clamped) - min) / (max - min)
+  return PADDING.left + ratio * plotWidth
+}
+
+function xToFreq(x: number) {
+  const ratio = clamp((x - PADDING.left) / plotWidth, 0, 1)
+  const min = log10(MIN_FREQ)
+  const max = log10(MAX_FREQ)
+  return 10 ** (min + (max - min) * ratio)
 }
 
 function gainToY(gainDb: number) {
-  const clampedGain = clamp(gainDb, MIN_GAIN_DB, MAX_GAIN_DB)
-  const ratio = (MAX_GAIN_DB - clampedGain) / (MAX_GAIN_DB - MIN_GAIN_DB)
-
-  return ratio * GRAPH_HEIGHT
+  const clamped = clamp(gainDb, MIN_DB, MAX_DB)
+  const ratio = (MAX_DB - clamped) / (MAX_DB - MIN_DB)
+  return PADDING.top + ratio * plotHeight
 }
 
-function yToGain(y: number, height: number) {
-  const ratio = clamp(y / height, 0, 1)
-  const gain = MAX_GAIN_DB - ratio * (MAX_GAIN_DB - MIN_GAIN_DB)
-
-  return Math.round(gain * 10) / 10
+function yToGain(y: number) {
+  const ratio = clamp((y - PADDING.top) / plotHeight, 0, 1)
+  return MAX_DB - ratio * (MAX_DB - MIN_DB)
 }
 
-function handleGraphPointerDown(e: PointerEvent) {
+function spectrumDbToY(value: number) {
+  const clamped = clamp(value, SPECTRUM_MIN_DB, SPECTRUM_MAX_DB)
+
+  const normalized =
+    (clamped - SPECTRUM_MIN_DB) / (SPECTRUM_MAX_DB - SPECTRUM_MIN_DB)
+
+  return PADDING.top + (1 - normalized) * plotHeight
+}
+
+function formatFreq(freq: number) {
+  if (freq >= 1000) {
+    const kHz = freq / 1000
+    return kHz >= 10 ? `${Math.round(kHz)} kHz` : `${round(kHz, 2)} kHz`
+  }
+  return `${Math.round(freq)} Hz`
+}
+
+function formatGain(gain: number) {
+  const rounded = round(gain, 1)
+  return `${rounded > 0 ? '+' : ''}${rounded} dB`
+}
+
+function formatQ(q: number) {
+  return round(q, 2).toFixed(2)
+}
+
+function labelForFreq(freq: number) {
+  if (freq >= 1000) {
+    if (freq % 1000 === 0) return `${freq / 1000}K`
+    return `${round(freq / 1000, 1)}K`
+  }
+  return `${freq}`
+}
+
+function getLocalPoint(clientX: number, clientY: number) {
+  if (!svgRef.value) return null
+
+  const rect = svgRef.value.getBoundingClientRect()
+  const x = ((clientX - rect.left) / rect.width) * VIEWBOX_WIDTH
+  const y = ((clientY - rect.top) / rect.height) * VIEWBOX_HEIGHT
+
+  return { x, y }
+}
+
+function isInsidePlot(x: number, y: number) {
+  return (
+    x >= PADDING.left &&
+    x <= VIEWBOX_WIDTH - PADDING.right &&
+    y >= PADDING.top &&
+    y <= VIEWBOX_HEIGHT - PADDING.bottom
+  )
+}
+
+function updateHoverState(clientX: number, clientY: number) {
+  const point = getLocalPoint(clientX, clientY)
+  if (!point || !isInsidePlot(point.x, point.y)) {
+    hoverFreqHz.value = null
+    hoverGainDb.value = null
+    return
+  }
+
+  hoverFreqHz.value = xToFreq(point.x)
+  hoverGainDb.value = yToGain(point.y)
+}
+
+function handlePointerMoveOnSvg(event: PointerEvent) {
+  updateHoverState(event.clientX, event.clientY)
+}
+
+function handlePointerLeave() {
+  hoverFreqHz.value = null
+  hoverGainDb.value = null
+}
+
+function handleBackgroundPointerDown(event: PointerEvent) {
   if (!props.interactive) return
-  if (props.bands.length >= MAX_BANDS) return
 
-  const target = e.target as HTMLElement
+  const point = getLocalPoint(event.clientX, event.clientY)
+  if (!point || !isInsidePlot(point.x, point.y)) return
 
-  if (target.closest('[data-eq-handle="true"]')) return
-  if (!graphRef.value) return
-
-  e.preventDefault()
-  e.stopPropagation()
-
-  const rect = graphRef.value.getBoundingClientRect()
-  const localX = e.clientX - rect.left
-  const localY = e.clientY - rect.top
+  const frequencyHz = Math.round(xToFreq(point.x))
+  const gainDeltaDb = round(yToGain(point.y), 1)
 
   emit('add-band', {
-    frequencyHz: xToFrequency(localX, rect.width),
-    gainDeltaDb: yToGain(localY, rect.height),
+    frequencyHz,
+    gainDeltaDb,
   })
 }
 
-function startDrag(e: PointerEvent, bandOrder: number) {
+function startBandDrag(event: PointerEvent, bandOrder: number) {
   if (!props.interactive) return
 
-  e.preventDefault()
-  e.stopPropagation()
+  event.preventDefault()
+  event.stopPropagation()
 
   activeBandOrder.value = bandOrder
+  draggingBandOrder.value = bandOrder
+
+  window.addEventListener('pointermove', handleBandDrag)
+  window.addEventListener('pointerup', stopBandDrag)
+
+  updateHoverState(event.clientX, event.clientY)
 }
 
-function onPointerMove(e: PointerEvent) {
-  if (!activeBandOrder.value || !graphRef.value || !props.interactive) return
+function handleBandDoubleClick(event: MouseEvent, bandOrder: number) {
+  if (!props.interactive) return
 
-  const rect = graphRef.value.getBoundingClientRect()
-  const localX = e.clientX - rect.left
-  const localY = e.clientY - rect.top
+  event.preventDefault()
+  event.stopPropagation()
+
+  emit('remove-band', { bandOrder })
+
+  if (activeBandOrder.value === bandOrder) {
+    activeBandOrder.value = null
+  }
+}
+
+function handleBandDrag(event: PointerEvent) {
+  if (draggingBandOrder.value == null) return
+
+  const point = getLocalPoint(event.clientX, event.clientY)
+  if (!point) return
+
+  const clampedX = clamp(point.x, PADDING.left, VIEWBOX_WIDTH - PADDING.right)
+  const clampedY = clamp(point.y, PADDING.top, VIEWBOX_HEIGHT - PADDING.bottom)
+
+  const frequencyHz = Math.round(xToFreq(clampedX))
+  const gainDeltaDb = round(yToGain(clampedY), 1)
 
   emit('update-band', {
-    bandOrder: activeBandOrder.value,
+    bandOrder: draggingBandOrder.value,
     patch: {
-      frequencyHz: xToFrequency(localX, rect.width),
-      gainDeltaDb: yToGain(localY, rect.height),
+      frequencyHz,
+      gainDeltaDb,
     },
   })
+
+  updateHoverState(event.clientX, event.clientY)
 }
 
-function stopDrag() {
-  activeBandOrder.value = null
+function stopBandDrag() {
+  draggingBandOrder.value = null
+  window.removeEventListener('pointermove', handleBandDrag)
+  window.removeEventListener('pointerup', stopBandDrag)
 }
 
-onMounted(() => {
-  window.addEventListener('pointermove', onPointerMove)
-  window.addEventListener('pointerup', stopDrag)
+onBeforeUnmount(() => {
+  stopBandDrag()
 })
 
-onUnmounted(() => {
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('pointerup', stopDrag)
+function bellResponse(freqHz: number, band: TrackEqBandState) {
+  const distance = Math.log2(freqHz / band.frequencyHz)
+  const width = clamp(1.15 / Math.max(band.q, 0.1), 0.12, 2.4)
+  return band.gainDeltaDb * Math.exp(-(distance * distance) / (2 * width * width))
+}
+
+function lowShelfResponse(freqHz: number, band: TrackEqBandState) {
+  const distance = Math.log2(freqHz / band.frequencyHz)
+  const steepness = clamp(band.q * 2.4, 0.8, 10)
+  const shelf = 1 / (1 + Math.exp(distance * steepness))
+  return band.gainDeltaDb * shelf
+}
+
+function highShelfResponse(freqHz: number, band: TrackEqBandState) {
+  const distance = Math.log2(freqHz / band.frequencyHz)
+  const steepness = clamp(band.q * 2.4, 0.8, 10)
+  const shelf = 1 / (1 + Math.exp(-distance * steepness))
+  return band.gainDeltaDb * shelf
+}
+
+function getBandResponse(freqHz: number, band: TrackEqBandState) {
+  switch (band.eqTypeCode) {
+    case 2:
+      return lowShelfResponse(freqHz, band)
+    case 3:
+      return highShelfResponse(freqHz, band)
+    default:
+      return bellResponse(freqHz, band)
+  }
+}
+
+function getTotalResponse(freqHz: number) {
+  return orderedBands.value.reduce((sum, band) => {
+    return sum + getBandResponse(freqHz, band)
+  }, 0)
+}
+
+const eqCurvePath = computed(() => {
+  const sampleCount = 420
+  let path = ''
+
+  for (let i = 0; i <= sampleCount; i++) {
+    const ratio = i / sampleCount
+    const freqHz = 10 ** (log10(MIN_FREQ) + ratio * (log10(MAX_FREQ) - log10(MIN_FREQ)))
+    const x = freqToX(freqHz)
+    const y = gainToY(getTotalResponse(freqHz))
+
+    path += `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)} `
+  }
+
+  return path.trim()
 })
+
+const spectrumPoints = computed(() => {
+  const values = props.spectrumData ?? []
+
+  if (!values.length) return []
+
+  // 실제 FFT 값은 보통 음수 dB 값이다.
+  // 0, 양수, -Infinity, NaN, 전부 무효값으로 처리한다.
+  const validValues = values.filter(value => {
+    return (
+      typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value < -1 &&
+      value > SPECTRUM_MIN_DB
+    )
+  })
+
+  // 유효한 값이 거의 없으면 무음/초기 상태로 보고 아예 그리지 않는다.
+  if (validValues.length < 3) {
+    return []
+  }
+
+  const nyquist = 22050
+  const result: Array<{ x: number; y: number }> = []
+
+  for (let i = 0; i < values.length; i += 1) {
+    const freqHz = (i / Math.max(1, values.length - 1)) * nyquist
+
+    if (freqHz < MIN_FREQ || freqHz > MAX_FREQ) continue
+
+    const rawValue = values[i]
+
+    // 유효하지 않은 bin은 바닥값으로 처리
+    const value =
+      typeof rawValue === 'number' &&
+      Number.isFinite(rawValue) &&
+      rawValue < -1 &&
+      rawValue > SPECTRUM_MIN_DB
+        ? rawValue
+        : SPECTRUM_MIN_DB
+
+    result.push({
+      x: freqToX(freqHz),
+      y: spectrumDbToY(value),
+    })
+  }
+
+  return result
+})
+
+const spectrumAreaPath = computed(() => {
+  const points = spectrumPoints.value
+  if (points.length < 2) return ''
+
+  const bottomY = PADDING.top + plotHeight
+  let path = `M ${points[0].x.toFixed(2)} ${bottomY.toFixed(2)} `
+
+  for (let i = 0; i < points.length; i++) {
+    path += `L ${points[i].x.toFixed(2)} ${points[i].y.toFixed(2)} `
+  }
+
+  path += `L ${points[points.length - 1].x.toFixed(2)} ${bottomY.toFixed(2)} Z`
+  return path.trim()
+})
+
+const spectrumLinePath = computed(() => {
+  const points = spectrumPoints.value
+  if (points.length < 2) return ''
+
+  let path = ''
+  for (let i = 0; i < points.length; i++) {
+    path += `${i === 0 ? 'M' : 'L'} ${points[i].x.toFixed(2)} ${points[i].y.toFixed(2)} `
+  }
+  return path.trim()
+})
+
+const infoText = computed(() => {
+  if (activeBand.value) {
+    return {
+      freq: formatFreq(activeBand.value.frequencyHz),
+      gain: formatGain(activeBand.value.gainDeltaDb),
+      q: formatQ(activeBand.value.q),
+    }
+  }
+
+  if (hoverFreqHz.value != null && hoverGainDb.value != null) {
+    return {
+      freq: formatFreq(hoverFreqHz.value),
+      gain: formatGain(hoverGainDb.value),
+      q: '--',
+    }
+  }
+
+  return {
+    freq: '--',
+    gain: '--',
+    q: '--',
+  }
+})
+
+const zeroDbY = computed(() => gainToY(0))
 </script>
 
 <template>
-  <div class="relative h-full overflow-hidden bg-[#242424]">
-    <!-- 그래프 그리드 영역 -->
-    <div
-      ref="graphRef"
-      class="absolute inset-5 right-12 bottom-8 cursor-crosshair"
-      @pointerdown="handleGraphPointerDown"
-    >
-      <!-- 세로선 -->
-      <div class="pointer-events-none absolute inset-0 flex justify-between">
-        <div
-          v-for="label in freqLabels"
-          :key="label"
-          class="h-full border-l border-white/[0.06]"
-        />
+  <div class="relative h-full w-full overflow-hidden bg-[#1b1b1b]">
+    <!-- 상단 상태 표시 -->
+    <div class="pointer-events-none absolute left-4 top-3 z-20 flex items-center gap-5">
+      <div v-if="title" class="text-[11px] font-semibold tracking-[0.2em] text-gray-300 uppercase">
+        {{ title }}
       </div>
 
-      <!-- 가로선 -->
-      <div class="pointer-events-none absolute inset-0 flex flex-col justify-between">
-        <div
-          v-for="label in dbLabels"
-          :key="label"
-          class="w-full border-t border-white/[0.06]"
-        />
+      <div class="flex items-center gap-4 text-[11px] text-gray-400">
+        <span>Freq <span class="ml-1 font-mono text-[#f7d34a]">{{ infoText.freq }}</span></span>
+        <span>Gain <span class="ml-1 font-mono text-[#f7d34a]">{{ infoText.gain }}</span></span>
+        <span>Q <span class="ml-1 font-mono text-[#f7d34a]">{{ infoText.q }}</span></span>
       </div>
-
-      <!-- 하단 주파수 막대 느낌 -->
-      <div class="pointer-events-none absolute bottom-0 left-0 right-0 flex h-16 items-end gap-1 opacity-35">
-        <div
-          v-for="(level, index) in spectrumBars"
-          :key="index"
-          class="flex-1 rounded-t bg-white/40 transition-[height] duration-75"
-          :style="{ height: `${4 + level * 60}px` }"
-        />
-      </div>
-
-      <!-- EQ 커브 + 핸들 -->
-      <svg
-        class="absolute inset-0 z-10 h-full w-full overflow-visible"
-        :viewBox="`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`"
-        preserveAspectRatio="none"
-      >
-        <!-- 0dB 기준선 -->
-        <line
-          :x1="0"
-          :x2="GRAPH_WIDTH"
-          :y1="centerY"
-          :y2="centerY"
-          stroke="#FFD84D"
-          stroke-width="1.5"
-          opacity="0.55"
-          vector-effect="non-scaling-stroke"
-        />
-
-        <!-- EQ 조절 커브 -->
-        <path
-          :d="curvePath"
-          fill="none"
-          stroke="#FFD84D"
-          stroke-width="3"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          vector-effect="non-scaling-stroke"
-        />
-
-        <!-- 사용자 EQ 포인트 -->
-        <circle
-          v-for="band in sortedBands"
-          :key="band.bandOrder"
-          :cx="frequencyToX(band.frequencyHz)"
-          :cy="gainToY(band.gainDeltaDb)"
-          r="8"
-          fill="#FFD84D"
-          stroke="#242424"
-          stroke-width="2"
-          class="cursor-move"
-          data-eq-handle="true"
-          vector-effect="non-scaling-stroke"
-          @pointerdown="startDrag($event, band.bandOrder)"
-        />
-      </svg>
-    </div>
-
-    <!-- 우측 dB 라벨 -->
-    <div class="pointer-events-none absolute right-2 top-5 bottom-8 flex w-9 flex-col justify-between text-right font-mono text-[10px] text-gray-500">
-      <span
-        v-for="label in dbLabels"
-        :key="label"
-      >
-        {{ label }}
-      </span>
-    </div>
-
-    <!-- 하단 주파수 라벨 -->
-    <div class="pointer-events-none absolute left-5 right-12 bottom-2 flex justify-between font-mono text-[10px] text-gray-500">
-      <span
-        v-for="label in freqLabels"
-        :key="label"
-      >
-        {{ label }}
-      </span>
     </div>
 
     <!-- 로딩 오버레이 -->
     <div
       v-if="loading"
-      class="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      class="absolute inset-0 z-30 grid place-items-center bg-black/35 backdrop-blur-[1px]"
     >
-      <div class="flex items-center gap-2 font-mono text-xs tracking-widest text-[#FF8F1A]">
-        <Loader2 class="h-4 w-4 animate-spin" />
-        분석 중...
+      <div class="rounded-full border border-white/10 bg-[#222]/90 px-4 py-2 text-xs tracking-[0.18em] text-gray-300">
+        ANALYZING...
       </div>
+    </div>
+
+    <svg
+      ref="svgRef"
+      class="h-full w-full"
+      :viewBox="`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`"
+      preserveAspectRatio="none"
+      @pointermove="handlePointerMoveOnSvg"
+      @pointerleave="handlePointerLeave"
+    >
+      <!-- 배경 -->
+      <rect
+        :x="PADDING.left"
+        :y="PADDING.top"
+        :width="plotWidth"
+        :height="plotHeight"
+        rx="8"
+        fill="#161616"
+      />
+
+      <!-- 세로 그리드 (minor) -->
+      <g opacity="0.55">
+        <line
+          v-for="freq in minorFreqs"
+          :key="`minor-${freq}`"
+          :x1="freqToX(freq)"
+          :x2="freqToX(freq)"
+          :y1="PADDING.top"
+          :y2="PADDING.top + plotHeight"
+          stroke="#3b3b3b"
+          stroke-width="1"
+        />
+      </g>
+
+      <!-- 세로 그리드 (major) -->
+      <g opacity="0.9">
+        <line
+          v-for="freq in majorFreqs"
+          :key="`major-${freq}`"
+          :x1="freqToX(freq)"
+          :x2="freqToX(freq)"
+          :y1="PADDING.top"
+          :y2="PADDING.top + plotHeight"
+          stroke="#4a4a4a"
+          stroke-width="1.4"
+        />
+      </g>
+
+      <!-- 가로 그리드 -->
+      <g>
+        <line
+          v-for="db in dbTicks"
+          :key="`db-${db}`"
+          :x1="PADDING.left"
+          :x2="PADDING.left + plotWidth"
+          :y1="gainToY(db)"
+          :y2="gainToY(db)"
+          :stroke="db === 0 ? '#806d20' : '#343434'"
+          :stroke-width="db === 0 ? 2 : 1"
+        />
+      </g>
+
+      <!-- 클릭 추가용 히트 영역 -->
+      <rect
+        :x="PADDING.left"
+        :y="PADDING.top"
+        :width="plotWidth"
+        :height="plotHeight"
+        fill="transparent"
+        @pointerdown="handleBackgroundPointerDown"
+      />
+
+      <!-- 스펙트럼 회색 면 -->
+      <path
+        v-if="spectrumAreaPath"
+        :d="spectrumAreaPath"
+        fill="rgba(185, 185, 185, 0.28)"
+        stroke="none"
+        pointer-events="none"
+      />
+
+      <!-- 스펙트럼 윤곽선 -->
+      <path
+        v-if="spectrumLinePath"
+        :d="spectrumLinePath"
+        fill="none"
+        stroke="rgba(180, 180, 180, 0.55)"
+        stroke-width="1.25"
+        vector-effect="non-scaling-stroke"
+        pointer-events="none"
+      />
+
+      <!-- EQ 0dB 라인 강조 -->
+      <line
+        :x1="PADDING.left"
+        :x2="PADDING.left + plotWidth"
+        :y1="zeroDbY"
+        :y2="zeroDbY"
+        stroke="#af8a1d"
+        stroke-width="2.2"
+      />
+
+      <!-- EQ 커브 -->
+      <path
+        :d="eqCurvePath"
+        fill="none"
+        stroke="#f7d34a"
+        stroke-width="5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        vector-effect="non-scaling-stroke"
+      />
+
+      <!-- 밴드 포인트 -->
+      <g v-for="band in orderedBands" :key="band.bandOrder">
+        <g
+          class="cursor-pointer"
+          @pointerdown.stop.prevent="startBandDrag($event, band.bandOrder)"
+          @dblclick.stop.prevent="handleBandDoubleClick($event, band.bandOrder)"
+        >
+          <circle
+            :cx="freqToX(band.frequencyHz)"
+            :cy="gainToY(band.gainDeltaDb)"
+            r="13"
+            :fill="activeBandOrder === band.bandOrder ? '#ffbf33' : '#f2c63d'"
+            stroke="#1c1c1c"
+            stroke-width="3"
+          />
+          <text
+            :x="freqToX(band.frequencyHz)"
+            :y="gainToY(band.gainDeltaDb) + 4"
+            text-anchor="middle"
+            font-size="11"
+            font-weight="700"
+            fill="#222"
+          >
+            {{ band.bandOrder }}
+          </text>
+        </g>
+      </g>
+
+      <!-- 하단 주파수 라벨 -->
+      <g>
+        <text
+          v-for="freq in majorFreqs"
+          :key="`freq-label-${freq}`"
+          :x="freqToX(freq)"
+          :y="VIEWBOX_HEIGHT - 12"
+          text-anchor="middle"
+          font-size="18"
+          fill="#7986a0"
+        >
+          {{ labelForFreq(freq) }}
+        </text>
+      </g>
+
+      <!-- 우측 dB 라벨 -->
+      <g>
+        <text
+          v-for="db in dbTicks"
+          :key="`db-label-${db}`"
+          :x="VIEWBOX_WIDTH - 10"
+          :y="gainToY(db) + 5"
+          text-anchor="end"
+          font-size="18"
+          fill="#8a95aa"
+        >
+          {{ db > 0 ? `+${db}` : `${db}` }}
+        </text>
+      </g>
+    </svg>
+
+    <!-- 인터랙션 안내 -->
+    <div
+      v-if="interactive"
+      class="pointer-events-none absolute bottom-3 left-4 text-[11px] text-gray-500"
+    >
+      클릭해서 밴드 추가 · 드래그해서 주파수/게인 조절
     </div>
   </div>
 </template>

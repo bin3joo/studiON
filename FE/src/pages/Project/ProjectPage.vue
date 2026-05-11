@@ -17,7 +17,7 @@ import { useCollabStore } from './store/useCollabStore';//공동 작업 스토�
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
-import type { ClipEqBandState } from './types'
+import type { TrackEqBandState } from './types'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -635,26 +635,35 @@ function handleAddEqBand(payload: {
   frequencyHz: number
   gainDeltaDb: number
 }) {
-  if (!trackStore.selectedClip || !trackStore.selectedTrackId) return
+  if (!trackStore.selectedTrackId) return
 
-  trackStore.addClipEqBand(
+  trackStore.addTrackEqBand(
     trackStore.selectedTrackId,
-    trackStore.selectedClip.clipId,
     payload,
   )
 }
 
 function handleUpdateEqBand(payload: {
   bandOrder: number
-  patch: Partial<ClipEqBandState>
+  patch: Partial<TrackEqBandState>
 }) {
-  if (!trackStore.selectedClip || !trackStore.selectedTrackId) return
+  if (!trackStore.selectedTrackId) return
 
-  trackStore.updateClipEqBand(
+  trackStore.updateTrackEqBand(
     trackStore.selectedTrackId,
-    trackStore.selectedClip.clipId,
     payload.bandOrder,
     payload.patch,
+  )
+}
+
+function handleRemoveEqBand(payload: {
+  bandOrder: number
+}) {
+  if (!trackStore.selectedTrackId) return
+
+  trackStore.removeTrackEqBand(
+    trackStore.selectedTrackId,
+    payload.bandOrder,
   )
 }
 
@@ -775,7 +784,7 @@ function handleActionAddTrack() {
       <div 
         ref="timelineContainerRef" 
         class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
-        @pointerdown="trackStore.deselectAll()"
+        @pointerdown.stop
       >
         <!-- 눈금자 -->
         <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
@@ -818,13 +827,13 @@ function handleActionAddTrack() {
       </div>
       <ProjectEqPanel
   :selected-track="selectedEqTrack"
-  :selected-clip="trackStore.selectedClip"
   :ai-analyzing="aiAnalyzing"
   :ai-analyzed="!!aiConflict"
   @apply-ai-eq="handleApplyAiEq"
   @cancel-ai-eq="handleCancelAiEq"
   @add-eq-band="handleAddEqBand"
   @update-eq-band="handleUpdateEqBand"
+  @remove-eq-band="handleRemoveEqBand"
 />
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
 

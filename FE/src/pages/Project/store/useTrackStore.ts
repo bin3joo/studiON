@@ -4,7 +4,7 @@ import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
 import { ref, computed, watch } from 'vue';
 //트랙과 클립의 타입
-import type { TrackUIState, ClipUIState, ClipEqState, ClipEqBandState, } from '../types';
+import type { TrackUIState, ClipUIState, TrackEqState, TrackEqBandState, } from '../types';
 //음원 처리를 위한 lib
 import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
@@ -29,17 +29,17 @@ export const useTrackStore = defineStore('track', () => {
     const pendingDuplicateOriginalClipIds = new Set<number>(); // 내가 복제한 클립의 원본 ID 목록 (백엔드 강제 락 해제용)
     const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
-    type ClipEqNode = {
+    type TrackEqNode = {
         bandOrder: number
         filter: Tone.Filter
     }
 
-    const clipEqNodes = new Map<number, ClipEqNode[]>()
-    const clipAnalyzers = new Map<number, Tone.FFT>()
+    const trackEqNodes = new Map<number, TrackEqNode[]>()
+    const trackAnalyzers = new Map<number, Tone.FFT>()
 
     const MAX_EQ_BANDS = 5
 
-    const createDefaultClipEq = (): ClipEqState => ({
+    const createDefaultTrackEq = (): TrackEqState => ({
         bands: [],
     })
 
@@ -163,6 +163,12 @@ export const useTrackStore = defineStore('track', () => {
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
 
+    // ==========================================
+    // 가로 가상 스크롤 (수평 뷰포트) 상태
+    // ==========================================
+    const viewportLeft = ref(0);
+    const viewportRight = ref(2000); // 초기 렌더링을 위해 기본값 제공
+
     //복사/잘라내기 한 클립 데이터를 보관할 클립보드
     const clipboardClip = ref<ClipUIState | null>(null);
     const isCutAction = ref(false);
@@ -214,134 +220,172 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     function clampNumber(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value))
-}
+        return Math.max(min, Math.min(max, value))
+    }
 
-function clampFrequency(frequencyHz: number) {
-  return Math.round(clampNumber(frequencyHz, 20, 20000))
-}
+    function clampFrequency(frequencyHz: number) {
+        return Math.round(clampNumber(frequencyHz, 20, 20000))
+    }
 
-function clampGain(gainDeltaDb: number) {
-  return Math.round(clampNumber(gainDeltaDb, -12, 12) * 10) / 10
-}
+    function clampGain(gainDeltaDb: number) {
+        return Math.round(clampNumber(gainDeltaDb, -12, 12) * 10) / 10
+    }
 
-function clampQ(q: number) {
-  return Math.round(clampNumber(q, 0.1, 10) * 100) / 100
-}
+    function clampQ(q: number) {
+        return Math.round(clampNumber(q, 0.1, 10) * 100) / 100
+    }
 
-function getClipEq(clip: ClipUIState): ClipEqState {
-  return {
-    bands: clip.eq?.bands ?? [],
-  }
-}
+    function getTrackEq(track: TrackUIState): TrackEqState {
+        return {
+            bands: track.eq?.bands ?? [],
+        }
+    }
 
-function findClip(trackId: number, clipId: number) {
-  const track = trackList.value.find(track => track.trackId === trackId)
-  if (!track) return null
+    function createToneFilterFromBand(band: TrackEqBandState) {
+        const type =
+            band.eqTypeCode === 2
+                ? 'lowshelf'
+                : band.eqTypeCode === 3
+                    ? 'highshelf'
+                    : 'peaking'
 
-  return track.clips.find(clip => clip.clipId === clipId) ?? null
-}
+        const filter = new Tone.Filter({
+            type,
+            frequency: band.frequencyHz,
+            Q: band.q,
+            gain: band.gainDeltaDb,
+        })
 
-function createToneFilterFromBand(band: ClipEqBandState) {
-  const type =
-    band.eqTypeCode === 2
-      ? 'lowshelf'
-      : band.eqTypeCode === 3
-        ? 'highshelf'
-        : 'peaking'
+        filter.channelCount = 2
+        filter.channelCountMode = 'explicit'
 
-  const filter = new Tone.Filter({
-    type,
-    frequency: band.frequencyHz,
-    Q: band.q,
-    gain: band.gainDeltaDb,
-  })
+        return filter
+    }
 
-  filter.channelCount = 2
-  filter.channelCountMode = 'explicit'
+    function disposeTrackEqNodes(trackId: number) {
+        const nodes = trackEqNodes.get(trackId)
 
-  return filter
-}
+        if (!nodes) return
 
-function disposeClipEqNodes(clipId: number) {
-  const nodes = clipEqNodes.get(clipId)
+        nodes.forEach(node => {
+            node.filter.dispose()
+        })
 
-  if (!nodes) return
+        trackEqNodes.delete(trackId)
+    }
 
-  nodes.forEach(node => {
-    node.filter.dispose()
-  })
+    function disposeTrackAnalyzer(trackId: number) {
+        const analyzer = trackAnalyzers.get(trackId)
 
-  clipEqNodes.delete(clipId)
-}
+        if (!analyzer) return
 
-function createClipEqNodes(clip: ClipUIState): ClipEqNode[] {
-  disposeClipEqNodes(clip.clipId)
+        analyzer.dispose()
+        trackAnalyzers.delete(trackId)
+    }
 
-  const eq = getClipEq(clip)
+    function createTrackEqNodes(track: TrackUIState): TrackEqNode[] {
+        disposeTrackEqNodes(track.trackId)
 
-  const nodes = eq.bands.map(band => ({
-    bandOrder: band.bandOrder,
-    filter: createToneFilterFromBand(band),
-  }))
+        const eq = getTrackEq(track)
 
-  clipEqNodes.set(clip.clipId, nodes)
+        const nodes = eq.bands.map(band => ({
+            bandOrder: band.bandOrder,
+            filter: createToneFilterFromBand(band),
+        }))
 
-  return nodes
-}
+        trackEqNodes.set(track.trackId, nodes)
 
-function disposeClipAnalyzer(clipId: number) {
-  const analyzer = clipAnalyzers.get(clipId)
+        return nodes
+    }
 
-  if (!analyzer) return
+    function getTrackInputNode(trackId: number) {
+        const eqNodes = trackEqNodes.get(trackId) ?? []
+        const analyzer = trackAnalyzers.get(trackId)
+        const volume = trackVolumes.get(trackId)
 
-  analyzer.dispose()
-  clipAnalyzers.delete(clipId)
-}
+        if (!volume) return null
 
-function connectPlayerToTrackWithEq(
-  player: Tone.Player,
-  clip: ClipUIState,
-  trackId: number,
-) {
-  const targetVol = trackVolumes.get(trackId)
-  if (!targetVol) return
+        if (eqNodes.length > 0) {
+            return eqNodes[0].filter
+        }
 
-  const eqNodes = createClipEqNodes(clip)
+        if (analyzer) {
+            return analyzer
+        }
 
-  disposeClipAnalyzer(clip.clipId)
+        return volume
+    }
 
-  const analyzer = new Tone.FFT(1024)
-  clipAnalyzers.set(clip.clipId, analyzer)
+    function connectPlayerToTrack(
+        player: Tone.Player,
+        trackId: number,
+    ) {
+        const inputNode = getTrackInputNode(trackId)
 
-  player.disconnect()
+        if (!inputNode) return
 
-  if (eqNodes.length > 0) {
-    player.chain(
-      ...eqNodes.map(node => node.filter),
-      analyzer,
-      targetVol,
-    )
-  }
-  else {
-    player.chain(
-      analyzer,
-      targetVol,
-    )
-  }
-}
+        player.disconnect()
+        player.connect(inputNode)
+    }
 
-function disposeClipAudio(clipId: number) {
-  const player = clipPlayers.get(clipId)
+    function reconnectTrackPlayers(trackId: number) {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track) return
 
-  if (player) {
-    player.unsync().stop().dispose()
-    clipPlayers.delete(clipId)
-  }
+        const inputNode = getTrackInputNode(trackId)
+        if (!inputNode) return
 
-  disposeClipEqNodes(clipId)
-  disposeClipAnalyzer(clipId)
-}
+        track.clips.forEach(clip => {
+            const player = clipPlayers.get(clip.clipId)
+            if (!player) return
+
+            player.disconnect()
+            player.connect(inputNode)
+        })
+    }
+
+    function rebuildTrackEqChain(trackId: number) {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        const volume = trackVolumes.get(trackId)
+
+        if (!track || !volume) return
+
+        disposeTrackEqNodes(trackId)
+        disposeTrackAnalyzer(trackId)
+
+        const eqNodes = createTrackEqNodes(track)
+        const analyzer = new Tone.FFT(2048)
+
+        trackAnalyzers.set(trackId, analyzer)
+
+        if (eqNodes.length > 0) {
+            for (let i = 0; i < eqNodes.length - 1; i += 1) {
+                eqNodes[i].filter.connect(eqNodes[i + 1].filter)
+            }
+
+            eqNodes[eqNodes.length - 1].filter.connect(analyzer)
+            analyzer.connect(volume)
+        }
+        else {
+            analyzer.connect(volume)
+        }
+
+        reconnectTrackPlayers(trackId)
+    }
+
+    function disposeClipAudio(clipId: number) {
+        const player = clipPlayers.get(clipId)
+
+        if (player) {
+            player.unsync().stop().dispose()
+            clipPlayers.delete(clipId)
+        }
+    }
+
+    function disposeTrackAudioChain(trackId: number) {
+        disposeTrackEqNodes(trackId)
+        disposeTrackAnalyzer(trackId)
+    }
 
     // ==========================================
     // 🌐 웹소켓 수신 (Subscribe) 처리부
@@ -366,7 +410,8 @@ function disposeClipAudio(clipId: number) {
             pan: data.pan,
             clips: [],
             height: 100,
-            isSelected: false
+            isSelected: false,
+            eq: createDefaultTrackEq(),
         };
         trackList.value.push(newTrack);
 
@@ -377,6 +422,8 @@ function disposeClipAudio(clipId: number) {
 
         trackVolumes.set(newTrack.trackId, vol);
         trackPanners.set(newTrack.trackId, panner);
+
+        rebuildTrackEqChain(newTrack.trackId);
     });
 
     socketService.subscribe('TRACK_DELETE', (data) => {
@@ -384,10 +431,11 @@ function disposeClipAudio(clipId: number) {
         if (index !== -1) {
             // 🚨 보완: 트랙을 지우기 전에, 트랙 안에 있던 모든 클립의 오디오 메모리를 완전 해제!
             trackList.value[index].clips.forEach(clip => {
-            disposeClipAudio(clip.clipId);
-        });
+                disposeClipAudio(clip.clipId);
+            });
 
-            // 트랙 삭제 및 믹서 노드 해제
+            disposeTrackAudioChain(data.trackId);
+
             trackList.value.splice(index, 1);
             trackVolumes.get(data.trackId)?.dispose(); trackVolumes.delete(data.trackId);
             trackPanners.get(data.trackId)?.dispose(); trackPanners.delete(data.trackId);
@@ -477,7 +525,6 @@ function disposeClipAudio(clipId: number) {
                 cdnUrl: "",
                 durationMs: data.audioDurationMs,
             },
-            eq: createDefaultClipEq(),
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -562,9 +609,8 @@ function disposeClipAudio(clipId: number) {
         const player = clipPlayers.get(data.clipId);
 
         if (player) {
-            connectPlayerToTrackWithEq(
+            connectPlayerToTrack(
                 player,
-                targetClip,
                 data.after.trackId,
             );
         }
@@ -1339,12 +1385,9 @@ function disposeClipAudio(clipId: number) {
     };
 
     // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
-    // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
     // [최적화 & EQ병합] 캐시된 AudioBuffer를 직접 주입하여 중복 네트워크 다운로드+디코딩을 완전 제거하고, EQ 노드 체인 연결
     const loadClipPlayer = async (clip: ClipUIState, trackId: number) => {
         if (!clip.audio?.cdnUrl) return;
-        const targetVol = trackVolumes.get(trackId);
-        if (!targetVol) return;
 
         if (!clipPlayers.has(clip.clipId)) {
             try {
@@ -1357,8 +1400,8 @@ function disposeClipAudio(clipId: number) {
                 // 2. 최적화: 버퍼를 주입하여 Player 생성 (네트워크 다운로드 및 디코딩 X)
                 const newPlayer = new Tone.Player(audioBuffer);
 
-                // 3. EQ 병합: targetVol에 바로 꽂지 않고, EQ 필터 체인을 거쳐서 연결
-                connectPlayerToTrackWithEq(newPlayer, clip, trackId);
+                // 3. EQ 체인 연결
+                connectPlayerToTrack(newPlayer, trackId);
 
                 clipPlayers.set(clip.clipId, newPlayer);
 
@@ -1483,21 +1526,22 @@ function disposeClipAudio(clipId: number) {
         console.log("========== [Audio Engine Setup Start] ==========");
 
         for (const track of tracks) {
-            if (!trackVolumes.has(track.trackId)) {
-                // 테스트 완료: 마스터 볼륨으로 안전하게 연결
-                const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
-                const vol = new Tone.Volume(track.volume).connect(panner);
+    if (!trackVolumes.has(track.trackId)) {
+        const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
+        const vol = new Tone.Volume(track.volume).connect(panner);
 
-                panner.channelCount = 2;
-                panner.channelCountMode = "explicit";
-                vol.channelCount = 2;
-                vol.channelCountMode = "explicit";
+        panner.channelCount = 2;
+        panner.channelCountMode = "explicit";
+        vol.channelCount = 2;
+        vol.channelCountMode = "explicit";
 
-                trackVolumes.set(track.trackId, vol);
-                trackPanners.set(track.trackId, panner);
-                console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
-            }
-        }
+        trackVolumes.set(track.trackId, vol);
+        trackPanners.set(track.trackId, panner);
+        console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
+    }
+
+    rebuildTrackEqChain(track.trackId);
+}
 
         for (const track of tracks) {
             const vol = trackVolumes.get(track.trackId);
@@ -1509,7 +1553,6 @@ function disposeClipAudio(clipId: number) {
                     continue;
                 } 
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
-
                 try {
                     // [최적화] 캐시에서 AudioBuffer를 가져오거나 한 번만 fetch+decode
                     const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
@@ -1518,9 +1561,8 @@ function disposeClipAudio(clipId: number) {
                     const player = new Tone.Player(audioBuffer);
 
                     // EQ 노드를 체인으로 연결
-                    connectPlayerToTrackWithEq(
+                    connectPlayerToTrack(
                         player,
-                        clip,
                         track.trackId,
                     );
 
@@ -1593,18 +1635,17 @@ function disposeClipAudio(clipId: number) {
         }
     };
 
-    const addClipEqBand = (
+    const addTrackEqBand = (
     trackId: number,
-    clipId: number,
     payload: {
         frequencyHz: number
         gainDeltaDb: number
     },
 ) => {
-    const clip = findClip(trackId, clipId)
-    if (!clip) return
+    const track = trackList.value.find(track => track.trackId === trackId)
+    if (!track) return
 
-    const currentBands = clip.eq?.bands ?? []
+    const currentBands = track.eq?.bands ?? []
 
     if (currentBands.length >= MAX_EQ_BANDS) {
         console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
@@ -1616,7 +1657,7 @@ function disposeClipAudio(clipId: number) {
             ? Math.max(...currentBands.map(band => band.bandOrder)) + 1
             : 1
 
-    const nextBand: ClipEqBandState = {
+    const nextBand: TrackEqBandState = {
         bandOrder: nextBandOrder,
         eqTypeCode: 1,
         frequencyHz: clampFrequency(payload.frequencyHz),
@@ -1628,34 +1669,25 @@ function disposeClipAudio(clipId: number) {
         appliedSuggestionId: null,
     }
 
-    clip.eq = {
+    track.eq = {
         bands: [
             ...currentBands,
             nextBand,
         ],
     }
 
-    const player = clipPlayers.get(clipId)
-
-    if (player) {
-        connectPlayerToTrackWithEq(
-            player,
-            clip,
-            trackId,
-        )
-    }
+    rebuildTrackEqChain(trackId)
 }
 
-const updateClipEqBand = (
+const updateTrackEqBand = (
     trackId: number,
-    clipId: number,
     bandOrder: number,
-    patch: Partial<ClipEqBandState>,
+    patch: Partial<TrackEqBandState>,
 ) => {
-    const clip = findClip(trackId, clipId)
-    if (!clip?.eq) return
+    const track = trackList.value.find(track => track.trackId === trackId)
+    if (!track?.eq) return
 
-    const nextBands = clip.eq.bands.map((band): ClipEqBandState => {
+    const nextBands = track.eq.bands.map((band): TrackEqBandState => {
         if (band.bandOrder !== bandOrder) return band
 
         return {
@@ -1677,11 +1709,11 @@ const updateClipEqBand = (
 
     if (!updatedBand) return
 
-    clip.eq = {
+    track.eq = {
         bands: nextBands,
     }
 
-    const nodes = clipEqNodes.get(clipId)
+    const nodes = trackEqNodes.get(trackId)
     const targetNode = nodes?.find(node => node.bandOrder === bandOrder)
 
     if (targetNode) {
@@ -1690,20 +1722,33 @@ const updateClipEqBand = (
         targetNode.filter.Q.value = updatedBand.q
     }
     else {
-        const player = clipPlayers.get(clipId)
-
-        if (player) {
-            connectPlayerToTrackWithEq(
-                player,
-                clip,
-                trackId,
-            )
-        }
+        rebuildTrackEqChain(trackId)
     }
 }
 
-const getClipSpectrum = (clipId: number): number[] => {
-    const analyzer = clipAnalyzers.get(clipId)
+const removeTrackEqBand = (
+    trackId: number,
+    bandOrder: number,
+) => {
+    const track = trackList.value.find(track => track.trackId === trackId)
+    if (!track?.eq) return
+
+    const nextBands = track.eq.bands
+        .filter(band => band.bandOrder !== bandOrder)
+        .map((band, index) => ({
+            ...band,
+            bandOrder: index + 1,
+        }))
+
+    track.eq = {
+        bands: nextBands,
+    }
+
+    rebuildTrackEqChain(trackId)
+}
+
+const getTrackSpectrum = (trackId: number): number[] => {
+    const analyzer = trackAnalyzers.get(trackId)
 
     if (!analyzer) return []
 
@@ -1743,15 +1788,15 @@ const getClipSpectrum = (clipId: number): number[] => {
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({
                     ...track,
+                    eq: createDefaultTrackEq(),
                     height: 100,
                     isSelected: false,
                     clips: track.clips.map((clip): ClipUIState => ({
-                    ...clip,
-                    eq: createDefaultClipEq(),
-                    isSelected: false,
-                    isDragging: false,
-                    isLocked: false,
-                }))
+                        ...clip,
+                        isSelected: false,
+                        isDragging: false,
+                        isLocked: false,
+                    }))
                 }));
 
                 let maxClipEnd = 0;
@@ -1827,6 +1872,8 @@ const getClipSpectrum = (clipId: number): number[] => {
         deselectAll,
 
         // 클립보드
+        viewportLeft,
+        viewportRight,
         clipboardClip,
         copyClip,
         cutClip,
@@ -1861,12 +1908,13 @@ const getClipSpectrum = (clipId: number): number[] => {
         unlockClip,
         setTimelineContainer,
 
-        addClipEqBand,
-        updateClipEqBand,
-        getClipSpectrum,
-
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,
         fetchAndCacheAudioBuffer,
+
+        addTrackEqBand,
+        updateTrackEqBand,
+        removeTrackEqBand,
+        getTrackSpectrum,
     };
 });

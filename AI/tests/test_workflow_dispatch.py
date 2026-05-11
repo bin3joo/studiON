@@ -171,7 +171,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
         def generate_plan(
             self,
             *,
-            selected_region_id: str,
+            selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
             region: dict[str, object],
@@ -224,7 +224,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
         def review_plan(
             self,
             *,
-            selected_region_id: str,
+            selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
             region: dict[str, object],
@@ -778,7 +778,7 @@ def test_worker_rejects_plan_resume_from_non_waiting_phase(
             job_id=20007,
             project_id=30007,
             dispatch_type="resume_plan_input",
-            selected_region_id="region-1",
+            selected_region_id=1,
             preserve_clip_id=1,
         )
     )
@@ -1060,10 +1060,10 @@ def test_preview_compare_api_rejects_non_ready_preview(
     state.update(
         {
             "phase": "preview_processing",
-            "selected_region_id": "20024-region-1",
+            "selected_region_id": 1,
             "analysis_regions": [
                 {
-                    "id": "20024-region-1",
+                    "id": 1,
                     "issue_type": "band_overlap",
                     "track_id": 21,
                     "secondary_track_id": 22,
@@ -1166,7 +1166,7 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
         {
             "clip_index": [{"clip_id": "clip-1", "track_id": 1}],
             "bar_mapping": [{"measure_no": 1, "start_ms": 0, "end_ms": 2000}],
-            "analysis_regions": [{"id": "region-1", "issue_type": "clipping"}],
+            "analysis_regions": [{"id": 1, "issue_type": "clipping"}],
             "plan_payload": {"summary": "summary"},
             "suggestion_payload": {"suggestions": [{"rank": 1, "actions": []}]},
             "plan_revision_notes": ["validator note"],
@@ -1181,7 +1181,7 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
 
     artifact = get_workflow_artifact_store().get_artifact(record.state_artifact_id)
     assert artifact is not None
-    assert artifact.payload["state_fields"]["analysis_regions"][0]["id"] == "region-1"
+    assert artifact.payload["state_fields"]["analysis_regions"][0]["id"] == 1
     assert artifact.payload["state_fields"]["plan_revision_notes"] == ["validator note"]
 
     restored = _row_to_record(
@@ -1203,7 +1203,7 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
             "state_json": record.state_snapshot,
         }
     )
-    assert restored.state_snapshot["analysis_regions"][0]["id"] == "region-1"
+    assert restored.state_snapshot["analysis_regions"][0]["id"] == 1
     assert restored.state_snapshot["plan_payload"]["summary"] == "summary"
     assert restored.state_snapshot["plan_revision_notes"] == ["validator note"]
 

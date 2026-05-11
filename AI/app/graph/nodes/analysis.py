@@ -22,6 +22,10 @@ from app.services.workflow_artifacts import (
     WorkflowArtifactDocument,
     get_workflow_artifact_store,
 )
+from app.services.workflow_analysis_regions import (
+    AnalysisRegionCreate,
+    get_workflow_analysis_region_store,
+)
 from app.services.workflow_audio_paths import resolve_clip_audio_path
 from app.services.workflow_snapshots import get_workflow_snapshot_store
 
@@ -465,7 +469,7 @@ def merge_analysis(state: WorkflowState) -> WorkflowState:
 
 
 def candidate_ranking(state: WorkflowState) -> WorkflowState:
-    ranking_scores: dict[str, float] = {}
+    ranking_scores: dict[int, float] = {}
     ranked_candidates: list[dict[str, object]] = []
     for region in state.get("analysis_regions", []):
         score = ranking_score(region)
@@ -473,8 +477,7 @@ def candidate_ranking(state: WorkflowState) -> WorkflowState:
         if region.get("requires_user_action", True):
             ranked_candidates.append(region)
     ranked_candidate_ids = [
-        str(region["id"])
-        for region in sorted(ranked_candidates, key=_candidate_ranking_sort_key)
+        int(region["id"]) for region in sorted(ranked_candidates, key=_candidate_ranking_sort_key)
     ]
     return workflow_update(
         state,
@@ -1585,16 +1588,30 @@ def _materialize_regions(
     materialized = []
     for offset, region in enumerate(raw_regions, start=1):
         evidence_doc_id = artifact_id(state, f"{issue}-evidence-{existing_count + offset}")
+        severity = _severity_from_score(issue=issue, score=region["score"])
+        requires_user_action = issue == "band_overlap"
+        region_record = get_workflow_analysis_region_store().create_region(
+            AnalysisRegionCreate(
+                job_id=state["job_id"],
+                issue_type=issue,
+                start_ms=int(region["start_ms"]),
+                end_ms=int(region["end_ms"]),
+                severity=severity,
+                analysis_summary=str(region["summary"]),
+                evidence_doc_id=evidence_doc_id,
+                requires_user_action=requires_user_action,
+            )
+        )
         materialized_region = {
-                "id": f"{state['job_id']}-{issue}-region-{existing_count + offset}",
+                "id": region_record.id,
                 "issue_type": issue,
                 "summary": region["summary"],
                 "start_ms": region["start_ms"],
                 "end_ms": region["end_ms"],
-                "severity": _severity_from_score(issue=issue, score=region["score"]),
+                "severity": severity,
                 # clipping과 다른 user-facing 이슈는 사용자가 구간을 보고 선택한다.
                 # sibilance만 자동 보정 경로로 넘긴다.
-                "requires_user_action": issue == "band_overlap",
+                "requires_user_action": requires_user_action,
                 "evidence_doc_id": evidence_doc_id,
                 "track_id": region.get("track_id"),
                 "secondary_track_id": region.get("secondary_track_id"),

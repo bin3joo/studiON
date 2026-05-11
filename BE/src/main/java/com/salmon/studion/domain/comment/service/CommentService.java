@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +29,11 @@ public class CommentService {
     public Comment getCommentByProjectId(Integer commentId, Integer projectId) {
         return commentRepository.findByIdAndProjectId(commentId, projectId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.COMMENT_NOT_FOUND));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Comment> getComments(Integer projectId, Integer trackId, Boolean isResolved, boolean mentionedMe, Integer userId) {
+        return commentRepository.findComments(projectId, trackId, isResolved, mentionedMe, userId);
     }
 
     @Transactional

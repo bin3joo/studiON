@@ -61,7 +61,7 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
 
     try:
         critic_response = get_plan_critic_llm_client().review_plan(
-            selected_region_id=str(selected_region["id"]),
+            selected_region_id=int(selected_region["id"]),
             preserve_clip_id=int(preserve_clip_id),
             user_feedback_message=state.get("user_feedback_message"),
             region=selected_region,
@@ -176,7 +176,7 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
         return "Plan action params must be an object."
 
     selected_region_id = plan_payload.get("selectedRegionId")
-    if selected_region_id is not None and str(selected_region_id) != str(selected_region["id"]):
+    if selected_region_id is not None and int(selected_region_id) != int(selected_region["id"]):
         return "Plan payload selectedRegionId did not match the selected region."
     preserve_clip_id = state.get("preserve_clip_id")
     if (

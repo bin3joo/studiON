@@ -593,3 +593,12 @@ CREATE TABLE `ai_analysis_job` (
 
   ALTER TABLE `ai_analysis_job`
   ADD CONSTRAINT `PK_AI_ANALYSIS_JOB` PRIMARY KEY (`id`);
+
+ALTER TABLE `ai_preview_render`
+  ADD COLUMN `analysisRegionId` VARCHAR(128) NOT NULL,
+  ADD COLUMN `userFeedbackMessage` VARCHAR(1000) NULL,
+  ADD COLUMN `preserveClipId` INT NULL;
+
+ALTER TABLE `ai_preview_render`
+  ADD INDEX `IDX_AI_PREVIEW_RENDER_REGION_REQUESTED` (`analysisRegionId`, `requestedAt`),
+  ADD INDEX `IDX_AI_PREVIEW_RENDER_JOB_REQUESTED` (`jobId`, `requestedAt`);

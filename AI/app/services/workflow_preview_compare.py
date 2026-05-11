@@ -151,7 +151,7 @@ def _require_preview_ready(state: dict[str, Any]) -> dict[str, Any]:
 def _resolve_focus_region(state: dict[str, Any]) -> dict[str, Any]:
     selected_region_id = state.get("selected_region_id")
     for region in state.get("analysis_regions", []):
-        if str(region.get("id")) == str(selected_region_id):
+        if selected_region_id is not None and int(region["id"]) == int(selected_region_id):
             return dict(region)
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,

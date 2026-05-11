@@ -4,6 +4,7 @@ export interface TimelineComment {
   mention?: string
   content: string
   color: string
+  profileImageUrl?: string | null
 }
 
 export interface TrackMeasureCommentGroup {

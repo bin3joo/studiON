@@ -1,7 +1,7 @@
 package com.salmon.studion.domain.comment.repository;
 
 import com.salmon.studion.domain.comment.entity.CommentMention;
-import io.lettuce.core.dynamic.annotation.Param;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
@@ -20,4 +20,12 @@ public interface CommentMentionRepository extends JpaRepository<CommentMention, 
     List<CommentMention> findAllByCommentId(@Param("commentId") Integer commentId);
 
     void deleteAllByComment_Id(Integer commentId);
+
+    @Query("""
+        SELECT cm
+        FROM CommentMention cm
+        JOIN FETCH cm.user u
+        WHERE cm.comment.id IN :commentIds
+    """)
+    List<CommentMention> findAllByCommentIds(@Param("commentIds") List<Integer> commentIds);
 }

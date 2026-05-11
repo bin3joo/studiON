@@ -39,11 +39,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--selected-region-id",
+        type=int,
         default=None,
         help="재개할 때 사용할 선택된 문제 구간 id입니다.",
     )
     parser.add_argument(
         "--preserve-clip-id",
+        type=int,
         default=None,
         help="재개할 때 사용할 보존 기준 clip id입니다.",
     )
@@ -168,21 +170,21 @@ def _resume_plan_input(first_result: dict[str, Any], args: argparse.Namespace) -
     return run_workflow_graph(resume_payload)
 
 
-def _default_selected_region_id(result: dict[str, Any]) -> str | None:
+def _default_selected_region_id(result: dict[str, Any]) -> int | None:
     ranked_candidate_ids = result.get("ranked_candidate_ids", [])
     if ranked_candidate_ids:
-        return str(ranked_candidate_ids[0])
+        return int(ranked_candidate_ids[0])
     return None
 
 
-def _default_preserve_clip_id(result: dict[str, Any], selected_region_id: str | None) -> str | None:
+def _default_preserve_clip_id(result: dict[str, Any], selected_region_id: int | None) -> int | None:
     if selected_region_id is None:
         return None
     for region in result.get("analysis_regions", []):
-        if region.get("id") == selected_region_id:
+        if int(region["id"]) == int(selected_region_id):
             affected_clip_ids = region.get("affected_clip_ids", [])
             if affected_clip_ids:
-                return str(affected_clip_ids[0])
+                return int(affected_clip_ids[0])
     return None
 
 

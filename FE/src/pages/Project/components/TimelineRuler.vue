@@ -207,11 +207,8 @@ onUnmounted(() => {
 
         <div 
           aria-label="현재 재생 위치 표시 바"
-          class="absolute top-0 bottom-0 z-40 w-3.5 cursor-pointer pointer-events-auto"
-          :style="{ 
-            transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
-            willChange: 'transform'
-          }"
+          class="playhead-line absolute top-0 bottom-0 z-40 w-3.5 cursor-pointer pointer-events-auto"
+          style="transform: translate3d(calc(var(--playhead-px, 0px) - 50%), 0, 0);"
           @pointerdown.stop="onPointerDown"
           @pointermove="onPointerMove"
           @pointerup="onPointerUp"

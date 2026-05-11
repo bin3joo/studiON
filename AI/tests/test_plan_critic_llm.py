@@ -36,7 +36,7 @@ def test_http_plan_critic_llm_client_sends_anthropic_shape(
     )
 
     response = client.review_plan(
-        selected_region_id="region-1",
+        selected_region_id=1,
         preserve_clip_id=10,
         user_feedback_message="keep vocal",
         region={"issue_type": "band_overlap"},
@@ -82,7 +82,7 @@ def test_http_plan_critic_llm_client_rejects_invalid_json_payload(
 
     with pytest.raises(PlanCriticLLMError) as exc_info:
         client.review_plan(
-            selected_region_id="region-1",
+            selected_region_id=1,
             preserve_clip_id=10,
             user_feedback_message=None,
             region={"issue_type": "clipping"},

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
-import WaveformWorker from '../../../core/workers/waveform.worker.ts?worker';
+import { waveformRendererPool } from '../../../core/workers/waveformRendererPool';
 
 const props = defineProps<{
   clip: ClipUIState;
@@ -14,12 +14,13 @@ const props = defineProps<{
 const trackStore = useTrackStore();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
-let worker: Worker | null = null;
 let observer: IntersectionObserver | null = null;
 let isVisible = false;
+// 현재 진행 중인 렌더 요청 ID (줌/스크롤 변경 시 이전 요청을 취소하기 위함)
+let currentRequestId: number | null = null;
 
-const renderWaveform = () => {
-  if (!canvasRef.value || !worker || !isVisible) return;
+const renderWaveform = async () => {
+  if (!canvasRef.value || !isVisible) return;
   if (props.chunkWidth <= 0) return;
 
   const secondsPerPixel = trackStore.secondsPerBar / trackStore.pixelPerBar;
@@ -37,14 +38,47 @@ const renderWaveform = () => {
     return; // 이 청크는 그릴 데이터가 없음
   }
 
-  worker.postMessage({
+  // 이전 요청이 진행 중이면 취소
+  if (currentRequestId !== null) {
+    waveformRendererPool.cancelRequest(currentRequestId);
+    currentRequestId = null;
+  }
+
+  // Worker Pool에 렌더 요청
+  const { promise, requestId } = waveformRendererPool.requestRender({
     channelData: props.audioData.channelData,
     color: '#D4CED2',
     width: props.chunkWidth,
     height: 100,
-    samplesPerPixel: samplesPerPixel,
-    startSampleOffset: startSampleOffset
+    samplesPerPixel,
+    startSampleOffset,
   });
+
+  currentRequestId = requestId;
+
+  const result = await promise;
+
+  // 요청이 취소되었거나 컴포넌트가 이미 언마운트된 경우
+  if (!result || !canvasRef.value) return;
+  // 요청 ID가 변경된 경우 (줌 변경 등으로 더 최신 요청이 들어온 경우) 결과 무시
+  if (currentRequestId !== requestId) {
+    result.bitmap.close(); // ImageBitmap 메모리 해제
+    return;
+  }
+
+  currentRequestId = null;
+
+  // 일반 canvas에 ImageBitmap 그리기
+  const canvas = canvasRef.value;
+  canvas.width = props.chunkWidth;
+  canvas.height = 100;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(result.bitmap, 0, 0);
+  }
+  // ImageBitmap 메모리 해제
+  result.bitmap.close();
 };
 
 const handleVisibilityChange = () => {
@@ -65,12 +99,6 @@ onMounted(async () => {
   await nextTick();
   if (!canvasRef.value) return;
 
-  worker = new WaveformWorker();
-
-  // 캔버스 제어권 워커로 이전
-  const offscreenCanvas = canvasRef.value.transferControlToOffscreen();
-  worker.postMessage({ canvas: offscreenCanvas }, [offscreenCanvas]);
-
   observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       isVisible = entry.isIntersecting;
@@ -79,8 +107,7 @@ onMounted(async () => {
       }
     });
   }, {
-    root: document.querySelector('.custom-scrollbar'), // 스크롤 가능한 가장 가까운 조상
-    rootMargin: '300px', // 좌우로 여유를 주어 스크롤 전 미리 렌더링
+    rootMargin: '500px 500px', // 좌우 스크롤을 대비하여 여유를 넉넉하게 줌
     threshold: 0
   });
 
@@ -91,7 +118,11 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   observer?.disconnect();
-  worker?.terminate();
+  // 진행 중인 렌더 요청 취소
+  if (currentRequestId !== null) {
+    waveformRendererPool.cancelRequest(currentRequestId);
+    currentRequestId = null;
+  }
 });
 </script>
 

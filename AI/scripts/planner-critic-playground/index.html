@@ -821,7 +821,7 @@ resume payload required fields:
         ?? data?.projections?.plan_state?.selected_region_id
         ?? null;
       const regions = data?.projections?.analysis_regions ?? [];
-      return regions.find((region) => String(region.id) === String(regionId)) ?? null;
+      return regions.find((region) => Number(region.id) === Number(regionId)) ?? null;
     }
 
     function buildPreviewDetailRows(preview, focusRegion) {
@@ -1701,7 +1701,7 @@ resume payload required fields:
         job_id: Number(els.jobId.value),
         project_id: Number(els.projectId.value),
         requested_by: Number(els.requestedBy.value),
-        selected_region_id: els.selectedRegionId.value.trim(),
+        selected_region_id: els.selectedRegionId.value ? Number(els.selectedRegionId.value) : null,
         preserve_clip_id: Number(els.preserveClipId.value),
         user_feedback_message: els.feedbackMessage.value.trim() || null,
       };

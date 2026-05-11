@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import {ref, computed, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
-import { Pencil, VolumeX } from 'lucide-vue-next';
+import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
 import FileSizeWarningModal from './FileSizeWarningModal.vue'
@@ -21,28 +21,43 @@ const props = defineProps<{
 //스토어 사용
 const trackStore = useTrackStore();
 
+// 클립이 겹칠 경우 나중에 생성된 클립(clipId가 큼)이 뒤에(아래에) 깔리도록 내림차순 정렬
+const sortedClips = computed(() => {
+  return [...props.track.clips].sort((a, b) => b.clipId - a.clipId);
+});
+
 // 마스터 트랙 전용: 겹치는 클립들을 시각적으로 하나의 덩어리로 묶어줄 배경 블록 계산
+// 사용자 요청: "나뉘지 않고 하나로 이어진 것처럼 보이게" 하려면 전체를 아우르는 단일 블록 반환
 const masterBackgroundBlocks = computed(() => {
-  if (!props.isMaster) return [];
+  if (!props.isMaster || props.track.clips.length === 0) return [];
+  
+  const minStart = Math.min(...props.track.clips.map(c => c.start));
+  const maxEnd = Math.max(...props.track.clips.map(c => c.start + c.duration));
+  
+  return [{ start: minStart, end: maxEnd }];
+});
+
+// 마스터 트랙 전용: 오디오 클립 사이의 텅 빈 공간(묵음) 구간만 계산 (여기에만 0 진폭 가로선을 그림)
+const masterGapLines = computed(() => {
+  if (!props.isMaster || props.track.clips.length <= 1) return [];
   
   const intervals = props.track.clips.map(c => ({ start: c.start, end: c.start + c.duration }));
   intervals.sort((a, b) => a.start - b.start);
   
-  const merged = [];
-  if (intervals.length > 0) {
-    let current = { ...intervals[0] };
-    for (let i = 1; i < intervals.length; i++) {
-      const next = intervals[i];
-      if (current.end >= next.start) {
-        current.end = Math.max(current.end, next.end); // 구간 연장
-      } else {
-        merged.push(current);
-        current = { ...next };
-      }
+  const gaps = [];
+  let currentEnd = intervals[0].end;
+  
+  for (let i = 1; i < intervals.length; i++) {
+    const next = intervals[i];
+    if (next.start > currentEnd) {
+      gaps.push({ start: currentEnd, end: next.start });
+      currentEnd = next.end;
+    } else {
+      currentEnd = Math.max(currentEnd, next.end);
     }
-    merged.push(current);
   }
-  return merged;
+  
+  return gaps;
 });
 
 
@@ -277,6 +292,8 @@ const resizeState = ref({
   startX: 0,
   origStart: 0,
   origDuration: 0,
+  origAudioStartMs: 0,
+  origAudioDurationMs: 0,
   isResizing: false
 });
 
@@ -296,6 +313,8 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
     startX: e.clientX,
     origStart: clip.start,
     origDuration: clip.duration,
+    origAudioStartMs: clip.audioStartMs,
+    origAudioDurationMs: clip.audioDurationMs,
     isResizing: true
   };
 
@@ -307,24 +326,61 @@ const onResizePointerMove = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
 
   const state = resizeState.value;
-  const tartgetClip = state.clip as ClipUIState;
+  const targetClip = state.clip as ClipUIState;
   const deltaX = e.clientX - state.startX;
   let deltaBar = deltaX / trackStore.pixelPerBar;
 
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
 
+  // 음원의 전체 길이를 마디 단위로 계산 (이 길이를 넘어서 늘릴 수 없음)
+  const totalAudioDurationMs = targetClip.audio?.durationMs ?? Infinity;
+  const maxAudioBars = totalAudioDurationMs / (trackStore.secondsPerBar * 1000);
+
   if (state.side === 'right') {
-    tartgetClip.duration = Math.max(minDuration, state.origDuration + deltaBar);
+    // 오른쪽 리사이즈: duration만 변화
+    let newDuration = state.origDuration + deltaBar;
+    
+    // 겹침 방지: 오른쪽에 있는 가장 가까운 클립의 시작점을 넘어갈 수 없음
+    // 백엔드의 엄격한 부동소수점 검증을 통과하기 위해 0.01 마디의 미세한 간격을 둡니다 (화면상 구분 불가)
+    const nextClip = props.track.clips
+      .filter(c => c.start >= state.origStart + state.origDuration - 0.001 && c.clipId !== targetClip.clipId)
+      .sort((a, b) => a.start - b.start)[0];
+    if (nextClip) {
+      newDuration = Math.min(newDuration, nextClip.start - state.origStart - 0.01);
+    }
+
+    // 음원 최대 길이 제한: 현재 audioStartMs부터 남은 오디오 길이까지만 늘릴 수 있음
+    const remainingAudioBars = (totalAudioDurationMs - state.origAudioStartMs) / (trackStore.secondsPerBar * 1000);
+    newDuration = Math.min(newDuration, remainingAudioBars);
+    newDuration = Math.max(minDuration, newDuration);
+    targetClip.duration = newDuration;
+    // 오디오 재생 범위도 같이 업데이트 (줄인 범위 밖 소리 차단)
+    targetClip.audioDurationMs = newDuration * trackStore.secondsPerBar * 1000;
   } else if (state.side === 'left') {
     // 왼쪽을 줄일 때는 시작점(start)과 길이(duration)가 동시에 변함
     const maxDelta = state.origDuration - minDuration;
-    const boundedDelta = Math.min(deltaBar, maxDelta);
+    let boundedDelta = Math.min(deltaBar, maxDelta);
     
-    // 0마디 뚫고 나가지 않게
-    const finalDelta = state.origStart + boundedDelta < 0 ? -state.origStart : boundedDelta;
+    // 겹침 방지: 왼쪽에 있는 가장 가까운 클립의 끝점을 넘어갈 수 없음
+    const prevClip = props.track.clips
+      .filter(c => c.start + c.duration <= state.origStart + 0.001 && c.clipId !== targetClip.clipId)
+      .sort((a, b) => (b.start + b.duration) - (a.start + a.duration))[0];
+    const minAllowedStart = prevClip ? prevClip.start + prevClip.duration + 0.01 : 0;
+    
+    // 시작점이 minAllowedStart 뚫고 나가지 않게
+    if (state.origStart + boundedDelta < minAllowedStart) {
+      boundedDelta = minAllowedStart - state.origStart;
+    }
 
-    tartgetClip.start = state.origStart + finalDelta;
-    tartgetClip.duration = state.origDuration - finalDelta;
+    // audioStartMs가 0 미만이 되지 않게 (왼쪽으로 확장 시 오디오 시작점 제한)
+    const newAudioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
+    if (newAudioStartMs < 0) boundedDelta = -state.origAudioStartMs / (trackStore.secondsPerBar * 1000);
+
+    targetClip.start = state.origStart + boundedDelta;
+    targetClip.duration = state.origDuration - boundedDelta;
+    // 왼쪽 리사이즈 시 오디오 시작점 이동 (줄인 만큼 오디오 시작점을 뒤로)
+    targetClip.audioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
+    targetClip.audioDurationMs = targetClip.duration * trackStore.secondsPerBar * 1000;
   }
 };
 
@@ -333,21 +389,33 @@ const onResizePointerUp = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
 
   const state = resizeState.value;
-  const tartgetClip = state.clip as ClipUIState;
+  const targetClip = state.clip as ClipUIState;
   
   // 백엔드 요청: 변경된 값 확정 (왼쪽을 얼마나 잘라냈는지 trimLeftBars 전달)
-  const trimLeftBars = state.side === 'left' ? (tartgetClip.start - state.origStart) : 0;
+  const trimLeftBars = state.side === 'left' ? (targetClip.start - state.origStart) : 0;
   
+  // 부동소수점 정밀도 문제로 인한 오차 방지 (백엔드 CLIP_OVERLAP 오작동 해결)
+  // 소수점 3자리까지만 남기고 자름으로써 백엔드의 깐깐한 수치 비교를 무사통과시킴
+  const safeStart = Number(targetClip.start.toFixed(3));
+  const safeDuration = Number(targetClip.duration.toFixed(3));
+  const safeTrimLeft = Number(trimLeftBars.toFixed(3));
+
   trackStore.resizeClip(
-      tartgetClip.clipId, 
+      targetClip.clipId, 
       props.track.trackId, 
-      tartgetClip.start, 
-      tartgetClip.duration,
-      trimLeftBars
+      safeStart, 
+      safeDuration,
+      safeTrimLeft
   );
 
+  // 리사이즈 후 오디오 플레이어를 새 범위에 맞게 재동기화
+  trackStore.resyncClip(targetClip.clipId, safeStart);
+
   // Resize 통신 이후에 Unlock을 보내야 백엔드가 정상적으로 처리함
-  trackStore.unlockClip(tartgetClip.clipId, props.track.trackId);
+  // nextTick으로 감싸서 통신이 먼저 처리되도록 보장
+  nextTick(() => {
+    trackStore.unlockClip(targetClip.clipId, props.track.trackId);
+  });
 
   resizeState.value.isResizing = false;
   resizeState.value.clip = null;
@@ -611,12 +679,25 @@ const finishEditPan = () => {
   trackStore.setTrackPan(props.track.trackId, val);
 };
 
-// ==========================================
-// 트랙 이름 수정 로직
-// ==========================================
 const isEditingName = ref(false);
 const nameInputRef = ref<HTMLInputElement | null>(null);
 const editNameValue = ref('');
+const isDragDisabled = ref(false);
+const isCommentExpanded = ref(false);
+
+const handleMouseDown = (e: MouseEvent) => {
+  const target = e.target as HTMLElement;
+  // 볼륨/팬 슬라이더(input), 각종 버튼, 텍스트 에디터 등을 클릭했을 때는 트랙 전체 드래그 속성을 즉시 끕니다.
+  if (target.closest('input, button, .interactive-control, [role="slider"]')) {
+    isDragDisabled.value = true;
+  } else {
+    isDragDisabled.value = false;
+  }
+};
+
+const handleDragStart = (e: DragEvent) => {
+  emit('dragstart', e);
+};
 
 const startEditName = async () => {
   if (props.isMaster) return; // 마스터 트랙은 수정 금지
@@ -666,14 +747,13 @@ const emit = defineEmits<{
 const onWorkAreaMouseMove = (e: MouseEvent) => {
   if(props.isMaster) return;
 
-  //현재 스크롤 위치와 X 좌표를 계산 
-  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
-  const scrollLeft = scrollContainer ?  scrollContainer.scrollLeft : 0;
-  const absoluteX = e.clientX - 224 + scrollLeft; //224는 왼쪽 컨트롤 패널 너비
+  const target = e.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  const absoluteX = e.clientX - rect.left;
 
   //마우스 위치를 바탕으로 정확한 '마디(Measure)' 역산
   const rawLocation = (absoluteX / trackStore.pixelPerBar) + 1;
-  const snappedLocation = Math.floor((rawLocation - 1) * trackStore.subDivision) / trackStore.subDivision + 1;
+  const snappedLocation = Math.round((rawLocation - 1) * trackStore.subDivision) / trackStore.subDivision + 1;
 
   // 코멘트 레이어를 위해 현재 마우스 위치 발송
   emit('hover-measure', {
@@ -703,63 +783,76 @@ const onWorkAreaMouseLeave = () => {
     :aria-label="`트랙: ${track.name}`" 
     class="flex border-b border-border group w-max min-w-full" 
     :data-track-id="track.trackId" 
-    :class="{ 'relative z-50': track.clips.some(c => c.isDragging) }"
+    :class="[
+      isCommentExpanded ? 'relative z-[100]' :
+      track.clips.some(c => c.isDragging) ? 'relative z-50' :
+      (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
+    ]"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828] cursor-pointer"
-      :class="track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border'"
+      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828]"
+      :class="[
+        track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border',
+        isMaster ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+      ]"
       :style="{ 
         width: '224px', 
         borderLeft: `4px solid ${track.color || '#FF3DCB'}` 
       }"
+      :draggable="!isMaster && !isDragDisabled"
+      @mousedown.capture="handleMouseDown"
+      @dragstart="handleDragStart"
+      @dragend="emit('dragend', $event)"
       @pointerdown.stop="trackStore.selectTrack(track.trackId)"
     >
     <!--빈틈 막는거-->
     <div class="absolute top-0 -bottom-px left-0 -right-px -z-10 bg-inherit pointer-events-none"></div>
-      <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
+    <div class="sticky left-0 z-20 w-[224px] shrink-0 border-r border-border bg-card"></div>
       <div class="flex items-center justify-between gap-2">
-        <div 
-          class="flex min-w-0 flex-1 items-center gap-1.5 cursor-grab active:cursor-grabbing"
-          :draggable="!isMaster"
-          @dragstart="emit('dragstart', $event)"
-          @dragend="emit('dragend', $event)"
-        >
-         <!-- 수정 모드: 인풋창 -->
-          <input
-            v-if="isEditingName"
-            ref="nameInputRef"
-            type="text"
-            v-model="editNameValue"
-            @blur="finishEditName"
-            @keydown.enter="finishEditName"
-            @keydown.esc="isEditingName = false"
-            @keydown.delete.stop
-            @mousedown.stop 
-            class="w-full truncate bg-transparent text-sm font-bold tracking-wide text-white outline-none border-b border-primary/50"
-          />
-          <!-- 일반 모드: 텍스트 -->
-          <span 
-            v-else 
-            class="truncate text-sm font-bold tracking-wide text-white"
-            @dblclick="!isMaster && startEditName()"
-          >
-            {{ track.name }}
-          </span>
+        <div class="flex min-w-0 flex-1 items-center gap-1.5">
+          <!-- 드래그 핸들 (시각적 힌트) -->
+          <GripVertical v-if="!isMaster" class="h-3.5 w-3.5 shrink-0 text-white/30 pointer-events-none" />
           
-          <!-- 연필 아이콘 -->
-          <button 
-            v-if="!isMaster && !isEditingName" 
-            aria-label="트랙 이름 수정" 
-            class="shrink-0 text-muted-foreground transition hover:text-white"
-            @click.stop="startEditName"
-            @mousedown.stop
-          >
-            <Pencil class="h-3 w-3" />
-          </button>
+          <div class="flex min-w-0 flex-1 items-center gap-1.5">
+           <!-- 수정 모드: 인풋창 -->
+            <input
+              v-if="isEditingName"
+              ref="nameInputRef"
+              type="text"
+              v-model="editNameValue"
+              @blur="finishEditName"
+              @keydown.enter="finishEditName"
+              @keydown.esc="isEditingName = false"
+              @keydown.delete.stop
+              @mousedown.stop 
+              @dragstart.prevent.stop
+              class="w-full truncate bg-transparent text-sm font-bold tracking-wide text-white outline-none border-b border-primary/50"
+            />
+            <!-- 일반 모드: 텍스트 -->
+            <span 
+              v-else 
+              class="truncate text-sm font-bold tracking-wide text-white interactive-control"
+              @dblclick="!isMaster && startEditName()"
+              @mousedown.stop
+            >
+              {{ track.name }}
+            </span>
+            
+            <!-- 연필 아이콘 -->
+            <button 
+              v-if="!isMaster && !isEditingName" 
+              aria-label="트랙 이름 수정" 
+              class="shrink-0 text-muted-foreground transition hover:text-white"
+              @click.stop="startEditName"
+              @mousedown.stop
+            >
+              <Pencil class="h-3 w-3" />
+            </button>
+          </div>
         </div>
 
-       <div class="flex shrink-0 items-center gap-1">
+       <div class="flex shrink-0 items-center gap-1" @mousedown.stop>
           <!-- 뮤트 버튼 -->
           <button 
             v-if="!isMaster"
@@ -768,7 +861,8 @@ const onWorkAreaMouseLeave = () => {
             :class="track.isMuted ? 'bg-red-500/20 text-red-500 border-red-500/50' : 'border-white/30 bg-white/10 text-white hover:bg-white/20'"
             class="grid h-6 w-7 place-items-center rounded border transition"
           >
-            <VolumeX class="h-3.5 w-3.5" />
+            <VolumeX v-if="track.isMuted" class="h-3.5 w-3.5" />
+            <Volume2 v-else class="h-3.5 w-3.5" />
           </button>
           
           <!-- 솔로 버튼 -->
@@ -900,30 +994,25 @@ const onWorkAreaMouseLeave = () => {
           @pointerdown.stop="trackStore.selectTrack(track.trackId)"
         ></div>
 
-      <!--마디 세로줄 렌더링-->
-        <div aria-hidden="true" class="pointer-events-none absolute inset-0 z-0">
-          <div 
-            v-for="bar in trackStore.projectInfo.totalBarCount" 
-            :key="bar"
-            class="absolute top-0 bottom-0 border-l"
-            :style="{
-              left: `${(bar - 1) * trackStore.pixelPerBar}px`,
-              borderColor: (bar - 1) % 4 === 0 ? '#505567' : '#393C45', // 4마디 단위 밝은 선 유지
-            }"
-          >
-            <template v-if="trackStore.subDivision > 1">
-              <div
-                v-for="sub in trackStore.subDivision - 1"
-                :key="sub"
-                class="absolute top-0 bottom-0 border-l border-white/5"
-                :style="{ left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px` }"
-              ></div>
-            </template>
-          </div>
-        </div>
+      <!--마디 세로줄 렌더링 (CSS 배경 패턴으로 DOM 0개 — 성능 최적화)-->
+        <div 
+          aria-hidden="true" 
+          class="pointer-events-none absolute inset-0 z-0"
+          :style="{
+            backgroundImage: [
+              `repeating-linear-gradient(to right, #505567 0px, #505567 1px, transparent 1px, transparent ${trackStore.pixelPerBar * 4}px)`,
+              `repeating-linear-gradient(to right, #393C45 0px, #393C45 1px, transparent 1px, transparent ${trackStore.pixelPerBar}px)`,
+              trackStore.subDivision > 1
+                ? `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${trackStore.pixelPerBar / trackStore.subDivision}px)`
+                : ''
+            ].filter(Boolean).join(','),
+            backgroundSize: '100% 100%'
+          }"
+        ></div>
 
         <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
         <div v-if="isMaster">
+          <!-- 1. 전체 배경 블록 -->
           <div 
             v-for="(block, idx) in masterBackgroundBlocks" 
             :key="'bg-'+idx"
@@ -933,6 +1022,19 @@ const onWorkAreaMouseLeave = () => {
               width: `${(block.end - block.start) * trackStore.pixelPerBar}px`
             }"
           ></div>
+          
+          <!-- 2. 클립 사이의 텅 빈 구간(묵음)에만 0 진폭 가로 선 그리기 -->
+          <div 
+            v-for="(gap, idx) in masterGapLines" 
+            :key="'gap-'+idx"
+            class="absolute inset-y-1 z-0 flex items-center"
+            :style="{
+              left: `${gap.start * trackStore.pixelPerBar}px`,
+              width: `${(gap.end - gap.start) * trackStore.pixelPerBar}px`
+            }"
+          >
+            <div class="w-full h-[1px] bg-[#D4CED2] opacity-30 mix-blend-screen"></div>
+          </div>
         </div>
         
         <!-- 파일 업로드 중 임시 고스트 클립 -->
@@ -948,12 +1050,12 @@ const onWorkAreaMouseLeave = () => {
           <span class="text-xs font-bold">업로드 중...</span>
         </div>
 
-     <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
+      <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
-          v-for="clip in track.clips" 
+          v-for="clip in sortedClips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
-          class="absolute inset-y-1 z-10 rounded-md"
+          class="clip-container absolute inset-y-1 z-10 rounded-md"
           :class="[
             isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
             clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
@@ -973,15 +1075,18 @@ const onWorkAreaMouseLeave = () => {
           @pointercancel="!isMaster && onClipPointerUp($event)"
           @contextmenu.prevent.stop="!isMaster && onClipRightClick($event, clip, track.trackId)"
         >
-          <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) -->
+          <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
             v-if="!isMaster"
-            class="absolute left-0 top-0 bottom-0 w-2.5 z-20 cursor-w-resize hover:bg-white/30"
+            class="group absolute left-0 top-0 bottom-0 w-3 z-20 cursor-w-resize flex items-center justify-center rounded-l-md transition-colors hover:bg-white/20"
+            :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
             @pointermove.stop="onResizePointerMove"
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
-          ></div>
+          >
+            <GripVertical class="h-4 w-4 text-white/50 group-hover:text-white/80 transition-colors" />
+          </div>
 
           <!-- 반복되는 반투명 잠금 배경 패턴 -->
           <div 
@@ -1017,15 +1122,18 @@ const onWorkAreaMouseLeave = () => {
           :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
           :clip="clip" />
 
-          <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) -->
+          <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
             v-if="!isMaster"
-            class="absolute right-0 top-0 bottom-0 w-2.5 z-20 cursor-e-resize hover:bg-white/30"
+            class="group absolute right-0 top-0 bottom-0 w-3 z-20 cursor-e-resize flex items-center justify-center rounded-r-md transition-colors hover:bg-white/20"
+            :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'right')"
             @pointermove.stop="onResizePointerMove"
             @pointerup.stop="onResizePointerUp"
             @pointercancel.stop="onResizePointerUp"
-          ></div>
+          >
+            <GripVertical class="h-4 w-4 text-white/50 group-hover:text-white/80 transition-colors" />
+          </div>
         </div>
 
     <TrackCommentLayer
@@ -1043,19 +1151,16 @@ const onWorkAreaMouseLeave = () => {
   @resolve-comment="emit('resolve-comment', $event)"
   @delete-comment="emit('delete-comment', $event)"
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
+  @track-pointerdown="trackStore.selectTrack(track.trackId)"
 />
       </div> 
 
       
 
-      <!--재생바-->
-      <div 
-        class="pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
-        :style="{ 
-           transform: `translate3d(calc(${trackStore.playheadPosition * trackStore.pixelPerBar}px - 50%), 0, 0)`,
-            boxShadow: '0 0 8px hsl(var(--primary) / 0.8)',
-            willChange: 'transform'
-        }"
+      <!--재생바 (DOM 직접 조작으로 이동 — Vue 반응성 우회)-->
+    <div 
+        class="playhead-line pointer-events-none absolute top-0 -bottom-px z-10 w-px bg-primary"
+        style="box-shadow: 0 0 8px hsl(var(--primary) / 0.8); will-change: transform; transform: translate3d(calc(var(--playhead-px, 0px) - 50%), 0, 0);"
       ></div>
 
     </div>

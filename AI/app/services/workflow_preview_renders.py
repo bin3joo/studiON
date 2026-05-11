@@ -13,7 +13,7 @@ from app.core.config import get_settings
 class PreviewRenderRecord(BaseModel):
     id: int
     job_id: int
-    analysis_region_id: str
+    analysis_region_id: int
     suggestion_id: str | None = None
     status: str
     render_no: int
@@ -32,7 +32,7 @@ class PreviewRenderRecord(BaseModel):
 
 class PreviewRenderCreate(BaseModel):
     job_id: int
-    analysis_region_id: str
+    analysis_region_id: int
     suggestion_id: str | None = None
     requested_by: int | None = None
     requested_at: str
@@ -66,7 +66,7 @@ class PreviewRenderStore(Protocol):
         self,
         job_id: int,
         *,
-        analysis_region_id: str | None = None,
+        analysis_region_id: int | None = None,
         only_ready: bool = False,
     ) -> PreviewRenderRecord | None: ...
 
@@ -148,7 +148,7 @@ class InMemoryPreviewRenderStore:
         self,
         job_id: int,
         *,
-        analysis_region_id: str | None = None,
+        analysis_region_id: int | None = None,
         only_ready: bool = False,
     ) -> PreviewRenderRecord | None:
         with self._lock:
@@ -163,7 +163,7 @@ class InMemoryPreviewRenderStore:
                 return None
             return records[-1].model_copy(deep=True)
 
-    def _next_render_no_locked(self, job_id: int, analysis_region_id: str) -> int:
+    def _next_render_no_locked(self, job_id: int, analysis_region_id: int) -> int:
         latest = self.get_latest_render(job_id, analysis_region_id=analysis_region_id)
         if latest is None:
             return 1
@@ -330,7 +330,7 @@ class MySQLPreviewRenderStore:
         self,
         job_id: int,
         *,
-        analysis_region_id: str | None = None,
+        analysis_region_id: int | None = None,
         only_ready: bool = False,
     ) -> PreviewRenderRecord | None:
         self._ensure_schema()
@@ -418,7 +418,7 @@ class MySQLPreviewRenderStore:
                         CREATE TABLE IF NOT EXISTS ai_preview_render (
                             id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                             job_id INT NOT NULL,
-                            analysis_region_id VARCHAR(128) NOT NULL,
+                            analysis_region_id INT NOT NULL,
                             suggestion_id VARCHAR(128) NULL,
                             status VARCHAR(32) NOT NULL,
                             render_no INT NOT NULL DEFAULT 1,
@@ -442,6 +442,14 @@ class MySQLPreviewRenderStore:
                         """
                     )
                 )
+                conn.execute(
+                    text(
+                        """
+                        ALTER TABLE ai_preview_render
+                        MODIFY COLUMN analysis_region_id INT NOT NULL
+                        """
+                    )
+                )
             self._schema_ready = True
 
 
@@ -456,7 +464,7 @@ def _row_to_record(row: dict[str, object]) -> PreviewRenderRecord:
     return PreviewRenderRecord(
         id=int(row["id"]),
         job_id=int(row["job_id"]),
-        analysis_region_id=str(row["analysis_region_id"]),
+        analysis_region_id=int(row["analysis_region_id"]),
         suggestion_id=str(row["suggestion_id"]) if row.get("suggestion_id") is not None else None,
         status=str(row["status"]),
         render_no=int(row["render_no"]),

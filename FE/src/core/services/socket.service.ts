@@ -26,7 +26,7 @@ class SocketService {
     const token = authStore.accessToken;
 
     // 🌟 추가된 디버깅 및 방어 코드 🌟
-    console.log("[Socket] 현재 가져온 토큰:", token);
+    //console.log("[Socket] 현재 가져온 토큰:", token);
 
     if (!token) {
       console.error("[Socket 🚨] 토큰이 없습니다! 소켓 연결을 중단합니다. (로그인 상태 확인 필요)");

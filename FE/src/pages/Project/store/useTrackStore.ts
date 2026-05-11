@@ -326,7 +326,7 @@ export const useTrackStore = defineStore('track', () => {
                 // [원복] 오디오 Culling 시 디코딩 부하로 인한 끊김이 발생하여 미리 로딩
                 loadClipPlayer(reactiveClip, data.trackId);
                 console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 예약 완료 (ID: ${reactiveClip.clipId})`);
-                
+
                 // 겹침 방지 (업로드한 당사자만 서버에 반영)
                 const isInitiator = uploadingTrackId.value === track.trackId;
                 resolveClipOverlap(reactiveClip, track, isInitiator);
@@ -498,10 +498,10 @@ export const useTrackStore = defineStore('track', () => {
             console.error(`[에러] 붙여넣기 할 원본 클립(ID: ${data.sourceClipId})을 화면에서 찾을 수 없습니다!`);
             return;
         }
-        
+
         const targetTrack = trackList.value.find(t => t.trackId === data.targetTrackId);
         if (!targetTrack) return;
-        
+
         // 원본 클립을 완벽하게 복제(Deep Copy)한 뒤, 백엔드가 지정해준 위치와 ID만 변경
         const pastedClip: ClipUIState = {
             ...JSON.parse(JSON.stringify(originalClip)),
@@ -529,7 +529,7 @@ export const useTrackStore = defineStore('track', () => {
             isCutAction.value = false;
         }
     });
-    
+
     // 내가 복제/붙여넣기 요청한 건인지 확인하기 위한 로컬 상태
     const pendingPasteCount = ref(0);
 
@@ -607,7 +607,7 @@ export const useTrackStore = defineStore('track', () => {
         targetTrack.clips.push(rightClip);
         // 왼쪽 클립 오디오 재설정 (resyncClip 내부 로직이 동작)
         resyncClip(originalClip.clipId, originalClip.start);
-        
+
         // [원복] 오디오 플레이어 미리 로드
         loadClipPlayer(rightClip, targetTrack.trackId);
         // 분할 작업 완료 후 재생 재개
@@ -1167,11 +1167,8 @@ export const useTrackStore = defineStore('track', () => {
     watch(playheadPosition, (newBar) => {
         if (!isPlaying.value) {
             const px = newBar * pixelPerBar.value;
-            const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
-            for (let i = 0; i < playheadEls.length; i++) {
-                playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
-            }
-            
+            document.documentElement.style.setProperty('--playhead-px', `${px}px`);
+
             // 정지 상태 스크러빙 시 진행 오버레이 갱신
             const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
             for (let i = 0; i < clipEls.length; i++) {
@@ -1191,11 +1188,7 @@ export const useTrackStore = defineStore('track', () => {
         const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
         const px = currentPositionBar * pixelPerBar.value;
 
-        // 1. DOM 직접 조작: 모든 재생바 요소의 transform을 한 번에 갱신 (Vue 반응성 완전 우회)
-        const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
-        for (let i = 0; i < playheadEls.length; i++) {
-            playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
-        }
+        document.documentElement.style.setProperty('--playhead-px', `${px}px`);
 
         // 1-1. 재생바 자동 스크롤: 재생바가 화면 중앙(50%)을 넘어가면 매 프레임마다 부드럽게 따라감
         if (timelineContainer) {

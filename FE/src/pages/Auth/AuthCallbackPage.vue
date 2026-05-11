@@ -12,7 +12,10 @@ const errorMessage = ref('')
 
 onMounted(async () => {
   const loginCode = new URLSearchParams(window.location.search).get('code')
-
+   
+   // ★ 백엔드 요청 전에 무조건 예전 토큰 비우기 ★
+  authStore.clearAccessToken() 
+  
   if (!loginCode) {
     errorMessage.value = '로그인 코드가 없습니다.'
     isLoading.value = false

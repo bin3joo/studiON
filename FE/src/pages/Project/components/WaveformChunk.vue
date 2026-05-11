@@ -31,7 +31,8 @@ const renderWaveform = async () => {
   if (!canvasRef.value) return;
   if (props.chunkWidth <= 0) return;
 
-  const secondsPerPixel = trackStore.secondsPerBar / trackStore.pixelPerBar;
+  const msPerPixel = props.clip.audioDurationMs / (props.clip.duration * trackStore.pixelPerBar);
+  const secondsPerPixel = msPerPixel / 1000;
   const samplesPerPixel = secondsPerPixel * props.audioData.sampleRate;
 
   // 1. 전체 오디오에서의 시작점(오프셋) 계산

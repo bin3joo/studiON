@@ -3,15 +3,16 @@ import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 type EventHandler = (data: any) => void;
 
 class SocketService {
-  public isMockMode = false;
+
 
   private ws: WebSocket | null = null;
   private currentProjectId: number | null = null;
+  // 페이지 전환 시 초기화되는 임시 리스너 (컴포넌트용)
   private listeners: Map<string, EventHandler[]> = new Map();
+  // 페이지 전환에도 절대 지워지지 않는 영구 보존 리스너 (Pinia 스토어용)
+  private persistentListeners: Map<string, EventHandler[]> = new Map();
 
   connect(projectId: number) {
-    if (this.isMockMode) return;
-
     if (
   this.ws &&
   (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) &&
@@ -61,9 +62,17 @@ class SocketService {
 
         console.log(`[Socket 📥] 수신 [${eventType}]:`, payload);
 
-        if (eventType && this.listeners.has(eventType)) {
-          const callbacks = this.listeners.get(eventType) || [];
-          callbacks.forEach(cb => cb(payload));
+        if (eventType) {
+          // 1. 임시 리스너 실행
+          if (this.listeners.has(eventType)) {
+            const callbacks = this.listeners.get(eventType) || [];
+            callbacks.forEach(cb => cb(payload));
+          }
+          // 2. 영구 리스너 실행
+          if (this.persistentListeners.has(eventType)) {
+            const persistentCallbacks = this.persistentListeners.get(eventType) || [];
+            persistentCallbacks.forEach(cb => cb(payload));
+          }
         }
       } catch (e) {
         console.error(`[Socket 🚨] 메시지 파싱 에러:`, e);
@@ -83,7 +92,7 @@ class SocketService {
 }
   }
 
-  // 컴포넌트에서 이벤트 리스너를 등록하는 함수
+  // 컴포넌트에서 임시 이벤트 리스너를 등록하는 함수 (disconnect 시 지워짐)
   subscribe(eventType: string, callback: EventHandler) {
     if (!this.listeners.has(eventType)) {
       this.listeners.set(eventType, []);
@@ -91,9 +100,17 @@ class SocketService {
     this.listeners.get(eventType)?.push(callback);
   }
 
+  // 스토어에서 영구 이벤트 리스너를 등록하는 함수 (절대 안 지워짐)
+  subscribePersistent(eventType: string, callback: EventHandler) {
+    if (!this.persistentListeners.has(eventType)) {
+      this.persistentListeners.set(eventType, []);
+    }
+    this.persistentListeners.get(eventType)?.push(callback);
+  }
+
   // 서버로 메시지 발신
   publish(eventType: string, payload: any) {
-    if (this.isMockMode || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.currentProjectId) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.currentProjectId) {
       //console.warn(`[Socket ⚠️] 연결되지 않은 상태에서 전송 시도됨: ${eventType}`);
 
       return;

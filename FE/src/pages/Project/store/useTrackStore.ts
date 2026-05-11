@@ -205,7 +205,7 @@ export const useTrackStore = defineStore('track', () => {
         trackList.value.forEach(t => t.isSelected = false);
     };
     //1마디당 걸리는 시간 계산
-    const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
+    const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
@@ -441,7 +441,7 @@ export const useTrackStore = defineStore('track', () => {
 
 
     // --------------------- 트랙 관련 (소켓) ---------------------    
-    socketService.subscribe('TRACK_ADD', (data) => {
+    socketService.subscribePersistent('TRACK_ADD', (data) => {
         // 이미 그려져있으면 무시 (Optimistic UI 중복 방지)
         if (trackList.value.some(t => t.trackId === data.trackId)) return;
 
@@ -473,7 +473,7 @@ export const useTrackStore = defineStore('track', () => {
         rebuildTrackEqChain(newTrack.trackId);
     });
 
-    socketService.subscribe('TRACK_DELETE', (data) => {
+    socketService.subscribePersistent('TRACK_DELETE', (data) => {
         const index = trackList.value.findIndex(t => t.trackId === data.trackId);
         if (index !== -1) {
             // 🚨 보완: 트랙을 지우기 전에, 트랙 안에 있던 모든 클립의 오디오 메모리를 완전 해제!
@@ -490,22 +490,41 @@ export const useTrackStore = defineStore('track', () => {
         if (selectedTrackId.value === data.trackId) deselectAll();
     });
 
-    socketService.subscribe('TRACK_RENAME', (data) => {
+    socketService.subscribePersistent('TRACK_REORDER', (data) => {
+        const { trackId, preTrackId, postTrackId } = data;
+        const trackIndex = trackList.value.findIndex(t => t.trackId === trackId);
+        if (trackIndex === -1) return;
+
+        const [track] = trackList.value.splice(trackIndex, 1);
+
+        let newIndex = 0;
+        if (preTrackId) {
+            const preIndex = trackList.value.findIndex(t => t.trackId === preTrackId);
+            if (preIndex !== -1) newIndex = preIndex + 1;
+        } else if (postTrackId) {
+            const postIndex = trackList.value.findIndex(t => t.trackId === postTrackId);
+            if (postIndex !== -1) newIndex = postIndex;
+        }
+
+        trackList.value.splice(newIndex, 0, track);
+    });
+
+    socketService.subscribePersistent('TRACK_RENAME', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) track.name = data.name;
     });
 
-    socketService.subscribe('TRACK_MUTE_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_MUTE_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) { track.isMuted = data.isMuted; syncEffectiveMuteStates(); }
     });
 
-    socketService.subscribe('TRACK_SOLO_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_SOLO_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) { track.isSoloed = data.isSoloed; syncEffectiveMuteStates(); }
     });
 
-    socketService.subscribe('TRACK_VOLUME_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_VOLUME_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) {
             track.volume = data.volume;
@@ -514,7 +533,7 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
 
-    socketService.subscribe('TRACK_PAN_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_PAN_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) {
             track.pan = data.pan;
@@ -524,7 +543,7 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     // --------------------- 에러 수신 (소켓) ---------------------
-    socketService.subscribe('ERROR', (data: any) => {
+    socketService.subscribePersistent('ERROR', (data: any) => {
         if (data && data.message) {
             alert(data.message);
         } else {
@@ -533,7 +552,7 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     // --------------------- 클립 관련 (소켓) ---------------------
-    socketService.subscribe('CLIP_LOCK', (data) => {
+    socketService.subscribePersistent('CLIP_LOCK', (data) => {
         // 내가 직접 잠근 클립이면 내 화면에서는 잠금 표시를 하지 않는다 (자기 자신 차단 방지)
         if (myLockedClips.has(data.clipId)) return;
 
@@ -548,7 +567,7 @@ export const useTrackStore = defineStore('track', () => {
 
     //1.신규 클립 업로드 완료 수신
     // 1. 신규 클립 업로드 완료 수신
-    socketService.subscribe('CLIP_CREATE', async (data) => {
+    socketService.subscribePersistent('CLIP_CREATE', async (data) => {
         // 업로드 중이던 클립이 백엔드에서 생성되어 돌아왔다면 고스트 클립 해제
         if (uploadingTrackId.value === data.trackId) {
             uploadingTrackId.value = null;
@@ -620,7 +639,7 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
 
-    socketService.subscribe('CLIP_MOVE', (data) => {
+    socketService.subscribePersistent('CLIP_MOVE', (data) => {
     let targetClip: ClipUIState | null = null;
     let sourceTrack: TrackUIState | null = null;
 
@@ -667,7 +686,7 @@ export const useTrackStore = defineStore('track', () => {
     resyncClip(targetClip.clipId, targetClip.start);
 });
 
-    socketService.subscribe('CLIP_RESIZE', (data) => {
+    socketService.subscribePersistent('CLIP_RESIZE', (data) => {
         for (const t of trackList.value) {
             const clip = t.clips.find(c => c.clipId === data.clipId);
             if (clip) {
@@ -688,7 +707,7 @@ export const useTrackStore = defineStore('track', () => {
                 }
 
                 // 백엔드와 동일한 공식으로 프론트에서 계산하여 동기화
-                const msPerBar = secondsPerBar.value * 1000;
+                const msPerBar = clip.audioDurationMs / clip.duration;
                 const newAudioStartMs = Math.round(clip.audioStartMs + (afterStart - beforeStart) * msPerBar);
                 const newAudioDurationMs = Math.round(afterDuration * msPerBar);
 
@@ -742,7 +761,7 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
-    socketService.subscribe('CLIP_DELETE', (data) => {
+    socketService.subscribePersistent('CLIP_DELETE', (data) => {
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
             if (index !== -1) {
@@ -753,7 +772,7 @@ export const useTrackStore = defineStore('track', () => {
         disposeClipAudio(data.clipId);
     });
 
-    socketService.subscribe('CLIP_CUT', (data) => {
+    socketService.subscribePersistent('CLIP_CUT', (data) => {
         // 잘라내기도 화면상 삭제 로직은 동일
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
@@ -768,7 +787,7 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     // 2. 클립 붙여넣기 수신 (가장 중요: sourceClipId를 통한 복제)
-    socketService.subscribe('CLIP_PASTE', (data) => {
+    socketService.subscribePersistent('CLIP_PASTE', (data) => {
         // 백엔드에서 '어떤 클립을 복사했는지(sourceClipId)'를 알려줌!
         let originalClip: ClipUIState | null = null;
         for (const t of trackList.value) {
@@ -797,6 +816,7 @@ export const useTrackStore = defineStore('track', () => {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.clipId,
             start: data.targetStartBar,
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -824,7 +844,7 @@ export const useTrackStore = defineStore('track', () => {
     const pendingPasteCount = ref(0);
 
     // 3. 클립 복제 수신
-    socketService.subscribe('CLIP_DUPLICATE', (data) => {
+    socketService.subscribePersistent('CLIP_DUPLICATE', (data) => {
         let originalClip: ClipUIState | null = null;
         for (const t of trackList.value) {
             const found = t.clips.find(c => c.clipId === data.clipId);
@@ -837,6 +857,7 @@ export const useTrackStore = defineStore('track', () => {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.newClipId,
             start: data.targetStartBar,
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -862,7 +883,7 @@ export const useTrackStore = defineStore('track', () => {
         resolveClipOverlap(duplicatedClip, targetTrack, isInitiator);
     });
     // 4. 클립 분할 수신
-    socketService.subscribe('CLIP_SPLIT', async (data) => {
+    socketService.subscribePersistent('CLIP_SPLIT', async (data) => {
         let targetTrack: TrackUIState | null = null;
         let originalClip: ClipUIState | null = null;
 
@@ -870,16 +891,23 @@ export const useTrackStore = defineStore('track', () => {
             const found = t.clips.find(c => c.clipId === data.clipId);
             if (found) { originalClip = found; targetTrack = t; break; }
         }
+
+        // 분할 응답이 왔으므로 대기 목록에서 제거
+        pendingSplitOriginalClipIds.delete(data.clipId);
+
         if (!originalClip || !targetTrack) return;
+        
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
         const wasPlaying = isPlaying.value;
         if (wasPlaying) {
             Tone.getTransport().pause();
             isPlaying.value = false;
         }
+
         const splitOffsetBars = data.splitBar - originalClip.start;
-        const splitOffsetMs = splitOffsetBars * secondsPerBar.value * 1000;
+        const splitOffsetMs = splitOffsetBars * (originalClip.audioDurationMs / originalClip.duration);
         // 백엔드 명세에 맞춰서 오른쪽 새 클립 생성
+        // 주의: JSON.parse(stringify) 과정에서 audio 객체의 참조 무결성이 깨지거나 값이 유실될 수 있으므로 명시적 얕은 복사본을 할당합니다.
         const rightClip: ClipUIState = {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.newClipId,
@@ -887,6 +915,7 @@ export const useTrackStore = defineStore('track', () => {
             duration: data.newClipDuration,
             audioStartMs: originalClip.audioStartMs + splitOffsetMs,
             audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs),
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isLocked: false,     // 분할로 새로 생긴 클립은 잠금 해제 상태로 초기화
             isDragging: false,
             isSelected: false
@@ -900,6 +929,7 @@ export const useTrackStore = defineStore('track', () => {
 
         // [원복] 오디오 플레이어 미리 로드
         loadClipPlayer(rightClip, targetTrack.trackId);
+
         // 분할 작업 완료 후 재생 재개
         if (wasPlaying) {
             const currentOffset = playheadPosition.value * secondsPerBar.value;
@@ -910,7 +940,7 @@ export const useTrackStore = defineStore('track', () => {
         }
     });
     // 5. 클립 복사 및 잘라내기 응답 
-    socketService.subscribe('CLIP_COPY', (data) => {
+    socketService.subscribePersistent('CLIP_COPY', (data) => {
         console.log(`[통신] 백엔드 클립보드에 복사 완료 (clipId: ${data.clipId})`);
     });
 
@@ -1101,9 +1131,25 @@ export const useTrackStore = defineStore('track', () => {
         });
         unlockClip(clip.clipId, trackId);
     };
+    // 서버 응답 대기 중인 클립 ID 목록 (네트워크 지연 시 연속 분할 방지용)
+    const pendingSplitOriginalClipIds = new Set<number>();
+
+    let lastSplitTime = 0;
 
     // 5. 클립 분할 (Split)
     const splitClip = async (clipId: number, trackId: number) => {
+        const now = Date.now();
+        if (now - lastSplitTime < 500) {
+            console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
+            return;
+        }
+        
+        if (pendingSplitOriginalClipIds.has(clipId)) {
+            console.warn("이전 분할 요청이 처리 중입니다. (네트워크 대기)");
+            return;
+        }
+
+        lastSplitTime = now;
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) return;
 
@@ -1113,7 +1159,8 @@ export const useTrackStore = defineStore('track', () => {
 
         const currentBar = playheadPosition.value;
 
-        if (currentBar <= originalClip.start || currentBar >= originalClip.start + originalClip.duration) {
+        const EPSILON = 0.0001; // 부동소수점 오차 방어
+        if (currentBar <= originalClip.start + EPSILON || currentBar >= originalClip.start + originalClip.duration - EPSILON) {
             alert("재생바(Playhead)가 클립 위에 있어야 분할할 수 있습니다.");
             return;
         }
@@ -1121,6 +1168,7 @@ export const useTrackStore = defineStore('track', () => {
         console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clipId, trackId);
+        pendingSplitOriginalClipIds.add(clipId);
         socketService.publish('CLIP_SPLIT', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
@@ -1638,6 +1686,11 @@ export const useTrackStore = defineStore('track', () => {
         for (let i = 0; i < clipEls.length; i++) {
             clipEls[i].style.setProperty('--progress-px', `0px`);
         }
+
+        // 타임라인 스크롤 위치를 맨 처음(0)으로 부드럽게 복귀
+        if (timelineContainer) {
+            timelineContainer.scrollTo({ left: 0, behavior: 'smooth' });
+        }
     };
 
     //마우스 휠 방향에 따라 줌 배율을 조절하는 함수
@@ -1713,6 +1766,32 @@ export const useTrackStore = defineStore('track', () => {
         console.log("========== [Audio Engine Setup End] ==========");
     }
 
+    // 프로젝트 진입 시 기존 오디오 자원 완벽 초기화 (유령 오디오, 중복 스케줄링 누수 방지)
+    const disposeAllAudio = () => {
+        console.log("========== [Audio Engine Cleanup Start] ==========");
+        clipPlayers.forEach((player, clipId) => {
+            player.unsync();
+            player.dispose();
+            console.log(`[Dispose] 유령 클립 방지: 클립 ${clipId} 오디오 자원 해제 완료`);
+        });
+        clipPlayers.clear();
+
+        // 트랙 볼륨/패너 노드도 함께 초기화하여 메모리 누수 완벽 차단
+        trackVolumes.forEach(vol => vol.dispose());
+        trackVolumes.clear();
+
+        trackPanners.forEach(panner => panner.dispose());
+        trackPanners.clear();
+
+        // EQ/분석 노드 정리
+        trackEqNodes.forEach(nodes => nodes.forEach(node => node.filter.dispose()));
+        trackEqNodes.clear();
+        trackAnalyzers.forEach(analyzer => analyzer.dispose());
+        trackAnalyzers.clear();
+
+        console.log("========== [Audio Engine Cleanup End] ==========");
+    };
+
     //클립 위치가 변경되었을 때 오디오 엔진 스케줄을 재설정 하는 함수
     const resyncClip = (clipId: number, newStartBar: number) => {
         console.log(`  └─ [Resync] 클립 ID ${clipId} 재동기화 시작 (새 위치: ${newStartBar}마디)`);
@@ -1737,9 +1816,6 @@ export const useTrackStore = defineStore('track', () => {
             return;
         }
 
-        const wasPlaying = isPlaying.value;
-        if (wasPlaying) Tone.getTransport().pause();
-
         player.unsync();
         player.stop();
 
@@ -1757,11 +1833,6 @@ export const useTrackStore = defineStore('track', () => {
             console.log(`  └─ [Resync] 스케줄링 등록 완료! (상태: 정상)`);
         } else {
             console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
-        }
-
-        if (wasPlaying) {
-            const currentOffset = playheadPosition.value * secondsPerBar.value;
-            Tone.getTransport().start("+0.01", currentOffset);
         }
     };
 
@@ -1894,6 +1965,9 @@ const getTrackSpectrum = (trackId: number): number[] => {
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
         try {
+            // 새 프로젝트 방에 들어올 때 기존 오디오 엔진의 찌꺼기(유령 플레이어)를 모두 파기
+            disposeAllAudio();
+
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 
@@ -1907,7 +1981,7 @@ const getTrackSpectrum = (trackId: number): number[] => {
                     name: data.name ?? '프로젝트',
                     tempo: data.tempo ?? 120,
                     rootNote: data.rootNote ?? 'C',
-                    mode: data.projectMode ?? 'MAJOR',
+                    mode: data.mode ?? 'MAJOR',
                     timeSigNumerator: data.timeSigNumerator ?? 4,
                     timeSigDenominator: data.timeSigDenominator ?? 4,
 

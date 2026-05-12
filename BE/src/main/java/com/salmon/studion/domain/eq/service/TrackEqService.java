@@ -26,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -61,7 +62,8 @@ public class TrackEqService {
         return trackEqRepository.findById(trackEqId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_EQ_NOT_FOUND));
     }
-
+    
+    @Transactional
     public TrackEqLockResponse lockTrackEq(TrackEqLockRequest request, Integer userId) {
         request.validate();
 
@@ -167,7 +169,7 @@ public class TrackEqService {
 
         return draftState;
     }
-
+    
     public void createIfAbsent(Integer trackId, Integer projectId) {
         if (trackEqRepository.existsByTrackId(trackId)) {
             return;
@@ -178,13 +180,43 @@ public class TrackEqService {
     }
 
     @Transactional
-    public void deleteByTrackId(Integer trackId) {
+    public void deleteByTrackIdIfExists(Integer trackId) {
         trackEqRepository.findByTrackId(trackId).ifPresent(trackEq -> {
             trackEqBandRepository.deleteAllByTrackEq_Id(trackEq.getId());
             redisTemplate.delete(TrackEqRedisKeys.lockKey(trackEq.getProjectId(), trackEq.getId()));
             redisTemplate.delete(TrackEqRedisKeys.draftKey(trackEq.getProjectId(), trackEq.getId()));
             trackEqRepository.delete(trackEq);
         });
+    }
+
+
+    @Transactional
+    public void synchronizeWithTrackIds(Integer projectId, List<Integer> activeTrackIds) {
+        List<TrackEq> currentTrackEqs = trackEqRepository.findByProjectId(projectId);
+
+        Set<Integer> activeTrackIdSet = Set.copyOf(activeTrackIds);
+        Set<Integer> currentTrackIdSet = currentTrackEqs.stream()
+                .map(TrackEq::getTrackId)
+                .collect(Collectors.toSet());
+
+        List<TrackEq> toCreate = activeTrackIds.stream()
+                .filter(trackId -> !currentTrackIdSet.contains(trackId))
+                .map(trackId -> TrackEq.create(trackId, projectId))
+                .toList();
+
+        if (!toCreate.isEmpty()) {
+            trackEqRepository.saveAll(toCreate);
+        }
+
+        List<Integer> orphanTrackEqIds = currentTrackEqs.stream()
+                .filter(trackEq -> !activeTrackIdSet.contains(trackEq.getTrackId()))
+                .map(TrackEq::getId)
+                .toList();
+
+        if (!orphanTrackEqIds.isEmpty()) {
+            trackEqBandRepository.deleteAllByTrackEq_IdIn(orphanTrackEqIds);
+            trackEqRepository.deleteAllByIdInBatch(orphanTrackEqIds);
+        }
     }
 
     private void validateBands(List<com.salmon.studion.domain.eq.dto.request.BandRequest> bands) {
@@ -274,4 +306,5 @@ public class TrackEqService {
         projectMemberService.validateProjectMember(projectId, userId);
         return trackEq;
     }
+
 }

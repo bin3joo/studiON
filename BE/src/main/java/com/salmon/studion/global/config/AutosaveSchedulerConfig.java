@@ -6,13 +6,13 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration
-public class TaskSchedulerConfig {
+public class AutosaveSchedulerConfig {
 
-    @Bean("aiTaskScheduler")
-    public TaskScheduler taskScheduler() {
+    @Bean("autosaveTaskScheduler")
+    public TaskScheduler autosaveTaskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(4);
-        scheduler.setThreadNamePrefix("ai-job-monitor-");
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("autosave-");
         scheduler.initialize();
         return scheduler;
     }

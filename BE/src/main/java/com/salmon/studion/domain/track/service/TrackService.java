@@ -182,25 +182,6 @@ public class TrackService {
             log.error("[MongoDB 이벤트 저장 실패]: event=TRACK_ADD, trackId={}", newTrackId, e);
         }
 
-        // RDB에 저장
-        try {
-            trackRepository.save(Track.create(
-                            newTrackId,
-                            project,
-                            lastTrackId,
-                            null,
-                            TrackType.valueOf(request.getType().toUpperCase()),
-                            request.getName(),
-                            false,
-                            false,
-                            0.0,
-                            0
-                    )
-            );
-        } catch (Exception e) {
-            log.error("[RDB 트랙 저장 실패]: trackId={}", newTrackId, e);
-        }
-
         return TrackAddResponse.builder()
                 .trackId(newTrackId)
                 .name(newTrack.getName())

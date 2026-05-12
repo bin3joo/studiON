@@ -134,6 +134,11 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
     switch (e.code) {
+      case 'KeyS': // 저장
+        e.preventDefault();
+        handleSave();
+        break;
+
       case 'KeyC': // 복사
         e.preventDefault();
         if (trackStore.selectedClip) {

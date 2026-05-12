@@ -15,6 +15,9 @@ import {
 } from 'lucide-vue-next'
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
+import { useCommentStore } from '../store/useCommentStore'
+
+const commentStore = useCommentStore()
 
 interface Props {
   projectName: string
@@ -241,7 +244,7 @@ function cancelProjectNameEdit() {
         @click="emit('open-comments')"
       >
         <MessageSquare class="h-4 w-4" />
-        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+        <span v-if="commentStore.hasNewComment" class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
       </button>
 
       <button

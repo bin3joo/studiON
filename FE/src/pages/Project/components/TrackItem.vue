@@ -857,9 +857,9 @@ const onWorkAreaMouseLeave = () => {
       (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
     ]"
     :style="{
-      contentVisibility: track.clips.some(c => c.isDragging) ? 'visible' : 'auto',
+      contentVisibility: (track.clips.some(c => c.isDragging) || isCommentExpanded) ? 'visible' : 'auto',
       containIntrinsicSize: '100px',
-      contain: track.clips.some(c => c.isDragging) ? 'none' : 'layout paint style'
+      contain: (track.clips.some(c => c.isDragging) || isCommentExpanded) ? 'none' : 'layout paint style'
     }"
   >
    <div 
@@ -1215,6 +1215,7 @@ const onWorkAreaMouseLeave = () => {
   @delete-comment="emit('delete-comment', $event)"
   @track-contextmenu="onTrackRightClick($event, track.trackId)"
   @track-pointerdown="trackStore.selectTrack(track.trackId)"
+  @comment-expanded="isCommentExpanded = $event"
 />
       </div> 
 

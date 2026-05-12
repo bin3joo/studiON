@@ -275,7 +275,7 @@ class TrackEqServiceTest {
         TrackEq trackEq = trackEq(7, 11, 22);
         when(trackEqRepository.findByTrackId(11)).thenReturn(Optional.of(trackEq));
 
-        trackEqService.deleteByTrackId(11);
+        trackEqService.deleteByTrackIdIfExists(11);
 
         InOrder inOrder = inOrder(trackEqBandRepository, redisTemplate, trackEqRepository);
         inOrder.verify(trackEqBandRepository).deleteAllByTrackEq_Id(7);
@@ -289,7 +289,7 @@ class TrackEqServiceTest {
     void deleteByTrackIdNoopWhenTrackEqMissing() {
         when(trackEqRepository.findByTrackId(11)).thenReturn(Optional.empty());
 
-        trackEqService.deleteByTrackId(11);
+        trackEqService.deleteByTrackIdIfExists(11);
 
         verifyNoInteractions(trackEqBandRepository);
     }

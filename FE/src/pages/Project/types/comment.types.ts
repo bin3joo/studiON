@@ -70,3 +70,35 @@ export interface SocketErrorResponse {
   code: number
   message: string
 }
+
+// GET API 호출 시 사용할 쿼리 파라미터 인터페이스
+export interface FetchCommentsParams {
+  isResolved?: boolean;
+  trackId?: number;
+  mentionedMe?: boolean;
+}
+
+// 백엔드 CommentDto 대응
+export interface CommentDto {
+  commentId: number;
+  trackId: number;
+  parentCommentId: number | null;
+  content: string;
+  location: number;
+  isResolved: boolean;
+  author: CommentUser; // 기존에 존재하는 CommentUser 재사용
+  mentionedUsers: CommentUser[];
+  createdAt: string;
+  replies: CommentDto[]; // 대댓글 리스트 (계층 구조)
+}
+
+
+// 전체 응답 구조
+export interface FetchCommentsResponse {
+  code: string;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    comments: CommentDto[];
+  };
+}

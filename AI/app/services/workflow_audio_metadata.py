@@ -30,7 +30,13 @@ class WorkflowAudioMetadataStore:
         params = {f"id_{index}": value for index, value in enumerate(ids)}
         query = text(
             f"""
-            SELECT id, object_key, original_name, stored_name, mime_type, duration_ms
+            SELECT
+                id,
+                object_key,
+                original_name,
+                stored_name,
+                mime_type,
+                duration_ms
             FROM audio_metadata
             WHERE id IN ({placeholders})
             """

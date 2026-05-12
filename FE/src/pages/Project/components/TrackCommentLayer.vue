@@ -396,14 +396,14 @@ function parseMentions(content: string) {
     >
       <!-- hover된 마디 세로 강조선 -->
       <div
-        v-if="activeCellLocation !== null"
+        v-if="trackStore.isCommentMode && activeCellLocation !== null"
         class="pointer-events-none absolute inset-y-0 w-px bg-primary"
         :style="{ left: `${activeCellLeft}px` }"
       />
 
       <!-- 댓글 없는 경우: hover 시 댓글 추가 버튼 -->
       <button
-        v-if="activeCellLocation !== null && !hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
+        v-if="trackStore.isCommentMode && activeCellLocation !== null && !hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
         type="button"
         class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 grid h-7 w-7 translate-x-0.5 place-items-center rounded-full border border-white/20 bg-[#282828] text-white shadow-md transition hover:border-primary hover:text-primary before:absolute before:-inset-4 before:content-['']"
         :style="{ left: `${activeCellLeft}px` }"
@@ -416,7 +416,7 @@ function parseMentions(content: string) {
 
       <!-- 댓글 있는 경우: hover 시 preview -->
       <button
-        v-if="activeCellLocation !== null && hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
+        v-if="trackStore.isCommentMode && activeCellLocation !== null && hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
         type="button"
         class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 flex h-[26px] max-w-[300px] translate-x-0.5 items-center gap-2 overflow-hidden whitespace-nowrap rounded-[6px] border border-white/20 bg-[#1c1c1c] px-2.5 shadow-xl transition hover:border-primary"
         :style="{ left: `${activeCellLeft}px` }"

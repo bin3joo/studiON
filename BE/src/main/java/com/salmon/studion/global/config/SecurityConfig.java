@@ -47,6 +47,7 @@ public class SecurityConfig {
                                                                 PathPatternRequestMatcher.withDefaults().matcher("/api/**")))
                                 .authorizeHttpRequests(auth -> auth
                                                 .requestMatchers(
+                                                                "/error",
                                                                 // "/**",
                                                                 // "/api/v1/**", // [개발 단계] 모두 통과
                                                                 // "/api/v1/auth/**",
@@ -58,6 +59,7 @@ public class SecurityConfig {
                                                                 "/api/v1/auth/positions",
                                                                 "/api/v1/auth/exchange",
                                                                 "/api/v1/auth/reissue",
+                                                                "/api/v1/ai/**",
                                                                 "/ws/**")
                                                 .permitAll()
                                                 .anyRequest().authenticated())

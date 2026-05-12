@@ -2,32 +2,20 @@ package com.salmon.studion.domain.track.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
-import com.salmon.studion.global.common.enums.TrackType;
-import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
-import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
-import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
-import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
-import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
-import com.salmon.studion.domain.track.dto.request.TrackPanRequest;
-import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
-import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
-import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
-import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
-import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
-import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
-import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
-import com.salmon.studion.domain.track.dto.response.TrackPanResponse;
-import com.salmon.studion.domain.track.dto.response.TrackVolumeResponse;
-import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
+import com.salmon.studion.domain.track.dto.request.*;
+import com.salmon.studion.domain.track.dto.response.*;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
 import com.salmon.studion.domain.track.entity.TrackRenameEventDocument;
 import com.salmon.studion.domain.track.entity.TrackReorderEventDocument;
 import com.salmon.studion.domain.track.repository.TrackEventRepository;
 import com.salmon.studion.domain.track.repository.TrackRepository;
+import com.salmon.studion.global.common.enums.TrackType;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -47,11 +35,13 @@ import java.util.stream.Collectors;
 public class TrackService {
 
     private static final String TRACKS_KEY = "project:%d:tracks";
-    private static final String TRACK_ID_SEQ_KEY = "project:%d:track:id_seq";
+    private static final String TRACK_ID_SEQ_KEY = "global:track:id_seq";
     private static final String EVENT_SEQ_KEY = "project:%d:event:seq";
     private static final String DELETED_TRACKS_KEY = "project:%d:deleted_tracks";
 
     private final ProjectService projectService;
+    private final ClipService clipService;
+    private final TrackEqService trackEqService;
     private final TrackRepository trackRepository;
     private final TrackEventRepository trackEventRepository;
     private final RedisTemplate<String, String> redisTemplate;
@@ -140,10 +130,10 @@ public class TrackService {
         request.validate();
 
         // 프로젝트 존재여부 확인
-        projectService.getProjectOrThrow(request.getProjectId());
+        Project project = projectService.getProjectOrThrow(request.getProjectId());
 
         Integer newTrackId = redisTemplate.opsForValue()
-                .increment(String.format(TRACK_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(TRACK_ID_SEQ_KEY).intValue();
 
         Integer lastTrackId = findLastTrackId(request.getProjectId());
         if (lastTrackId != null) {
@@ -162,12 +152,13 @@ public class TrackService {
                 .pan(0)
                 .build();
 
+        // Redis에 저장
         saveTrackToRedis(request.getProjectId(), newTrack);
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
 
-        // 저장 실패 시에도 브로드캐스트는 진행
+        // MongoDB에 이벤트 저장(저장 실패 시에도 브로드캐스트는 진행)
         try {
             saveTrackAddOrDeleteEvent(
                     "TRACK_ADD",
@@ -211,11 +202,19 @@ public class TrackService {
             updatePreTrackId(request.getProjectId(), track.getPostTrackId(), track.getPreTrackId());
         }
 
+        trackEqService.deleteByTrackIdIfExists(track.getTrackId());
         removeTrackToRedis(request.getProjectId(), track);
-        redisTemplate.opsForSet().add(
-                String.format(DELETED_TRACKS_KEY, request.getProjectId()),
-                String.valueOf(request.getTrackId())
-        );
+
+        // 삭제된 트랙의 클립을 Redis에서 삭제
+        clipService.deleteClipStatesByTrack(request.getProjectId(), request.getTrackId());
+
+        // 클립 RDB 삭제 후 트랙 RDB 삭제 (FK 제약으로 순서 고정)
+        clipService.deleteClipsByTrackFromRdb(request.getTrackId());
+        try {
+            trackRepository.deleteById(request.getTrackId());
+        } catch (Exception e) {
+            log.error("[RDB 트랙 삭제 실패]: trackId={}", request.getTrackId(), e);
+        }
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
@@ -484,23 +483,8 @@ public class TrackService {
         request.setProjectId(projectId);
         request.setName("track 1");
         request.setType("audio");
-        TrackAddResponse response = addTrack(request, userId);
 
-        Project project = projectService.getProjectOrThrow(projectId);
-        trackRepository.save(Track.create(
-                response.getTrackId(),
-                project,
-                response.getPreTrackId(),
-                response.getPostTrackId(),
-                TrackType.AUDIO,
-                response.getName(),
-                response.getIsSoloed(),
-                response.getIsMuted(),
-                response.getVolume(),
-                response.getPan()
-        ));
-
-        return response;
+        return addTrack(request, userId);
     }
 
 
@@ -652,5 +636,72 @@ public class TrackService {
     public Track getTrackInProjectId(Integer projectId, Integer trackId) {
         return trackRepository.findByIdAndProject_Id(trackId, projectId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+    }
+
+    // MySQL에서 삭제 예정인 track을 제거하는 메서드
+    public void deleteRemovedTracksFromMysql(Integer projectId) {
+        String deletedKey = String.format(DELETED_TRACKS_KEY, projectId);
+        Set<String> deletedIdStrs = redisTemplate.opsForSet().members(deletedKey);
+
+        if (deletedIdStrs == null || deletedIdStrs.isEmpty()) {
+            return;
+        }
+
+        List<Integer> deletedIds = deletedIdStrs.stream().map(Integer::parseInt).toList();
+        trackRepository.deleteAllById(deletedIds);
+    }
+
+    // Redis의 deleted_tracks 키 삭제 (DB 커밋 성공 후)
+    public void clearDeletedTrackKeys(Integer projectId) {
+        redisTemplate.delete(String.format(DELETED_TRACKS_KEY, projectId));
+    }
+
+    public void upsertTracksFromRedis(Integer projectId) {
+        String trackKey = String.format(TRACKS_KEY, projectId);
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(trackKey);
+
+        if (entries.isEmpty()) {
+            return;
+        }
+
+        List<TrackState> redisTrackList = entries.values().stream()
+                .map(v -> parseTrackState((String) v))
+                .toList();
+
+        Map<Integer, Track> mysqlTrackMap = trackRepository.findByProject_Id(projectId).stream()
+                .collect(Collectors.toMap(Track::getId, t-> t));
+
+        Project project = projectService.getProjectOrThrow(projectId);
+
+        List<Track> toSave = redisTrackList.stream()
+                .map(state -> {
+                    Track existing = mysqlTrackMap.get(state.getTrackId());
+                    if (existing != null) {
+                        existing.update(
+                                state.getName(),
+                                state.getPreTrackId(),
+                                state.getPostTrackId(),
+                                state.getIsSoloed(),
+                                state.getIsMuted(),
+                                state.getVolume(),
+                                state.getPan()
+                        );
+                        return existing;
+                    }
+                    return Track.create(
+                        state.getTrackId(),
+                        project,
+                        state.getPreTrackId(),
+                        state.getPostTrackId(),
+                        TrackType.valueOf(state.getType().toUpperCase()),
+                        state.getName(),
+                        state.getIsSoloed(),
+                        state.getIsMuted(),
+                        state.getVolume(),
+                        state.getPan()
+                    );
+                })
+                .toList();
+        trackRepository.saveAll(toSave);
     }
 }

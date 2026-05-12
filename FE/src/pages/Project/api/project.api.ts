@@ -9,8 +9,10 @@ import type {
   ProjectId,
   RootNote,
 } from '../types/project.types'
+import type { FetchCommentsParams, FetchCommentsResponse } from '../types/comment.types';
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
+import type { SaveProjectSnapshotResponse } from '../types/project.types';
 
 // ==========================================
 // [인터페이스] 백엔드 응답 규격 (명세서 기반)
@@ -25,14 +27,20 @@ export interface ProjectDetailResponse {
     projectId: number;
     name: string;
     rootNote: string;
-    projectMode: string;
+    mode: string;
     tempo: number;
     timeSigNumerator: number;
     timeSigDenominator: number;
     totalBarCount: number;
-    totalPlayTime: number;
+    totalPlayTimeMs: number;
+    masterTrack: {
+      masterTrackId: number;
+      isSoloed: boolean;
+      isMuted: boolean;
+      volume: number;
+      pan: number;
+    };
     tracks: TrackDto[];
-
   }
 }
 
@@ -56,8 +64,7 @@ export interface AudioDetailResponse {
 // 프로젝트 생성 기본값
 // ==============================
 
-const MOCK_PROJECT_CREATE_DELAY_MS = 400;
-const MOCK_PROJECT_LIST_DELAY_MS = 300;
+
 const DEFAULT_PROJECT_NAME = '새 프로젝트';
 const DEFAULT_ROOT_NOTE: RootNote = 'C';
 const DEFAULT_MODE: Mode = 'Major';
@@ -174,6 +181,25 @@ export const projectApi = {
   // 메타데이터 저장
   saveAudioMetadata: async (projectId: number, payload: SaveAudioMetadataRequest) => {
     const response = await axiosInstance.post<SaveAudioMetadataResponse>(`/api/v1/projects/${projectId}/audios`, payload);
+    return response.data.data;
+  },
+
+  //프로젝트 코멘트 목록 조회
+  getComments: async (projectId: number, params?: FetchCommentsParams) => {
+    const response = await axiosInstance.get<FetchCommentsResponse>(
+      `/api/v1/projects/${projectId}/comments`,
+      { params }
+    );
+    //인터셉터를 통해 response.data.data 내의 comments 배열이 반환됨
+    return response.data.data.comments;
+
+  },
+
+  // 프로젝트 수동 저장
+  saveProjectSnapshot: async (projectId: number) => {
+    const response = await axiosInstance.post<SaveProjectSnapshotResponse>(
+      `/api/v1/projects/${projectId}/snapshot`
+    );
     return response.data.data;
   }
 

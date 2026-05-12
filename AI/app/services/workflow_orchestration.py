@@ -6,7 +6,12 @@ from typing import Any
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.graph.state import WorkflowDispatchType, build_workflow_initial_state
+from app.graph.state import (
+    WorkflowDispatchType,
+    WorkflowUserDecision,
+    build_workflow_initial_state,
+    utc_now,
+)
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 from app.services.workflow_preview_compare import build_preview_compare_payload
 from app.services.workflow_queue import enqueue_workflow_dispatch
@@ -23,7 +28,7 @@ logger = logging.getLogger(__name__)
 class WorkflowDispatchAccepted(BaseModel):
     job_id: int
     project_id: int
-    dispatch_type: WorkflowDispatchType
+    dispatch_type: str
     status: str = "accepted"
     queue_name: str = "workflow"
 
@@ -52,6 +57,7 @@ class WorkflowResumePayload(BaseModel):
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
+    user_decision: WorkflowUserDecision = "RESUME"
     requested_by: int | None = None
 
 
@@ -86,6 +92,8 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
         store.create_pending_job(initial_state)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     message = WorkflowDispatchMessage(
         job_id=payload.job_id,
@@ -108,6 +116,9 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
 
 
 def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccepted:
+    if payload.user_decision in {"CONFIRM", "CANCEL"}:
+        return record_workflow_feedback(payload)
+
     store = get_workflow_job_store()
     job = store.get_job(payload.job_id)
     if job is None or job.project_id != payload.project_id:
@@ -132,6 +143,7 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
         selected_region_id=payload.selected_region_id,
         preserve_clip_id=payload.preserve_clip_id,
         user_feedback_message=payload.user_feedback_message,
+        user_decision=payload.user_decision,
     )
     logger.info(
         "workflow dispatch resumed | job_id=%s dispatch_type=%s queue=%s",
@@ -144,6 +156,52 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
         job_id=payload.job_id,
         project_id=payload.project_id,
         dispatch_type=dispatch_type,
+    )
+
+
+def record_workflow_feedback(payload: WorkflowResumePayload) -> WorkflowDispatchAccepted:
+    store = get_workflow_job_store()
+    job = store.get_job(payload.job_id)
+    if job is None or job.project_id != payload.project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow job was not found.",
+        )
+
+    restored_state = _build_restored_job_state(job)
+    notes = [*restored_state.get("notes", [])]
+    notes.append(
+        f"User decision recorded: {payload.user_decision}"
+        + (
+            f" ({payload.user_feedback_message})"
+            if payload.user_feedback_message
+            else ""
+        )
+    )
+    restored_state.update(
+        {
+            "selected_region_id": payload.selected_region_id
+            if payload.selected_region_id is not None
+            else restored_state.get("selected_region_id"),
+            "preserve_clip_id": payload.preserve_clip_id
+            if payload.preserve_clip_id is not None
+            else restored_state.get("preserve_clip_id"),
+            "user_feedback_message": payload.user_feedback_message,
+            "user_decision": payload.user_decision,
+            "user_feedback_recorded_at": utc_now(),
+            "notes": notes,
+        }
+    )
+    store.save_graph_state(restored_state)
+    logger.info(
+        "workflow feedback recorded | job_id=%s decision=%s",
+        payload.job_id,
+        payload.user_decision,
+    )
+    return WorkflowDispatchAccepted(
+        job_id=payload.job_id,
+        project_id=payload.project_id,
+        dispatch_type=payload.user_decision.lower(),
     )
 
 

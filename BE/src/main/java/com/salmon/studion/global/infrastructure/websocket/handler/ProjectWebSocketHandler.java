@@ -31,6 +31,7 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
     private final CommentEventHandler commentEventHandler;
     private final TrackEventHandler trackEventHandler;
     private final ClipEventHandler clipEventHandler;
+    private final EqEventHandler eqEventHandler;
     private final WebSocketMessageSender webSocketMessageSender;
 
     @Override
@@ -66,6 +67,9 @@ public class ProjectWebSocketHandler extends TextWebSocketHandler {
             }
             else if(event.startsWith("CLIP_")){
                 clipEventHandler.handleClipEvent(session, projectId, event, raw);
+            }
+            else if (event.startsWith("EQ_")) {
+                eqEventHandler.handleEqEvent(session, projectId, event, raw);
             }
             else {
                 webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다 : " + event);

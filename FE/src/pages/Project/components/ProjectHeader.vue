@@ -168,11 +168,12 @@ function cancelProjectNameEdit() {
       <button
         type="button"
         class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        title="저장 (Ctrl + S)"
         @click="emit('save')"
       >
         <Save class="h-4 w-4" />
         <span>저장</span>
-        <span class="text-muted-foreground">마지막 저장 시간 {{ lastSavedAt }}</span>
+        <span class="text-muted-foreground">{{ lastSavedAt }}</span>
       </button>
 
       <button

@@ -1,20 +1,14 @@
 package com.salmon.studion.global.infrastructure.websocket.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipCreateRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipPasteRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
+import com.salmon.studion.domain.clip.dto.request.*;
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.global.exception.BusinessException;
 import com.salmon.studion.global.infrastructure.websocket.WebSocketMessageSender;
 import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
 import com.salmon.studion.global.infrastructure.websocket.util.WebSocketSessionUtils;
+import com.salmon.studion.global.scheduler.ProjectAutosaveScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -30,6 +24,7 @@ public class ClipEventHandler {
     private final WebSocketMessageSender webSocketMessageSender;
     private final ObjectMapper objectMapper;
     private final ClipService clipService;
+    private final ProjectAutosaveScheduler projectAutosaveScheduler;
 
     public void handleClipEvent(WebSocketSession session, Integer projectId, String event, WsMessage<Map> raw) throws IOException {
         Integer userId = WebSocketSessionUtils.getUserId(session);
@@ -37,45 +32,53 @@ public class ClipEventHandler {
         Object response = null;
         switch (event){
             case "CLIP_CREATE":
-                ClipCreateRequest createRequest = objectMapper.convertValue(raw.getPayload(), ClipCreateRequest.class);
+                ClipCreateRequest createRequest = bindClipRequest(raw, ClipCreateRequest.class, projectId);
                 response = clipService.createClip(createRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_LOCK":
-                ClipLockRequest lockRequest = objectMapper.convertValue(raw.getPayload(), ClipLockRequest.class);
+                ClipLockRequest lockRequest = bindClipRequest(raw, ClipLockRequest.class, projectId);
                 response = clipService.lockClip(lockRequest, userId);
                 break;
             case "CLIP_MOVE":
-                ClipMoveRequest moveRequest = objectMapper.convertValue(raw.getPayload(), ClipMoveRequest.class);
+                ClipMoveRequest moveRequest = bindClipRequest(raw, ClipMoveRequest.class, projectId);
                 response = clipService.moveClip(moveRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_RESIZE":
-                ClipResizeRequest resizeRequest = objectMapper.convertValue(raw.getPayload(), ClipResizeRequest.class);
+                ClipResizeRequest resizeRequest = bindClipRequest(raw, ClipResizeRequest.class, projectId);
                 response = clipService.resizeClip(resizeRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_SPLIT":
-                ClipSplitRequest splitRequest = objectMapper.convertValue(raw.getPayload(), ClipSplitRequest.class);
+                ClipSplitRequest splitRequest = bindClipRequest(raw, ClipSplitRequest.class, projectId);
                 response = clipService.splitClip(splitRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_DUPLICATE":
-                ClipDuplicateRequest duplicateRequest = objectMapper.convertValue(raw.getPayload(), ClipDuplicateRequest.class);
+                ClipDuplicateRequest duplicateRequest = bindClipRequest(raw, ClipDuplicateRequest.class, projectId);
                 response = clipService.duplicateClip(duplicateRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_CUT":
-                ClipCutRequest cutRequest = objectMapper.convertValue(raw.getPayload(), ClipCutRequest.class);
+                ClipCutRequest cutRequest = bindClipRequest(raw, ClipCutRequest.class, projectId);
                 response = clipService.cutClip(cutRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_COPY":
-                ClipCopyRequest copyRequest = objectMapper.convertValue(raw.getPayload(), ClipCopyRequest.class);
+                ClipCopyRequest copyRequest = bindClipRequest(raw, ClipCopyRequest.class, projectId);
                 response = clipService.copyClip(copyRequest, userId);
                 webSocketMessageSender.sendToSession(session, event, response);
                 return;
             case "CLIP_PASTE":
-                ClipPasteRequest pasteRequest = objectMapper.convertValue(raw.getPayload(), ClipPasteRequest.class);
+                ClipPasteRequest pasteRequest = bindClipRequest(raw, ClipPasteRequest.class, projectId);
                 response = clipService.pasteClip(pasteRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             case "CLIP_DELETE":
-                ClipDeleteRequest deleteRequest = objectMapper.convertValue(raw.getPayload(), ClipDeleteRequest.class);
+                ClipDeleteRequest deleteRequest = bindClipRequest(raw, ClipDeleteRequest.class, projectId);
                 response = clipService.deleteClip(deleteRequest, userId);
+                projectAutosaveScheduler.schedule(projectId);
                 break;
             default:
                 webSocketMessageSender.sendError(session, 400, "지원하지 않는 이벤트입니다.");
@@ -83,6 +86,26 @@ public class ClipEventHandler {
         }
         webSocketMessageSender.broadcast(projectId, event, response);
 
+    }
+
+    private <T extends ClipRequest> T bindClipRequest(
+            WsMessage<Map> raw,
+            Class<T> requestType,
+            Integer pathProjectId
+    ) {
+        T request = objectMapper.convertValue(raw.getPayload(), requestType);
+
+        Integer payloadProjectId = request.getProjectId();
+        if (payloadProjectId != null && !pathProjectId.equals(payloadProjectId)) {
+            // TODO: enum 코드 값으로 분리하기
+            throw new BusinessException(
+                    ErrorCode.INVALID_REQUEST,
+                    "WebSocket 경로의 projectId와 payload의 projectId가 일치하지 않습니다."
+            );
+        }
+
+        request.setProjectId(pathProjectId);
+        return request;
     }
 
 }

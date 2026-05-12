@@ -36,17 +36,28 @@ export interface CreateProjectResponse {
       projectId: number
       name: string
       rootNote: RootNote
-      projectMode: Mode
+      mode: Mode
       tempo: number
       timeSigNumerator: number
       timeSigDenominator: number
       totalBarCount: number
-      totalPlayTime: number
+      totalPlayTimeMs: number
     }
     masterTrack: {
       masterTrackId: number
       isSoloed: boolean
       isMuted: boolean
+      volume: number
+      pan: number
+    }
+    defaultTrack: {
+      trackId: number
+      name: string
+      type: string
+      preTrackId: number | null
+      postTrackId: number | null
+      isMuted: boolean
+      isSoloed: boolean
       volume: number
       pan: number
     }
@@ -57,12 +68,12 @@ export interface ProjectSummary {
   projectId: ProjectId
   name: string
   rootNote: RootNote
-  projectMode: Mode
+  mode: Mode
   tempo: number
   timeSigNumerator: number
   timeSigDenominator: number
   totalBarCount: number
-  totalPlayTime: number
+  totalPlayTimeMs: number
 }
 
 export interface MasterTrackSummary {
@@ -128,3 +139,15 @@ export interface AcceptInviteCodeData {
 
 // 초대코드 입력 응답 전체
 export type AcceptInviteCodeResponse = ApiResponse<AcceptInviteCodeData | null>
+
+// 프로젝트 저장 응답
+export interface SaveProjectSnapshotResponse {
+  code: string;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    projectId: number;
+    trigger: string;       // 예: "MANUAL"
+    saveAt: string;        // 예: "2026-05-12T15:30:00"
+  };
+}

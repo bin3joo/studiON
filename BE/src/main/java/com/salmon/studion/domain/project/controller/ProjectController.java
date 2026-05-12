@@ -4,6 +4,7 @@ import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectListResponse;
+import com.salmon.studion.domain.project.dto.response.ProjectSnapshotSaveResponse;
 import com.salmon.studion.domain.project.facade.ProjectFacade;
 import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.common.response.ApiResponse;
@@ -40,5 +41,13 @@ public class ProjectController {
     ) {
         Integer userId = user.getUserId();
         return ResponseEntity.ok(ApiResponse.success(projectFacade.createProject(projectCreateRequest, userId)));
+    }
+
+    @PostMapping("/{projectId}/snapshot")
+    public ResponseEntity<ApiResponse<ProjectSnapshotSaveResponse>> saveProjectSnapshot(
+            @PathVariable Integer projectId,
+            @AuthenticationPrincipal CustomOAuth2User user
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(projectFacade.saveProjectSnapshot(projectId, user.getUserId())));
     }
 }

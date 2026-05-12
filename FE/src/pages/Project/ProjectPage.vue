@@ -17,7 +17,13 @@ import { useCollabStore } from './store/useCollabStore';//공동 작업 스토�
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
-import type { ClipEqBandState } from './types'
+import type { TrackEqBandState } from './types'
+import { AlertTriangle } from 'lucide-vue-next';
+import { projectApi } from './api/project.api';
+import { useProjectSave } from './composables/useProjectSave';
+import { startAiWorkflow, getAiWorkflowStatus,
+  type AiAnalysisRegion, type ProjectSnapshotRequest,
+} from './api/projectAi.api'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -26,6 +32,9 @@ const projectId = route.params.projectId as string
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
 const authStore = useAuthStore(); // Auth 스토어 사용 준비
+
+const { lastSavedTime, handleSave } = useProjectSave(Number(projectId));
+const TIMELINE_TRACK_HEADER_WIDTH = 266
 
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
@@ -71,6 +80,19 @@ const handleWheel = (e: WheelEvent) => {
   }
 };
 
+let scrollRafId: number | null = null;
+const handleHorizontalScroll = (e: Event) => {
+  if (scrollRafId) return;
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = null;
+    const target = e.target as HTMLElement;
+    if (target) {
+      trackStore.viewportLeft = target.scrollLeft;
+      trackStore.viewportRight = target.scrollLeft + target.clientWidth;
+    }
+  });
+};
+
 //스페이스바 단축키 핸들러
 const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // 입력창(input, textarea)에 포커스가 있을 때는 단축키를 무시해야 합니다. (이름/볼륨 수정 중 스페이스바 띄어쓰기 보호)
@@ -112,6 +134,11 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
     switch (e.code) {
+      case 'KeyS': // 저장
+        e.preventDefault();
+        handleSave();
+        break;
+
       case 'KeyC': // 복사
         e.preventDefault();
         if (trackStore.selectedClip) {
@@ -181,25 +208,22 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
         if (trackStore.selectedClip && trackStore.selectedTrackId) {
           // 1. 선택된 클립이 명확히 있으면 그 클립만 안전하게 분할
           trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
-        } else {
-          // 2. 선택된 클립이 없다면? -> 재생바(Playhead) 선에 닿아있는 모든 트랙의 클립을 동시 분할
-          let hasSplit = false;
-          
-          trackStore.trackList.forEach(track => {
+        } else if (trackStore.selectedTrackId) {
+          // 2. 선택된 클립이 없다면, 선택된 트랙이 있는지 확인하고 해당 트랙의 클립만 분할
+          const track = trackStore.trackList.find(t => t.trackId === trackStore.selectedTrackId);
+          if (track) {
             const clipUnderPlayhead = track.clips.find(c => 
               currentBar > c.start && currentBar < c.start + c.duration
             );
-            
-            // 재생바 아래에 깔린 클립이 발견되면 즉시 분할 스토어 액션 호출
             if (clipUnderPlayhead) {
               trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
-              hasSplit = true;
+            } else {
+              alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
             }
-          });
-
-          if (!hasSplit) {
-            console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
           }
+        } else {
+          // 3. 아무것도 선택되지 않은 경우 분할 취소
+          alert("분할할 클립이나 트랙을 선택해 주세요.");
         }
         break;
       }
@@ -505,10 +529,6 @@ function handleSaveVersion() {
   console.log('버전 저장')
 }
 
-function handleSave() {
-  console.log('저장')
-}
-
 function handleUndo() {
   console.log('undo')
 }
@@ -581,6 +601,8 @@ const aiAnalyzing = ref(false)
 const aiConflict = ref<null | {
   startPercent: number
   endPercent: number
+  startPx: number
+  endPx: number
   barStart: number
   barEnd: number
   title: string
@@ -588,30 +610,8 @@ const aiConflict = ref<null | {
   bullets: string[]
 }>(null)
 
-const runAiAnalysis = () => {
-  if (aiAnalyzing.value) return
-
-  aiAnalyzing.value = true
-  aiConflict.value = null
-
-  setTimeout(() => {
-    aiConflict.value = {
-      startPercent: 18.3,
-      endPercent: 23.3,
-      barStart: 12,
-      barEnd: 14,
-      title: '12마디에서 14마디 사이',
-      summary: '중음역대에서 충돌이 발생해요.',
-      bullets: [
-        '트랙을 선택해 충돌 구간을 확인해보세요.',
-        '리드 신스 1과 리듬 기타 L의 200Hz~800Hz 대역이 겹쳐요.',
-        '각 트랙 EQ에서 -3dB 정도 컷을 제안합니다.',
-      ],
-    }
-
-    aiAnalyzing.value = false
-  }, 1200)
-}
+const aiBeforeBands = ref<TrackEqBandState[]>([])
+const aiAfterBands = ref<TrackEqBandState[]>([])
 
 const selectedEqTrack = computed(() => {
   const selectedTrackId = trackStore.selectedTrackId
@@ -635,26 +635,35 @@ function handleAddEqBand(payload: {
   frequencyHz: number
   gainDeltaDb: number
 }) {
-  if (!trackStore.selectedClip || !trackStore.selectedTrackId) return
+  if (!trackStore.selectedTrackId) return
 
-  trackStore.addClipEqBand(
+  trackStore.addTrackEqBand(
     trackStore.selectedTrackId,
-    trackStore.selectedClip.clipId,
     payload,
   )
 }
 
 function handleUpdateEqBand(payload: {
   bandOrder: number
-  patch: Partial<ClipEqBandState>
+  patch: Partial<TrackEqBandState>
 }) {
-  if (!trackStore.selectedClip || !trackStore.selectedTrackId) return
+  if (!trackStore.selectedTrackId) return
 
-  trackStore.updateClipEqBand(
+  trackStore.updateTrackEqBand(
     trackStore.selectedTrackId,
-    trackStore.selectedClip.clipId,
     payload.bandOrder,
     payload.patch,
+  )
+}
+
+function handleRemoveEqBand(payload: {
+  bandOrder: number
+}) {
+  if (!trackStore.selectedTrackId) return
+
+  trackStore.removeTrackEqBand(
+    trackStore.selectedTrackId,
+    payload.bandOrder,
   )
 }
 
@@ -706,21 +715,20 @@ function handleActionSplit() {
 
   if (trackStore.selectedClip && trackStore.selectedTrackId) {
     trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
-  } else {
-    let hasSplit = false;
-    trackStore.trackList.forEach(track => {
+  } else if (trackStore.selectedTrackId) {
+    const track = trackStore.trackList.find(t => t.trackId === trackStore.selectedTrackId);
+    if (track) {
       const clipUnderPlayhead = track.clips.find(c => 
         currentBar > c.start && currentBar < c.start + c.duration
       );
       if (clipUnderPlayhead) {
         trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
-        hasSplit = true;
+      } else {
+        alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
       }
-    });
-
-    if (!hasSplit) {
-      console.log("재생바가 위치한 곳에 자를 수 있는 오디오 클립이 없습니다.");
     }
+  } else {
+    alert("분할할 클립이나 트랙을 선택해 주세요.");
   }
 }
 
@@ -737,16 +745,277 @@ function handleActionAddTrack() {
   trackStore.addTrack();
 }
 
+// 전역 파일 드래그 앤 드롭 에러 방지 처리
+const isInvalidDropModalOpen = ref(false);
+
+const onGlobalDragOver = (e: DragEvent) => {
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'; // 드롭 이벤트를 발생시키기 위해 copy로 설정
+  }
+};
+
+const onGlobalDrop = (e: DragEvent) => {
+  // 브라우저의 기본 파일 열기 동작 차단
+  
+  const files = e.dataTransfer?.files;
+  if (files && files.length > 0) {
+    // 트랙 내부의 이벤트 리스너(stopPropagation)를 거치지 않고 여기까지 올라온 이벤트는
+    // 빈 공간이나 헤더 등에 드롭한 잘못된 위치의 드롭임.
+    isInvalidDropModalOpen.value = true;
+  }
+};
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function pollAiWorkflow(jobId: number) {
+  const maxTry = 60 // 2초 * 60 = 최대 120초
+
+  for (let i = 0; i < maxTry; i += 1) {
+    const result = await getAiWorkflowStatus(jobId)
+    const regions = result.projections.analysis_regions ?? []
+
+    if (result.job.status === 'FAILED') {
+      throw new Error(result.job.error_message ?? 'AI 분석에 실패했습니다.')
+    }
+
+    if (
+      result.job.status === 'COMPLETED' ||
+      result.job.status === 'WAITING_USER' ||
+      result.job.progress >= 100 ||
+      regions.length > 0
+    ) {
+      return result
+    }
+
+    await sleep(2000)
+  }
+
+  throw new Error('AI 분석 결과를 가져오지 못했습니다.')
+}
+
+function getAudioMetadataId(clip: any): number | null {
+  return (
+    clip.audioMetadataId ??
+    clip.audio_metadata_id ??
+    clip.audio?.audioMetadataId ??
+    clip.audio?.audio_metadata_id ??
+    null
+  )
+}
+
+function getAudioDurationMs(clip: any, fallbackDurationMs: number): number {
+  return (
+    clip.audioDurationMs ??
+    clip.audio_duration_ms ??
+    clip.audio?.durationMs ??
+    clip.audio?.duration_ms ??
+    clip.audio?.audioDurationMs ??
+    fallbackDurationMs
+  )
+}
+
+function buildProjectSnapshotFromStore(): ProjectSnapshotRequest {
+  const info = trackStore.projectInfo
+
+  const bpm = info.tempo
+  const numerator = info.timeSigNumerator || 4
+  const denominator = info.timeSigDenominator || 4
+
+  const msPerBar = (60000 / bpm) * numerator * (4 / denominator)
+
+  const tracks = trackStore.trackList.map(track => ({
+    track_id: Number(track.trackId),
+    name: track.name ?? '',
+  }))
+
+  const clips = trackStore.trackList.flatMap(track =>
+    track.clips
+      .map(clip => {
+        const audioMetadataId = getAudioMetadataId(clip)
+
+        if (!audioMetadataId) {
+          return null
+        }
+
+        const startMs = Math.round(clip.start * msPerBar)
+        const endMs = Math.round((clip.start + clip.duration) * msPerBar)
+        const clipDurationMs = Math.max(endMs - startMs, 1)
+
+        return {
+          clip_id: Number(clip.clipId),
+          track_id: Number(track.trackId),
+          start_ms: startMs,
+          end_ms: Math.max(endMs, startMs + 1),
+          audio_metadata_id: Number(audioMetadataId),
+          audio_start_ms: Math.round(clip.audioStartMs ?? (clip as any).audio_start_ms ?? 0),
+          audio_duration_ms: Math.round(getAudioDurationMs(clip, clipDurationMs)),
+        }
+      })
+      .filter((clip): clip is ProjectSnapshotRequest['clips'][number] => clip !== null),
+  )
+
+  const baseDurationMs = Math.round(info.totalBarCount * msPerBar)
+  const durationMs = Math.max(
+    baseDurationMs,
+    ...clips.map(clip => clip.end_ms),
+  )
+
+  return {
+    duration_ms: durationMs,
+    bpm,
+    numerator,
+    denominator,
+    tracks,
+    clips,
+  }
+}
+
+function getMsPerBar() {
+  const info = trackStore.projectInfo
+
+  const bpm = info.tempo || 120
+  const numerator = info.timeSigNumerator || 4
+  const denominator = info.timeSigDenominator || 4
+
+  return (60000 / bpm) * numerator * (4 / denominator)
+}
+
+function mapRegionToOverlay(region: AiAnalysisRegion, durationMs: number) {
+  const startMs = region.start_ms ?? 0
+  const endMs = region.end_ms ?? startMs + 1
+
+  const msPerBar = getMsPerBar()
+
+  // 표시용 마디
+  const barStart =
+    region.measure_start ??
+    Math.floor(startMs / msPerBar) + 1
+
+  const barEnd =
+    region.measure_end ??
+    Math.ceil(endMs / msPerBar)
+
+  // 실제 위치 계산용: ms 기준
+  const startBarFloat = startMs / msPerBar
+  const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
+
+  const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
+  const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
+
+  const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
+  const endPercent = Math.max(
+    startPercent + 0.5,
+    Math.min(100, (endMs / durationMs) * 100),
+  )
+
+  return {
+    startPercent,
+    endPercent,
+    startPx,
+    endPx,
+    barStart,
+    barEnd,
+    title: `${barStart}마디에서 ${barEnd}마디 사이`,
+    summary: region.analysis_summary ?? 'AI가 충돌 가능성이 있는 구간을 감지했어요.',
+    bullets: [
+      region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
+      region.band_low_hz && region.band_high_hz
+        ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 충돌이 감지됐어요.`
+        : '주파수 대역 정보가 없습니다.',
+      region.involved_track_ids.length > 0
+        ? `관련 트랙: ${region.involved_track_ids.join(', ')}`
+        : '관련 트랙 정보를 확인 중입니다.',
+    ],
+  }
+}
+
+const runAiAnalysis = async () => {
+  if (aiAnalyzing.value) return
+
+  try {
+    aiAnalyzing.value = true
+    aiConflict.value = null
+
+    const selectedTrack = selectedEqTrack.value
+
+    if (selectedTrack?.eq?.bands) {
+      aiBeforeBands.value = selectedTrack.eq.bands.map(band => ({ ...band }))
+    } else {
+      aiBeforeBands.value = []
+    }
+
+    const snapshot = buildProjectSnapshotFromStore()
+
+    if (snapshot.tracks.length === 0) {
+      alert('분석할 트랙이 없습니다.')
+      return
+    }
+
+    if (snapshot.clips.length === 0) {
+      alert('AI 분석을 하려면 먼저 저장된 오디오 클립이 필요합니다.')
+      return
+    }
+
+    const startResult = await startAiWorkflow({
+      project_id: Number(projectId),
+      issue_types: [
+        'band_overlap',
+        'track_clipping',
+        'master_clipping',
+        'sibilance',
+        'high_band_harshness',
+      ],
+      validator_mode: 'PASS',
+      critic_mode: 'PASS',
+      project_snapshot: snapshot,
+    })
+
+    const statusResult = await pollAiWorkflow(startResult.job.job_id)
+    const regions = statusResult.projections.analysis_regions ?? []
+
+    console.log('[AI regions]', regions)
+    console.log('[AI snapshot duration]', snapshot.duration_ms)
+    console.log('[AI project info]', trackStore.projectInfo)
+
+    if (regions.length === 0) {
+      alert('AI가 감지한 충돌 구간이 없습니다.')
+      return
+    }
+
+    aiConflict.value = mapRegionToOverlay(regions[0], snapshot.duration_ms)
+  } catch (error) {
+    console.error(error)
+
+    if (
+      error instanceof Error &&
+      error.message.includes('timeout')
+    ) {
+      alert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.')
+      return
+    }
+
+    alert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.')
+  } finally {
+    aiAnalyzing.value = false
+  }
+}
+
 </script>
 
 <template>
   <!--플랙스, 플랙스 콜 -> 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
   
-  <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground" >
+  <div 
+    class="flex h-screen flex-col overflow-hidden bg-background text-foreground"
+    @dragover.prevent="onGlobalDragOver"
+    @drop.prevent="onGlobalDrop"
+  >
     <ProjectHeader
   :project-name="projectName"
   :online-users="onlineUsers"
-  last-saved-at="13:24"
+  :last-saved-at="lastSavedTime"
   @rename="handleRename"
   @export="handleExport"
   @save-version="handleSaveVersion"
@@ -775,10 +1044,11 @@ function handleActionAddTrack() {
       <div 
         ref="timelineContainerRef" 
         class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
-        @pointerdown="trackStore.deselectAll()"
+        @pointerdown.stop="trackStore.deselectAll()"
+        @scroll="handleHorizontalScroll"
       >
         <!-- 눈금자 -->
-        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
+        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
           <TimelineRuler />
         </div>
 
@@ -801,7 +1071,7 @@ function handleActionAddTrack() {
 </div>
 
         <!-- 마스터 트랙 -->
-        <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]">
+        <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]" style="will-change: transform;">
           <TrackItem
   :track="trackStore.masterTrack"
   :is-master="true"
@@ -817,15 +1087,17 @@ function handleActionAddTrack() {
         
       </div>
       <ProjectEqPanel
-  :selected-track="selectedEqTrack"
-  :selected-clip="trackStore.selectedClip"
-  :ai-analyzing="aiAnalyzing"
-  :ai-analyzed="!!aiConflict"
-  @apply-ai-eq="handleApplyAiEq"
-  @cancel-ai-eq="handleCancelAiEq"
-  @add-eq-band="handleAddEqBand"
-  @update-eq-band="handleUpdateEqBand"
-/>
+        :selected-track="selectedEqTrack"
+        :ai-analyzing="aiAnalyzing"
+        :ai-analyzed="!!aiConflict"
+        :ai-before-bands="aiBeforeBands"
+        :ai-after-bands="aiAfterBands"
+        @apply-ai-eq="handleApplyAiEq"
+        @cancel-ai-eq="handleCancelAiEq"
+        @add-eq-band="handleAddEqBand"
+        @update-eq-band="handleUpdateEqBand"
+        @remove-eq-band="handleRemoveEqBand"
+      />
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
 
     <section class="px-6 py-4">
@@ -849,6 +1121,22 @@ function handleActionAddTrack() {
   :project-name="projectName"
   @close="isInviteModalOpen = false"
     />
+
+    <!-- 잘못된 파일 드롭 안내 모달 -->
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div class="flex flex-col items-center gap-4 rounded-xl bg-[#1E1E21] p-6 shadow-2xl border border-white/10 w-[320px]">
+        <div class="rounded-full bg-red-500/20 p-3">
+          <AlertTriangle class="h-6 w-6 text-red-400" />
+        </div>
+        <div class="text-center">
+          <h3 class="text-base font-semibold text-white">잘못된 드롭 위치</h3>
+          <p class="mt-2 text-sm text-gray-400">오디오 파일은 타임라인의 <span class="text-primary font-bold">트랙 작업 영역</span> 위에 드래그 앤 드롭해 주세요.</p>
+        </div>
+        <button @click="isInvalidDropModalOpen = false" class="mt-4 w-full rounded-md bg-primary py-2 text-sm font-semibold text-black hover:bg-primary/80 transition-colors">
+          확인
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 

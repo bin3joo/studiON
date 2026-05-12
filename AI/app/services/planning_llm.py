@@ -9,15 +9,8 @@ import httpx
 from app.core.config import get_settings
 
 ALLOWED_ACTION_TYPES = [
-    "GAIN_TRIM",
     "EQ_CUT",
     "DYNAMIC_EQ",
-    "HPF",
-    "DE_ESSER",
-    "SIDECHAIN_COMPRESS",
-    "PAN_ADJUST",
-    "FADE_ADJUST",
-    "TRUE_PEAK_LIMITER",
 ]
 
 
@@ -166,28 +159,27 @@ def get_planning_llm_client() -> PlanningLLMClient:
 
 def _planner_system_prompt() -> str:
     return (
-        "너는 band_overlap 문제만 다루는 오디오 편집 계획 생성기다. "
-        "반드시 JSON object 하나만 반환하고, 설명 문장이나 코드펜스는 포함하지 마라. "
-        "입력으로 선택된 region, preserve clip, clip context, revision notes가 주어진다. "
-        "목표는 preserve clip이 속한 트랙은 건드리지 않으면서 "
-        "같은 구간의 다른 TRACK 하나에 적용할 단일 DYNAMIC_EQ 액션을 제안하는 것이다. "
-        "반환 JSON은 다음 필드를 반드시 포함해야 한다: "
+        "You are generating one safe EQ-only correction plan for an audio workflow. "
+        "Return only a JSON object and do not add markdown or commentary. "
+        "Use the selected region, preserve clip, clip context, and revision notes exactly as given. "
+        "This path is EQ-only: the only allowed action types are DYNAMIC_EQ and EQ_CUT. "
+        "The action must always use TRACK scope. MASTER scope is forbidden. "
+        "Never target the preserve clip track. "
+        "Keep targetClipId null. "
+        "Keep startMs and endMs inside the selected region. "
+        "Keep bandLowHz and bandHighHz inside the selected region band when they are provided. "
+        "Use a conservative gain reduction and keep the explanation aligned with the actual action. "
+        "Use this exact JSON shape: "
         '{"strategyTitle": string, "strategySummary": string, '
         '"summary": string, "explanation": string, '
-        '"candidate": {"action": {"actionType": string, "targetScope": "TRACK|MASTER", '
+        '"candidate": {"action": {"actionType": string, "targetScope": "TRACK", '
         '"targetTrackId": number|null, "targetClipId": number|null, "startMs": number|null, '
         '"endMs": number|null, "bandLowHz": number|null, "bandHighHz": number|null, '
         '"gainDeltaDb": number|null, "params": object}}}. '
-        "허용되는 actionType 목록은 "
-        f"{', '.join(ALLOWED_ACTION_TYPES)} 이지만 "
-        "현재 이 경로에서는 DYNAMIC_EQ만 사용해야 한다. "
-        "targetScope는 반드시 TRACK이어야 한다. "
-        "targetTrackId는 preserve clip 트랙이 아닌 involved track 중 하나여야 한다. "
-        "targetClipId는 null이어도 되지만 preserve clip 자체를 수정 대상으로 지정하면 안 된다. "
-        "startMs와 endMs는 선택된 region 범위를 벗어나면 안 된다. "
-        "bandLowHz와 bandHighHz는 region의 혼잡 대역 근처 값이어야 한다. "
-        "gainDeltaDb는 음수 감쇠 값이어야 한다. "
-        "params는 DYNAMIC_EQ에 필요한 최소 파라미터만 포함하라."
+        f"Allowed actionType values: {', '.join(ALLOWED_ACTION_TYPES)}. "
+        "For band_overlap, use DYNAMIC_EQ only. "
+        "For sibilance, reinterpret the fix as a high-band DYNAMIC_EQ. "
+        "For track_clipping, emit an EQ action only when a band-focused fix is plausible."
     )
 
 

@@ -21,6 +21,7 @@ from app.services.workflow_artifacts import (
 )
 from app.services.workflow_audio_metadata import AudioMetadataRecord
 from app.services.workflow_jobs import (
+    MySQLWorkflowJobStore,
     WorkflowDispatchMessage,
     _build_record,
     _row_to_record,
@@ -134,6 +135,9 @@ def reset_job_store(monkeypatch: pytest.MonkeyPatch) -> None:
         mongo_snapshot_collection="timeline_snapshots",
         mongo_artifact_collection="workflow_artifacts",
         audio_root=None,
+        audio_cache_dir=str(Path(gettempdir()) / "studion-ai-audio-cache-test"),
+        audio_download_timeout_seconds=10.0,
+        audio_download_connect_timeout_seconds=2.0,
     )
     monkeypatch.setattr(
         "app.services.workflow_jobs.get_settings",
@@ -480,6 +484,7 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
     assert result["sibilance_fix_log_id"] is not None
     assert recipe_artifact is not None
     assert recipe_artifact.payload["issueType"] == "sibilance"
+    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
     assert log_artifact is not None
     assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
 
@@ -580,6 +585,7 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
     assert result["sibilance_fix_applied"] is True
     assert recipe_artifact is not None
     assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
+    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
 
 
 def test_worker_rejects_plan_resume_from_completed_phase(
@@ -861,6 +867,35 @@ def test_start_api_persists_snapshot_only_in_snapshot_store(
     assert "master_audio_object_key" not in stored.state_snapshot
 
 
+def test_start_api_returns_not_found_when_be_job_row_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = get_workflow_job_store()
+
+    def _raise_missing_row(state: dict) -> None:
+        raise KeyError(f"Workflow job does not exist: {state['job_id']}")
+
+    monkeypatch.setattr(store, "create_pending_job", _raise_missing_row)
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/v1/internal/workflow/jobs/start",
+        json={
+            "job_id": 20031,
+            "project_id": 30031,
+            "project_snapshot": build_project_snapshot(track_ids=[5, 6]),
+            "issue_types": ["band_overlap"],
+        },
+    )
+
+    assert response.status_code == 404
+    assert "Workflow job does not exist: 20031" in response.json()["detail"]
+
+
 def test_resume_api_infers_dispatch_type_from_waiting_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -903,6 +938,102 @@ def test_resume_api_infers_dispatch_type_from_waiting_phase(
     assert len(queued_messages) == 2
     assert queued_messages[-1].selected_region_id == plan_input["selected_region_id"]
     assert queued_messages[-1].preserve_clip_id == plan_input["preserve_clip_id"]
+
+
+def test_feedback_api_uses_path_job_id_for_resume_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queued_messages: list[WorkflowDispatchMessage] = []
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: queued_messages.append(message),
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20026,
+            project_id=30026,
+            project_snapshot=build_project_snapshot(track_ids=[13, 14]),
+            issue_types=["band_overlap"],
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20026,
+            project_id=30026,
+            dispatch_type="start",
+        )
+    )
+    stored = get_workflow_job_store().get_job(20026)
+    assert stored is not None
+    plan_input = build_plan_input(stored.state_snapshot)
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/v1/internal/workflow/jobs/20026/feedback",
+        json={
+            "project_id": 30026,
+            "user_decision": "RESUME",
+            **plan_input,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["job"]["dispatch_type"] == "resume_plan_input"
+    assert queued_messages[-1].job_id == 20026
+    assert queued_messages[-1].user_decision == "RESUME"
+
+
+def test_feedback_api_records_confirm_decision_in_status_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=20027,
+            project_id=30027,
+            project_snapshot=build_project_snapshot(track_ids=[15, 16]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20027,
+            project_id=30027,
+            dispatch_type="start",
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20027,
+            project_id=30027,
+            dispatch_type="resume_plan_input",
+            user_decision="RESUME",
+            **build_plan_input(waiting),
+        )
+    )
+    client = TestClient(create_app())
+
+    feedback_response = client.post(
+        "/api/v1/internal/workflow/jobs/20027/feedback",
+        json={
+            "project_id": 30027,
+            "user_decision": "CONFIRM",
+            "user_feedback_message": "preview accepted",
+        },
+    )
+
+    assert feedback_response.status_code == 200
+    assert feedback_response.json()["job"]["dispatch_type"] == "confirm"
+
+    status_response = client.get("/api/v1/internal/workflow/jobs/20027")
+
+    assert status_response.status_code == 200
+    feedback_event = status_response.json()["projections"]["feedback_event"]
+    assert feedback_event["payload"]["decision"] == "CONFIRM"
+    assert feedback_event["payload"]["user_feedback_message"] == "preview accepted"
 
 
 def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1206,6 +1337,88 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
     assert restored.state_snapshot["analysis_regions"][0]["id"] == 1
     assert restored.state_snapshot["plan_payload"]["summary"] == "summary"
     assert restored.state_snapshot["plan_revision_notes"] == ["validator note"]
+
+
+def test_mysql_workflow_job_store_create_pending_job_updates_existing_row() -> None:
+    class _FakeResult:
+        rowcount = 1
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.statement = None
+            self.params = None
+
+        def execute(self, statement, params):  # noqa: ANN001
+            self.statement = str(statement)
+            self.params = params
+            return _FakeResult()
+
+    class _FakeBegin:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def __enter__(self) -> _FakeConnection:
+            return self._connection
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    class _FakeEngine:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def begin(self) -> _FakeBegin:
+            return _FakeBegin(self._connection)
+
+    connection = _FakeConnection()
+    store = MySQLWorkflowJobStore.__new__(MySQLWorkflowJobStore)
+    store._engine = _FakeEngine(connection)
+    store._ensure_schema = lambda: None
+
+    state = build_workflow_initial_state(job_id=21001, project_id=31001)
+
+    record = store.create_pending_job(state)
+
+    assert record.id == 21001
+    assert connection.statement is not None
+    assert "UPDATE ai_analysis_job" in connection.statement
+    assert "INSERT INTO ai_analysis_job" not in connection.statement
+    assert connection.params["id"] == 21001
+
+
+def test_mysql_workflow_job_store_create_pending_job_fails_when_row_missing() -> None:
+    class _FakeResult:
+        rowcount = 0
+
+    class _FakeConnection:
+        def execute(self, statement, params):  # noqa: ANN001
+            return _FakeResult()
+
+    class _FakeBegin:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def __enter__(self) -> _FakeConnection:
+            return self._connection
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    class _FakeEngine:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def begin(self) -> _FakeBegin:
+            return _FakeBegin(self._connection)
+
+    store = MySQLWorkflowJobStore.__new__(MySQLWorkflowJobStore)
+    store._engine = _FakeEngine(_FakeConnection())
+    store._ensure_schema = lambda: None
+
+    with pytest.raises(KeyError, match="Workflow job does not exist: 21002"):
+        store.create_pending_job(
+            build_workflow_initial_state(job_id=21002, project_id=31002)
+        )
 
 
 def test_workflow_start_payload_defaults_include_clipping() -> None:

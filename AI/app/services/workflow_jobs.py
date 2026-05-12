@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from json import dumps, loads
 from threading import RLock
 from typing import Protocol
@@ -8,10 +9,8 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import IntegrityError
-
 from app.core.config import get_settings
-from app.graph.state import WorkflowDispatchType, WorkflowState
+from app.graph.state import WorkflowDispatchType, WorkflowState, WorkflowUserDecision
 from app.services.workflow_artifacts import (
     WorkflowArtifactDocument,
     get_workflow_artifact_store,
@@ -28,6 +27,7 @@ class WorkflowDispatchMessage(BaseModel):
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
+    user_decision: WorkflowUserDecision | None = None
 
 
 class WorkflowJobRecord(BaseModel):
@@ -37,7 +37,7 @@ class WorkflowJobRecord(BaseModel):
     phase: str
     current_node: str | None = None
     progress: int = 0
-    langgraph_thread_id: str
+    langgraph_thread_id: str | None = None
     timeline_snapshot_id: str | None = None
     requested_by: int | None = None
     started_at: str | None = None
@@ -77,6 +77,8 @@ COMPACT_STATE_KEYS = {
     "selected_region_id",
     "preserve_clip_id",
     "user_feedback_message",
+    "user_decision",
+    "user_feedback_recorded_at",
     "clip_feature_artifact_id",
     "vocal_detected",
     "clap_required",
@@ -210,50 +212,9 @@ class MySQLWorkflowJobStore:
     def create_pending_job(self, state: WorkflowState) -> WorkflowJobRecord:
         self._ensure_schema()
         record = _build_record(state)
-        try:
-            with self._engine.begin() as conn:
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO ai_analysis_job (
-                            id,
-                            project_id,
-                            status,
-                            phase,
-                            current_node,
-                            progress,
-                            langgraph_thread_id,
-                            timeline_snapshot_id,
-                            requested_by,
-                            started_at,
-                            completed_at,
-                            error_code,
-                            error_message,
-                            state_artifact_id,
-                            state_json
-                        ) VALUES (
-                            :id,
-                            :project_id,
-                            :status,
-                            :phase,
-                            :current_node,
-                            :progress,
-                            :langgraph_thread_id,
-                            :timeline_snapshot_id,
-                            :requested_by,
-                            :started_at,
-                            :completed_at,
-                            :error_code,
-                            :error_message,
-                            :state_artifact_id,
-                            :state_json
-                        )
-                        """
-                    ),
-                    _record_params(record),
-                )
-        except IntegrityError as exc:
-            raise ValueError(f"Workflow job already exists: {state['job_id']}") from exc
+        updated = self._update_job_record(record)
+        if updated == 0:
+            raise KeyError(f"Workflow job does not exist: {state['job_id']}")
         return record
 
     def get_job(self, job_id: int) -> WorkflowJobRecord | None:
@@ -291,6 +252,12 @@ class MySQLWorkflowJobStore:
     def save_graph_state(self, state: WorkflowState) -> WorkflowJobRecord:
         self._ensure_schema()
         record = _build_record(state)
+        updated = self._update_job_record(record)
+        if updated == 0:
+            raise KeyError(f"Workflow job does not exist: {state['job_id']}")
+        return record
+
+    def _update_job_record(self, record: WorkflowJobRecord) -> int:
         with self._engine.begin() as conn:
             result = conn.execute(
                 text(
@@ -316,9 +283,7 @@ class MySQLWorkflowJobStore:
                 ),
                 _record_params(record),
             )
-        if result.rowcount == 0:
-            raise KeyError(f"Workflow job does not exist: {state['job_id']}")
-        return record
+        return result.rowcount
 
     def _ensure_schema(self) -> None:
         if self._schema_ready:
@@ -451,16 +416,26 @@ def _row_to_record(row: dict) -> WorkflowJobRecord:
         phase=row["phase"],
         current_node=row.get("current_node"),
         progress=int(row.get("progress", 0)),
-        langgraph_thread_id=row["langgraph_thread_id"],
+        langgraph_thread_id=row.get("langgraph_thread_id") or f"lg-thread:{row['id']}",
         timeline_snapshot_id=row.get("timeline_snapshot_id"),
         requested_by=row.get("requested_by"),
-        started_at=row.get("started_at"),
-        completed_at=row.get("completed_at"),
+        started_at=_normalize_datetime_value(row.get("started_at")),
+        completed_at=_normalize_datetime_value(row.get("completed_at")),
         error_code=row.get("error_code"),
         error_message=row.get("error_message"),
         state_artifact_id=state_artifact_id,
         state_snapshot=state_snapshot,
     )
+
+
+def _normalize_datetime_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _sanitize_state_snapshot(state: WorkflowState) -> tuple[dict, str | None]:

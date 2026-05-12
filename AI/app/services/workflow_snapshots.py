@@ -26,6 +26,7 @@ class ProjectClip(BaseModel):
     audio_metadata_id: int = Field(gt=0)
     audio_start_ms: int = Field(default=0, ge=0)
     audio_duration_ms: int | None = Field(default=None, gt=0)
+    audio_url: str | None = None
 
     @model_validator(mode="after")
     def validate_range(self) -> ProjectClip:
@@ -219,12 +220,14 @@ def _build_bar_mapping(
 
 def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, object | None]]:
     audio_metadata_store = get_workflow_audio_metadata_store()
-    audio_metadata_ids = [clip.audio_metadata_id for clip in snapshot.clips]
+    audio_metadata_ids = [
+        clip.audio_metadata_id for clip in snapshot.clips if not clip.audio_url
+    ]
     audio_metadata_map = (
         audio_metadata_store.get_by_ids(
             [int(audio_metadata_id) for audio_metadata_id in audio_metadata_ids]
         )
-        if audio_metadata_store is not None
+        if audio_metadata_store is not None and audio_metadata_ids
         else {}
     )
     return [
@@ -234,6 +237,7 @@ def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, object | None
             "start_ms": clip.start_ms,
             "end_ms": clip.end_ms,
             "audio_metadata_id": clip.audio_metadata_id,
+            "audio_url": clip.audio_url,
             "object_key": (
                 audio_metadata_map[int(clip.audio_metadata_id)].object_key
                 if int(clip.audio_metadata_id) in audio_metadata_map

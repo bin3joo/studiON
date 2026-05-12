@@ -2,45 +2,18 @@ package com.salmon.studion.domain.clip.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.salmon.studion.domain.clip.dto.ClipState;
-import com.salmon.studion.domain.clip.dto.request.ClipCopyRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipCutRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipPasteRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipLockRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipMoveRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipDeleteRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipResizeRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipDuplicateRequest;
-import com.salmon.studion.domain.clip.dto.request.ClipSplitRequest;
-import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipCutResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipPasteResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipDeleteResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipDuplicateResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipLockResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipResizeResponse;
-import com.salmon.studion.domain.clip.dto.response.ClipSplitResponse;
 import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
 import com.salmon.studion.domain.audio.service.AudioService;
-import com.salmon.studion.domain.clip.dto.request.ClipCreateRequest;
-import com.salmon.studion.domain.clip.dto.response.ClipCreateResponse;
-import com.salmon.studion.domain.clip.entity.Clip;
-import com.salmon.studion.domain.clip.entity.ClipCreateEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipDeleteEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipDuplicateEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipLockEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipMoveEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipPasteEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipResizeEventDocument;
-import com.salmon.studion.domain.clip.entity.ClipSplitEventDocument;
+import com.salmon.studion.domain.clip.dto.ClipState;
+import com.salmon.studion.domain.clip.dto.request.*;
+import com.salmon.studion.domain.clip.dto.response.*;
+import com.salmon.studion.domain.clip.entity.*;
 import com.salmon.studion.domain.clip.repository.ClipEventRepository;
 import com.salmon.studion.domain.clip.repository.ClipRepository;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
-import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.repository.TrackRepository;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -52,6 +25,7 @@ import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -65,7 +39,7 @@ public class ClipService {
     private static final String CLIP_LOCK_KEY = "project:%d:clip:%d:lock";
     private static final String CLIP_EVENT_SEQ_KEY = "project:%d:clip:event:seq";
     private static final String CLIP_STATE_KEY = "project:%d:clips";
-    private static final String CLIP_ID_SEQ_KEY = "project:%d:clip:id_seq";
+    private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
     private static final String CLIP_CLIPBOARD_KEY = "project:%d:user:%d:clipboard";
     private static final String DELETED_CLIPS_KEY = "project:%d:deleted_clips";
 
@@ -213,6 +187,8 @@ public class ClipService {
 
         Project project = projectService.getProjectOrThrow(request.getProjectId());
 
+        validateTrackInProject(request.getTrackId(), request.getProjectId());
+
         AudioMetadata audioMetadata = audioService.createAudioMetadata(
                 AudioMetadataCreateRequest.builder()
                         .objectKey(request.getObjectKey())
@@ -229,7 +205,7 @@ public class ClipService {
                 / project.getTimeSigNumerator();
 
         Integer clipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         ClipState state = ClipState.builder()
                 .clipId(clipId)
@@ -285,6 +261,8 @@ public class ClipService {
         request.validate();
 
         projectService.getProjectOrThrow(request.getProjectId());
+
+        validateTrackInProject(request.getTargetTrackId(), request.getProjectId());
 
         String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
         String currentLocker = redisTemplate.opsForValue().get(lockKey);
@@ -514,7 +492,7 @@ public class ClipService {
         }
 
         Integer newClipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         double msPerBar = (double) original.getAudioDurationMs() / original.getDuration();
 
@@ -653,6 +631,8 @@ public class ClipService {
 
         projectService.getProjectOrThrow(request.getProjectId());
 
+        validateTrackInProject(request.getTargetTrackId(), request.getProjectId());
+
         String clipboardKey = String.format(CLIP_CLIPBOARD_KEY, request.getProjectId(), userId);
         String clipboardJson = redisTemplate.opsForValue().get(clipboardKey);
         if (clipboardJson == null) {
@@ -667,7 +647,7 @@ public class ClipService {
         }
 
         Integer newClipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         ClipState newClip = ClipState.builder()
                 .clipId(newClipId)
@@ -731,7 +711,7 @@ public class ClipService {
         Double targetStartBar = original.getStart() + original.getDuration();
 
         Integer newClipId = redisTemplate.opsForValue()
-                .increment(String.format(CLIP_ID_SEQ_KEY, request.getProjectId())).intValue();
+                .increment(CLIP_ID_SEQ_KEY).intValue();
 
         ClipState newClip = ClipState.builder()
                 .clipId(newClipId)
@@ -830,4 +810,101 @@ public class ClipService {
         }
     }
 
+    // Mysql에서 삭제 예정인 clip 삭제하는 메서드
+    public void deleteRemovedClipsFromMysql(Integer projectId) {
+        String deletedKey = String.format(DELETED_CLIPS_KEY, projectId);
+        Set<String> deletedIdStrs = redisTemplate.opsForSet().members(deletedKey);
+        if (deletedIdStrs == null || deletedIdStrs.isEmpty()) {
+            return;
+        }
+        List<Integer> deletedIds = deletedIdStrs.stream()
+                .map(Integer::parseInt)
+                .toList();
+        clipRepository.deleteAllById(deletedIds);
+    }
+
+    // Redis의 deleted_clips 키 삭제 (DB 커밋 성공 후)
+    public void clearDeletedClipKeys(Integer projectId) {
+        redisTemplate.delete(String.format(DELETED_CLIPS_KEY, projectId));
+    }
+
+    public void upsertClipsFromRedis(Integer projectId) {
+        String clipKey = String.format(CLIP_STATE_KEY, projectId);
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(clipKey);
+        if (entries.isEmpty()) {
+            return;
+        }
+
+        List<ClipState> redisClips = entries.values().stream()
+                .map(v -> parseClipState((String) v))
+                .toList();
+
+        Map<Integer, Clip> rdbClipMap = clipRepository.findAllByProjectId(projectId).stream()
+                .collect(Collectors.toMap(Clip::getId, c -> c));
+
+        List<Clip> toSave = redisClips.stream()
+                .map(state -> {
+                    Clip existing = rdbClipMap.get(state.getClipId());
+                    if (existing != null) {
+                        existing.update(
+                                trackRepository.getReferenceById(state.getTrackId()),
+                                state.getStart(),
+                                state.getDuration(),
+                                state.getAudioStartMs(),
+                                state.getAudioDurationMs()
+                        );
+                        return existing;
+                    }
+                    return Clip.create(
+                            state.getClipId(),
+                            trackRepository.getReferenceById(state.getTrackId()),
+                            audioMetadataRepository.getReferenceById(state.getAudioMetadataId()),
+                            state.getColor(),
+                            state.getStart(),
+                            state.getDuration(),
+                            state.getAudioStartMs(),
+                            state.getAudioDurationMs()
+                    );
+                })
+                .toList();
+
+        clipRepository.saveAll(toSave);
+    }
+
+    public void deleteClipStatesByTrack(Integer projectId, Integer trackId) {
+        String clipHashKey = String.format(CLIP_STATE_KEY, projectId);
+        String deletedSetKey = String.format(DELETED_CLIPS_KEY, projectId);
+
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(clipHashKey);
+        if (entries.isEmpty()) return;
+
+        List<Object> keysToDelete = new ArrayList<>();
+        List<String> idsToAdd = new ArrayList<>();
+
+        for (Map.Entry<Object, Object> entry : entries.entrySet()) {
+            ClipState state = parseClipState((String) entry.getValue());
+            if (state.getTrackId().equals(trackId)) {
+                keysToDelete.add(entry.getKey());
+                idsToAdd.add(String.valueOf(state.getClipId()));
+            }
+        }
+
+        if (!keysToDelete.isEmpty()) {
+            redisTemplate.opsForHash().delete(clipHashKey, keysToDelete.toArray());
+            redisTemplate.opsForSet().add(deletedSetKey, idsToAdd.toArray(new String[0]));
+        }
+    }
+
+    public void deleteClipsByTrackFromRdb(Integer trackId) {
+        try {
+            clipRepository.deleteAllByTrackId(trackId);
+        } catch (Exception e) {
+            log.error("[RDB 클립 삭제 실패]: trackId={}", trackId, e);
+        }
+    }
+
+    private void validateTrackInProject(Integer trackId, Integer projectId) {
+        trackRepository.findByIdAndProject_Id(trackId, projectId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+    }
 }

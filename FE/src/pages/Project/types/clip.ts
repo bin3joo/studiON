@@ -23,7 +23,6 @@ export interface ClipUIState extends ClipDto {
     isSelected?: boolean;
     isDragging?: boolean;
     isLocked?: boolean;
-    eq?: ClipEqState
 }
 
 //EQ
@@ -37,7 +36,7 @@ export type EqSourceTypeCode = 1 | 2 | 3
 // 2 = USER_MANUAL
 // 3 = SYSTEM
 
-export interface ClipEqBandState {
+export interface TrackEqBandState {
   id?: number
   bandOrder: number
   eqTypeCode: EqTypeCode
@@ -51,6 +50,7 @@ export interface ClipEqBandState {
   appliedSuggestionId?: number | null
 }
 
-export interface ClipEqState {
-  bands: ClipEqBandState[]
+export interface TrackEqState {
+  bands: TrackEqBandState[]
 }
+

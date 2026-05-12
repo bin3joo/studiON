@@ -1,25 +1,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
-import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus } from 'lucide-vue-next';
+import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus } from 'lucide-vue-next';
 import * as Tone from 'tone';
 
 const trackStore = useTrackStore();
 
-// 1. 마디(Bar)와 박자(Beat) 변환 로직
-const formattedPosition = computed(() => {
-  const pos = trackStore.playheadPosition;
-  const numerator = trackStore.projectInfo.timeSigNumerator || 4;
-  
-  const bar = Math.floor(pos) + 1; 
-  const beat = Math.floor((pos % 1) * numerator) + 1;
-  
-  return {
-    bar: String(bar).padStart(2, '0'),
-    beat: beat,
-    total: String(trackStore.projectInfo.totalBarCount).padStart(2, '0')
-  };
-});
+// 1. 마디(Bar)와 박자(Beat) 변환 로직 (반응성 제거 - DOM 직접 업데이트)
+const playheadBar = ref('01');
+const playheadBeat = ref('1');
+const totalBars = computed(() => String(trackStore.projectInfo.totalBarCount).padStart(2, '0'));
 
 // 2. 키(Key) 관련 상태 및 배열
 const isKeyPickerOpen = ref(false);
@@ -78,25 +68,23 @@ const emit = defineEmits<{
     <div class="flex items-center">
       <!--tabular-nums : 고정폭 숫자표시로 숫자바뀔떄 UI 흔들림을 방지 drop-shadow : 숫자에 네온 효과-->
       <div 
-        :aria-label="`현재 재생 위치: ${formattedPosition.bar}마디 ${formattedPosition.beat}박자, 전체 ${formattedPosition.total}마디`"
+        id="playhead-position-display"
+        :aria-label="`현재 재생 위치: ${playheadBar}마디 ${playheadBeat}박자, 전체 ${totalBars}마디`"
         class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-3 font-mono text-sm"
       >
         <!-- 마디 정보 -->
         <span class="text-[10px] uppercase tracking-wider text-muted-foreground" aria-hidden="true">마디</span>
         <span class="tabular-nums text-primary drop-shadow-[0_0_6px_hsl(var(--primary)/0.6)]">
-          {{ formattedPosition.bar }}<span class="text-muted-foreground">.</span>{{ formattedPosition.beat }}
+          <span id="playhead-bar-text">{{ playheadBar }}</span><span class="text-muted-foreground">.</span><span id="playhead-beat-text">{{ playheadBeat }}</span>
         </span>
         <span class="text-muted-foreground" aria-hidden="true">/</span>
-        <span class="tabular-nums text-muted-foreground">{{ formattedPosition.total }}</span>
+        <span class="tabular-nums text-muted-foreground">{{ totalBars }}</span>
       </div>
 
     </div>
 
     <!-- 단축키 도구 모음 (타임라인 1에 맞춤) -->
     <div class="absolute left-[224px] flex items-center gap-1" role="group" aria-label="클립 및 트랙 도구">
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="트랙 추가 (Shift + T)" @click="emit('action-add-track')">
-        <ListPlus class="h-4 w-4" />
-      </button>
       <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복사 (Ctrl/Cmd + C)" @click="emit('action-copy')">
         <Copy class="h-4 w-4" />
       </button>
@@ -111,6 +99,18 @@ const emit = defineEmits<{
       </button>
       <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복제 (Ctrl/Cmd + D)" @click="emit('action-duplicate')">
         <CopyPlus class="h-4 w-4" />
+      </button>
+      <button 
+        :class="[
+          'inline-flex h-8 w-8 items-center justify-center rounded transition',
+          trackStore.isCommentMode 
+            ? 'bg-primary/20 text-primary border border-primary/50 shadow-[0_0_8px_hsl(var(--primary)/0.4)]' 
+            : 'text-muted-foreground hover:bg-white/10 hover:text-white'
+        ]"
+        title="코멘트 모드 (C)" 
+        @click="trackStore.toggleCommentMode()"
+      >
+        <MessageSquarePlus class="h-4 w-4" />
       </button>
       <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-red-400" title="삭제 (Del/Backspace)" @click="emit('action-delete')">
         <Trash2 class="h-4 w-4" />

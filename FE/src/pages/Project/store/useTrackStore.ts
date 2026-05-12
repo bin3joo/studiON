@@ -4,7 +4,7 @@ import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
 import { ref, computed, watch } from 'vue';
 //트랙과 클립의 타입
-import type { TrackUIState, ClipUIState, ClipEqState, ClipEqBandState, } from '../types';
+import type { TrackUIState, ClipUIState, TrackEqState, TrackEqBandState, } from '../types';
 //음원 처리를 위한 lib
 import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
@@ -29,24 +29,103 @@ export const useTrackStore = defineStore('track', () => {
     const pendingDuplicateOriginalClipIds = new Set<number>(); // 내가 복제한 클립의 원본 ID 목록 (백엔드 강제 락 해제용)
     const cutClipsMap = new Map<number, ClipUIState>(); // 다른 사용자가 잘라내기 한 클립 임시 보관소 (붙여넣기 수신용)
 
-    type ClipEqNode = {
-    bandOrder: number
-    filter: Tone.Filter
+    type TrackEqNode = {
+        bandOrder: number
+        filter: Tone.Filter
     }
 
-    const clipEqNodes = new Map<number, ClipEqNode[]>()
-    const clipAnalyzers = new Map<number, Tone.FFT>()
+    const trackEqNodes = new Map<number, TrackEqNode[]>()
+    const trackAnalyzers = new Map<number, Tone.FFT>()
 
     const MAX_EQ_BANDS = 5
 
-    const createDefaultClipEq = (): ClipEqState => ({
-    bands: [],
+    const createDefaultTrackEq = (): TrackEqState => ({
+        bands: [],
     })
+
+    // [최적화] 전역 AudioBuffer 캐시: URL 당 한 번만 fetch+decode 하여 재생기(Tone.Player)와 파형(WaveformWebGL) 모두 공유
+    // 키: cdnUrl 문자열, 값: 디코딩 완료된 AudioBuffer
+    const audioBufferCache = new Map<string, AudioBuffer>();
+    // 진행 중인 디코딩 Promise를 보관하여 동시에 같은 URL을 여러 번 디코딩하는 것을 방지
+    const audioBufferPending = new Map<string, Promise<AudioBuffer>>();
+
+    // URL에 대한 AudioBuffer를 한 번만 디코딩하여 캐시에 저장하고 반환하는 함수
+    const fetchAndCacheAudioBuffer = async (url: string): Promise<AudioBuffer> => {
+        // 이미 캐시에 있으면 즉시 반환
+        const cached = audioBufferCache.get(url);
+        if (cached) return cached;
+
+        // 다른 곳에서 이미 디코딩 중이면 같은 Promise를 공유 (중복 요청 방지)
+        const pending = audioBufferPending.get(url);
+        if (pending) return pending;
+
+        // 최초 요청: fetch → decode → 캐시 저장
+        const promise = (async () => {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioCtx = Tone.getContext().rawContext as AudioContext;
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            // [최적화] Web Audio API 버퍼 할당 병목(JIT Compile Freeze) 사전 제거
+            // 거대한 AudioBuffer가 처음 할당될 때 브라우저가 멈추는 현상을 막기 위해
+            // 오디오 다운로드 직후 백그라운드에서 한 번 빈 재생을 강제하여 캐싱을 유도합니다.
+            try {
+                const warmupSource = audioCtx.createBufferSource();
+                warmupSource.buffer = audioBuffer;
+                const dummyGain = audioCtx.createGain();
+                dummyGain.gain.value = 0; // 무음 처리
+                warmupSource.connect(dummyGain);
+                dummyGain.connect(audioCtx.destination);
+                
+                warmupSource.start(0, 0, 0.001);
+                
+                // 웜업 노드가 JIT 컴파일을 충분히 완료할 수 있도록 메모리 해제를 늦춥니다
+                setTimeout(() => {
+                    try {
+                        warmupSource.disconnect();
+                        dummyGain.disconnect();
+                    } catch(e) { /* ignore */ }
+                }, 5000);
+            } catch (e) {
+                // 무시
+            }
+            
+            audioBufferCache.set(url, audioBuffer);
+            audioBufferPending.delete(url);
+            return audioBuffer;
+        })();
+
+        audioBufferPending.set(url, promise);
+        return promise;
+    };
+
+    // 외부(WaveformWebGL 등)에서 캐시에 접근할 수 있도록 getter 함수 제공
+    const getAudioBufferCache = () => audioBufferCache;
 
     // 재생바 자동 스크롤용 타임라인 컨테이너 DOM 참조 (ProjectPage에서 전달받음)
     let timelineContainer: HTMLElement | null = null;
+    let cachedScrollLeft = 0;
+    let cachedClientWidth = 0;
+
     const setTimelineContainer = (el: HTMLElement | null) => {
+        if (timelineContainer) {
+            timelineContainer.removeEventListener('scroll', handleScroll);
+        }
         timelineContainer = el;
+        if (el) {
+            cachedScrollLeft = el.scrollLeft;
+            cachedClientWidth = el.clientWidth;
+            el.addEventListener('scroll', handleScroll, { passive: true });
+        }
+    };
+
+    const handleScroll = () => {
+        // [최적화] 재생 중일 때는 자동 스크롤(updatePlayheadLoop)이 cachedScrollLeft를 관리하므로,
+        // 여기서 scrollLeft를 동기적으로 읽으면 심각한 Layout Thrashing과 스크롤 Jitter(경합)가 발생합니다.
+        // 따라서 정지 상태일 때만 사용자의 수동 스크롤 위치를 기록합니다.
+        if (timelineContainer && !isPlaying.value) {
+            cachedScrollLeft = timelineContainer.scrollLeft;
+        }
     };
 
     //[1-1] 백엔드 연동 데이터
@@ -69,6 +148,8 @@ export const useTrackStore = defineStore('track', () => {
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
     Tone.getTransport().bpm.value = bpm.value;
+    // 메인 스레드 블로킹 시 이벤트 스킵 방지를 위한 스케줄링 여유시간 상향 조정
+    Tone.getContext().lookAhead = 0.2;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
 
     // 마스터 트랙의 믹서 채널 생성 (모노 다운믹스 절대 방지: 강제 스테레오)
@@ -124,10 +205,16 @@ export const useTrackStore = defineStore('track', () => {
         trackList.value.forEach(t => t.isSelected = false);
     };
     //1마디당 걸리는 시간 계산
-    const secondsPerBar = computed(() => (4 * 60) / bpm.value); // 4/4박자 기준 1마디는 4분음표 4개로 구성 => (60초 * 4) / bpm
+    const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
+
+    // ==========================================
+    // 가로 가상 스크롤 (수평 뷰포트) 상태
+    // ==========================================
+    const viewportLeft = ref(0);
+    const viewportRight = ref(2000); // 초기 렌더링을 위해 기본값 제공
 
     //복사/잘라내기 한 클립 데이터를 보관할 클립보드
     const clipboardClip = ref<ClipUIState | null>(null);
@@ -180,134 +267,172 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     function clampNumber(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value))
-}
+        return Math.max(min, Math.min(max, value))
+    }
 
-function clampFrequency(frequencyHz: number) {
-  return Math.round(clampNumber(frequencyHz, 20, 20000))
-}
+    function clampFrequency(frequencyHz: number) {
+        return Math.round(clampNumber(frequencyHz, 20, 20000))
+    }
 
-function clampGain(gainDeltaDb: number) {
-  return Math.round(clampNumber(gainDeltaDb, -12, 12) * 10) / 10
-}
+    function clampGain(gainDeltaDb: number) {
+        return Math.round(clampNumber(gainDeltaDb, -12, 12) * 10) / 10
+    }
 
-function clampQ(q: number) {
-  return Math.round(clampNumber(q, 0.1, 10) * 100) / 100
-}
+    function clampQ(q: number) {
+        return Math.round(clampNumber(q, 0.1, 10) * 100) / 100
+    }
 
-function getClipEq(clip: ClipUIState): ClipEqState {
-  return {
-    bands: clip.eq?.bands ?? [],
-  }
-}
+    function getTrackEq(track: TrackUIState): TrackEqState {
+        return {
+            bands: track.eq?.bands ?? [],
+        }
+    }
 
-function findClip(trackId: number, clipId: number) {
-  const track = trackList.value.find(track => track.trackId === trackId)
-  if (!track) return null
+    function createToneFilterFromBand(band: TrackEqBandState) {
+        const type =
+            band.eqTypeCode === 2
+                ? 'lowshelf'
+                : band.eqTypeCode === 3
+                    ? 'highshelf'
+                    : 'peaking'
 
-  return track.clips.find(clip => clip.clipId === clipId) ?? null
-}
+        const filter = new Tone.Filter({
+            type,
+            frequency: band.frequencyHz,
+            Q: band.q,
+            gain: band.gainDeltaDb,
+        })
 
-function createToneFilterFromBand(band: ClipEqBandState) {
-  const type =
-    band.eqTypeCode === 2
-      ? 'lowshelf'
-      : band.eqTypeCode === 3
-        ? 'highshelf'
-        : 'peaking'
+        filter.channelCount = 2
+        filter.channelCountMode = 'explicit'
 
-  const filter = new Tone.Filter({
-    type,
-    frequency: band.frequencyHz,
-    Q: band.q,
-    gain: band.gainDeltaDb,
-  })
+        return filter
+    }
 
-  filter.channelCount = 2
-  filter.channelCountMode = 'explicit'
+    function disposeTrackEqNodes(trackId: number) {
+        const nodes = trackEqNodes.get(trackId)
 
-  return filter
-}
+        if (!nodes) return
 
-function disposeClipEqNodes(clipId: number) {
-  const nodes = clipEqNodes.get(clipId)
+        nodes.forEach(node => {
+            node.filter.dispose()
+        })
 
-  if (!nodes) return
+        trackEqNodes.delete(trackId)
+    }
 
-  nodes.forEach(node => {
-    node.filter.dispose()
-  })
+    function disposeTrackAnalyzer(trackId: number) {
+        const analyzer = trackAnalyzers.get(trackId)
 
-  clipEqNodes.delete(clipId)
-}
+        if (!analyzer) return
 
-function createClipEqNodes(clip: ClipUIState): ClipEqNode[] {
-  disposeClipEqNodes(clip.clipId)
+        analyzer.dispose()
+        trackAnalyzers.delete(trackId)
+    }
 
-  const eq = getClipEq(clip)
+    function createTrackEqNodes(track: TrackUIState): TrackEqNode[] {
+        disposeTrackEqNodes(track.trackId)
 
-  const nodes = eq.bands.map(band => ({
-    bandOrder: band.bandOrder,
-    filter: createToneFilterFromBand(band),
-  }))
+        const eq = getTrackEq(track)
 
-  clipEqNodes.set(clip.clipId, nodes)
+        const nodes = eq.bands.map(band => ({
+            bandOrder: band.bandOrder,
+            filter: createToneFilterFromBand(band),
+        }))
 
-  return nodes
-}
+        trackEqNodes.set(track.trackId, nodes)
 
-function disposeClipAnalyzer(clipId: number) {
-  const analyzer = clipAnalyzers.get(clipId)
+        return nodes
+    }
 
-  if (!analyzer) return
+    function getTrackInputNode(trackId: number) {
+        const eqNodes = trackEqNodes.get(trackId) ?? []
+        const analyzer = trackAnalyzers.get(trackId)
+        const volume = trackVolumes.get(trackId)
 
-  analyzer.dispose()
-  clipAnalyzers.delete(clipId)
-}
+        if (!volume) return null
 
-function connectPlayerToTrackWithEq(
-  player: Tone.Player,
-  clip: ClipUIState,
-  trackId: number,
-) {
-  const targetVol = trackVolumes.get(trackId)
-  if (!targetVol) return
+        if (eqNodes.length > 0) {
+            return eqNodes[0].filter
+        }
 
-  const eqNodes = createClipEqNodes(clip)
+        if (analyzer) {
+            return analyzer
+        }
 
-  disposeClipAnalyzer(clip.clipId)
+        return volume
+    }
 
-  const analyzer = new Tone.FFT(1024)
-  clipAnalyzers.set(clip.clipId, analyzer)
+    function connectPlayerToTrack(
+        player: Tone.Player,
+        trackId: number,
+    ) {
+        const inputNode = getTrackInputNode(trackId)
 
-  player.disconnect()
+        if (!inputNode) return
 
-  if (eqNodes.length > 0) {
-    player.chain(
-      ...eqNodes.map(node => node.filter),
-      analyzer,
-      targetVol,
-    )
-  }
-  else {
-    player.chain(
-      analyzer,
-      targetVol,
-    )
-  }
-}
+        player.disconnect()
+        player.connect(inputNode)
+    }
 
-function disposeClipAudio(clipId: number) {
-  const player = clipPlayers.get(clipId)
+    function reconnectTrackPlayers(trackId: number) {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track) return
 
-  if (player) {
-    player.unsync().stop().dispose()
-    clipPlayers.delete(clipId)
-  }
+        const inputNode = getTrackInputNode(trackId)
+        if (!inputNode) return
 
-  disposeClipEqNodes(clipId)
-  disposeClipAnalyzer(clipId)
-}
+        track.clips.forEach(clip => {
+            const player = clipPlayers.get(clip.clipId)
+            if (!player) return
+
+            player.disconnect()
+            player.connect(inputNode)
+        })
+    }
+
+    function rebuildTrackEqChain(trackId: number) {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        const volume = trackVolumes.get(trackId)
+
+        if (!track || !volume) return
+
+        disposeTrackEqNodes(trackId)
+        disposeTrackAnalyzer(trackId)
+
+        const eqNodes = createTrackEqNodes(track)
+        const analyzer = new Tone.FFT(2048)
+
+        trackAnalyzers.set(trackId, analyzer)
+
+        if (eqNodes.length > 0) {
+            for (let i = 0; i < eqNodes.length - 1; i += 1) {
+                eqNodes[i].filter.connect(eqNodes[i + 1].filter)
+            }
+
+            eqNodes[eqNodes.length - 1].filter.connect(analyzer)
+            analyzer.connect(volume)
+        }
+        else {
+            analyzer.connect(volume)
+        }
+
+        reconnectTrackPlayers(trackId)
+    }
+
+    function disposeClipAudio(clipId: number) {
+        const player = clipPlayers.get(clipId)
+
+        if (player) {
+            player.unsync().stop().dispose()
+            clipPlayers.delete(clipId)
+        }
+    }
+
+    function disposeTrackAudioChain(trackId: number) {
+        disposeTrackEqNodes(trackId)
+        disposeTrackAnalyzer(trackId)
+    }
 
     // ==========================================
     // 🌐 웹소켓 수신 (Subscribe) 처리부
@@ -316,7 +441,7 @@ function disposeClipAudio(clipId: number) {
 
 
     // --------------------- 트랙 관련 (소켓) ---------------------    
-    socketService.subscribe('TRACK_ADD', (data) => {
+    socketService.subscribePersistent('TRACK_ADD', (data) => {
         // 이미 그려져있으면 무시 (Optimistic UI 중복 방지)
         if (trackList.value.some(t => t.trackId === data.trackId)) return;
 
@@ -332,7 +457,8 @@ function disposeClipAudio(clipId: number) {
             pan: data.pan,
             clips: [],
             height: 100,
-            isSelected: false
+            isSelected: false,
+            eq: createDefaultTrackEq(),
         };
         trackList.value.push(newTrack);
 
@@ -343,17 +469,20 @@ function disposeClipAudio(clipId: number) {
 
         trackVolumes.set(newTrack.trackId, vol);
         trackPanners.set(newTrack.trackId, panner);
+
+        rebuildTrackEqChain(newTrack.trackId);
     });
 
-    socketService.subscribe('TRACK_DELETE', (data) => {
+    socketService.subscribePersistent('TRACK_DELETE', (data) => {
         const index = trackList.value.findIndex(t => t.trackId === data.trackId);
         if (index !== -1) {
             // 🚨 보완: 트랙을 지우기 전에, 트랙 안에 있던 모든 클립의 오디오 메모리를 완전 해제!
             trackList.value[index].clips.forEach(clip => {
-            disposeClipAudio(clip.clipId);
-        });
+                disposeClipAudio(clip.clipId);
+            });
 
-            // 트랙 삭제 및 믹서 노드 해제
+            disposeTrackAudioChain(data.trackId);
+
             trackList.value.splice(index, 1);
             trackVolumes.get(data.trackId)?.dispose(); trackVolumes.delete(data.trackId);
             trackPanners.get(data.trackId)?.dispose(); trackPanners.delete(data.trackId);
@@ -361,22 +490,41 @@ function disposeClipAudio(clipId: number) {
         if (selectedTrackId.value === data.trackId) deselectAll();
     });
 
-    socketService.subscribe('TRACK_RENAME', (data) => {
+    socketService.subscribePersistent('TRACK_REORDER', (data) => {
+        const { trackId, preTrackId, postTrackId } = data;
+        const trackIndex = trackList.value.findIndex(t => t.trackId === trackId);
+        if (trackIndex === -1) return;
+
+        const [track] = trackList.value.splice(trackIndex, 1);
+
+        let newIndex = 0;
+        if (preTrackId) {
+            const preIndex = trackList.value.findIndex(t => t.trackId === preTrackId);
+            if (preIndex !== -1) newIndex = preIndex + 1;
+        } else if (postTrackId) {
+            const postIndex = trackList.value.findIndex(t => t.trackId === postTrackId);
+            if (postIndex !== -1) newIndex = postIndex;
+        }
+
+        trackList.value.splice(newIndex, 0, track);
+    });
+
+    socketService.subscribePersistent('TRACK_RENAME', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) track.name = data.name;
     });
 
-    socketService.subscribe('TRACK_MUTE_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_MUTE_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) { track.isMuted = data.isMuted; syncEffectiveMuteStates(); }
     });
 
-    socketService.subscribe('TRACK_SOLO_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_SOLO_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) { track.isSoloed = data.isSoloed; syncEffectiveMuteStates(); }
     });
 
-    socketService.subscribe('TRACK_VOLUME_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_VOLUME_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) {
             track.volume = data.volume;
@@ -385,7 +533,7 @@ function disposeClipAudio(clipId: number) {
         }
     });
 
-    socketService.subscribe('TRACK_PAN_CHANGE', (data) => {
+    socketService.subscribePersistent('TRACK_PAN_CHANGE', (data) => {
         const track = trackList.value.find(t => t.trackId === data.trackId);
         if (track) {
             track.pan = data.pan;
@@ -395,7 +543,7 @@ function disposeClipAudio(clipId: number) {
     });
 
     // --------------------- 에러 수신 (소켓) ---------------------
-    socketService.subscribe('ERROR', (data: any) => {
+    socketService.subscribePersistent('ERROR', (data: any) => {
         if (data && data.message) {
             alert(data.message);
         } else {
@@ -404,7 +552,7 @@ function disposeClipAudio(clipId: number) {
     });
 
     // --------------------- 클립 관련 (소켓) ---------------------
-    socketService.subscribe('CLIP_LOCK', (data) => {
+    socketService.subscribePersistent('CLIP_LOCK', (data) => {
         // 내가 직접 잠근 클립이면 내 화면에서는 잠금 표시를 하지 않는다 (자기 자신 차단 방지)
         if (myLockedClips.has(data.clipId)) return;
 
@@ -419,7 +567,7 @@ function disposeClipAudio(clipId: number) {
 
     //1.신규 클립 업로드 완료 수신
     // 1. 신규 클립 업로드 완료 수신
-    socketService.subscribe('CLIP_CREATE', async (data) => {
+    socketService.subscribePersistent('CLIP_CREATE', async (data) => {
         // 업로드 중이던 클립이 백엔드에서 생성되어 돌아왔다면 고스트 클립 해제
         if (uploadingTrackId.value === data.trackId) {
             uploadingTrackId.value = null;
@@ -443,7 +591,6 @@ function disposeClipAudio(clipId: number) {
                 cdnUrl: "",
                 durationMs: data.audioDurationMs,
             },
-            eq: createDefaultClipEq(),
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -453,6 +600,17 @@ function disposeClipAudio(clipId: number) {
         // 2. 백그라운드에서 오디오 상세 정보(URL) 조회 API 비동기 호출
         try {
             const audioInfo = await projectApi.getAudioDetail(projectInfo.value.projectId, data.audioMetadataId);
+
+            // [최적화] 업로더 본인이 미리 캐싱해둔 로컬 blobUrl의 AudioBuffer를 CDN URL 키로 이전
+            // → loadClipPlayer와 WaveformWebGL 모두 추가 네트워크 요청 없이 즉시 사용 가능
+            if (data._localBlobUrl && audioBufferCache.has(data._localBlobUrl)) {
+                const localBuffer = audioBufferCache.get(data._localBlobUrl)!;
+                audioBufferCache.set(audioInfo.audioUrl, localBuffer);
+                // 더 이상 필요 없는 blobUrl 키 제거 및 메모리 해제
+                audioBufferCache.delete(data._localBlobUrl);
+                URL.revokeObjectURL(data._localBlobUrl);
+                console.log(`[CLIP_CREATE 최적화] 로컬 AudioBuffer → CDN URL 키로 이전 완료 (네트워크 다운로드 생략)`);
+            }
 
             // 3. Vue 반응성 확보: 배열 안의 실제 반응형 객체를 다시 찾아서 audio를 통째로 교체
             const reactiveClip = track.clips.find(c => c.clipId === data.clipId);
@@ -481,7 +639,7 @@ function disposeClipAudio(clipId: number) {
         }
     });
 
-    socketService.subscribe('CLIP_MOVE', (data) => {
+    socketService.subscribePersistent('CLIP_MOVE', (data) => {
     let targetClip: ClipUIState | null = null;
     let sourceTrack: TrackUIState | null = null;
 
@@ -517,9 +675,8 @@ function disposeClipAudio(clipId: number) {
         const player = clipPlayers.get(data.clipId);
 
         if (player) {
-            connectPlayerToTrackWithEq(
+            connectPlayerToTrack(
                 player,
-                targetClip,
                 data.after.trackId,
             );
         }
@@ -529,7 +686,7 @@ function disposeClipAudio(clipId: number) {
     resyncClip(targetClip.clipId, targetClip.start);
 });
 
-    socketService.subscribe('CLIP_RESIZE', (data) => {
+    socketService.subscribePersistent('CLIP_RESIZE', (data) => {
         for (const t of trackList.value) {
             const clip = t.clips.find(c => c.clipId === data.clipId);
             if (clip) {
@@ -550,7 +707,7 @@ function disposeClipAudio(clipId: number) {
                 }
 
                 // 백엔드와 동일한 공식으로 프론트에서 계산하여 동기화
-                const msPerBar = secondsPerBar.value * 1000;
+                const msPerBar = clip.audioDurationMs / clip.duration;
                 const newAudioStartMs = Math.round(clip.audioStartMs + (afterStart - beforeStart) * msPerBar);
                 const newAudioDurationMs = Math.round(afterDuration * msPerBar);
 
@@ -604,7 +761,7 @@ function disposeClipAudio(clipId: number) {
         }
     };
 
-    socketService.subscribe('CLIP_DELETE', (data) => {
+    socketService.subscribePersistent('CLIP_DELETE', (data) => {
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
             if (index !== -1) {
@@ -615,7 +772,7 @@ function disposeClipAudio(clipId: number) {
         disposeClipAudio(data.clipId);
     });
 
-    socketService.subscribe('CLIP_CUT', (data) => {
+    socketService.subscribePersistent('CLIP_CUT', (data) => {
         // 잘라내기도 화면상 삭제 로직은 동일
         for (const t of trackList.value) {
             const index = t.clips.findIndex(c => c.clipId === data.clipId);
@@ -630,7 +787,7 @@ function disposeClipAudio(clipId: number) {
     });
 
     // 2. 클립 붙여넣기 수신 (가장 중요: sourceClipId를 통한 복제)
-    socketService.subscribe('CLIP_PASTE', (data) => {
+    socketService.subscribePersistent('CLIP_PASTE', (data) => {
         // 백엔드에서 '어떤 클립을 복사했는지(sourceClipId)'를 알려줌!
         let originalClip: ClipUIState | null = null;
         for (const t of trackList.value) {
@@ -659,6 +816,7 @@ function disposeClipAudio(clipId: number) {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.clipId,
             start: data.targetStartBar,
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -686,7 +844,7 @@ function disposeClipAudio(clipId: number) {
     const pendingPasteCount = ref(0);
 
     // 3. 클립 복제 수신
-    socketService.subscribe('CLIP_DUPLICATE', (data) => {
+    socketService.subscribePersistent('CLIP_DUPLICATE', (data) => {
         let originalClip: ClipUIState | null = null;
         for (const t of trackList.value) {
             const found = t.clips.find(c => c.clipId === data.clipId);
@@ -699,6 +857,7 @@ function disposeClipAudio(clipId: number) {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.newClipId,
             start: data.targetStartBar,
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isSelected: false,
             isDragging: false,
             isLocked: false
@@ -724,7 +883,7 @@ function disposeClipAudio(clipId: number) {
         resolveClipOverlap(duplicatedClip, targetTrack, isInitiator);
     });
     // 4. 클립 분할 수신
-    socketService.subscribe('CLIP_SPLIT', async (data) => {
+    socketService.subscribePersistent('CLIP_SPLIT', async (data) => {
         let targetTrack: TrackUIState | null = null;
         let originalClip: ClipUIState | null = null;
 
@@ -732,16 +891,27 @@ function disposeClipAudio(clipId: number) {
             const found = t.clips.find(c => c.clipId === data.clipId);
             if (found) { originalClip = found; targetTrack = t; break; }
         }
+
+        // 분할 응답이 왔으므로 대기 목록에서 제거
+        pendingSplitOriginalClipIds.delete(data.clipId);
+
         if (!originalClip || !targetTrack) return;
+        
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
         const wasPlaying = isPlaying.value;
+        let pausedAtSeconds = 0;
         if (wasPlaying) {
+            pausedAtSeconds = Tone.getTransport().seconds;
             Tone.getTransport().pause();
             isPlaying.value = false;
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
         }
+
         const splitOffsetBars = data.splitBar - originalClip.start;
-        const splitOffsetMs = splitOffsetBars * secondsPerBar.value * 1000;
+        const splitOffsetMs = splitOffsetBars * (originalClip.audioDurationMs / originalClip.duration);
         // 백엔드 명세에 맞춰서 오른쪽 새 클립 생성
+        // 주의: JSON.parse(stringify) 과정에서 audio 객체의 참조 무결성이 깨지거나 값이 유실될 수 있으므로 명시적 얕은 복사본을 할당합니다.
         const rightClip: ClipUIState = {
             ...JSON.parse(JSON.stringify(originalClip)),
             clipId: data.newClipId,
@@ -749,6 +919,7 @@ function disposeClipAudio(clipId: number) {
             duration: data.newClipDuration,
             audioStartMs: originalClip.audioStartMs + splitOffsetMs,
             audioDurationMs: Math.max(0, originalClip.audioDurationMs - splitOffsetMs),
+            audio: originalClip.audio ? { ...originalClip.audio } : undefined,
             isLocked: false,     // 분할로 새로 생긴 클립은 잠금 해제 상태로 초기화
             isDragging: false,
             isSelected: false
@@ -762,16 +933,17 @@ function disposeClipAudio(clipId: number) {
 
         // [원복] 오디오 플레이어 미리 로드
         loadClipPlayer(rightClip, targetTrack.trackId);
+
         // 분할 작업 완료 후 재생 재개
         if (wasPlaying) {
-            const currentOffset = playheadPosition.value * secondsPerBar.value;
-            Tone.getTransport().start("+0.01", currentOffset);
+            Tone.getTransport().start("+0.01", pausedAtSeconds);
             isPlaying.value = true;
             updatePlayheadLoop();
+            scrollAnimationLoop();
         }
     });
     // 5. 클립 복사 및 잘라내기 응답 
-    socketService.subscribe('CLIP_COPY', (data) => {
+    socketService.subscribePersistent('CLIP_COPY', (data) => {
         console.log(`[통신] 백엔드 클립보드에 복사 완료 (clipId: ${data.clipId})`);
     });
 
@@ -785,13 +957,23 @@ function disposeClipAudio(clipId: number) {
         uploadingTrackId.value = trackId;
         uploadingBar.value = startBar;
 
-        // 1. 오디오 파일을 Tone.Player로 임시 로드하여 길이(Duration) 측정
-        const tempUrl = URL.createObjectURL(file);
-        const tempPlayer = new Tone.Player();
-        await tempPlayer.load(tempUrl);
-        const durationMs = Math.round(tempPlayer.buffer.duration * 1000);
-        tempPlayer.dispose();
-        URL.revokeObjectURL(tempUrl);
+        // 1. 로컬 파일을 AudioBuffer로 디코딩 (길이 측정 + 캐시 사전 적재를 한 번에 처리)
+        //    → 기존에는 Tone.Player로 임시 로드 후 dispose했지만, 이제는 AudioBuffer를 캐시에 보관하여
+        //      CLIP_CREATE 수신 시 네트워크 왕복 없이 즉시 재생/파형 표시가 가능합니다.
+        const localBlobUrl = URL.createObjectURL(file);
+        let durationMs: number;
+        try {
+            const localBuffer = await fetchAndCacheAudioBuffer(localBlobUrl);
+            durationMs = Math.round(localBuffer.duration * 1000);
+        } catch (e) {
+            console.error(`[Upload] 로컬 파일 디코딩 실패:`, e);
+            URL.revokeObjectURL(localBlobUrl);
+            uploadingTrackId.value = null;
+            uploadingBar.value = null;
+            return;
+        }
+        // ⚠️ revokeObjectURL은 하지 않습니다. 캐시에 blobUrl 키로 보관되어 있으므로
+        //    CLIP_CREATE에서 CDN URL이 도착하면 그때 blobUrl 캐시를 CDN URL 키로 이전합니다.
 
         // 2. 파일 타입에 따른 MIME 타입 및 포맷팅 설정
         const mimeType = file.type.includes('wav') ? 'WAV' : 'MPEG';
@@ -822,13 +1004,16 @@ function disposeClipAudio(clipId: number) {
                 storedName: uploadTicket.storedName,
                 mimeType: mimeType,
                 sizeBytes: file.size,
-                durationMs: durationMs
+                durationMs: durationMs,
+                // [최적화] 업로더 본인의 CLIP_CREATE 수신부에서 CDN URL 대신 사용할 로컬 blob URL
+                _localBlobUrl: localBlobUrl
             });
 
             console.log(`[Upload] 백엔드로 CLIP_CREATE 발신 완료. 렌더링은 브로드캐스트 수신 후 진행됩니다.`);
             // 프론트엔드 로직 종료 (렌더링은 수신부에서 일괄 처리)
         } catch (error) {
             console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
+            URL.revokeObjectURL(localBlobUrl);
             alert("파일 업로드에 실패했습니다.");
             uploadingTrackId.value = null;
             uploadingBar.value = null;
@@ -949,9 +1134,25 @@ function disposeClipAudio(clipId: number) {
         });
         unlockClip(clip.clipId, trackId);
     };
+    // 서버 응답 대기 중인 클립 ID 목록 (네트워크 지연 시 연속 분할 방지용)
+    const pendingSplitOriginalClipIds = new Set<number>();
+
+    let lastSplitTime = 0;
 
     // 5. 클립 분할 (Split)
     const splitClip = async (clipId: number, trackId: number) => {
+        const now = Date.now();
+        if (now - lastSplitTime < 500) {
+            console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
+            return;
+        }
+        
+        if (pendingSplitOriginalClipIds.has(clipId)) {
+            console.warn("이전 분할 요청이 처리 중입니다. (네트워크 대기)");
+            return;
+        }
+
+        lastSplitTime = now;
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) return;
 
@@ -961,7 +1162,8 @@ function disposeClipAudio(clipId: number) {
 
         const currentBar = playheadPosition.value;
 
-        if (currentBar <= originalClip.start || currentBar >= originalClip.start + originalClip.duration) {
+        const EPSILON = 0.0001; // 부동소수점 오차 방어
+        if (currentBar <= originalClip.start + EPSILON || currentBar >= originalClip.start + originalClip.duration - EPSILON) {
             alert("재생바(Playhead)가 클립 위에 있어야 분할할 수 있습니다.");
             return;
         }
@@ -969,6 +1171,7 @@ function disposeClipAudio(clipId: number) {
         console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clipId, trackId);
+        pendingSplitOriginalClipIds.add(clipId);
         socketService.publish('CLIP_SPLIT', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
@@ -1008,17 +1211,24 @@ function disposeClipAudio(clipId: number) {
     });
 
     // 일반 트랙에 변화가 생길 때마다 마스터 트랙에 실시간 병합!
+    // [최적화] JSON.parse(JSON.stringify())를 제거하고 필요한 속성만 얕은 복사합니다.
+    // 기존 방식은 300개 트랙의 클립을 모두 직렬화→역직렬화하면서 메인 스레드를 수십ms 블로킹했습니다.
     watch(() => trackList.value, (newTrackList) => {
         const mergedClips: ClipUIState[] = [];
 
         newTrackList.forEach(track => {
             track.clips.forEach(clip => {
                 mergedClips.push({
-                    ...JSON.parse(JSON.stringify(clip)),
                     clipId: clip.clipId + 9000000,
+                    start: clip.start,
+                    duration: clip.duration,
+                    audioStartMs: clip.audioStartMs,
+                    audioDurationMs: clip.audioDurationMs,
                     color: '#4b4b4b',
+                    audio: clip.audio ? { ...clip.audio } : undefined as any,
                     isSelected: false,
-                    isDragging: false
+                    isDragging: false,
+                    isLocked: false,
                 });
             });
         });
@@ -1268,10 +1478,12 @@ function disposeClipAudio(clipId: number) {
 
                 isPlaying.value = true;
                 updatePlayheadLoop();
+                scrollAnimationLoop();
             } else {
                 Tone.getTransport().pause();
                 isPlaying.value = false;
                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
                 // 일시정지 시 최종 위치를 반응형 ref에도 확정 (PlayController, TimelineRuler 동기화)
                 playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
             }
@@ -1281,28 +1493,35 @@ function disposeClipAudio(clipId: number) {
     };
 
     // 단일 클립 오디오 플레이어 로딩 함수 (동적 Culling 대신 미리 로드하여 렉 방지)
-    const loadClipPlayer = (clip: ClipUIState, trackId: number) => {
-    if (!clip.audio?.cdnUrl) return;
-    const targetVol = trackVolumes.get(trackId);
-    if (!targetVol) return;
+    // [최적화 & EQ병합] 캐시된 AudioBuffer를 직접 주입하여 중복 네트워크 다운로드+디코딩을 완전 제거하고, EQ 노드 체인 연결
+    const loadClipPlayer = async (clip: ClipUIState, trackId: number) => {
+        if (!clip.audio?.cdnUrl) return;
 
-    if (!clipPlayers.has(clip.clipId)) {
-        const newPlayer = new Tone.Player();
+        if (!clipPlayers.has(clip.clipId)) {
+            try {
+                // 1. 최적화: 캐시에서 AudioBuffer를 가져오거나, 없으면 한 번만 fetch+decode
+                const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
 
-        connectPlayerToTrackWithEq(newPlayer, clip, trackId);
+                // await 후 다른 곳에서 이미 등록했을 수 있으므로 중복 체크
+                if (clipPlayers.has(clip.clipId)) return;
 
-        clipPlayers.set(clip.clipId, newPlayer);
+                // 2. 최적화: 버퍼를 주입하여 Player 생성 (네트워크 다운로드 및 디코딩 X)
+                const newPlayer = new Tone.Player(audioBuffer);
 
-        newPlayer.load(clip.audio.cdnUrl).then(() => {
-            const exactStartTimeSec = clip.start * secondsPerBar.value;
-            const audioOffsetSec = clip.audioStartMs / 1000;
-            newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
-        }).catch(e => {
-            console.error("[Audio Load Error]:", e);
-            disposeClipAudio(clip.clipId);
-        });
-    }
-};
+                // 3. EQ 체인 연결
+                connectPlayerToTrack(newPlayer, trackId);
+
+                clipPlayers.set(clip.clipId, newPlayer);
+
+                const exactStartTimeSec = clip.start * secondsPerBar.value;
+                const audioOffsetSec = clip.audioStartMs / 1000;
+                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
+            } catch (e) {
+                console.error("[Audio Load Error]:", e);
+                disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
+            }
+        }
+    };
 
     // [성능 최적화] 재생바 UI 업데이트 루프
     // Vue 반응성(ref) 대신 DOM을 직접 조작하여 초당 1,300회 이상의 Vue re-render를 원천 차단
@@ -1314,6 +1533,13 @@ function disposeClipAudio(clipId: number) {
         if (!isPlaying.value) {
             const px = newBar * pixelPerBar.value;
             document.documentElement.style.setProperty('--playhead-px', `${px}px`);
+            
+            // updatePlayheadLoop나 stopPlay에서 인라인 transform을 덮어씌웠기 때문에
+            // 여기서도 직접 .playhead-line의 transform을 갱신해 주어야 합니다.
+            const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
+            for (let i = 0; i < playheadEls.length; i++) {
+                playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+            }
 
             // 정지 상태 스크러빙 시 진행 오버레이 갱신
             const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
@@ -1328,48 +1554,120 @@ function disposeClipAudio(clipId: number) {
         }
     });
 
+    let lastFrameTime = performance.now();
+    let loopFrameCount = 0;
+    // [최적화] 스크롤 목표값을 별도 변수에 기록하고, 스크롤 쓰기는 독립 루프에서 처리
+    let pendingScrollLeft = -1;
+    let scrollRAFId = 0;
+
+    // 스크롤 쓰기 전용 독립 루프 (재생바 렌더링 루프와 완전 분리)
+    // scrollLeft = value 호출이 브라우저 Layout Reflow를 강제 트리거하여
+    // 재생바 애니메이션을 30~40ms씩 멈추게 만드는 것을 방지합니다.
+    const scrollAnimationLoop = () => {
+        if (!isPlaying.value) return;
+        if (pendingScrollLeft >= 0 && timelineContainer) {
+            timelineContainer.scrollLeft = pendingScrollLeft;
+            pendingScrollLeft = -1;
+        }
+        scrollRAFId = requestAnimationFrame(scrollAnimationLoop);
+    };
+
+    // Long Task 수집 배열
+    const longTasks: any[] = [];
+    if (typeof window !== 'undefined' && window.PerformanceObserver) {
+        try {
+            const observer = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                    longTasks.push(entry);
+                    if (longTasks.length > 50) longTasks.shift(); // 메모리 누수 방지
+                }
+            });
+            observer.observe({ entryTypes: ['longtask'] });
+        } catch (e) {
+            console.error("Long Task Observer 초기화 실패", e);
+        }
+    }
+
     const updatePlayheadLoop = () => {
         if (!isPlaying.value) return;
+
+        loopFrameCount++;
+        const loopStart = performance.now();
+        const timeSinceLastFrame = loopStart - lastFrameTime;
+        lastFrameTime = loopStart;
+
+        // 프레임 드랍 감지 (30ms 이상 지연되면 멈칫거림으로 간주)
+        if (timeSinceLastFrame > 30 && loopFrameCount > 10) {
+            console.warn(`🚨 [프레임 드랍 감지] 루프 지연 시간: ${timeSinceLastFrame.toFixed(2)}ms`);
+            
+            // Long Task API를 통해 직전에 메인 스레드를 막은 원인을 분석
+            if (longTasks.length > 0) {
+                const lastTask = longTasks[longTasks.length - 1];
+                console.warn(`🔍 [원인 분석] 최근 Long Task 발견: 
+- 소요 시간: ${lastTask.duration.toFixed(2)}ms
+- 원인(name): ${lastTask.name}
+- 발생 시점: ${lastTask.startTime.toFixed(2)}
+- 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a:any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
+            }
+        }
 
         const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
         const px = currentPositionBar * pixelPerBar.value;
 
-        document.documentElement.style.setProperty('--playhead-px', `${px}px`);
+        // [최적화] 전역 CSS 변수(--playhead-px)를 :root에 설정하면 브라우저 전체의 Style Recalculation이 발생하여 프레임 드랍이 생깁니다.
+        // 현재 가상 스크롤이 적용되어 DOM 노드가 극소수이므로, 직접 주입하는 것이 100배 빠릅니다.
+        const playheadEls = document.getElementsByClassName('playhead-line') as HTMLCollectionOf<HTMLElement>;
+        for (let i = 0; i < playheadEls.length; i++) {
+            playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+        }
+        
+        const clipEls = document.getElementsByClassName('clip-container') as HTMLCollectionOf<HTMLElement>;
+        for (let i = 0; i < clipEls.length; i++) {
+            clipEls[i].style.setProperty('--playhead-px', `${px}px`);
+        }
 
-        // 1-1. 재생바 자동 스크롤: 재생바가 화면 중앙(50%)을 넘어가면 매 프레임마다 부드럽게 따라감
-        if (timelineContainer) {
-            const relativeX = px - timelineContainer.scrollLeft;
-            const threshold = timelineContainer.clientWidth * 0.5;
+        // 1-1. 스크롤 위치 계산만 수행 (DOM 쓰기는 scrollAnimationLoop에서 분리 처리)
+        if (cachedClientWidth > 0) {
+            const relativeX = px - cachedScrollLeft;
+            const threshold = cachedClientWidth * 0.5;
             if (relativeX > threshold) {
-                // 목표 스크롤 위치를 향해 부드럽게 보간(lerp)하여 이동 (급격한 점프 방지)
                 const targetScrollLeft = px - threshold;
-                const currentScrollLeft = timelineContainer.scrollLeft;
-                const lerpFactor = 0.12; // 보간 계수: 작을수록 더 부드럽고, 클수록 빠르게 따라감
-                timelineContainer.scrollLeft = currentScrollLeft + (targetScrollLeft - currentScrollLeft) * lerpFactor;
+                const lerpFactor = 0.12;
+                cachedScrollLeft = cachedScrollLeft + (targetScrollLeft - cachedScrollLeft) * lerpFactor;
+                pendingScrollLeft = cachedScrollLeft;
             }
         }
 
-        // 1-2. 재생바 좌측 파형 밝게 표시: 각 클립의 진행 비율에 맞춰 오버레이 너비 갱신
-        const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
-        for (let i = 0; i < clipEls.length; i++) {
-            const clipEl = clipEls[i];
-            const clipLeft = parseFloat(clipEl.style.left) || 0;
-            const clipWidth = parseFloat(clipEl.style.width) || 0;
-            if (clipWidth <= 0) continue;
-            const progressPx = Math.max(0, Math.min(px - clipLeft, clipWidth));
-            clipEl.style.setProperty('--progress-px', `${progressPx}px`);
-        }
-
-        // 2. Vue 반응형 ref는 PlayController 숫자 디스플레이(마디.박자) 전용으로 저빈도 갱신
+        // 2. DOM 직접 업데이트 (Vue 반응성 렌더링 스톰 방지)
         const now = performance.now();
         if (now - lastReactiveUpdate > REACTIVE_UPDATE_INTERVAL) {
-            playheadPosition.value = currentPositionBar;
+            playheadPosition.value = currentPositionBar; // 정지 등 다른 의존성을 위해 값은 갱신해둠
             lastReactiveUpdate = now;
+
+            // DOM을 직접 찾아 텍스트만 교체 (Vue 컴포넌트 렌더 사이클 우회)
+            const barTextEl = document.getElementById('playhead-bar-text');
+            const beatTextEl = document.getElementById('playhead-beat-text');
+            const displayEl = document.getElementById('playhead-position-display');
+            
+            if (barTextEl && beatTextEl && projectInfo.value) {
+                const numerator = projectInfo.value.timeSigNumerator || 4;
+                const bar = Math.floor(currentPositionBar) + 1; 
+                const beat = Math.floor((currentPositionBar % 1) * numerator) + 1;
+                
+                barTextEl.textContent = String(bar).padStart(2, '0');
+                beatTextEl.textContent = String(beat);
+
+                if (displayEl) {
+                    const total = String(projectInfo.value.totalBarCount).padStart(2, '0');
+                    displayEl.setAttribute('aria-label', `현재 재생 위치: ${barTextEl.textContent}마디 ${beat}박자, 전체 ${total}마디`);
+                }
+            }
         }
 
-        if (debugLoopCount < 5) {
-            console.log(`🔄 [루프 확인 ${debugLoopCount + 1}/5] 시계가 흐르고 있나요? -> Transport 초: ${Tone.getTransport().seconds.toFixed(4)}, 재생바 마디: ${currentPositionBar.toFixed(4)}`);
-            debugLoopCount++;
+        // 현재 루프 실행에 걸린 시간 측정
+        const totalLoopTime = performance.now() - loopStart;
+        if (totalLoopTime > 15) {
+            console.error(`🐢 [루프 자체 병목] updatePlayheadLoop 실행에 ${totalLoopTime.toFixed(2)}ms 소요!`);
         }
 
         if (currentPositionBar >= projectInfo.value.totalBarCount) {
@@ -1387,6 +1685,7 @@ function disposeClipAudio(clipId: number) {
         isPlaying.value = false;
         playheadPosition.value = 0;
         cancelAnimationFrame(animationFrameId);
+        if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
         // DOM 직접 조작: 재생바를 처음 위치로 리셋
         const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
         for (let i = 0; i < playheadEls.length; i++) {
@@ -1396,6 +1695,11 @@ function disposeClipAudio(clipId: number) {
         const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;
         for (let i = 0; i < clipEls.length; i++) {
             clipEls[i].style.setProperty('--progress-px', `0px`);
+        }
+
+        // 타임라인 스크롤 위치를 맨 처음(0)으로 부드럽게 복귀
+        if (timelineContainer) {
+            timelineContainer.scrollTo({ left: 0, behavior: 'smooth' });
         }
     };
 
@@ -1415,21 +1719,22 @@ function disposeClipAudio(clipId: number) {
         console.log("========== [Audio Engine Setup Start] ==========");
 
         for (const track of tracks) {
-            if (!trackVolumes.has(track.trackId)) {
-                // 테스트 완료: 마스터 볼륨으로 안전하게 연결
-                const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
-                const vol = new Tone.Volume(track.volume).connect(panner);
+    if (!trackVolumes.has(track.trackId)) {
+        const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
+        const vol = new Tone.Volume(track.volume).connect(panner);
 
-                panner.channelCount = 2;
-                panner.channelCountMode = "explicit";
-                vol.channelCount = 2;
-                vol.channelCountMode = "explicit";
+        panner.channelCount = 2;
+        panner.channelCountMode = "explicit";
+        vol.channelCount = 2;
+        vol.channelCountMode = "explicit";
 
-                trackVolumes.set(track.trackId, vol);
-                trackPanners.set(track.trackId, panner);
-                console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
-            }
-        }
+        trackVolumes.set(track.trackId, vol);
+        trackPanners.set(track.trackId, panner);
+        console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
+    }
+
+    rebuildTrackEqChain(track.trackId);
+}
 
         for (const track of tracks) {
             const vol = trackVolumes.get(track.trackId);
@@ -1441,16 +1746,19 @@ function disposeClipAudio(clipId: number) {
                     continue;
                 } 
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
-                const player = new Tone.Player();
-
-                connectPlayerToTrackWithEq(
-                    player,
-                    clip,
-                    track.trackId,
-                );
-
                 try {
-                    await player.load(clip.audio.cdnUrl);
+                    // [최적화] 캐시에서 AudioBuffer를 가져오거나 한 번만 fetch+decode
+                    const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
+                    
+                    // 버퍼를 사용해 Player 생성 (네트워크 다운로드 X)
+                    const player = new Tone.Player(audioBuffer);
+
+                    // EQ 노드를 체인으로 연결
+                    connectPlayerToTrack(
+                        player,
+                        track.trackId,
+                    );
+
                     console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
@@ -1461,11 +1769,38 @@ function disposeClipAudio(clipId: number) {
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
                     console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
+                    disposeClipAudio(clip.clipId);
                 }
             }
         }
         console.log("========== [Audio Engine Setup End] ==========");
     }
+
+    // 프로젝트 진입 시 기존 오디오 자원 완벽 초기화 (유령 오디오, 중복 스케줄링 누수 방지)
+    const disposeAllAudio = () => {
+        console.log("========== [Audio Engine Cleanup Start] ==========");
+        clipPlayers.forEach((player, clipId) => {
+            player.unsync();
+            player.dispose();
+            console.log(`[Dispose] 유령 클립 방지: 클립 ${clipId} 오디오 자원 해제 완료`);
+        });
+        clipPlayers.clear();
+
+        // 트랙 볼륨/패너 노드도 함께 초기화하여 메모리 누수 완벽 차단
+        trackVolumes.forEach(vol => vol.dispose());
+        trackVolumes.clear();
+
+        trackPanners.forEach(panner => panner.dispose());
+        trackPanners.clear();
+
+        // EQ/분석 노드 정리
+        trackEqNodes.forEach(nodes => nodes.forEach(node => node.filter.dispose()));
+        trackEqNodes.clear();
+        trackAnalyzers.forEach(analyzer => analyzer.dispose());
+        trackAnalyzers.clear();
+
+        console.log("========== [Audio Engine Cleanup End] ==========");
+    };
 
     //클립 위치가 변경되었을 때 오디오 엔진 스케줄을 재설정 하는 함수
     const resyncClip = (clipId: number, newStartBar: number) => {
@@ -1491,9 +1826,6 @@ function disposeClipAudio(clipId: number) {
             return;
         }
 
-        const wasPlaying = isPlaying.value;
-        if (wasPlaying) Tone.getTransport().pause();
-
         player.unsync();
         player.stop();
 
@@ -1512,25 +1844,19 @@ function disposeClipAudio(clipId: number) {
         } else {
             console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
         }
-
-        if (wasPlaying) {
-            const currentOffset = playheadPosition.value * secondsPerBar.value;
-            Tone.getTransport().start("+0.01", currentOffset);
-        }
     };
 
-    const addClipEqBand = (
+    const addTrackEqBand = (
     trackId: number,
-    clipId: number,
     payload: {
         frequencyHz: number
         gainDeltaDb: number
     },
 ) => {
-    const clip = findClip(trackId, clipId)
-    if (!clip) return
+    const track = trackList.value.find(track => track.trackId === trackId)
+    if (!track) return
 
-    const currentBands = clip.eq?.bands ?? []
+    const currentBands = track.eq?.bands ?? []
 
     if (currentBands.length >= MAX_EQ_BANDS) {
         console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
@@ -1542,7 +1868,7 @@ function disposeClipAudio(clipId: number) {
             ? Math.max(...currentBands.map(band => band.bandOrder)) + 1
             : 1
 
-    const nextBand: ClipEqBandState = {
+    const nextBand: TrackEqBandState = {
         bandOrder: nextBandOrder,
         eqTypeCode: 1,
         frequencyHz: clampFrequency(payload.frequencyHz),
@@ -1554,34 +1880,25 @@ function disposeClipAudio(clipId: number) {
         appliedSuggestionId: null,
     }
 
-    clip.eq = {
+    track.eq = {
         bands: [
             ...currentBands,
             nextBand,
         ],
     }
 
-    const player = clipPlayers.get(clipId)
-
-    if (player) {
-        connectPlayerToTrackWithEq(
-            player,
-            clip,
-            trackId,
-        )
-    }
+    rebuildTrackEqChain(trackId)
 }
 
-const updateClipEqBand = (
+const updateTrackEqBand = (
     trackId: number,
-    clipId: number,
     bandOrder: number,
-    patch: Partial<ClipEqBandState>,
+    patch: Partial<TrackEqBandState>,
 ) => {
-    const clip = findClip(trackId, clipId)
-    if (!clip?.eq) return
+    const track = trackList.value.find(track => track.trackId === trackId)
+    if (!track?.eq) return
 
-    const nextBands = clip.eq.bands.map((band): ClipEqBandState => {
+    const nextBands = track.eq.bands.map((band): TrackEqBandState => {
         if (band.bandOrder !== bandOrder) return band
 
         return {
@@ -1603,11 +1920,11 @@ const updateClipEqBand = (
 
     if (!updatedBand) return
 
-    clip.eq = {
+    track.eq = {
         bands: nextBands,
     }
 
-    const nodes = clipEqNodes.get(clipId)
+    const nodes = trackEqNodes.get(trackId)
     const targetNode = nodes?.find(node => node.bandOrder === bandOrder)
 
     if (targetNode) {
@@ -1616,20 +1933,33 @@ const updateClipEqBand = (
         targetNode.filter.Q.value = updatedBand.q
     }
     else {
-        const player = clipPlayers.get(clipId)
-
-        if (player) {
-            connectPlayerToTrackWithEq(
-                player,
-                clip,
-                trackId,
-            )
-        }
+        rebuildTrackEqChain(trackId)
     }
 }
 
-const getClipSpectrum = (clipId: number): number[] => {
-    const analyzer = clipAnalyzers.get(clipId)
+const removeTrackEqBand = (
+    trackId: number,
+    bandOrder: number,
+) => {
+    const track = trackList.value.find(track => track.trackId === trackId)
+    if (!track?.eq) return
+
+    const nextBands = track.eq.bands
+        .filter(band => band.bandOrder !== bandOrder)
+        .map((band, index) => ({
+            ...band,
+            bandOrder: index + 1,
+        }))
+
+    track.eq = {
+        bands: nextBands,
+    }
+
+    rebuildTrackEqChain(trackId)
+}
+
+const getTrackSpectrum = (trackId: number): number[] => {
+    const analyzer = trackAnalyzers.get(trackId)
 
     if (!analyzer) return []
 
@@ -1645,6 +1975,9 @@ const getClipSpectrum = (clipId: number): number[] => {
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {
         try {
+            // 새 프로젝트 방에 들어올 때 기존 오디오 엔진의 찌꺼기(유령 플레이어)를 모두 파기
+            disposeAllAudio();
+
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 
@@ -1658,7 +1991,7 @@ const getClipSpectrum = (clipId: number): number[] => {
                     name: data.name ?? '프로젝트',
                     tempo: data.tempo ?? 120,
                     rootNote: data.rootNote ?? 'C',
-                    mode: data.projectMode ?? 'MAJOR',
+                    mode: data.mode ?? 'MAJOR',
                     timeSigNumerator: data.timeSigNumerator ?? 4,
                     timeSigDenominator: data.timeSigDenominator ?? 4,
 
@@ -1669,15 +2002,15 @@ const getClipSpectrum = (clipId: number): number[] => {
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({
                     ...track,
+                    eq: createDefaultTrackEq(),
                     height: 100,
                     isSelected: false,
                     clips: track.clips.map((clip): ClipUIState => ({
-                    ...clip,
-                    eq: createDefaultClipEq(),
-                    isSelected: false,
-                    isDragging: false,
-                    isLocked: false,
-                }))
+                        ...clip,
+                        isSelected: false,
+                        isDragging: false,
+                        isLocked: false,
+                    }))
                 }));
 
                 let maxClipEnd = 0;
@@ -1753,6 +2086,8 @@ const getClipSpectrum = (clipId: number): number[] => {
         deselectAll,
 
         // 클립보드
+        viewportLeft,
+        viewportRight,
         clipboardClip,
         copyClip,
         cutClip,
@@ -1787,8 +2122,13 @@ const getClipSpectrum = (clipId: number): number[] => {
         unlockClip,
         setTimelineContainer,
 
-        addClipEqBand,
-        updateClipEqBand,
-        getClipSpectrum,
+        // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
+        getAudioBufferCache,
+        fetchAndCacheAudioBuffer,
+
+        addTrackEqBand,
+        updateTrackEqBand,
+        removeTrackEqBand,
+        getTrackSpectrum,
     };
 });

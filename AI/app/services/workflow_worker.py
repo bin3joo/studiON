@@ -29,6 +29,7 @@ def run_workflow_dispatch(message: WorkflowDispatchMessage):
             "selected_region_id": message.selected_region_id,
             "preserve_clip_id": message.preserve_clip_id,
             "user_feedback_message": message.user_feedback_message,
+            "user_decision": message.user_decision,
         }
     )
     store.save_graph_state(result)

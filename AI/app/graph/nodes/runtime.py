@@ -531,6 +531,7 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "selected_region_id": state.get("selected_region_id"),
             "preserve_clip_id": state.get("preserve_clip_id"),
             "user_feedback_message": state.get("user_feedback_message"),
+            "user_decision": state.get("user_decision"),
         }
     )
     failure = _validate_dispatch(job.state_snapshot, dispatch)
@@ -559,6 +560,8 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
         restored["preserve_clip_id"] = dispatch.preserve_clip_id
     if dispatch.user_feedback_message is not None:
         restored["user_feedback_message"] = dispatch.user_feedback_message
+    if dispatch.user_decision is not None:
+        restored["user_decision"] = dispatch.user_decision
     return restored
 
 
@@ -704,23 +707,23 @@ def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, object]]
 
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:
     score = float(region.get("score", 0.0))
-    reduction_target_db = round(min(max(1.5 + (score * 8.0), 2.0), 6.5), 2)
+    reduction_db = round(min(max(1.2 + (score * 2.8), 1.8), 3.8), 2)
     return {
         "regionId": region.get("id"),
-        "actionType": "DE_ESSER",
+        "actionType": "DYNAMIC_EQ",
         "targetScope": "TRACK",
         "targetTrackId": int(region.get("track_id") or 0),
         "startMs": int(region.get("start_ms") or 0),
         "endMs": int(region.get("end_ms") or 0),
         "bandLowHz": region.get("band_low_hz"),
         "bandHighHz": region.get("band_high_hz"),
+        "gainDeltaDb": -reduction_db,
         "params": {
             "threshold": -18,
             "ratio": 2.4,
             "attackMs": 2,
             "releaseMs": 60,
-            "mix": 1.0,
-            "gainReductionDbTarget": reduction_target_db,
+            "q": 2.4,
         },
     }
 
@@ -730,13 +733,11 @@ def _build_non_user_issue_recipe_groups(state: WorkflowState) -> list[dict[str, 
         "track_clipping": _build_track_clipping_fix_recipe,
         "high_band_harshness": _build_high_band_harshness_fix_recipe,
         "sibilance": _build_sibilance_fix_recipe,
-        "master_clipping": _build_master_clipping_fix_recipe,
     }
     ordered_issue_types = [
         "track_clipping",
         "high_band_harshness",
         "sibilance",
-        "master_clipping",
     ]
     mixed_issue_flow = any(
         bool(region.get("requires_user_action")) for region in state.get("analysis_regions", [])
@@ -751,52 +752,53 @@ def _build_non_user_issue_recipe_groups(state: WorkflowState) -> list[dict[str, 
         if not regions:
             continue
         builder = issue_builders[issue_type]
+        recipes = [builder(region) for region in regions]
+        recipes = [recipe for recipe in recipes if recipe is not None]
+        if not recipes:
+            continue
+        recipe_region_ids = {
+            int(recipe["regionId"]) for recipe in recipes if recipe.get("regionId") is not None
+        }
+        recipe_track_ids = {
+            int(recipe["targetTrackId"])
+            for recipe in recipes
+            if recipe.get("targetTrackId") is not None
+        }
         groups.append(
             {
                 "issueType": issue_type,
-                "regionIds": [
-                    int(region["id"]) for region in regions if region.get("id") is not None
-                ],
-                "trackIds": sorted(
-                    {
-                        int(region.get("track_id") or 0)
-                        for region in regions
-                        if region.get("track_id") is not None
-                    }
-                ),
-                "regionCount": len(regions),
+                "regionIds": sorted(recipe_region_ids),
+                "trackIds": sorted(recipe_track_ids),
+                "regionCount": len(recipes),
                 "appliedInMixedIssueFlow": mixed_issue_flow,
                 "containsPromotedMasterContributor": any(
                     region.get("auto_fix_source") == "promoted_master_contributor"
                     for region in regions
+                    if region.get("id") in recipe_region_ids
                 ),
-                "recipes": [builder(region) for region in regions],
+                "recipes": recipes,
             }
         )
     return groups
 
 
-def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object]:
+def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object] | None:
     score = float(region.get("score", 0.0))
-    gain_trim_db = round(min(max(1.0 + (score * 4.0), 1.5), 4.5), 2)
     band_hints = _collect_track_clipping_band_hints(region)
-    action_type = "GAIN_TRIM"
-    band_low_hz = None
-    band_high_hz = None
-    gain_delta_db: float | None = -gain_trim_db
-    params: dict[str, object] = {"preGainDb": -gain_trim_db}
     if "high" in band_hints:
         action_type = "DYNAMIC_EQ"
         band_low_hz = 4500
         band_high_hz = 9000
         gain_delta_db = -round(min(max(1.0 + (score * 2.2), 1.5), 3.0), 2)
-        params = {"threshold": -20, "ratio": 2.0, "preGainDb": -gain_trim_db}
+        params: dict[str, object] = {"threshold": -20, "ratio": 2.0}
     elif "low_mid" in band_hints:
         action_type = "EQ_CUT"
         band_low_hz = 180
         band_high_hz = 1200
         gain_delta_db = -round(min(max(0.8 + (score * 1.6), 1.2), 2.8), 2)
-        params = {"q": 1.1, "preGainDb": -gain_trim_db}
+        params = {"q": 1.1}
+    else:
+        return None
     return {
         "regionId": region.get("id"),
         "actionType": action_type,
@@ -827,38 +829,6 @@ def _build_high_band_harshness_fix_recipe(region: dict[str, object]) -> dict[str
         "bandHighHz": region.get("band_high_hz"),
         "gainDeltaDb": -reduction_db,
         "params": {"threshold": -20, "ratio": 2.1},
-    }
-
-
-def _build_master_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object]:
-    score = float(region.get("score", 0.0))
-    pre_gain_db = round(min(max(1.5 + (score * 3.5), 2.0), 5.0), 2)
-    action_type = "TRUE_PEAK_LIMITER"
-    gain_delta_db = None
-    params: dict[str, object] = {
-        "preGainDb": -pre_gain_db,
-        "ceilingDbfs": -1.0,
-        "attackMs": 2,
-        "releaseMs": 80,
-        "lookaheadMs": 3,
-    }
-    if float(region.get("score", 0.0)) < 0.2 and not region.get("contributing_track_ids"):
-        action_type = "GAIN_TRIM"
-        gain_delta_db = -pre_gain_db
-        params = {"preGainDb": -pre_gain_db}
-    return {
-        "regionId": region.get("id"),
-        "actionType": action_type,
-        "targetScope": "MASTER",
-        "targetTrackId": None,
-        "startMs": int(region.get("start_ms") or 0),
-        "endMs": int(region.get("end_ms") or 0),
-        "bandLowHz": None,
-        "bandHighHz": None,
-        "gainDeltaDb": gain_delta_db,
-        "params": params,
-        "origin": region.get("auto_fix_source", "residual_master_clipping"),
-        "sourceMasterCandidateId": region.get("source_master_candidate_id"),
     }
 
 

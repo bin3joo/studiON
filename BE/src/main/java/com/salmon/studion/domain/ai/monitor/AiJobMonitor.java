@@ -2,11 +2,10 @@ package com.salmon.studion.domain.ai.monitor;
 
 import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.response.AiWorkflowStatusResponse;
-import com.salmon.studion.domain.ai.entity.AiAnalysisJob;
 import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.ai.websocket.AiJobEventPublisher;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
@@ -19,7 +18,6 @@ import java.util.concurrent.ScheduledFuture;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AiJobMonitor {
 
     private static final Duration POLLING_INTERVAL = Duration.ofSeconds(2);
@@ -31,6 +29,18 @@ public class AiJobMonitor {
 
     private final Map<Integer, ScheduledFuture<?>> pollingTasks = new ConcurrentHashMap<>();
     private final Map<Integer, String> lastStateKeys = new ConcurrentHashMap<>();
+
+    public AiJobMonitor(
+            FastApiClient fastApiClient,
+            @Qualifier("aiTaskScheduler") TaskScheduler taskScheduler,
+            AiJobEventPublisher aiJobEventPublisher,
+            AiAnalysisJobRepository aiAnalysisJobRepository
+    ) {
+        this.fastApiClient = fastApiClient;
+        this.taskScheduler = taskScheduler;
+        this.aiJobEventPublisher = aiJobEventPublisher;
+        this.aiAnalysisJobRepository = aiAnalysisJobRepository;
+    }
 
     public void startMonitoring(Integer jobId, Integer projectId) {
         if (pollingTasks.containsKey(jobId)) {
@@ -98,7 +108,9 @@ public class AiJobMonitor {
         String status = response.getJob().getStatus();
         return "WAITING_USER".equals(status)
                 || "COMPLETED".equals(status)
-                || "FAILED".equals(status);
+                || "FAILED".equals(status)
+                || "CANCELLED".equals(status)
+                || "EXPIRED".equals(status);
     }
 
     private String nullSafe(String value) {

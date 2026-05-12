@@ -17,6 +17,7 @@ from app.services.clap_inference import CLAPInferenceError, CLAPTrackPrediction
 from app.services.plan_critic_llm import PlanCriticLLMResponse
 from app.services.planning_llm import PlanningLLMError, PlanningLLMResponse
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
+from app.services.workflow_audio_paths import AudioPathResolutionError, resolve_clip_audio_path
 from app.services.workflow_audio_metadata import AudioMetadataRecord
 from app.services.workflow_preview_renderer import PREVIEW_CONTEXT_PADDING_MS
 from app.services.workflow_snapshots import ProjectSnapshot, build_snapshot_runtime_context
@@ -209,6 +210,9 @@ def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
         mongo_snapshot_collection="timeline_snapshots",
         mongo_artifact_collection="workflow_artifacts",
         audio_root=None,
+        audio_cache_dir=str(Path(gettempdir()) / "studion-ai-audio-cache-test"),
+        audio_download_timeout_seconds=10.0,
+        audio_download_connect_timeout_seconds=2.0,
     )
     monkeypatch.setattr("app.services.workflow_artifacts.get_settings", lambda: settings)
     monkeypatch.setattr("app.services.workflow_snapshots.get_settings", lambda: settings)
@@ -226,6 +230,75 @@ def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     artifact_store.reset()
     snapshot_store.reset()
     _TEST_AUDIO_METADATA.clear()
+
+
+def test_resolve_clip_audio_path_downloads_and_caches_audio_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    audio_path = Path(_ensure_test_audio_file(77, vocal_like=True))
+    payload = audio_path.read_bytes()
+    captured_urls: list[str] = []
+
+    class _FakeResponse:
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def get(self, url: str) -> _FakeResponse:
+            captured_urls.append(url)
+            return _FakeResponse(payload)
+
+    monkeypatch.setattr("app.services.workflow_audio_paths.httpx.Client", _FakeClient)
+    clip = {"clip_id": 77001, "audio_url": "https://cdn.test/audio/77.wav"}
+
+    resolved_first = resolve_clip_audio_path(clip)
+    resolved_second = resolve_clip_audio_path(clip)
+
+    assert resolved_first is not None
+    assert resolved_second == resolved_first
+    assert Path(resolved_first).read_bytes() == payload
+    assert captured_urls == ["https://cdn.test/audio/77.wav"]
+
+
+def test_resolve_clip_audio_path_raises_on_audio_download_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def get(self, url: str):
+            raise RuntimeError("unexpected")
+
+    def _raising_client(*args, **kwargs):
+        raise AudioPathResolutionError(
+            "AUDIO_DOWNLOAD_FAILED",
+            "Failed to download audio source: https://cdn.test/audio/88.wav",
+        )
+
+    monkeypatch.setattr("app.services.workflow_audio_paths.httpx.Client", _FakeClient)
+    monkeypatch.setattr("app.services.workflow_audio_paths._resolve_audio_url", _raising_client)
+
+    with pytest.raises(AudioPathResolutionError) as exc:
+        resolve_clip_audio_path({"clip_id": 88001, "audio_url": "https://cdn.test/audio/88.wav"})
+
+    assert exc.value.code == "AUDIO_DOWNLOAD_FAILED"
 
 
 def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
@@ -427,6 +500,96 @@ def test_materialize_execution_plan_fails_before_internal_approval() -> None:
     assert result["failure_code"] == "PLAN_NOT_APPROVED"
 
 
+def test_plan_rule_validator_rejects_non_eq_only_action() -> None:
+    state = build_workflow_initial_state(
+        job_id=10043,
+        project_id=20043,
+        analysis_regions=[
+            {
+                "id": 1,
+                "issue_type": "sibilance",
+                "start_ms": 0,
+                "end_ms": 400,
+                "track_id": 8,
+                "band_low_hz": 6000,
+                "band_high_hz": 8500,
+            }
+        ],
+        selected_region_id=1,
+        preserve_clip_id=1,
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionType": "DE_ESSER",
+                    "targetScope": "TRACK",
+                    "targetTrackId": 8,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": 6000,
+                    "bandHighHz": 8500,
+                    "gainDeltaDb": -2.0,
+                    "params": {"threshold": -18},
+                }
+            },
+        },
+    )
+
+    result = nodes.plan_rule_validator(state)
+
+    assert result["validator_result"] == "REJECT"
+    assert any("not allowed" in note for note in result["plan_revision_notes"])
+
+
+def test_materialize_execution_plan_rejects_master_scope_preview_action() -> None:
+    state = build_workflow_initial_state(
+        job_id=10044,
+        project_id=20044,
+        analysis_regions=[
+            {
+                "id": 1,
+                "issue_type": "band_overlap",
+                "start_ms": 0,
+                "end_ms": 400,
+                "track_id": 8,
+                "affected_clip_ids": [1],
+            }
+        ],
+        selected_region_id=1,
+        preserve_clip_id=1,
+        plan_status="APPROVED",
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetScope": "MASTER",
+                    "targetTrackId": None,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": 250,
+                    "bandHighHz": 1200,
+                    "gainDeltaDb": -2.0,
+                    "params": {"threshold": -18},
+                }
+            },
+        },
+    )
+
+    result = suggestion_nodes.materialize_execution_plan(state)
+
+    assert result["current_node"] == "fail_workflow"
+    assert result["failure_code"] == "INVALID_EQ_ONLY_PLAN_ACTION"
+
+
 def test_workflow_skips_clap_when_not_needed() -> None:
     result = run_workflow_graph(
         {
@@ -620,6 +783,7 @@ def test_workflow_autofixes_sibilance_without_preview() -> None:
     assert recipe_artifact.payload["appliedInMixedIssueFlow"] is False
     assert recipe_artifact.payload["regionIds"]
     assert recipe_artifact.payload["groups"][0]["issueType"] == "sibilance"
+    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
     assert log_artifact is not None
     assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
     assert log_artifact.payload["regionIds"] == recipe_artifact.payload["regionIds"]
@@ -672,6 +836,7 @@ def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> 
     assert recipe_artifact is not None
     assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
     assert recipe_artifact.payload["groups"][0]["issueType"] == "sibilance"
+    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
     assert log_artifact is not None
     assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
 
@@ -1999,9 +2164,7 @@ def test_master_clipping_promotes_clear_contributor_to_track_fix() -> None:
     assert master_regions == []
     assert track_regions[0]["track_id"] == 10
     assert track_regions[0]["auto_fix_source"] == "promoted_master_contributor"
-    assert groups[0]["issueType"] == "track_clipping"
-    assert all(group["issueType"] != "master_clipping" for group in groups)
-    assert groups[0]["recipes"][0]["actionType"] == "GAIN_TRIM"
+    assert groups == []
 
 
 def test_master_clipping_keeps_master_recipe_when_contributors_are_distributed() -> None:
@@ -2114,9 +2277,58 @@ def test_master_clipping_keeps_master_recipe_when_contributors_are_distributed()
     assert track_regions == []
     assert len(master_regions) == 1
     assert set(master_regions[0]["contributing_track_ids"]) == {10, 20, 30}
-    assert any(group["issueType"] == "master_clipping" for group in groups)
-    master_group = next(group for group in groups if group["issueType"] == "master_clipping")
-    assert master_group["recipes"][0]["targetScope"] == "MASTER"
+    assert groups == []
+
+
+def test_track_clipping_recipe_uses_dynamic_eq_for_high_band_hint() -> None:
+    recipe = runtime_nodes._build_track_clipping_fix_recipe(
+        {
+            "id": 1,
+            "track_id": 10,
+            "start_ms": 0,
+            "end_ms": 200,
+            "score": 0.42,
+            "band_hints": ["high"],
+        }
+    )
+
+    assert recipe is not None
+    assert recipe["actionType"] == "DYNAMIC_EQ"
+    assert recipe["bandLowHz"] == 4500
+    assert recipe["bandHighHz"] == 9000
+
+
+def test_track_clipping_recipe_uses_eq_cut_for_low_mid_hint() -> None:
+    recipe = runtime_nodes._build_track_clipping_fix_recipe(
+        {
+            "id": 2,
+            "track_id": 11,
+            "start_ms": 0,
+            "end_ms": 200,
+            "score": 0.35,
+            "band_hints": ["low_mid"],
+        }
+    )
+
+    assert recipe is not None
+    assert recipe["actionType"] == "EQ_CUT"
+    assert recipe["bandLowHz"] == 180
+    assert recipe["bandHighHz"] == 1200
+
+
+def test_track_clipping_recipe_skips_broadband_only_hint() -> None:
+    recipe = runtime_nodes._build_track_clipping_fix_recipe(
+        {
+            "id": 3,
+            "track_id": 12,
+            "start_ms": 0,
+            "end_ms": 200,
+            "score": 0.35,
+            "band_hints": ["broadband"],
+        }
+    )
+
+    assert recipe is None
 
 
 def test_workflow_defaults_include_clipping_detection() -> None:
@@ -2142,7 +2354,7 @@ def test_workflow_defaults_include_clipping_detection() -> None:
         "track_clipping" in result["detected_issues"]
         or "master_clipping" in result["detected_issues"]
     )
-    assert result["clipping_fix_applied"] is True
+    assert result["clipping_fix_applied"] is False
 
 
 def test_workflow_skips_sibilance_when_clap_candidate_is_absent() -> None:
@@ -2240,7 +2452,7 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
     assert regions[0]["issue_type"] == "sibilance"
 
 
-def test_clipping_autofix_materializes_master_true_peak_limiter_recipe() -> None:
+def test_clipping_autofix_excludes_master_clipping_recipe_groups() -> None:
     result = run_workflow_graph(
         {
             "job_id": 10030,
@@ -2252,15 +2464,8 @@ def test_clipping_autofix_materializes_master_true_peak_limiter_recipe() -> None
     artifact_store = get_workflow_artifact_store()
     recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
 
-    assert recipe_artifact is not None
-    master_group = next(
-        group
-        for group in recipe_artifact.payload["groups"]
-        if group["issueType"] == "master_clipping"
-    )
-    action = master_group["recipes"][0]
-
-    assert action["actionType"] == "TRUE_PEAK_LIMITER"
-    assert action["targetScope"] == "MASTER"
-    assert action["targetTrackId"] is None
-    assert action["params"]["ceilingDbfs"] == -1.0
+    if recipe_artifact is not None:
+        assert all(
+            group["issueType"] != "master_clipping"
+            for group in recipe_artifact.payload["groups"]
+        )

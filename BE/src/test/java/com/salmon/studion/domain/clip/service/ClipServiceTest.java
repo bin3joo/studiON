@@ -104,6 +104,67 @@ class ClipServiceTest {
     }
 
     @Nested
+    @DisplayName("전역 시퀀스")
+    class GlobalSequenceTest {
+
+        private static final String GLOBAL_CLIP_ID_SEQ_KEY = "global:clip:id_seq";
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIP_STATE_KEY2 = "project:2:clips";
+        private static final Integer TRACK_ID = 1;
+        private static final Integer AUDIO_METADATA_ID = 42;
+        private static final Integer DURATION_MS = 8000;
+
+        @Test
+        @DisplayName("서로 다른 프로젝트의 클립 생성은 동일한 전역 시퀀스 키를 사용한다")
+        void differentProjectsUseSameGlobalKey() {
+            Integer projectId2 = 2;
+
+            Project mockProject = mock(Project.class);
+            lenient().when(mockProject.getTempo()).thenReturn(120.0);
+            lenient().when(mockProject.getTimeSigNumerator()).thenReturn(4);
+            lenient().when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mockProject);
+            lenient().when(projectService.getProjectOrThrow(projectId2)).thenReturn(mockProject);
+
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
+            lenient().when(mockAudio.getId()).thenReturn(AUDIO_METADATA_ID);
+            lenient().when(mockAudio.getDurationMs()).thenReturn(DURATION_MS);
+            lenient().when(audioService.createAudioMetadata(any())).thenReturn(mockAudio);
+
+            lenient().when(valueOperations.increment(GLOBAL_CLIP_ID_SEQ_KEY)).thenReturn(1L).thenReturn(2L);
+            lenient().when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+            lenient().when(valueOperations.increment("project:2:clip:event:seq")).thenReturn(1L);
+            lenient().doAnswer(inv -> null).when(hashOperations).put(any(), any(), any());
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, projectId2)).thenReturn(Optional.of(mock(Track.class)));
+
+            ClipCreateRequest req1 = createRequest(PROJECT_ID, TRACK_ID);
+            ClipCreateRequest req2 = createRequest(projectId2, TRACK_ID);
+
+            clipService.createClip(req1, USER_ID);
+            clipService.createClip(req2, USER_ID);
+
+            verify(valueOperations, times(2)).increment(GLOBAL_CLIP_ID_SEQ_KEY);
+            verify(valueOperations, never()).increment("project:1:clip:id_seq");
+            verify(valueOperations, never()).increment("project:2:clip:id_seq");
+        }
+
+        private ClipCreateRequest createRequest(Integer projectId, Integer trackId) {
+            ClipCreateRequest req = new ClipCreateRequest();
+            req.setProjectId(projectId);
+            req.setTrackId(trackId);
+            req.setStartBar(0.0);
+            req.setColor("#FF0000");
+            req.setObjectKey("projects/1/audios/test.mp3");
+            req.setOriginalName("test.mp3");
+            req.setStoredName("test.mp3");
+            req.setMimeType(com.salmon.studion.global.common.enums.MimeType.MPEG);
+            req.setSizeBytes(100000);
+            req.setDurationMs(DURATION_MS);
+            return req;
+        }
+    }
+
+    @Nested
     @DisplayName("lockClip - 잠금")
     class LockTest {
 
@@ -235,6 +296,7 @@ class ClipServiceTest {
             store = new HashMap<>();
 
             lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+            lenient().when(trackRepository.findByIdAndProject_Id(TARGET_TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
 
             lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
                     .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
@@ -792,7 +854,7 @@ class ClipServiceTest {
         private static final Double ORIGINAL_DURATION = 6.0;
         private static final Double SPLIT_BAR = 4.0;
         private static final String CLIP_STATE_KEY = "project:1:clips";
-        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+        private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
         private static final Integer NEW_CLIP_ID = 100;
 
         private Map<String, String> store;
@@ -1006,7 +1068,7 @@ class ClipServiceTest {
         private static final Integer ORIGINAL_TRACK_ID = 1;
         private static final Integer NEW_CLIP_ID = 200;
         private static final String CLIP_STATE_KEY = "project:1:clips";
-        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+        private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
 
         private Map<String, String> store;
 
@@ -1449,7 +1511,7 @@ class ClipServiceTest {
         private static final Integer DURATION_MS = 8000;
         private static final Double EXPECTED_DURATION_BARS = 4.0; // (8000/1000) * (120/60) / 4
         private static final String CLIP_STATE_KEY = "project:1:clips";
-        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+        private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
 
         private Map<String, String> store;
 
@@ -1468,6 +1530,7 @@ class ClipServiceTest {
             lenient().when(audioService.createAudioMetadata(any())).thenReturn(mockAudio);
 
             lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
 
             lenient().doAnswer(inv -> {
                 store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
@@ -1629,7 +1692,7 @@ class ClipServiceTest {
         private static final Double CLIPBOARD_DURATION = 4.0;
         private static final Integer NEW_CLIP_ID = 300;
         private static final String CLIP_STATE_KEY = "project:1:clips";
-        private static final String CLIP_ID_SEQ_KEY = "project:1:clip:id_seq";
+        private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
         private static final String CLIPBOARD_KEY = "project:1:user:1:clipboard";
 
         private Map<String, String> store;
@@ -1639,6 +1702,7 @@ class ClipServiceTest {
             store = new HashMap<>();
 
             lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+            lenient().when(trackRepository.findByIdAndProject_Id(TARGET_TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
 
             lenient().doAnswer(inv -> {
                 store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());

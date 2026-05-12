@@ -134,6 +134,8 @@ class ClipServiceTest {
             lenient().when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
             lenient().when(valueOperations.increment("project:2:clip:event:seq")).thenReturn(1L);
             lenient().doAnswer(inv -> null).when(hashOperations).put(any(), any(), any());
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, projectId2)).thenReturn(Optional.of(mock(Track.class)));
 
             ClipCreateRequest req1 = createRequest(PROJECT_ID, TRACK_ID);
             ClipCreateRequest req2 = createRequest(projectId2, TRACK_ID);
@@ -294,6 +296,7 @@ class ClipServiceTest {
             store = new HashMap<>();
 
             lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+            lenient().when(trackRepository.findByIdAndProject_Id(TARGET_TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
 
             lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
                     .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
@@ -1527,6 +1530,7 @@ class ClipServiceTest {
             lenient().when(audioService.createAudioMetadata(any())).thenReturn(mockAudio);
 
             lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
 
             lenient().doAnswer(inv -> {
                 store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
@@ -1698,6 +1702,7 @@ class ClipServiceTest {
             store = new HashMap<>();
 
             lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(NEW_CLIP_ID.longValue());
+            lenient().when(trackRepository.findByIdAndProject_Id(TARGET_TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
 
             lenient().doAnswer(inv -> {
                 store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());

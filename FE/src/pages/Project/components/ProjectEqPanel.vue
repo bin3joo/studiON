@@ -24,6 +24,10 @@ const currentBands = computed(() => {
 const emit = defineEmits<{
   'apply-ai-eq': []
   'cancel-ai-eq': []
+  'request-ai-eq-revision': [payload: {
+    selectedTrackIds: number[]
+    message: string
+  }]
   'add-eq-band': [payload: {
     frequencyHz: number
     gainDeltaDb: number
@@ -46,6 +50,36 @@ const afterBands = computed(() => {
     ? props.aiAfterBands
     : currentBands.value
 })
+
+const hasAiSuggestion = computed(() => {
+  return props.aiAfterBands.length > 0
+})
+
+const selectedRevisionTrackIds = ref<number[]>([])
+const revisionMessage = ref('')
+
+const revisionCandidateTracks = computed(() => {
+  return trackStore.trackList
+})
+
+function toggleRevisionTrack(trackId: number) {
+  if (selectedRevisionTrackIds.value.includes(trackId)) {
+    selectedRevisionTrackIds.value = selectedRevisionTrackIds.value.filter(id => id !== trackId)
+    return
+  }
+
+  selectedRevisionTrackIds.value = [
+    ...selectedRevisionTrackIds.value,
+    trackId,
+  ]
+}
+
+function requestAiRevision() {
+  emit('request-ai-eq-revision', {
+    selectedTrackIds: selectedRevisionTrackIds.value,
+    message: revisionMessage.value.trim(),
+  })
+}
 
 const freqLabels = ['20', '50', '100', '200', '500', '1K', '2K', '5K', '10K', '20K']
 const dbLabels = ['+12', '+8', '+6', '+3', '0', '-3', '-6', '-9', '-12']
@@ -149,76 +183,154 @@ watch(
       />
     </div>
 
-    <!-- 트랙 선택 + AI 분석 후: 이전 / 이후 2분할 -->
-    <div v-else>
-      <div class="grid grid-cols-2 border-b border-white/10">
-        <div class="flex h-11 items-center gap-3 border-r border-white/10 px-5">
-          <span class="text-xs font-bold tracking-[0.28em] text-gray-400">
-            이전
-          </span>
+    <!-- 트랙 선택 + AI 분석 후 -->
+<div v-else>
+  <div class="grid grid-cols-2 border-b border-white/10">
+    <!-- 왼쪽: Before 헤더 -->
+    <div class="flex h-11 items-center gap-3 border-r border-white/10 px-5">
+      <span class="text-xs font-bold tracking-[0.28em] text-gray-400">
+        이전
+      </span>
 
-          <button
-            class="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-white transition hover:border-[#FF8F1A] hover:text-[#FF8F1A]"
-          >
-            <Play class="h-3 w-3 fill-current" />
-          </button>
-        </div>
+      <button
+        class="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-white transition hover:border-[#FF8F1A] hover:text-[#FF8F1A]"
+      >
+        <Play class="h-3 w-3 fill-current" />
+      </button>
+    </div>
 
-        <div class="flex h-11 items-center gap-3 px-5">
-          <span class="text-xs font-bold tracking-[0.28em] text-gray-400">
-            이후
-          </span>
+    <!-- 오른쪽: 요청 전/후 헤더 -->
+    <div class="flex h-11 items-center gap-3 px-5">
+      <span class="text-xs font-bold tracking-[0.28em] text-gray-400">
+        {{ hasAiSuggestion ? '이후' : 'AI 수정 요청' }}
+      </span>
 
-          <button
-            class="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-white transition hover:border-[#FF8F1A] hover:text-[#FF8F1A]"
-          >
-            <Play class="h-3 w-3 fill-current" />
-          </button>
+      <button
+        v-if="hasAiSuggestion"
+        class="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-white transition hover:border-[#FF8F1A] hover:text-[#FF8F1A]"
+      >
+        <Play class="h-3 w-3 fill-current" />
+      </button>
 
-          <div class="ml-auto flex items-center gap-2">
-            <button
-              class="inline-flex items-center gap-1.5 rounded-full bg-[#FF8F1A] px-3 py-1.5 text-[11px] font-bold text-black transition hover:brightness-110 disabled:opacity-40"
-              :disabled="aiAnalyzing"
-              @click="emit('apply-ai-eq')"
-            >
-              <Wand2 class="h-3.5 w-3.5" />
-              AI 적용
-            </button>
+      <div class="ml-auto flex items-center gap-2">
+        <button
+          class="inline-flex items-center gap-1.5 rounded-full bg-[#FF8F1A] px-3 py-1.5 text-[11px] font-bold text-black transition hover:brightness-110 disabled:opacity-40"
+          :disabled="aiAnalyzing || !hasAiSuggestion"
+          @click="emit('apply-ai-eq')"
+        >
+          <Wand2 class="h-3.5 w-3.5" />
+          AI 적용
+        </button>
 
-            <button
-              class="rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-bold text-gray-300 transition hover:border-white/30 hover:text-white"
-              @click="emit('cancel-ai-eq')"
-            >
-              취소
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="grid h-[260px] grid-cols-2 bg-white/10 gap-px">
-        <EqGraph
-          title="Before"
-          :freq-labels="freqLabels"
-          :db-labels="dbLabels"
-          :bands="beforeBands"
-          :spectrum-data="spectrumData"
-          :interactive="false"
-        />
-
-        <EqGraph
-          title="After"
-          :freq-labels="freqLabels"
-          :db-labels="dbLabels"
-          :bands="afterBands"
-          :spectrum-data="spectrumData"
-          :after="true"
-          :loading="aiAnalyzing"
-          :interactive="!!selectedTrack"
-          @add-band="emit('add-eq-band', $event)"
-          @update-band="emit('update-eq-band', $event)"
-          @remove-band="emit('remove-eq-band', $event)"
-        />
+        <button
+          class="rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-bold text-gray-300 transition hover:border-white/30 hover:text-white"
+          @click="emit('cancel-ai-eq')"
+        >
+          취소
+        </button>
       </div>
     </div>
+  </div>
+
+  <div class="grid h-[300px] grid-cols-2 bg-white/10 gap-px">
+    <!-- 왼쪽: Before EQ -->
+    <EqGraph
+      title="Before"
+      :freq-labels="freqLabels"
+      :db-labels="dbLabels"
+      :bands="beforeBands"
+      :spectrum-data="spectrumData"
+      :interactive="false"
+    />
+
+    <!-- 오른쪽: AI 요청 UI -->
+    <div
+      v-if="!hasAiSuggestion"
+      class="flex h-full flex-col justify-center bg-[#242424] px-8"
+    >
+      <div>
+        <div class="text-xl font-bold text-white">
+          수정 후보 트랙
+        </div>
+
+        <p class="mt-2 text-sm text-gray-400">
+          충돌 트랙을 확인하고 수정하고 싶은 트랙을 선택해주세요.
+        </p>
+
+        <div class="mt-5 flex flex-wrap gap-3">
+          <button
+            v-for="track in revisionCandidateTracks"
+            :key="track.trackId"
+            type="button"
+            class="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-bold transition"
+            :class="selectedRevisionTrackIds.includes(track.trackId)
+              ? 'border-[#FF8F1A] bg-[#FF8F1A] text-black'
+              : 'border-white/25 text-gray-100 hover:border-[#FF8F1A] hover:text-[#FF8F1A]'"
+            @click="toggleRevisionTrack(track.trackId)"
+          >
+            <span
+              class="grid h-4 w-4 place-items-center rounded-full border"
+              :class="selectedRevisionTrackIds.includes(track.trackId)
+                ? 'border-black bg-black/20'
+                : 'border-white/60'"
+            >
+              <span
+                v-if="selectedRevisionTrackIds.includes(track.trackId)"
+                class="h-2 w-2 rounded-full bg-black"
+              />
+            </span>
+
+            {{ track.name }}
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-10">
+        <div class="text-xl font-bold text-white">
+          수정 요청하기
+        </div>
+
+        <p class="mt-2 text-sm text-gray-400">
+          선택한 트랙에 대해 AI에게 수정 방향을 요청하세요.
+        </p>
+
+        <div class="mt-4 flex gap-3">
+          <input
+            v-model="revisionMessage"
+            type="text"
+            class="h-11 flex-1 rounded-md border border-white/10 bg-black/30 px-4 text-sm text-white outline-none placeholder:text-gray-500 focus:border-[#FF8F1A]"
+            placeholder="ex. 이 클립은 살리고 나머지는 자연스럽게 너무 세게 깎지 말아줘"
+          />
+
+          <button
+            type="button"
+            class="inline-flex h-11 items-center gap-2 rounded-md bg-[#FF8F1A] px-5 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-40"
+            :disabled="aiAnalyzing || selectedRevisionTrackIds.length === 0"
+            @click="requestAiRevision"
+          >
+            <Wand2 class="h-4 w-4" />
+            계획 생성
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: AI 수정안 After EQ -->
+    <EqGraph
+      v-else
+      title="After"
+      :freq-labels="freqLabels"
+      :db-labels="dbLabels"
+      :bands="afterBands"
+      :spectrum-data="spectrumData"
+      :after="true"
+      :loading="aiAnalyzing"
+      :interactive="!!selectedTrack"
+      @add-band="emit('add-eq-band', $event)"
+      @update-band="emit('update-eq-band', $event)"
+      @remove-band="emit('remove-eq-band', $event)"
+    />
+  </div>
+</div>
   </section>
 </template>

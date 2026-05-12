@@ -9,10 +9,12 @@ import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectListResponse;
+import com.salmon.studion.domain.project.dto.response.ProjectSnapshotSaveResponse;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.entity.ProjectMember;
 import com.salmon.studion.domain.project.service.MasterTrackService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
+import com.salmon.studion.domain.project.service.ProjectSaveService;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.entity.MasterTrack;
 import com.salmon.studion.domain.track.entity.Track;
@@ -33,6 +35,7 @@ public class ProjectFacade {
 
     private final ProjectService projectService;
     private final ProjectMemberService projectMemberService;
+    private final ProjectSaveService projectSaveService;
     private final MasterTrackService masterTrackService;
     private final UserService userService;
     private final TrackService trackService;
@@ -223,4 +226,8 @@ public class ProjectFacade {
         );
     }
 
+    public ProjectSnapshotSaveResponse saveProjectSnapshot(Integer projectId, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
+        return projectSaveService.saveManually(projectId);
+    }
 }

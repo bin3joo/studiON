@@ -1091,7 +1091,7 @@ const onWorkAreaMouseLeave = () => {
           v-for="clip in visibleClips" 
           :key="clip.clipId"
           :aria-label="`오디오 클립: ${clip.audio?.originalName || track.name}`"
-          class="clip-container absolute inset-y-1 z-10 rounded-md"
+          class="clip-container absolute inset-y-1 z-10 rounded-md overflow-hidden"
           :class="[
             isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
             clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
@@ -1154,9 +1154,8 @@ const onWorkAreaMouseLeave = () => {
             {{ clip.audio?.originalName || track.name }}
           </div>
 
-          <!-- GPU 파형 컴포넌트 -->
          <WaveformWebGL
-          :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
+          :key="clip.clipId"
           :clip="clip" />
 
           <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->

@@ -40,7 +40,6 @@ public class AiService {
     private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
 
-    @Transactional
     public AiJobStartResponse startWorkflow(AiJobStartApiRequest request, Integer requestedBy) {
         Integer userId = requireUserId(requestedBy);
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
@@ -50,10 +49,12 @@ public class AiService {
         );
 
         Integer jobId = aiAnalysisJob.getId();
+
         log.info("AiService startWorkflow 호출 | jobId={} projectId={} requestedBy={}",
                 jobId, request.getProjectId(), userId);
 
         Map<Integer, String> audioUrlByMetadataId = buildAudioUrlByMetadataId(request);
+
         AiJobStartRequest fastApiRequest = AiJobStartRequest.create(
                 jobId,
                 request,
@@ -63,17 +64,26 @@ public class AiService {
 
         try {
             AiJobStartResponse response = fastApiClient.startWorkflow(fastApiRequest);
+
             aiAnalysisJob.markDispatched(response.getJob());
-            aiJobMonitor.startMonitoring(response.getJob().getJobId(), response.getJob().getProjectId());
+            aiAnalysisJobRepository.save(aiAnalysisJob);
+
+            aiJobMonitor.startMonitoring(
+                    response.getJob().getJobId(),
+                    response.getJob().getProjectId()
+            );
+
             return response;
         } catch (BusinessException e) {
             aiAnalysisJob.markDispatchFailed(
                     e.getErrorCode().getCode(),
                     e.getMessage()
             );
+            aiAnalysisJobRepository.save(aiAnalysisJob);
             throw e;
         } catch (RuntimeException e) {
             aiAnalysisJob.markDispatchFailed("AI_UNKNOWN", e.getMessage());
+            aiAnalysisJobRepository.save(aiAnalysisJob);
             throw e;
         }
     }

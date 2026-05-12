@@ -899,9 +899,13 @@ export const useTrackStore = defineStore('track', () => {
         
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
         const wasPlaying = isPlaying.value;
+        let pausedAtSeconds = 0;
         if (wasPlaying) {
+            pausedAtSeconds = Tone.getTransport().seconds;
             Tone.getTransport().pause();
             isPlaying.value = false;
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
         }
 
         const splitOffsetBars = data.splitBar - originalClip.start;
@@ -932,8 +936,7 @@ export const useTrackStore = defineStore('track', () => {
 
         // 분할 작업 완료 후 재생 재개
         if (wasPlaying) {
-            const currentOffset = playheadPosition.value * secondsPerBar.value;
-            Tone.getTransport().start("+0.01", currentOffset);
+            Tone.getTransport().start("+0.01", pausedAtSeconds);
             isPlaying.value = true;
             updatePlayheadLoop();
             scrollAnimationLoop();

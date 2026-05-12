@@ -19,14 +19,6 @@ pipeline {
             }
         }
 
-        stage('Prepare Env') {
-            steps {
-                withCredentials([file(credentialsId: 'studion-prod-env', variable: 'ENV_PROD_FILE')]) {
-                    sh 'rm -f .env.prod && cp "$ENV_PROD_FILE" .env.prod && chmod 600 .env.prod'
-                }
-            }
-        }
-
         stage('CI - Backend Build') {
             steps {
                 dir('BE') {

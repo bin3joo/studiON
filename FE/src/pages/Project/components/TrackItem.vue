@@ -815,7 +815,11 @@ const onWorkAreaMouseLeave = () => {
       track.clips.some(c => c.isDragging) ? 'relative z-50' :
       (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
     ]"
-    style="content-visibility: auto; contain-intrinsic-size: 100px; contain: layout paint style;"
+    :style="{
+      contentVisibility: track.clips.some(c => c.isDragging) ? 'visible' : 'auto',
+      containIntrinsicSize: '100px',
+      contain: track.clips.some(c => c.isDragging) ? 'none' : 'layout paint style'
+    }"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"

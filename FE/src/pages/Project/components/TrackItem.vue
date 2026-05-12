@@ -346,6 +346,7 @@ const onResizePointerMove = (e: PointerEvent) => {
   let deltaBar = deltaX / trackStore.pixelPerBar;
 
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
+  const snapResolution = trackStore.subDivision; // 스냅 해상도
 
   // 음원의 전체 길이를 마디 단위로 계산 (이 길이를 넘어서 늘릴 수 없음)
   // 백엔드 데이터 누락이나 목업 클립인 경우, Infinity 대신 현재 가시적인 오디오 길이의 끝을 최대치로 사용하여 무한 드래그 버그 방지
@@ -355,8 +356,10 @@ const onResizePointerMove = (e: PointerEvent) => {
   const maxAudioBars = totalAudioDurationMs / (trackStore.secondsPerBar * 1000);
 
   if (state.side === 'right') {
-    // 오른쪽 리사이즈: duration만 변화
-    let newDuration = state.origDuration + deltaBar;
+    // 오른쪽 리사이즈: 스냅된 새로운 끝점을 기반으로 duration 계산
+    let rawNewEnd = state.origStart + state.origDuration + deltaBar;
+    let snappedEnd = Math.round(rawNewEnd * snapResolution) / snapResolution;
+    let newDuration = snappedEnd - state.origStart;
     
     // 겹침 방지: 오른쪽에 있는 가장 가까운 클립의 시작점을 넘어갈 수 없음
     // 백엔드의 엄격한 부동소수점 검증을 통과하기 위해 0.01 마디의 미세한 간격을 둡니다 (화면상 구분 불가)
@@ -375,9 +378,13 @@ const onResizePointerMove = (e: PointerEvent) => {
     // 오디오 재생 범위도 같이 업데이트 (줄인 범위 밖 소리 차단)
     targetClip.audioDurationMs = newDuration * trackStore.secondsPerBar * 1000;
   } else if (state.side === 'left') {
-    // 왼쪽을 줄일 때는 시작점(start)과 길이(duration)가 동시에 변함
+    // 왼쪽 리사이즈: 스냅된 새로운 시작점을 기반으로 boundedDelta 계산
+    let rawNewStart = state.origStart + deltaBar;
+    let snappedStart = Math.round(rawNewStart * snapResolution) / snapResolution;
+    let boundedDelta = snappedStart - state.origStart;
+
     const maxDelta = state.origDuration - minDuration;
-    let boundedDelta = Math.min(deltaBar, maxDelta);
+    boundedDelta = Math.min(boundedDelta, maxDelta);
     
     // 겹침 방지: 왼쪽에 있는 가장 가까운 클립의 끝점을 넘어갈 수 없음
     const prevClip = props.track.clips

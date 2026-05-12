@@ -266,23 +266,6 @@ public class ClipService {
             log.error("[MongoDB 이벤트 저장 실패]: event=CLIP_CREATE, clipId={}", clipId, e);
         }
 
-        Track track = trackRepository.getReferenceById(request.getTrackId());
-
-        try {
-            clipRepository.save(Clip.create(
-                    clipId,
-                    track,
-                    audioMetadata,
-                    request.getColor(),
-                    request.getStartBar(),
-                    durationBars,
-                    0,
-                    audioMetadata.getDurationMs()
-            ));
-        } catch (Exception e) {
-            log.error("[RDB 클립 저장 실패]: clipId={}", clipId, e);
-        }
-
         return ClipCreateResponse.builder()
                 .clipId(clipId)
                 .trackId(request.getTrackId())

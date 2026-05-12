@@ -14,11 +14,6 @@ const props = defineProps<{
 const trackStore = useTrackStore();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
-// 실제 캔버스에 그림이 그려진 순간의 렌더링 상태를 기억하는 변수들
-// 부모 컨테이너가 리사이즈될 때 캔버스가 CSS로 늘어나는(꿈틀거리는) 현상을 방지
-const renderedWidth = ref(props.chunkWidth);
-const renderedAudioStartMs = ref(props.clip.audioStartMs);
-
 
 // 현재 진행 중인 렌더 요청 ID (줌/스크롤 변경 시 이전 요청을 취소하기 위함)
 let currentRequestId: number | null = null;
@@ -91,10 +86,6 @@ const renderWaveform = async () => {
   if (ctx && result.bitmap) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(result.bitmap, 0, 0);
-    
-    // 그림이 성공적으로 그려진 후에만 시각적 너비와 시작점 위치 업데이트
-    renderedWidth.value = props.chunkWidth;
-    renderedAudioStartMs.value = props.clip.audioStartMs;
   }
   // ImageBitmap 메모리 해제
   if (result.bitmap) result.bitmap.close();
@@ -138,12 +129,8 @@ onUnmounted(() => {
 <template>
   <canvas 
     ref="canvasRef"
-    class="absolute top-0 h-full origin-left"
-    :style="{ 
-      left: `${chunkLeft}px`, 
-      width: `${renderedWidth}px`,
-      transform: `translateX(${ -((props.clip.audioStartMs - renderedAudioStartMs) / 1000) * (trackStore.pixelPerBar / trackStore.secondsPerBar) }px)`
-    }"
+    class="absolute top-0 h-full"
+    :style="{ left: `${chunkLeft}px`, width: `${chunkWidth}px` }"
   ></canvas>
 </template>
 

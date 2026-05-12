@@ -9,6 +9,8 @@ const props = defineProps<{
   selectedTrack: TrackUIState | null
   aiAnalyzing: boolean
   aiAnalyzed: boolean
+  aiBeforeBands: TrackEqBandState[]
+  aiAfterBands: TrackEqBandState[]
 }>()
 
 const trackStore = useTrackStore()
@@ -34,6 +36,16 @@ const emit = defineEmits<{
     bandOrder: number
   }]
 }>()
+
+const beforeBands = computed(() => {
+  return props.aiBeforeBands
+})
+
+const afterBands = computed(() => {
+  return props.aiAfterBands.length > 0
+    ? props.aiAfterBands
+    : currentBands.value
+})
 
 const freqLabels = ['20', '50', '100', '200', '500', '1K', '2K', '5K', '10K', '20K']
 const dbLabels = ['+12', '+8', '+6', '+3', '0', '-3', '-6', '-9', '-12']
@@ -188,8 +200,8 @@ watch(
           title="Before"
           :freq-labels="freqLabels"
           :db-labels="dbLabels"
-          :bands="[]"
-          :spectrum-data="[]"
+          :bands="beforeBands"
+          :spectrum-data="spectrumData"
           :interactive="false"
         />
 
@@ -197,7 +209,7 @@ watch(
           title="After"
           :freq-labels="freqLabels"
           :db-labels="dbLabels"
-          :bands="currentBands"
+          :bands="afterBands"
           :spectrum-data="spectrumData"
           :after="true"
           :loading="aiAnalyzing"

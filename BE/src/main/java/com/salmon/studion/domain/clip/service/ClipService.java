@@ -187,6 +187,8 @@ public class ClipService {
 
         Project project = projectService.getProjectOrThrow(request.getProjectId());
 
+        validateTrackInProject(request.getTrackId(), request.getProjectId());
+
         AudioMetadata audioMetadata = audioService.createAudioMetadata(
                 AudioMetadataCreateRequest.builder()
                         .objectKey(request.getObjectKey())
@@ -259,6 +261,8 @@ public class ClipService {
         request.validate();
 
         projectService.getProjectOrThrow(request.getProjectId());
+
+        validateTrackInProject(request.getTargetTrackId(), request.getProjectId());
 
         String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
         String currentLocker = redisTemplate.opsForValue().get(lockKey);
@@ -627,6 +631,8 @@ public class ClipService {
 
         projectService.getProjectOrThrow(request.getProjectId());
 
+        validateTrackInProject(request.getTargetTrackId(), request.getProjectId());
+
         String clipboardKey = String.format(CLIP_CLIPBOARD_KEY, request.getProjectId(), userId);
         String clipboardJson = redisTemplate.opsForValue().get(clipboardKey);
         if (clipboardJson == null) {
@@ -895,5 +901,10 @@ public class ClipService {
         } catch (Exception e) {
             log.error("[RDB 클립 삭제 실패]: trackId={}", trackId, e);
         }
+    }
+
+    private void validateTrackInProject(Integer trackId, Integer projectId) {
+        trackRepository.findByIdAndProject_Id(trackId, projectId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
     }
 }

@@ -43,29 +43,29 @@ public class ProjectSaveService {
         }
     }
 
-//    public Optional<ProjectSnapshotSaveResponse> saveIfDirty(Integer projectId, ProjectSaveTrigger trigger) {
-//        if (!projectDirtyStateService.isDirty(projectId)) {
-//            return Optional.empty();
-//        }
-//
-//        if (!projectDirtyStateService.acquireSavingLock(projectId)) {
-//            log.debug("[프로젝트 자동저장 skip] 저장 진행 중 | projectId={}", projectId);
-//            return Optional.empty();
-//        }
-//
-//        try {
-//            ProjectSnapshotSaveResponse response = projectSnapshotService.save(projectId, trigger);
-//
-//            trackService.clearDeletedTrackKeys(projectId);
-//            clipService.clearDeletedClipKeys(projectId);
-//            projectDirtyStateService.markSaveSuccess(projectId);
-//            return Optional.of(response);
-//        } catch (RuntimeException e) {
-//            long failCount = projectDirtyStateService.incrementFailCount(projectId);
-//            log.error("[프로젝트 자동저장 실패] projectId={} trigger= {} failCount={}", projectId, trigger, failCount, e);
-//            return Optional.empty();
-//        } finally {
-//            projectDirtyStateService.releaseSavingLock(projectId);
-//        }
-//    }
+    public Optional<ProjectSnapshotSaveResponse> saveIfDirty(Integer projectId, ProjectSaveTrigger trigger) {
+        if (!projectDirtyStateService.isDirty(projectId)) {
+            return Optional.empty();
+        }
+
+        if (!projectDirtyStateService.acquireSavingLock(projectId)) {
+            log.debug("[프로젝트 자동저장 skip] 저장 진행 중 | projectId={}", projectId);
+            return Optional.empty();
+        }
+
+        try {
+            ProjectSnapshotSaveResponse response = projectSnapshotService.save(projectId, trigger);
+
+            trackService.clearDeletedTrackKeys(projectId);
+            clipService.clearDeletedClipKeys(projectId);
+            projectDirtyStateService.markSaveSuccess(projectId);
+            return Optional.of(response);
+        } catch (RuntimeException e) {
+            long failCount = projectDirtyStateService.incrementFailCount(projectId);
+            log.error("[프로젝트 자동저장 실패] projectId={} trigger= {} failCount={}", projectId, trigger, failCount, e);
+            return Optional.empty();
+        } finally {
+            projectDirtyStateService.releaseSavingLock(projectId);
+        }
+    }
 }

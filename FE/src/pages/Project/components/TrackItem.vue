@@ -1045,17 +1045,6 @@ const onWorkAreaMouseLeave = () => {
 
         <!-- 마스터 트랙 전용: 합쳐진 배경 블록 렌더링 -->
         <div v-if="isMaster">
-          <!-- 1. 전체 배경 블록 -->
-          <div 
-            v-for="(block, idx) in masterBackgroundBlocks" 
-            :key="'bg-'+idx"
-            class="absolute inset-y-1 z-0 rounded-md bg-[#4b4b4b]/40 border border-[#4b4b4b]"
-            :style="{
-              left: `${block.start * trackStore.pixelPerBar}px`,
-              width: `${(block.end - block.start) * trackStore.pixelPerBar}px`
-            }"
-          ></div>
-          
           <!-- 2. 클립 사이의 텅 빈 구간(묵음)에만 0 진폭 가로 선 그리기 -->
           <div 
             v-for="(gap, idx) in masterGapLines" 
@@ -1153,7 +1142,7 @@ const onWorkAreaMouseLeave = () => {
 
           <!-- GPU 파형 컴포넌트 -->
          <WaveformWebGL
-          :key="`${clip.clipId}-${clip.duration}-${clip.audioStartMs}`"
+          :key="clip.clipId"
           :clip="clip" />
 
           <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->

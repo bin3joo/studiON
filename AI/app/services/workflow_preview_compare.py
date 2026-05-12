@@ -10,7 +10,7 @@ from scipy.signal import butter, resample_poly, sosfiltfilt
 
 from app.graph.nodes.analysis import DSP_TARGET_SR
 from app.services.workflow_artifacts import get_workflow_artifact_store
-from app.services.workflow_audio_paths import resolve_clip_audio_path
+from app.services.workflow_audio_paths import AudioPathResolutionError, resolve_clip_audio_path
 from app.services.workflow_audio_rendering import load_clip_segment, ms_to_frames
 from app.services.workflow_snapshots import TimelineSnapshotDocument
 
@@ -250,7 +250,13 @@ def _build_excerpt_track_signals(
         overlap_end_ms = min(excerpt_end_ms, clip_end_ms)
         if overlap_end_ms <= overlap_start_ms:
             continue
-        resolved_audio_path = resolve_clip_audio_path(clip)
+        try:
+            resolved_audio_path = resolve_clip_audio_path(clip)
+        except AudioPathResolutionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.message,
+            ) from exc
         if resolved_audio_path is None:
             continue
         clip_waveform = load_clip_segment(

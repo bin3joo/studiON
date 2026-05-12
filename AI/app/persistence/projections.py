@@ -11,7 +11,7 @@ from app.graph.state import ApplyState, RuntimeState, WorkflowState
 class RuntimeStatusProjection(BaseModel):
     job_id: int
     phase: str
-    current_node: str
+    current_node: str | None = None
     progress: int
     status: str
     heartbeat_at: str | None = None
@@ -513,7 +513,21 @@ def _build_applied_suggestion(
 
 # 최종 사용자 의사결정을 feedback event projection으로 노출한다.
 def _build_feedback_event(state: WorkflowState) -> FeedbackEventProjection | None:
-    return None
+    decision = state.get("user_decision")
+    if decision is None:
+        return None
+    return FeedbackEventProjection(
+        id=f"{state['job_id']}-feedback",
+        job_id=state["job_id"],
+        event_type="USER_DECISION_RECORDED",
+        payload={
+            "decision": decision,
+            "selected_region_id": state.get("selected_region_id"),
+            "preserve_clip_id": state.get("preserve_clip_id"),
+            "user_feedback_message": state.get("user_feedback_message"),
+            "recorded_at": state.get("user_feedback_recorded_at"),
+        },
+    )
 
 
 def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, Any]]:

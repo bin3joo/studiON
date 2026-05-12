@@ -21,6 +21,11 @@ WorkflowDispatchType = Literal[
     "start",
     "resume_plan_input",
 ]
+WorkflowUserDecision = Literal[
+    "CONFIRM",
+    "CANCEL",
+    "RESUME",
+]
 RuntimeStatus = Literal[
     "queued",
     "running",
@@ -76,6 +81,8 @@ class WorkflowState(TypedDict, total=False):
     selected_region_id: int | None
     preserve_clip_id: int | None
     user_feedback_message: str | None
+    user_decision: WorkflowUserDecision | None
+    user_feedback_recorded_at: str | None
     clip_feature_artifact_id: str | None
     dsp_scan_summary: dict[str, object]
     vocal_detected: bool
@@ -183,6 +190,8 @@ def build_workflow_initial_state(
         "selected_region_id": None,
         "preserve_clip_id": None,
         "user_feedback_message": None,
+        "user_decision": None,
+        "user_feedback_recorded_at": None,
         "clip_feature_artifact_id": None,
         "dsp_scan_summary": {},
         "vocal_detected": False,

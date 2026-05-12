@@ -26,7 +26,7 @@ from app.services.workflow_analysis_regions import (
     AnalysisRegionCreate,
     get_workflow_analysis_region_store,
 )
-from app.services.workflow_audio_paths import resolve_clip_audio_path
+from app.services.workflow_audio_paths import AudioPathResolutionError, resolve_clip_audio_path
 from app.services.workflow_snapshots import get_workflow_snapshot_store
 
 # 실제 DSP는 프로젝트 전체 타임라인을 기준으로 STFT를 계산한다.
@@ -548,7 +548,10 @@ def _build_track_representative_specs(
         )
         selected_clip: dict[str, object] | None = None
         for clip in ranked_clips:
-            resolved_audio_path = resolve_clip_audio_path(clip)
+            try:
+                resolved_audio_path = resolve_clip_audio_path(clip)
+            except AudioPathResolutionError:
+                continue
             if resolved_audio_path is None:
                 continue
             selected_clip = {**clip, "resolved_audio_path": resolved_audio_path}
@@ -687,7 +690,10 @@ def _resolve_all_clip_audio(clip_index: list[dict[str, object]]) -> list[dict[st
     resolved_clips: list[dict[str, object]] = []
     missing_clip_ids: list[int] = []
     for clip in clip_index:
-        audio_path = resolve_clip_audio_path(clip)
+        try:
+            audio_path = resolve_clip_audio_path(clip)
+        except AudioPathResolutionError as exc:
+            raise DSPBuildError(exc.code, exc.message) from exc
         if audio_path is None:
             missing_clip_ids.append(int(clip["clip_id"]))
             continue

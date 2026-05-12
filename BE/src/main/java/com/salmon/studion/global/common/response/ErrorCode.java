@@ -70,7 +70,8 @@ public enum ErrorCode {
     AI_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "AI_005", "AI 서버 응답 형식이 올바르지 않습니다."),
 
     // EQ EQ_000
-    TRACK_EQ_NOT_FOUND(HttpStatus.NOT_FOUND, "EQ_001", "해당 track eq를 찾을 수 없습니다.");
+    TRACK_EQ_NOT_FOUND(HttpStatus.NOT_FOUND, "EQ_001", "해당 track eq를 찾을 수 없습니다."),
+    TRACK_EQ_LOCKED(HttpStatus.CONFLICT, "EQ_002", "다른 사용자가 EQ를 편집 중입니다.");
 
     private final HttpStatus status;
     private final String code;

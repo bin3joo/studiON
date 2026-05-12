@@ -6,9 +6,9 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Getter;
 
+import java.util.Map;
 import java.util.List;
 
 @Getter
@@ -45,8 +45,23 @@ public class AiJobStartRequest {
     public static AiJobStartRequest create(
             Integer jobId,
             AiJobStartApiRequest request,
-            Integer requestedBy
+            Integer requestedBy,
+            Map<Integer, String> audioUrlByMetadataId
     ) {
+        ProjectSnapshotRequest sourceSnapshot = request.getProjectSnapshot();
+        List<ProjectTrackRequest> tracks = sourceSnapshot.getProjectTrackRequest().stream()
+                .map(ProjectTrackRequest::copyOf)
+                .toList();
+        List<ProjectClipRequest> clips = sourceSnapshot.getProjectClipRequest().stream()
+                .map(clip -> {
+                    String resolvedAudioUrl = clip.getAudioUrl();
+                    if (resolvedAudioUrl == null || resolvedAudioUrl.isBlank()) {
+                        resolvedAudioUrl = audioUrlByMetadataId.get(clip.getAudioMetadataId());
+                    }
+                    return ProjectClipRequest.create(clip, resolvedAudioUrl);
+                })
+                .toList();
+
         return new AiJobStartRequest(
                 jobId,
                 request.getProjectId(),
@@ -54,7 +69,7 @@ public class AiJobStartRequest {
                 request.getIssueTypes(),
                 request.getValidatorMode(),
                 request.getCriticMode(),
-                request.getProjectSnapshot()
+                ProjectSnapshotRequest.create(sourceSnapshot, tracks, clips)
         );
     }
 }

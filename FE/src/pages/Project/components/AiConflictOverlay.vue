@@ -5,6 +5,8 @@ const props = defineProps<{
   conflict: {
     startPercent: number
     endPercent: number
+    startPx: number
+    endPx: number
     barStart: number
     barEnd: number
     title: string
@@ -22,20 +24,20 @@ const close = () => {
 
 <template>
   <div
-    class="pointer-events-none absolute bottom-0 top-7 z-20"
+    class="pointer-events-none absolute top-[34px] bottom-[0px] z-[999] rounded border border-purple-400/70 bg-purple-500/20 shadow-[0_0_24px_rgba(217,70,239,0.35)]"
     :style="{
-      left: `${props.conflict.startPercent}%`,
-      width: `${props.conflict.endPercent - props.conflict.startPercent}%`,
+      left: `${props.conflict.startPx}px`,
+      width: `${Math.max(props.conflict.endPx - props.conflict.startPx, 8)}px`,
     }"
   >
     <div
-      class="absolute inset-0 border-x border-red-400/80 bg-red-500/20 shadow-[0_0_24px_rgba(239,68,68,0.35)]"
+      class="absolute inset-0 border-x border-red-400/80 bg-red-500/20"
     />
 
-    <div class="pointer-events-auto absolute left-full top-1 ml-2">
+    <div class="pointer-events-auto absolute left-full top-3 ml-2">
       <button
         type="button"
-        class="grid h-7 w-7 place-items-center rounded-full bg-fuchsia-500 text-white shadow-[0_0_16px_rgba(217,70,239,0.8)]"
+        class="relative z-[1000] grid h-7 w-7 place-items-center rounded-full bg-fuchsia-500 text-white shadow-[0_0_16px_rgba(217,70,239,0.8)]"
         @click="open = !open"
       >
         ✨
@@ -43,7 +45,7 @@ const close = () => {
 
       <div
         v-if="open"
-        class="absolute left-10 top-0 w-[360px] rounded-lg border border-fuchsia-400/60 bg-[#202025]/95 text-white shadow-[0_0_28px_rgba(217,70,239,0.35)] backdrop-blur"
+        class="absolute left-10 top-0 z-[1000] w-[360px] rounded-lg border border-fuchsia-400/60 bg-[#202025]/95 text-white shadow-[0_0_28px_rgba(217,70,239,0.35)] backdrop-blur"
       >
         <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-fuchsia-300">

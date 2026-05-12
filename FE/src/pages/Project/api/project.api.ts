@@ -9,6 +9,7 @@ import type {
   ProjectId,
   RootNote,
 } from '../types/project.types'
+import type { FetchCommentsParams, FetchCommentsResponse } from '../types/comment.types';
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
 
@@ -180,6 +181,17 @@ export const projectApi = {
   saveAudioMetadata: async (projectId: number, payload: SaveAudioMetadataRequest) => {
     const response = await axiosInstance.post<SaveAudioMetadataResponse>(`/api/v1/projects/${projectId}/audios`, payload);
     return response.data.data;
+  },
+
+  //프로젝트 코멘트 목록 조회
+  getComments: async (projectId: number, params?: FetchCommentsParams) => {
+    const response = await axiosInstance.get<FetchCommentsResponse>(
+      `/api/v1/projects/${projectId}/comments`,
+      { params }
+    );
+    //인터셉터를 통해 response.data.data 내의 comments 배열이 반환됨
+    return response.data.data.comments;
+
   }
 
 }

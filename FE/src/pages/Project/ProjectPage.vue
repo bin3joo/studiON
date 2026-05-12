@@ -19,6 +19,8 @@ import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
 import type { TrackEqBandState } from './types'
 import { AlertTriangle } from 'lucide-vue-next';
+import { projectApi } from './api/project.api';
+import { useProjectSave } from './composables/useProjectSave';
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -27,6 +29,7 @@ const projectId = route.params.projectId as string
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
 const authStore = useAuthStore(); // Auth 스토어 사용 준비
+const { lastSavedTime, handleSave } = useProjectSave(Number(projectId));
 
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
@@ -516,10 +519,6 @@ function handleSaveVersion() {
   console.log('버전 저장')
 }
 
-function handleSave() {
-  console.log('저장')
-}
-
 function handleUndo() {
   console.log('undo')
 }
@@ -788,7 +787,7 @@ const onGlobalDrop = (e: DragEvent) => {
     <ProjectHeader
   :project-name="projectName"
   :online-users="onlineUsers"
-  last-saved-at="13:24"
+  :last-saved-at="lastSavedTime"
   @rename="handleRename"
   @export="handleExport"
   @save-version="handleSaveVersion"
@@ -894,7 +893,7 @@ const onGlobalDrop = (e: DragEvent) => {
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->
-    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div class="flex flex-col items-center gap-4 rounded-xl bg-[#1E1E21] p-6 shadow-2xl border border-white/10 w-[320px]">
         <div class="rounded-full bg-red-500/20 p-3">
           <AlertTriangle class="h-6 w-6 text-red-400" />

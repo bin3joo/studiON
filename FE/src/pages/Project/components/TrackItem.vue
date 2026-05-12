@@ -635,12 +635,14 @@ const isDragOver = ref(false); // 파일을 트랙 위로 드래그 중인지 �
 const onDragEnter = (e: DragEvent) => {
   if (props.isMaster) return; // 마스터 트랙은 드롭 불가
   e.preventDefault();
+  e.stopPropagation(); // 정상 트랙 영역에서는 전역 드롭 이벤트가 발생하지 않도록 차단
   isDragOver.value = true;
 };
 
 const onDragOver = (e: DragEvent) => {
   if (props.isMaster) return;
   e.preventDefault(); // 브라우저가 파일을 열어버리는 기본 동작 방지
+  e.stopPropagation(); // 전파 방지
   if (e.dataTransfer) {
     e.dataTransfer.dropEffect = 'copy'; // 복사(추가)된다는 마우스 커서 표시
   }
@@ -649,6 +651,7 @@ const onDragOver = (e: DragEvent) => {
 const onDragLeave = (e: DragEvent) => {
   if (props.isMaster) return;
   e.preventDefault();
+  e.stopPropagation();
   
   // 자식 요소 위로 마우스가 지나갈 때 깜빡이는 현상 방지
   const currentTarget = e.currentTarget as HTMLElement;
@@ -661,6 +664,7 @@ const onDragLeave = (e: DragEvent) => {
 const onDrop = (e: DragEvent) => {
   if (props.isMaster) return;
   e.preventDefault();
+  e.stopPropagation(); // 트랙에 제대로 떨어뜨렸으므로, 최상위 컨테이너로 버블링되지 않게 막음
   isDragOver.value = false;
 
   // 1. 떨어뜨린 파일 가져오기

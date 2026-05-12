@@ -30,9 +30,7 @@ pipeline {
         stage('CI - Frontend Build') {
             steps {
                 dir('FE') {
-                    sh 'npm ci'
-                    sh 'npm run lint'
-                    sh 'npm run build'
+                    sh 'docker build --target builder -t studion-fe-ci:${BUILD_NUMBER} .'
                 }
             }
         }

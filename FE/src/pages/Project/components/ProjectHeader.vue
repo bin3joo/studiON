@@ -173,7 +173,7 @@ function cancelProjectNameEdit() {
       >
         <Save class="h-4 w-4" />
         <span>저장</span>
-        <span class="text-muted-foreground">마지막 저장 시간 {{ lastSavedAt }}</span>
+        <span class="text-muted-foreground">{{ lastSavedAt }}</span>
       </button>
 
       <button

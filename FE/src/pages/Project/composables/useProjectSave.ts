@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { projectApi } from '../api/project.api'
 
 export function useProjectSave(projectId: number) {
-    const lastSavedTime = ref<string>('저장 전')
+    const lastSavedTime = ref<string>('--:--')
 
     function formatTime(isoString: string) {
         const date = new Date(isoString);

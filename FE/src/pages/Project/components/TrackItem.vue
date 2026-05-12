@@ -119,7 +119,7 @@ function updateClipPosition() {
   //마우스를 누르고 있을때 백 그라운드에서 돌아가는 오토 스크롤 엔진
  //마우스를 누르고 있을때 백 그라운드에서 돌아가는 오토 스크롤 엔진
 function autoScrollLoop() {
-  if(!activeClip.value || !scrollContainer) return; //조건이 맞지 않으면 함수 종료
+  if((!activeClip.value && !resizeState.value.isResizing) || !scrollContainer) return; //조건이 맞지 않으면 함수 종료
   
   const EDGE_THRESHOLD = 80; //가장자리에서 80px안쪽으로 들어오면 자동 스크롤 시작
   const SCROLL_SPEED = 15; //한 프레임당 15px씩 밀어내기
@@ -139,7 +139,11 @@ function autoScrollLoop() {
 
   // 스크롤이 발생했다면, 마우스가 가만히 있어도 클립 위치를 갱신해야 함
   if (scrolled) {
-    updateClipPosition(); 
+    if (activeClip.value) {
+      updateClipPosition(); 
+    } else if (resizeState.value.isResizing) {
+      updateResizePosition();
+    }
   }
 
   // 드래그 중이면 끊임없이 다음 프레임 예약
@@ -333,16 +337,28 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
     isResizing: true
   };
 
+  // 가장 가까운 스크롤 영역('.overflow-auto')을 찾아 오토 스크롤 셋팅
+  scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
+  startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
+  currentClientX = e.clientX; // 좌표 초기화
+
+  // 오토 스크롤 엔진 가동
+  if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
+  autoScrollRafId = requestAnimationFrame(autoScrollLoop);
+
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 };
 
-// 리사이즈 마우스 이동 (UI 선반영으로 부드럽게)
-const onResizePointerMove = (e: PointerEvent) => {
-  if (!resizeState.value.isResizing || !resizeState.value.clip) return;
+// 리사이즈 클립 위치/길이 업데이트 함수 (마우스 이동 + 스크롤 이동 동시 반영)
+function updateResizePosition() {
+  if (!resizeState.value.isResizing || !resizeState.value.clip || !scrollContainer) return;
 
+  const currentScrollLeft = (scrollContainer as HTMLElement).scrollLeft; //현재 스크롤량 가져오기
   const state = resizeState.value;
   const targetClip = state.clip as ClipUIState;
-  const deltaX = e.clientX - state.startX;
+  
+  // 마우스 이동 거리 + 화면 스크롤 이동 거리 합산
+  const deltaX = (currentClientX - state.startX) + (currentScrollLeft - startScrollLeft.value);
   let deltaBar = deltaX / trackStore.pixelPerBar;
 
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
@@ -407,11 +423,25 @@ const onResizePointerMove = (e: PointerEvent) => {
     targetClip.audioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
     targetClip.audioDurationMs = targetClip.duration * trackStore.secondsPerBar * 1000;
   }
+}
+
+// 리사이즈 마우스 이동 (UI 선반영으로 부드럽게)
+const onResizePointerMove = (e: PointerEvent) => {
+  if (!resizeState.value.isResizing || !resizeState.value.clip) return;
+  
+  currentClientX = e.clientX; // 엔진이 알 수 있게 마우스 좌표 최신화
+  updateResizePosition();
 };
 
 // 리사이즈 종료 (스토어에 통신 요청)
 const onResizePointerUp = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
+
+  // 오토 스크롤 엔진 종료
+  if(autoScrollRafId) {
+    cancelAnimationFrame(autoScrollRafId);
+    autoScrollRafId = null;
+  }
 
   const state = resizeState.value;
   const targetClip = state.clip as ClipUIState;

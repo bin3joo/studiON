@@ -88,4 +88,18 @@ public class Project extends BaseEntity {
         this.name = name;
         this.lastUpdateAt = LocalDateTime.now();
     }
+
+    public void refreshSnapshotStatistics(
+            Integer trackCount,
+            Integer totalBarCount,
+            Integer totalPlayTimeMs,
+            Long totalAudioSizeByte
+    ) {
+        this.trackCount = trackCount;
+        this.totalBarCount = totalBarCount;
+        this.totalPlayTimeMs = totalPlayTimeMs;
+        this.totalAudioSizeByte = totalAudioSizeByte;
+        this.lastUpdateAt = LocalDateTime.now();
+    }
+
 }

@@ -85,9 +85,6 @@ const emit = defineEmits<{
 
     <!-- 단축키 도구 모음 (타임라인 1에 맞춤) -->
     <div class="absolute left-[224px] flex items-center gap-1" role="group" aria-label="클립 및 트랙 도구">
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="트랙 추가 (Shift + T)" @click="emit('action-add-track')">
-        <ListPlus class="h-4 w-4" />
-      </button>
       <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복사 (Ctrl/Cmd + C)" @click="emit('action-copy')">
         <Copy class="h-4 w-4" />
       </button>

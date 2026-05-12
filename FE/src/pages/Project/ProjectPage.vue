@@ -18,6 +18,7 @@ import {socketService} from '../../core/services/socket.service'; //웹 소켓 �
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
 import type { TrackEqBandState } from './types'
+import { AlertTriangle } from 'lucide-vue-next';
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -755,12 +756,35 @@ function handleActionAddTrack() {
   trackStore.addTrack();
 }
 
+// 전역 파일 드래그 앤 드롭 에러 방지 처리
+const isInvalidDropModalOpen = ref(false);
+
+const onGlobalDragOver = (e: DragEvent) => {
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'; // 드롭 이벤트를 발생시키기 위해 copy로 설정
+  }
+};
+
+const onGlobalDrop = (e: DragEvent) => {
+  // 브라우저의 기본 파일 열기 동작 차단
+  
+  const files = e.dataTransfer?.files;
+  if (files && files.length > 0) {
+    // 트랙 내부의 이벤트 리스너(stopPropagation)를 거치지 않고 여기까지 올라온 이벤트는
+    // 빈 공간이나 헤더 등에 드롭한 잘못된 위치의 드롭임.
+    isInvalidDropModalOpen.value = true;
+  }
+};
 </script>
 
 <template>
   <!--플랙스, 플랙스 콜 -> 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
   
-  <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground" >
+  <div 
+    class="flex h-screen flex-col overflow-hidden bg-background text-foreground"
+    @dragover.prevent="onGlobalDragOver"
+    @drop.prevent="onGlobalDrop"
+  >
     <ProjectHeader
   :project-name="projectName"
   :online-users="onlineUsers"
@@ -868,6 +892,22 @@ function handleActionAddTrack() {
   :project-name="projectName"
   @close="isInviteModalOpen = false"
     />
+
+    <!-- 잘못된 파일 드롭 안내 모달 -->
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div class="flex flex-col items-center gap-4 rounded-xl bg-[#1E1E21] p-6 shadow-2xl border border-white/10 w-[320px]">
+        <div class="rounded-full bg-red-500/20 p-3">
+          <AlertTriangle class="h-6 w-6 text-red-400" />
+        </div>
+        <div class="text-center">
+          <h3 class="text-base font-semibold text-white">잘못된 드롭 위치</h3>
+          <p class="mt-2 text-sm text-gray-400">오디오 파일은 타임라인의 <span class="text-primary font-bold">트랙 작업 영역</span> 위에 드래그 앤 드롭해 주세요.</p>
+        </div>
+        <button @click="isInvalidDropModalOpen = false" class="mt-4 w-full rounded-md bg-primary py-2 text-sm font-semibold text-black hover:bg-primary/80 transition-colors">
+          확인
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 

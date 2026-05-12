@@ -2,6 +2,7 @@ package com.salmon.studion.domain.track.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.clip.service.ClipService;
 import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
@@ -48,6 +49,7 @@ import static org.mockito.Mockito.*;
 class TrackServiceTest {
 
     @Mock private ProjectService projectService;
+    @Mock private ClipService clipService;
     @Mock private TrackEqService trackEqService;
     @Mock private RedisTemplate<String, String> redisTemplate;
     @Mock private com.salmon.studion.domain.track.repository.TrackRepository trackRepository;
@@ -257,7 +259,7 @@ class TrackServiceTest {
             assertThat(response.getPostTrackId()).isEqualTo(2);
 
             assertThat(fromStore(2).getPreTrackId()).isNull();
-            verify(trackEqService).deleteByTrackId(1);
+            verify(trackEqService).deleteByTrackIdIfExists(1);
         }
 
         @Test

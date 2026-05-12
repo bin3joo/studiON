@@ -888,4 +888,12 @@ public class ClipService {
             redisTemplate.opsForSet().add(deletedSetKey, idsToAdd.toArray(new String[0]));
         }
     }
+
+    public void deleteClipsByTrackFromRdb(Integer trackId) {
+        try {
+            clipRepository.deleteAllByTrackId(trackId);
+        } catch (Exception e) {
+            log.error("[RDB 클립 삭제 실패]: trackId={}", trackId, e);
+        }
+    }
 }

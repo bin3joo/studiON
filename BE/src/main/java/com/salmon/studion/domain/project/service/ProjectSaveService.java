@@ -22,6 +22,8 @@ public class ProjectSaveService {
     private final TrackService trackService;
     private final ClipService clipService;
 
+    private static final int MAX_AUTOSAVE_FAIL_COUNT = 5;
+
     public ProjectSnapshotSaveResponse saveManually(Integer projectId) {
         if (!projectDirtyStateService.acquireSavingLock(projectId)) {
             throw new BusinessException(ErrorCode.PROJECT_SAVE_IN_PROGRESS);
@@ -48,6 +50,12 @@ public class ProjectSaveService {
             return Optional.empty();
         }
 
+        long failCount = projectDirtyStateService.getFailCount(projectId);
+        if (failCount >= MAX_AUTOSAVE_FAIL_COUNT) {
+            log.warn("[프로젝트 자동저장 중단] 최대 실패 횟수 초과 | projectId={} failCount={}", projectId, failCount);
+            return Optional.empty();
+        }
+
         if (!projectDirtyStateService.acquireSavingLock(projectId)) {
             log.debug("[프로젝트 자동저장 skip] 저장 진행 중 | projectId={}", projectId);
             return Optional.empty();
@@ -61,8 +69,8 @@ public class ProjectSaveService {
             projectDirtyStateService.markSaveSuccess(projectId);
             return Optional.of(response);
         } catch (RuntimeException e) {
-            long failCount = projectDirtyStateService.incrementFailCount(projectId);
-            log.error("[프로젝트 자동저장 실패] projectId={} trigger= {} failCount={}", projectId, trigger, failCount, e);
+            long nextFailCount = projectDirtyStateService.incrementFailCount(projectId);
+            log.error("[프로젝트 자동저장 실패] projectId={} trigger= {} failCount={}", projectId, trigger, nextFailCount, e);
             return Optional.empty();
         } finally {
             projectDirtyStateService.releaseSavingLock(projectId);

@@ -18,7 +18,7 @@ public class ProjectDirtyStateService {
     private static final String FAIL_COUNT_KEY = "autosave:fail-count:%d";
     private static final String LAST_SAVED_AT_KEY = "autosave:last-saved-at:%d";
 
-    private static final Duration SAVING_LOCK_TTL = Duration.ofSeconds(30);
+    private static final Duration SAVING_LOCK_TTL = Duration.ofSeconds(60*5);
     private static final Duration KEY_TTL = Duration.ofHours(2);
 
     private final RedisTemplate<String, String> redisTemplate;
@@ -71,7 +71,17 @@ public class ProjectDirtyStateService {
     }
 
     public long incrementFailCount(Integer projectId) {
-        Long value = redisTemplate.opsForValue().increment(String.format(FAIL_COUNT_KEY, projectId));
+        String key = String.format(FAIL_COUNT_KEY, projectId);
+        Long value = redisTemplate.opsForValue().increment(key);
+        redisTemplate.expire(key, KEY_TTL);
         return value == null ? 0L : value;
+    }
+
+    public long getFailCount(Integer projectId) {
+        String value = redisTemplate.opsForValue().get(String.format(FAIL_COUNT_KEY, projectId));
+        if (value == null) {
+            return 0L;
+        }
+        return Long.parseLong(value);
     }
 }

@@ -60,7 +60,7 @@ public class FastApiClient {
         log.info("FastAPI user feedback 호출 | jobId={} projectId={}", request.getJobId(), request.getProjectId());
 
         return aiWebClient.post()
-                .uri("/internal/workflow/jobs/resume")
+                .uri("/internal/workflow/jobs/{jobId}/feedback", request.getJobId())
                 .bodyValue(request)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, response ->

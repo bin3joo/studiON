@@ -83,12 +83,7 @@ class HTTPPlanCriticLLMClient:
                     ),
                 }
             ],
-            "system": (
-                "항상 한국어로만 답하라. 반드시 JSON object 하나만 반환하라. "
-                '반환 형식은 {"result":"PASS|REVISE|REJECT","note":"string"} 이다. '
-                "의미 없는 칭찬은 금지하고, 계획의 안정성, "
-                "사용자 의도 적합성, 과도한 보정 여부를 비평하라."
-            ),
+            "system": _critic_system_prompt(),
         }
         headers = {
             "Content-Type": "application/json",
@@ -168,6 +163,17 @@ def get_plan_critic_llm_client() -> PlanCriticLLMClient:
         max_tokens=settings.plan_critic_max_tokens,
         timeout_seconds=settings.plan_critic_timeout_seconds,
         connect_timeout_seconds=settings.plan_critic_connect_timeout_seconds,
+    )
+
+
+def _critic_system_prompt() -> str:
+    return (
+        "Review the proposed EQ-only audio-fix plan and return only a JSON object. "
+        'Use the schema {"result":"PASS|REVISE|REJECT","note":"string"}. '
+        "Reject plans that violate preserve-track safety, selected-region boundaries, "
+        "the stated user feedback intent, the EQ-only policy, or TRACK-only scope. "
+        "Reject DE_ESSER, GAIN_TRIM, TRUE_PEAK_LIMITER, and MASTER scope. "
+        "When revision is needed, write a short, actionable note that the planner can directly apply."
     )
 
 

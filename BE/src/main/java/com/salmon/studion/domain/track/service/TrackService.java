@@ -2,6 +2,7 @@ package com.salmon.studion.domain.track.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
@@ -52,6 +53,7 @@ public class TrackService {
     private static final String DELETED_TRACKS_KEY = "project:%d:deleted_tracks";
 
     private final ProjectService projectService;
+    private final TrackEqService trackEqService;
     private final TrackRepository trackRepository;
     private final TrackEventRepository trackEventRepository;
     private final RedisTemplate<String, String> redisTemplate;
@@ -231,6 +233,7 @@ public class TrackService {
             updatePreTrackId(request.getProjectId(), track.getPostTrackId(), track.getPreTrackId());
         }
 
+        trackEqService.deleteByTrackId(track.getTrackId());
         removeTrackToRedis(request.getProjectId(), track);
         redisTemplate.opsForSet().add(
                 String.format(DELETED_TRACKS_KEY, request.getProjectId()),

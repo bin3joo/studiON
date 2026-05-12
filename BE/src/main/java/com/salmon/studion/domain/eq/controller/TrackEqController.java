@@ -76,7 +76,7 @@ public class TrackEqController {
     }
 
     @DeleteMapping("/track-eqs/{trackEqId}/bands")
-    public ResponseEntity<ApiResponse<Void>> deleteTrackEqBands(
+    public ResponseEntity<ApiResponse<Void>> clearTrackEqBands(
             @PathVariable Integer trackEqId,
             @AuthenticationPrincipal CustomOAuth2User user
     ) {

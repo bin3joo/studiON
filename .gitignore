@@ -32,9 +32,11 @@ pnpm-debug.log*
 FE/*.wav
 FE/*.mp3
 
+/tmp
 AI/*.png
 AI/*.wav
 AI/*.mp3
 AI/generated-audio/
-
+AI/tests/fixtures
+AI/tmp
 AI/docs

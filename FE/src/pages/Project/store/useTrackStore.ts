@@ -899,9 +899,13 @@ export const useTrackStore = defineStore('track', () => {
         
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
         const wasPlaying = isPlaying.value;
+        let pausedAtSeconds = 0;
         if (wasPlaying) {
+            pausedAtSeconds = Tone.getTransport().seconds;
             Tone.getTransport().pause();
             isPlaying.value = false;
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
         }
 
         const splitOffsetBars = data.splitBar - originalClip.start;
@@ -932,8 +936,7 @@ export const useTrackStore = defineStore('track', () => {
 
         // 분할 작업 완료 후 재생 재개
         if (wasPlaying) {
-            const currentOffset = playheadPosition.value * secondsPerBar.value;
-            Tone.getTransport().start("+0.01", currentOffset);
+            Tone.getTransport().start("+0.01", pausedAtSeconds);
             isPlaying.value = true;
             updatePlayheadLoop();
             scrollAnimationLoop();
@@ -1530,6 +1533,13 @@ export const useTrackStore = defineStore('track', () => {
         if (!isPlaying.value) {
             const px = newBar * pixelPerBar.value;
             document.documentElement.style.setProperty('--playhead-px', `${px}px`);
+            
+            // updatePlayheadLoop나 stopPlay에서 인라인 transform을 덮어씌웠기 때문에
+            // 여기서도 직접 .playhead-line의 transform을 갱신해 주어야 합니다.
+            const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
+            for (let i = 0; i < playheadEls.length; i++) {
+                playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
+            }
 
             // 정지 상태 스크러빙 시 진행 오버레이 갱신
             const clipEls = document.querySelectorAll('.clip-container') as NodeListOf<HTMLElement>;

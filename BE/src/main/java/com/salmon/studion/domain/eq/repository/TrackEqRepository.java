@@ -11,6 +11,7 @@ import java.util.Optional;
 public interface TrackEqRepository extends JpaRepository<TrackEq, Integer> {
 
     List<TrackEq> findByProjectId(Integer projectId);
+
     boolean existsByTrackId(Integer trackId);
 
     Optional<TrackEq> findByTrackId(Integer trackId);

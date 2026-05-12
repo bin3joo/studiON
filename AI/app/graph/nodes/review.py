@@ -10,6 +10,9 @@ from app.services.plan_critic_llm import (
 
 ISSUE_ALLOWED_ACTIONS = {
     "band_overlap": {"DYNAMIC_EQ"},
+    "high_band_harshness": {"DYNAMIC_EQ"},
+    "sibilance": {"DYNAMIC_EQ"},
+    "track_clipping": {"DYNAMIC_EQ", "EQ_CUT"},
 }
 
 
@@ -134,15 +137,11 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
         return f"Action type {action_type} is not allowed for issue {issue_type}."
 
     target_scope = action.get("targetScope")
-    if target_scope not in {"TRACK", "MASTER"}:
+    if target_scope != "TRACK":
         return "Plan action omitted a valid targetScope."
     target_track_id = action.get("targetTrackId")
-    if target_scope == "TRACK" and target_track_id is None:
+    if target_track_id is None:
         return "TRACK-scoped actions must include targetTrackId."
-    if target_scope == "MASTER" and target_track_id is not None:
-        return "MASTER-scoped actions must not include targetTrackId."
-    if issue_type == "band_overlap" and target_scope != "TRACK":
-        return f"{issue_type} plans must use TRACK scope."
 
     start_ms = action.get("startMs")
     end_ms = action.get("endMs")
@@ -198,6 +197,10 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
             and int(target_track_id) == preserve_track_id
         ):
             return "Band-overlap plans must not target the preserved clip track."
+    elif issue_type == "sibilance" and action_type != "DYNAMIC_EQ":
+        return "Sibilance plans must use DYNAMIC_EQ in EQ-only mode."
+    elif issue_type == "track_clipping" and action_type not in {"DYNAMIC_EQ", "EQ_CUT"}:
+        return "Track-clipping plans must use an EQ action in EQ-only mode."
     return None
 
 

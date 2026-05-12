@@ -30,7 +30,13 @@ class WorkflowAudioMetadataStore:
         params = {f"id_{index}": value for index, value in enumerate(ids)}
         query = text(
             f"""
-            SELECT id, objectKey, originalName, storedName, mimeType, durationMs
+            SELECT
+                id,
+                object_key,
+                original_name,
+                stored_name,
+                mime_type,
+                duration_ms
             FROM audio_metadata
             WHERE id IN ({placeholders})
             """
@@ -40,11 +46,11 @@ class WorkflowAudioMetadataStore:
         return {
             int(row["id"]): AudioMetadataRecord(
                 id=int(row["id"]),
-                object_key=str(row["objectKey"]),
-                original_name=row.get("originalName"),
-                stored_name=row.get("storedName"),
-                mime_type=row.get("mimeType"),
-                duration_ms=row.get("durationMs"),
+                object_key=str(row["object_key"]),
+                original_name=row.get("original_name"),
+                stored_name=row.get("stored_name"),
+                mime_type=row.get("mime_type"),
+                duration_ms=row.get("duration_ms"),
             )
             for row in rows
         }

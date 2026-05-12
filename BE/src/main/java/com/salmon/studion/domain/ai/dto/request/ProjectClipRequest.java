@@ -1,11 +1,14 @@
 package com.salmon.studion.domain.ai.dto.request;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
 @NoArgsConstructor
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class ProjectClipRequest {
 
     @JsonProperty("clip_id")
@@ -28,4 +31,20 @@ public class ProjectClipRequest {
 
     @JsonProperty("audio_duration_ms")
     private Integer audioDurationMs;
+
+    @JsonProperty("audio_url")
+    private String audioUrl;
+
+    public static ProjectClipRequest create(ProjectClipRequest source, String audioUrl) {
+        return new ProjectClipRequest(
+                source.getClipId(),
+                source.getTrackId(),
+                source.getStartMs(),
+                source.getEndMs(),
+                source.getAudioMetadataId(),
+                source.getAudioStartMs(),
+                source.getAudioDurationMs(),
+                audioUrl
+        );
+    }
 }

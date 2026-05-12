@@ -147,7 +147,16 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     # 확장한 후에는 여러 계획안에 여러 action을 만들어서 사용자에게 줄 예정.
     action = candidate["action"]
     suggestion_group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
-    preview_band_spec = _build_preview_band_spec(state, action=action)
+    try:
+        preview_band_spec = _build_preview_band_spec(state, action=action)
+    except ValueError as exc:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "INVALID_EQ_ONLY_PLAN_ACTION",
+                "failure_message": str(exc),
+            }
+        )
     payload = {
         "groupTitle": plan_payload.get("strategyTitle") or "Workflow suggestion group",
         "groupSummary": plan_payload.get("strategySummary"),
@@ -258,7 +267,7 @@ def _normalize_plan_payload(
     candidate["issueType"] = region.get("issue_type")
     candidate["preserveClipId"] = preserve_clip_id
 
-    action["targetScope"] = action.get("targetScope", "TRACK")
+    action["targetScope"] = "TRACK"
     action["params"] = action.get("params") or {}
     candidate["targetTrackId"] = action.get("targetTrackId")
     candidate["action"] = action
@@ -271,6 +280,11 @@ def _build_preview_band_spec(
     *,
     action: dict[str, object],
 ) -> dict[str, object]:
+    action_type = action.get("actionType")
+    if action_type not in {"DYNAMIC_EQ", "EQ_CUT"}:
+        raise ValueError("preview band spec requires an EQ-only actionType")
+    if action.get("targetScope") != "TRACK":
+        raise ValueError("preview band spec requires TRACK scope")
     target_track_id = action.get("targetTrackId")
     gain_delta_db = action.get("gainDeltaDb")
     if not isinstance(target_track_id, int):
@@ -343,34 +357,44 @@ def _build_region_action(
         return build_action(
             state,
             index=index,
-            action_type="DE_ESSER",
+            action_type="DYNAMIC_EQ",
             track_id=int(region.get("track_id") or 0),
             start_ms=region["start_ms"],
             end_ms=region["end_ms"],
             band_low_hz=region.get("band_low_hz"),
             band_high_hz=region.get("band_high_hz"),
-            params={"threshold": -18, "ratio": 2.4},
+            gain_delta_db=-2.4,
+            params={"threshold": -18, "ratio": 2.4, "q": 2.4},
         )
     if issue == "clipping":
-        recommended_trim_db = _recommended_clipping_trim_db(region)
-        return build_action(
-            state,
-            index=index,
-            action_type="GAIN_TRIM",
-            track_id=None,
-            target_scope="MASTER",
-            start_ms=region["start_ms"],
-            end_ms=region["end_ms"],
-            gain_delta_db=round(-recommended_trim_db, 2),
-            params={
-                "preGainDb": round(-recommended_trim_db, 2),
-                "postAction": "TRUE_PEAK_LIMITER",
-                "ceilingDbfs": -1.0,
-                "attackMs": 2,
-                "releaseMs": 80,
-                "lookaheadMs": 3,
-            },
-        )
+        band_hints = _collect_track_clipping_band_hints(region)
+        if "high" in band_hints:
+            return build_action(
+                state,
+                index=index,
+                action_type="DYNAMIC_EQ",
+                track_id=int(region.get("track_id") or 0),
+                start_ms=region["start_ms"],
+                end_ms=region["end_ms"],
+                band_low_hz=4500,
+                band_high_hz=9000,
+                gain_delta_db=-2.0,
+                params={"threshold": -20, "ratio": 2.0},
+            )
+        if "low_mid" in band_hints:
+            return build_action(
+                state,
+                index=index,
+                action_type="EQ_CUT",
+                track_id=int(region.get("track_id") or 0),
+                start_ms=region["start_ms"],
+                end_ms=region["end_ms"],
+                band_low_hz=180,
+                band_high_hz=1200,
+                gain_delta_db=-1.8,
+                params={"q": 1.1},
+            )
+        return None
     if issue == "high_band_harshness":
         return build_action(
             state,
@@ -442,13 +466,14 @@ def _resolve_clip_track_id(state: WorkflowState, clip_id: int) -> int | None:
     return None
 
 
-def _recommended_clipping_trim_db(region: dict[str, object]) -> float:
-    score = float(region.get("score", 0.0))
-    severity = str(region.get("severity", "MEDIUM"))
-    base_by_severity = {
-        "CRITICAL": 3.2,
-        "HIGH": 2.4,
-        "MEDIUM": 1.6,
-        "LOW": 1.2,
-    }
-    return min(max(base_by_severity.get(severity, 1.6) + (score * 1.25), 1.0), 5.5)
+def _collect_track_clipping_band_hints(region: dict[str, object]) -> set[str]:
+    hints: set[str] = set()
+    for hint in region.get("band_hints", []) or []:
+        hints.add(str(hint))
+    contributor_hints = region.get("contributor_band_hints", {})
+    track_id = region.get("track_id")
+    if track_id is not None and str(track_id) in contributor_hints:
+        hints.update(str(hint) for hint in contributor_hints[str(track_id)])
+    if track_id in contributor_hints:
+        hints.update(str(hint) for hint in contributor_hints[track_id])
+    return hints

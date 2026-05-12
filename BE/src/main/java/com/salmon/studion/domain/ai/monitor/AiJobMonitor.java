@@ -108,7 +108,9 @@ public class AiJobMonitor {
         String status = response.getJob().getStatus();
         return "WAITING_USER".equals(status)
                 || "COMPLETED".equals(status)
-                || "FAILED".equals(status);
+                || "FAILED".equals(status)
+                || "CANCELLED".equals(status)
+                || "EXPIRED".equals(status);
     }
 
     private String nullSafe(String value) {

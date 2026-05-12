@@ -1,7 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
+from tempfile import gettempdir
 from urllib.parse import quote_plus
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AI_ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -26,6 +30,9 @@ class Settings(BaseSettings):
     mongo_artifact_collection: str = "workflow_artifacts"
     mongo_heartbeat_frequency_ms: int = 180000
     audio_root: str | None = None
+    audio_cache_dir: str = f"{gettempdir()}/studion-ai-audio-cache"
+    audio_download_timeout_seconds: float = 30.0
+    audio_download_connect_timeout_seconds: float = 5.0
     clap_enabled: bool = True
     clap_inference_url: str | None = None
     clap_timeout_seconds: float = 20.0
@@ -46,7 +53,14 @@ class Settings(BaseSettings):
     plan_critic_timeout_seconds: float = 20.0
     plan_critic_connect_timeout_seconds: float = 5.0
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="STUDION_AI_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(
+            str(AI_ROOT_DIR / ".env.ai"),
+            str(AI_ROOT_DIR / ".env"),
+        ),
+        env_prefix="STUDION_AI_",
+        extra="ignore",
+    )
 
     @property
     def resolved_mysql_url(self) -> str | None:

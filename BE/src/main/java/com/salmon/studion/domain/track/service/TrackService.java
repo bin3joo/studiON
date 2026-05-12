@@ -7,29 +7,15 @@ import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
 import com.salmon.studion.domain.track.dto.TrackState;
-import com.salmon.studion.global.common.enums.TrackType;
-import com.salmon.studion.domain.track.dto.request.TrackAddRequest;
-import com.salmon.studion.domain.track.dto.request.TrackRemoveRequest;
-import com.salmon.studion.domain.track.dto.request.TrackRenameRequest;
-import com.salmon.studion.domain.track.dto.request.TrackReorderRequest;
-import com.salmon.studion.domain.track.dto.request.TrackMuteRequest;
-import com.salmon.studion.domain.track.dto.request.TrackPanRequest;
-import com.salmon.studion.domain.track.dto.request.TrackVolumeRequest;
-import com.salmon.studion.domain.track.dto.request.TrackSoloRequest;
-import com.salmon.studion.domain.track.dto.response.TrackAddResponse;
-import com.salmon.studion.domain.track.dto.response.TrackRemoveResponse;
-import com.salmon.studion.domain.track.dto.response.TrackRenameResponse;
-import com.salmon.studion.domain.track.dto.response.TrackReorderResponse;
-import com.salmon.studion.domain.track.dto.response.TrackMuteResponse;
-import com.salmon.studion.domain.track.dto.response.TrackPanResponse;
-import com.salmon.studion.domain.track.dto.response.TrackVolumeResponse;
-import com.salmon.studion.domain.track.dto.response.TrackSoloResponse;
+import com.salmon.studion.domain.track.dto.request.*;
+import com.salmon.studion.domain.track.dto.response.*;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.entity.TrackEventDocument;
 import com.salmon.studion.domain.track.entity.TrackRenameEventDocument;
 import com.salmon.studion.domain.track.entity.TrackReorderEventDocument;
 import com.salmon.studion.domain.track.repository.TrackEventRepository;
 import com.salmon.studion.domain.track.repository.TrackRepository;
+import com.salmon.studion.global.common.enums.TrackType;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -216,6 +202,7 @@ public class TrackService {
             updatePreTrackId(request.getProjectId(), track.getPostTrackId(), track.getPreTrackId());
         }
 
+        trackEqService.deleteByTrackIdIfExists(track.getTrackId());
         removeTrackToRedis(request.getProjectId(), track);
         redisTemplate.opsForSet().add(
                 String.format(DELETED_TRACKS_KEY, request.getProjectId()),

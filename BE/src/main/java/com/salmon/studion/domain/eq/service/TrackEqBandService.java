@@ -1,5 +1,6 @@
 package com.salmon.studion.domain.eq.service;
 
+import com.salmon.studion.domain.eq.dto.TrackEqDraftState;
 import com.salmon.studion.domain.eq.dto.request.BandRequest;
 import com.salmon.studion.domain.eq.dto.response.TrackEqBandListResponse;
 import com.salmon.studion.domain.eq.entity.TrackEq;
@@ -63,14 +64,26 @@ public class TrackEqBandService {
     }
 
     @Transactional
-    public void deleteTrackEqBands(Integer trackEqId, Integer userId) {
+    public void replaceTrackEqBandsFromDraft(Integer trackEqId, Integer userId, List<TrackEqDraftState.DraftBand> bands) {
 
+        TrackEq trackEq = getAuthorizedTrackEq(trackEqId, userId);
+
+        trackEqBandRepository.deleteAllByTrackEq_Id(trackEqId);
+
+        List<TrackEqBand> trackEqBands = bands.stream()
+                .map(draftBand -> toEntity(trackEq, draftBand))
+                .toList();
+
+        trackEqBandRepository.saveAll(trackEqBands);
+    }
+
+    // 초기화 시 해당 trackEqId의 track eq bands 삭제
+    @Transactional
+    public void deleteTrackEqBands(Integer trackEqId, Integer userId) {
 
         getAuthorizedTrackEq(trackEqId, userId);
 
         trackEqBandRepository.deleteAllByTrackEq_Id(trackEqId);
-
-
     }
 
     private TrackEq getAuthorizedTrackEq(Integer trackEqId, Integer userId) {
@@ -84,6 +97,21 @@ public class TrackEqBandService {
     }
 
     private TrackEqBand toEntity(TrackEq trackEq, BandRequest request) {
+        return TrackEqBand.create(
+                trackEq,
+                request.getBandOrder(),
+                toEqTypeCode(request.getEqType()),
+                request.getFrequencyHz(),
+                request.getQ(),
+                request.getGainDeltaDb(),
+                null,
+                null,
+                null,
+                toSourceTypeCode(request.getSourceType())
+        );
+    }
+
+    private TrackEqBand toEntity(TrackEq trackEq, TrackEqDraftState.DraftBand request) {
         return TrackEqBand.create(
                 trackEq,
                 request.getBandOrder(),

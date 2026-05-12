@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
 import { waveformRendererPool } from '../../../core/workers/waveformRendererPool';
@@ -13,6 +13,23 @@ const props = defineProps<{
 
 const trackStore = useTrackStore();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
+
+// 리사이즈 시 모양 찌그러짐을 방지하기 위한 렌더링 상태 캐싱
+const renderedWidth = ref(props.chunkWidth);
+const renderedLeft = ref(props.chunkLeft);
+const renderedAudioStartMs = ref(props.clip.audioStartMs);
+
+const msPerPixel = computed(() => {
+  if (props.clip.duration <= 0 || trackStore.pixelPerBar <= 0) return 1;
+  return props.clip.audioDurationMs / (props.clip.duration * trackStore.pixelPerBar);
+});
+
+// 클립의 시작점이 변할 때(왼쪽 리사이즈), 캔버스를 반대 방향으로 이동시켜 잘라내기(Crop) 효과 생성
+const visualTransformX = computed(() => {
+  const diffMs = props.clip.audioStartMs - renderedAudioStartMs.value;
+  if (diffMs === 0) return 0;
+  return -(diffMs / msPerPixel.value);
+});
 
 
 // 현재 진행 중인 렌더 요청 ID (줌/스크롤 변경 시 이전 요청을 취소하기 위함)
@@ -31,8 +48,8 @@ const renderWaveform = async () => {
   if (!canvasRef.value) return;
   if (props.chunkWidth <= 0) return;
 
-  const msPerPixel = props.clip.audioDurationMs / (props.clip.duration * trackStore.pixelPerBar);
-  const secondsPerPixel = msPerPixel / 1000;
+  const currentMsPerPixel = msPerPixel.value;
+  const secondsPerPixel = currentMsPerPixel / 1000;
   const samplesPerPixel = secondsPerPixel * props.audioData.sampleRate;
 
   // 1. 전체 오디오에서의 시작점(오프셋) 계산
@@ -82,6 +99,12 @@ const renderWaveform = async () => {
   const canvas = canvasRef.value;
   canvas.width = props.chunkWidth;
   canvas.height = 100;
+  
+  // 성공적으로 그렸을 때만 시각적 크기/위치를 업데이트하여 찌그러짐 방지
+  renderedWidth.value = props.chunkWidth;
+  renderedLeft.value = props.chunkLeft;
+  renderedAudioStartMs.value = props.clip.audioStartMs;
+
   const ctx = canvas.getContext('2d');
   if (ctx && result.bitmap) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -129,8 +152,12 @@ onUnmounted(() => {
 <template>
   <canvas 
     ref="canvasRef"
-    class="absolute top-0 h-full"
-    :style="{ left: `${chunkLeft}px`, width: `${chunkWidth}px` }"
+    class="absolute top-0 h-full max-w-none origin-left"
+    :style="{ 
+      left: `${renderedLeft}px`, 
+      width: `${renderedWidth}px`,
+      transform: `translateX(${visualTransformX}px)`
+    }"
   ></canvas>
 </template>
 

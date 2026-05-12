@@ -9,7 +9,7 @@ services:
     env_file:
       - .env.ai
     depends_on:
-      - redis
+      - ai-redis
     restart: unless-stopped
 
   ai-worker:
@@ -19,11 +19,11 @@ services:
     env_file:
       - .env.ai
     depends_on:
-      - redis
+      - ai-redis
     restart: unless-stopped
     command: uv run python -m dramatiq app.services.workflow_queue
 
-  redis:
+  ai-redis:
     image: redis:7
     container_name: studion-redis
     volumes:

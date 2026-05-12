@@ -1,9 +1,10 @@
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.graph.state import ApplyState, RuntimeState, WorkflowState
+from app.graph.state import ApplyState, RuntimeState, WorkflowState, WorkflowUserDecision
 from app.graph.workflow import (
     build_apply_graph,
     build_apply_response,
@@ -89,6 +90,15 @@ class WorkflowDispatchResponse(BaseModel):
     job: WorkflowDispatchAccepted
 
 
+class WorkflowFeedbackRequest(BaseModel):
+    project_id: int
+    selected_region_id: int | None = None
+    preserve_clip_id: int | None = None
+    user_feedback_message: str | None = None
+    user_decision: WorkflowUserDecision
+    requested_by: int | None = None
+
+
 class WorkflowJobView(BaseModel):
     id: int
     project_id: int
@@ -98,8 +108,8 @@ class WorkflowJobView(BaseModel):
     progress: int = 0
     timeline_snapshot_id: str | None = None
     requested_by: int | None = None
-    started_at: str | None = None
-    completed_at: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -170,6 +180,26 @@ def workflow_job_start(request: WorkflowStartPayload) -> WorkflowDispatchRespons
 @router.post("/internal/workflow/jobs/resume")
 def workflow_job_resume(request: WorkflowResumePayload) -> WorkflowDispatchResponse:
     return WorkflowDispatchResponse(job=resume_workflow_job(request))
+
+
+@router.post("/internal/workflow/jobs/{job_id}/feedback")
+def workflow_job_feedback(
+    job_id: int,
+    request: WorkflowFeedbackRequest,
+) -> WorkflowDispatchResponse:
+    return WorkflowDispatchResponse(
+        job=resume_workflow_job(
+            WorkflowResumePayload(
+                job_id=job_id,
+                project_id=request.project_id,
+                selected_region_id=request.selected_region_id,
+                preserve_clip_id=request.preserve_clip_id,
+                user_feedback_message=request.user_feedback_message,
+                user_decision=request.user_decision,
+                requested_by=request.requested_by,
+            )
+        )
+    )
 
 
 @router.get("/internal/workflow/jobs/{job_id}")

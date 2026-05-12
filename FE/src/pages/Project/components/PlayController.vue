@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
-import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus } from 'lucide-vue-next';
+import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus } from 'lucide-vue-next';
 import * as Tone from 'tone';
 
 const trackStore = useTrackStore();
@@ -102,6 +102,18 @@ const emit = defineEmits<{
       </button>
       <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복제 (Ctrl/Cmd + D)" @click="emit('action-duplicate')">
         <CopyPlus class="h-4 w-4" />
+      </button>
+      <button 
+        :class="[
+          'inline-flex h-8 w-8 items-center justify-center rounded transition',
+          trackStore.isCommentMode 
+            ? 'bg-primary/20 text-primary border border-primary/50 shadow-[0_0_8px_hsl(var(--primary)/0.4)]' 
+            : 'text-muted-foreground hover:bg-white/10 hover:text-white'
+        ]"
+        title="코멘트 모드 (C)" 
+        @click="trackStore.toggleCommentMode()"
+      >
+        <MessageSquarePlus class="h-4 w-4" />
       </button>
       <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-red-400" title="삭제 (Del/Backspace)" @click="emit('action-delete')">
         <Trash2 class="h-4 w-4" />

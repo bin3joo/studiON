@@ -9,8 +9,6 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import IntegrityError
-
 from app.core.config import get_settings
 from app.graph.state import WorkflowDispatchType, WorkflowState, WorkflowUserDecision
 from app.services.workflow_artifacts import (
@@ -214,50 +212,9 @@ class MySQLWorkflowJobStore:
     def create_pending_job(self, state: WorkflowState) -> WorkflowJobRecord:
         self._ensure_schema()
         record = _build_record(state)
-        try:
-            with self._engine.begin() as conn:
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO ai_analysis_job (
-                            id,
-                            project_id,
-                            status,
-                            phase,
-                            current_node,
-                            progress,
-                            langgraph_thread_id,
-                            timeline_snapshot_id,
-                            requested_by,
-                            started_at,
-                            completed_at,
-                            error_code,
-                            error_message,
-                            state_artifact_id,
-                            state_json
-                        ) VALUES (
-                            :id,
-                            :project_id,
-                            :status,
-                            :phase,
-                            :current_node,
-                            :progress,
-                            :langgraph_thread_id,
-                            :timeline_snapshot_id,
-                            :requested_by,
-                            :started_at,
-                            :completed_at,
-                            :error_code,
-                            :error_message,
-                            :state_artifact_id,
-                            :state_json
-                        )
-                        """
-                    ),
-                    _record_params(record),
-                )
-        except IntegrityError as exc:
-            raise ValueError(f"Workflow job already exists: {state['job_id']}") from exc
+        updated = self._update_job_record(record)
+        if updated == 0:
+            raise KeyError(f"Workflow job does not exist: {state['job_id']}")
         return record
 
     def get_job(self, job_id: int) -> WorkflowJobRecord | None:
@@ -295,6 +252,12 @@ class MySQLWorkflowJobStore:
     def save_graph_state(self, state: WorkflowState) -> WorkflowJobRecord:
         self._ensure_schema()
         record = _build_record(state)
+        updated = self._update_job_record(record)
+        if updated == 0:
+            raise KeyError(f"Workflow job does not exist: {state['job_id']}")
+        return record
+
+    def _update_job_record(self, record: WorkflowJobRecord) -> int:
         with self._engine.begin() as conn:
             result = conn.execute(
                 text(
@@ -320,9 +283,7 @@ class MySQLWorkflowJobStore:
                 ),
                 _record_params(record),
             )
-        if result.rowcount == 0:
-            raise KeyError(f"Workflow job does not exist: {state['job_id']}")
-        return record
+        return result.rowcount
 
     def _ensure_schema(self) -> None:
         if self._schema_ready:

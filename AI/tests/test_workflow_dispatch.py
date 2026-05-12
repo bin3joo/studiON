@@ -21,6 +21,7 @@ from app.services.workflow_artifacts import (
 )
 from app.services.workflow_audio_metadata import AudioMetadataRecord
 from app.services.workflow_jobs import (
+    MySQLWorkflowJobStore,
     WorkflowDispatchMessage,
     _build_record,
     _row_to_record,
@@ -866,6 +867,35 @@ def test_start_api_persists_snapshot_only_in_snapshot_store(
     assert "master_audio_object_key" not in stored.state_snapshot
 
 
+def test_start_api_returns_not_found_when_be_job_row_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = get_workflow_job_store()
+
+    def _raise_missing_row(state: dict) -> None:
+        raise KeyError(f"Workflow job does not exist: {state['job_id']}")
+
+    monkeypatch.setattr(store, "create_pending_job", _raise_missing_row)
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/v1/internal/workflow/jobs/start",
+        json={
+            "job_id": 20031,
+            "project_id": 30031,
+            "project_snapshot": build_project_snapshot(track_ids=[5, 6]),
+            "issue_types": ["band_overlap"],
+        },
+    )
+
+    assert response.status_code == 404
+    assert "Workflow job does not exist: 20031" in response.json()["detail"]
+
+
 def test_resume_api_infers_dispatch_type_from_waiting_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1307,6 +1337,88 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
     assert restored.state_snapshot["analysis_regions"][0]["id"] == 1
     assert restored.state_snapshot["plan_payload"]["summary"] == "summary"
     assert restored.state_snapshot["plan_revision_notes"] == ["validator note"]
+
+
+def test_mysql_workflow_job_store_create_pending_job_updates_existing_row() -> None:
+    class _FakeResult:
+        rowcount = 1
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.statement = None
+            self.params = None
+
+        def execute(self, statement, params):  # noqa: ANN001
+            self.statement = str(statement)
+            self.params = params
+            return _FakeResult()
+
+    class _FakeBegin:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def __enter__(self) -> _FakeConnection:
+            return self._connection
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    class _FakeEngine:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def begin(self) -> _FakeBegin:
+            return _FakeBegin(self._connection)
+
+    connection = _FakeConnection()
+    store = MySQLWorkflowJobStore.__new__(MySQLWorkflowJobStore)
+    store._engine = _FakeEngine(connection)
+    store._ensure_schema = lambda: None
+
+    state = build_workflow_initial_state(job_id=21001, project_id=31001)
+
+    record = store.create_pending_job(state)
+
+    assert record.id == 21001
+    assert connection.statement is not None
+    assert "UPDATE ai_analysis_job" in connection.statement
+    assert "INSERT INTO ai_analysis_job" not in connection.statement
+    assert connection.params["id"] == 21001
+
+
+def test_mysql_workflow_job_store_create_pending_job_fails_when_row_missing() -> None:
+    class _FakeResult:
+        rowcount = 0
+
+    class _FakeConnection:
+        def execute(self, statement, params):  # noqa: ANN001
+            return _FakeResult()
+
+    class _FakeBegin:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def __enter__(self) -> _FakeConnection:
+            return self._connection
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    class _FakeEngine:
+        def __init__(self, connection: _FakeConnection) -> None:
+            self._connection = connection
+
+        def begin(self) -> _FakeBegin:
+            return _FakeBegin(self._connection)
+
+    store = MySQLWorkflowJobStore.__new__(MySQLWorkflowJobStore)
+    store._engine = _FakeEngine(_FakeConnection())
+    store._ensure_schema = lambda: None
+
+    with pytest.raises(KeyError, match="Workflow job does not exist: 21002"):
+        store.create_pending_job(
+            build_workflow_initial_state(job_id=21002, project_id=31002)
+        )
 
 
 def test_workflow_start_payload_defaults_include_clipping() -> None:

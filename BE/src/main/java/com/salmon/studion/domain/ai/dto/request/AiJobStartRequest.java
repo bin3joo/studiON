@@ -47,7 +47,8 @@ public class AiJobStartRequest {
             AiJobStartApiRequest request,
             Integer requestedBy,
             Map<Integer, String> audioUrlByMetadataId,
-            List<ProjectTrackEqRequest> trackEqs
+            List<ProjectTrackEqRequest> trackEqs,
+            ProjectMasterLimiterRequest masterLimiter
     ) {
         ProjectSnapshotRequest sourceSnapshot = request.getProjectSnapshot();
         List<ProjectTrackRequest> tracks = sourceSnapshot.getProjectTrackRequest().stream()
@@ -70,7 +71,7 @@ public class AiJobStartRequest {
                 request.getIssueTypes(),
                 request.getValidatorMode(),
                 request.getCriticMode(),
-                ProjectSnapshotRequest.create(sourceSnapshot, tracks, clips, trackEqs)
+                ProjectSnapshotRequest.create(sourceSnapshot, tracks, clips, trackEqs, masterLimiter)
         );
     }
 }

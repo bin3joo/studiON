@@ -56,8 +56,13 @@ DSP_SCAN_PATH_MAP = {
 }
 
 RANKING_PATH_MAP = {
+    "issue_router_gate": "issue_router_gate",
+    "materialize_non_llm_issues": "materialize_non_llm_issues",
+}
+
+ISSUE_ROUTER_PATH_MAP = {
     "wait_user_plan_input": "wait_user_plan_input",
-    "materialize_execution_plan": "materialize_execution_plan",
+    "materialize_non_llm_issues": "materialize_non_llm_issues",
 }
 
 PLAN_INPUT_PATH_MAP = {
@@ -159,15 +164,16 @@ def build_workflow_graph():
     graph.add_node("infer_track_roles", nodes.infer_track_roles)
     graph.add_node("detect_sibilance", nodes.detect_sibilance)
     graph.add_node("merge_analysis", nodes.merge_analysis)
+    graph.add_node("build_issue_payloads", nodes.build_issue_payloads)
     graph.add_node("candidate_ranking", nodes.candidate_ranking)
+    graph.add_node("issue_router_gate", nodes.issue_router_gate)
     graph.add_node("wait_user_plan_input", nodes.wait_user_plan_input)
     graph.add_node("planning_agent", nodes.planning_agent)
     graph.add_node("plan_rule_validator", nodes.plan_rule_validator)
     graph.add_node("plan_critic", nodes.plan_critic)
     graph.add_node("approve_plan", nodes.approve_plan)
     graph.add_node("materialize_execution_plan", nodes.materialize_execution_plan)
-    graph.add_node("auto_fix_non_user_issues", nodes.auto_fix_non_user_issues)
-    graph.add_node("log_non_user_issue_fixes", nodes.log_non_user_issue_fixes)
+    graph.add_node("materialize_non_llm_issues", nodes.materialize_non_llm_issues)
     graph.add_node("persist_analysis_result", nodes.persist_analysis_result)
     graph.add_node("user_action_gate", nodes.user_action_gate)
     graph.add_node("apply_selected_edit_recipe", nodes.apply_selected_edit_recipe)
@@ -201,11 +207,17 @@ def build_workflow_graph():
     graph.add_conditional_edges("clap_gate", edges.route_after_clap_gate, CLAP_GATE_PATH_MAP)
     graph.add_edge("infer_track_roles", "detect_sibilance")
     graph.add_edge("detect_sibilance", "merge_analysis")
-    graph.add_edge("merge_analysis", "candidate_ranking")
+    graph.add_edge("merge_analysis", "build_issue_payloads")
+    graph.add_edge("build_issue_payloads", "candidate_ranking")
     graph.add_conditional_edges(
         "candidate_ranking",
         edges.route_after_candidate_ranking,
         RANKING_PATH_MAP,
+    )
+    graph.add_conditional_edges(
+        "issue_router_gate",
+        edges.route_after_issue_router_gate,
+        ISSUE_ROUTER_PATH_MAP,
     )
     graph.add_edge("wait_user_plan_input", END)
     graph.add_conditional_edges(
@@ -225,9 +237,8 @@ def build_workflow_graph():
         CRITIC_PATH_MAP,
     )
     graph.add_edge("approve_plan", "materialize_execution_plan")
-    graph.add_edge("materialize_execution_plan", "auto_fix_non_user_issues")
-    graph.add_edge("auto_fix_non_user_issues", "log_non_user_issue_fixes")
-    graph.add_edge("log_non_user_issue_fixes", "persist_analysis_result")
+    graph.add_edge("materialize_execution_plan", "materialize_non_llm_issues")
+    graph.add_edge("materialize_non_llm_issues", "persist_analysis_result")
     graph.add_edge("persist_analysis_result", "user_action_gate")
     graph.add_conditional_edges(
         "user_action_gate",

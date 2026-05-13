@@ -602,3 +602,29 @@ ALTER TABLE `ai_preview_render`
 ALTER TABLE `ai_preview_render`
   ADD INDEX `IDX_AI_PREVIEW_RENDER_REGION_REQUESTED` (`analysisRegionId`, `requestedAt`),
   ADD INDEX `IDX_AI_PREVIEW_RENDER_JOB_REQUESTED` (`jobId`, `requestedAt`);
+
+CREATE TABLE `master_limiter` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT NOT NULL,
+  `is_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `threshold_db` DOUBLE NOT NULL DEFAULT -6.0,
+  `ceiling_dbfs` DOUBLE NOT NULL DEFAULT -1.0,
+  `attack_ms` DOUBLE NOT NULL DEFAULT 3.0,
+  `release_ms` DOUBLE NOT NULL DEFAULT 80.0,
+  `input_gain_db` DOUBLE NOT NULL DEFAULT 0.0,
+  `makeup_gain_db` DOUBLE NOT NULL DEFAULT 0.0,
+  `job_id` INT NULL,
+  `suggestion_action_id` INT NULL,
+  `applied_suggestion_id` INT NULL,
+  `source_type_code` INT NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_by` INT NULL,
+  `updated_by` INT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `UK_MASTER_LIMITER_PROJECT` (`project_id`)
+);
+
+ALTER TABLE `master_limiter`
+  ADD CONSTRAINT `FK_MASTER_LIMITER_PROJECT`
+  FOREIGN KEY (`project_id`) REFERENCES `project` (`id`);

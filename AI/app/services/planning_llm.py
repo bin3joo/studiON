@@ -163,10 +163,11 @@ def get_planning_llm_client() -> PlanningLLMClient:
 
 def _planner_system_prompt() -> str:
     return (
-        "You are generating one safe EQ-only correction plan for an audio workflow. "
+        "You are generating one safe band_overlap correction plan for an audio workflow. "
         "Return only a JSON object and do not add markdown or commentary. "
         "Use the selected region, preserve clip, clip context, and revision notes exactly as given. "
-        "This path is EQ-only: the only allowed action types are DYNAMIC_EQ and EQ_CUT. "
+        "This planner path is only for band_overlap issues. "
+        "The only allowed action types are DYNAMIC_EQ and EQ_CUT. "
         "The action must always use TRACK scope. MASTER scope is forbidden. "
         "Never target the preserve clip track. "
         "Keep targetClipId null. "
@@ -181,12 +182,7 @@ def _planner_system_prompt() -> str:
         '"endMs": number|null, "bandLowHz": number|null, "bandHighHz": number|null, '
         '"gainDeltaDb": number|null, "params": object}}}. '
         f"Allowed actionType values: {', '.join(ALLOWED_ACTION_TYPES)}. "
-        "For band_overlap, use DYNAMIC_EQ only. "
-        "For sibilance, reinterpret the fix as a high-band DYNAMIC_EQ. "
-        "For track_clipping, emit an EQ action only when a band-focused fix is plausible. "
-        "For track_clipping with a low-mid or broad body band, prefer EQ_CUT. "
-        "For track_clipping with a clearly high-band focus, prefer DYNAMIC_EQ. "
-        "If the issue or band focus is ambiguous, choose the more conservative action type and smaller cut. "
+        "Prefer DYNAMIC_EQ when the overlap is sustained or dynamic, and EQ_CUT when a narrower static cut is safer. "
         "Prefer the non-preserve track with the strongest contribution to the selected problem. "
         "If revision notes mention leakage, range too wide, or overreach, tighten the time range and band range instead of widening them. "
         "If user feedback says to preserve texture, warmth, body, or vocal character, reduce gain more conservatively and avoid wider bands. "

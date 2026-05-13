@@ -4,6 +4,7 @@ import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectClipRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackRequest;
 import com.salmon.studion.domain.ai.dto.response.AiJobStartResponse;
@@ -14,6 +15,8 @@ import com.salmon.studion.domain.ai.monitor.AiJobMonitor;
 import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.eq.service.TrackEqService;
+import com.salmon.studion.domain.limiter.service.MasterLimiterService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -40,6 +43,7 @@ public class AiService {
     private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
     private final TrackEqService trackEqService;
+    private final MasterLimiterService masterLimiterService;
 
     public AiJobStartResponse startWorkflow(AiJobStartApiRequest request, Integer requestedBy) {
         Integer userId = requireUserId(requestedBy);
@@ -67,7 +71,8 @@ public class AiService {
                 request,
                 userId,
                 audioUrlByMetadataId,
-                trackEqs
+                trackEqs,
+                masterLimiterService.getCurrentMasterLimiterPayload(request.getProjectId())
         );
 
         try {

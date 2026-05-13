@@ -92,6 +92,9 @@ class WorkflowDispatchResponse(BaseModel):
 
 class WorkflowFeedbackRequest(BaseModel):
     project_id: int
+    issue_id: str | None = None
+    action_type: str | None = None
+    action_payload: dict[str, Any] | None = None
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
     user_feedback_message: str | None = None
@@ -192,6 +195,9 @@ def workflow_job_feedback(
             WorkflowResumePayload(
                 job_id=job_id,
                 project_id=request.project_id,
+                issue_id=request.issue_id,
+                action_type=request.action_type,
+                action_payload=request.action_payload,
                 selected_region_id=request.selected_region_id,
                 preserve_clip_id=request.preserve_clip_id,
                 user_feedback_message=request.user_feedback_message,

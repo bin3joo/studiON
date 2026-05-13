@@ -170,8 +170,13 @@ async function openCommentBox(measure: number, event?: MouseEvent) {
 
   if (event) {
     const triggerRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    const spaceAbove = triggerRect.top - VIEWPORT_MARGIN
-    const spaceBelow = window.innerHeight - triggerRect.bottom - VIEWPORT_MARGIN
+    
+    // 타임라인 컨테이너의 영역을 기준으로 가용 공간 계산
+    const scrollContainer = rootRef.value?.closest('.custom-scrollbar') as HTMLElement | null
+    const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : { top: 0, bottom: window.innerHeight }
+    
+    const spaceAbove = triggerRect.top - containerRect.top - VIEWPORT_MARGIN
+    const spaceBelow = containerRect.bottom - triggerRect.bottom - VIEWPORT_MARGIN
 
     if (spaceBelow >= COMMENT_BOX_HEIGHT) {
       expandedPlacement.value = 'bottom'
@@ -439,11 +444,8 @@ function parseMentions(content: string) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="expandedMeasure !== null"
-        class="pointer-events-auto absolute z-120 w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl"
-        :class="[
-          expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]',
-          getCommentGroup(expandedMeasure) ? 'p-3' : 'px-2.5 py-1.5'
-        ]"
+        class="pointer-events-auto absolute z-120 w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-3"
+        :class="expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]'"
         :style="{ left: `calc(${expandedCellLeft}px + 13px)` }"
         @mousedown.stop
         @click.stop
@@ -453,6 +455,21 @@ function parseMentions(content: string) {
           class="absolute left-1/2 -translate-x-1/2 h-3.5 w-3.5 rotate-45 border-white/20 bg-[#1c1c1c]"
           :class="expandedPlacement === 'top' ? 'bottom-[-7.5px] border-b border-r' : 'top-[-7.5px] border-t border-l'"
         ></div>
+
+        <!-- 공통 헤더: 트랙 이름 & 마디 수 -->
+        <div class="mb-2.5 flex items-center justify-between border-b border-white/10 pb-2">
+          <span class="text-[11px] font-semibold text-white/50">
+            {{ trackStore.masterTrack.trackId === Number(props.trackId) ? trackStore.masterTrack.name : (trackStore.trackList.find(t => String(t.trackId) === props.trackId)?.name || `트랙 ${props.trackId}`) }} · {{ expandedMeasure }}마디
+          </span>
+          <!-- 닫기 버튼 -->
+          <button
+            class="shrink-0 transition hover:scale-110"
+            @click.stop="closeCommentBox"
+            title="닫기"
+          >
+            <X class="h-3.5 w-3.5 text-white/40 hover:text-white" />
+          </button>
+        </div>
 
         <!-- 새 댓글 달기 (Empty State) -->
         <div v-if="!getCommentGroup(expandedMeasure)" class="relative z-10 flex items-center gap-2">
@@ -473,13 +490,6 @@ function parseMentions(content: string) {
             @click="submitComment(expandedMeasure)"
           >
             <ArrowUpCircle class="h-4 w-4 text-white/40 hover:text-white" />
-          </button>
-          <button
-            class="shrink-0 transition hover:scale-110"
-            @click.stop="closeCommentBox"
-            title="닫기"
-          >
-            <X class="h-4 w-4 text-white/40 hover:text-white" />
           </button>
         </div>
 
@@ -517,14 +527,6 @@ function parseMentions(content: string) {
                     title="해결됨 표시"
                   >
                     <Check class="h-4 w-4" />
-                  </button>
-                  <button
-                    v-if="idx === 0"
-                    class="text-white hover:text-white/60 transition-colors"
-                    @click.stop="closeCommentBox"
-                    title="닫기"
-                  >
-                    <X class="h-4 w-4" />
                   </button>
                 </div>
               </div>

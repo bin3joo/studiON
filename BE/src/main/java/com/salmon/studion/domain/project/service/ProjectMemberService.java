@@ -18,6 +18,9 @@ public class ProjectMemberService {
 
     private final ProjectMemberRepository projectMemberRepository;
 
+    // TODO: 유저테스트 전용 임시 구현 (추후 수정 필요 - TEM_MAX_PROJECT_MEMBER_COUNT)
+    private static final long TEMP_MAX_PROJECT_MEMBER_COUNT = 6L;
+
     public void createProjectMember(Project project, User user) {
         try {
             projectMemberRepository.save(ProjectMember.create(project, user));
@@ -49,5 +52,13 @@ public class ProjectMemberService {
 
     public List<Integer> getProjectMemberUserIds(Integer projectId, List<Integer> mentionedUserIds) {
         return projectMemberRepository.findUserIdsInProject(projectId, mentionedUserIds);
+    }
+
+    // TODO: 유저테스트 전용 임시 구현 (추후 수정 필요 - validateProjectMemberLimit())
+    public void validateProjectMemberLimit(Integer projectId) {
+        long memberCount = projectMemberRepository.countByProject_Id(projectId);
+        if (memberCount >= TEMP_MAX_PROJECT_MEMBER_COUNT) {
+            throw new BusinessException(ErrorCode.FAIL, "프로젝트 최대 인원은 6명입니다.");
+        }
     }
 }

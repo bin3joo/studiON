@@ -1,6 +1,6 @@
 package com.salmon.studion.domain.comment.dto.websocket;
 
-import com.salmon.studion.domain.comment.entity.Comment;
+import com.salmon.studion.domain.comment.dto.redis.CommentState;
 
 public record CommentDeleteResponse (
         Integer projectId,
@@ -8,12 +8,12 @@ public record CommentDeleteResponse (
         Integer commentId,
         Integer parentCommentId
 ) {
-    public static CommentDeleteResponse of(Integer projectId, Comment comment) {
+    public static CommentDeleteResponse of(Integer projectId, CommentState commentState) {
         return new CommentDeleteResponse(
                 projectId,
-                comment.getTrack().getId(),
-                comment.getId(),
-                comment.getParentCommentId()
+                commentState.getTrackId(),
+                commentState.getCommentId(),
+                commentState.getParentCommentId()
         );
     }
 }

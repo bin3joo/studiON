@@ -2,16 +2,13 @@ package com.salmon.studion.domain.comment.facade;
 
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
+import com.salmon.studion.domain.comment.dto.redis.CommentState;
 import com.salmon.studion.domain.comment.dto.response.CommentsGetResponse;
 import com.salmon.studion.domain.comment.dto.websocket.*;
-import com.salmon.studion.domain.comment.entity.Comment;
-import com.salmon.studion.domain.comment.entity.CommentMention;
-import com.salmon.studion.domain.comment.service.CommentMentionService;
 import com.salmon.studion.domain.comment.service.CommentService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.service.TrackService;
-import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +22,6 @@ import java.util.*;
 public class CommentFacade {
 
     private final CommentService commentService;
-    private final CommentMentionService commentMentionService;
     private final ProjectMemberService projectMemberService;
     private final TrackService trackService;
     private final UserService userService;
@@ -44,11 +40,17 @@ public class CommentFacade {
         List<Integer> mentionedUserIds = normalizeMentionIds(request.getMentionedUserIds());
         List<User> mentionedUsers = validateAndLoadMentionUsers(request.getProjectId(), mentionedUserIds);
 
-        Comment comment = commentService.createComment(track, user, request.getParentCommentId(), request.getContent(), request.getLocation());
-
-        commentMentionService.createCommentMention(comment, mentionedUsers);
-
-        return CommentCreateResponse.of(request.getProjectId(), comment, mentionedUsers);
+        CommentState commentState = commentService.createComment(
+                request.getProjectId(),
+                track,
+                user,
+                request.getParentCommentId(),
+                request.getContent(),
+                request.getLocation(),
+                mentionedUserIds
+        );
+        
+        return CommentCreateResponse.of(request.getProjectId(), commentState, user, mentionedUsers);
     }
 
     @Transactional(readOnly = true)
@@ -59,16 +61,15 @@ public class CommentFacade {
             trackService.getTrackInProjectId(projectId, trackId);
         }
 
-        List<Comment> comments = commentService.getComments(projectId, trackId, isResolved, mentionedMe, userId);
+        List<CommentState> commentStates = commentService.getComments(projectId, trackId, isResolved, mentionedMe, userId);
 
-        if (comments.isEmpty()) {
+        if (commentStates.isEmpty()) {
             return CommentsGetResponse.from(List.of());
         }
 
-        List<Integer> commentsIds = comments.stream().map(Comment::getId).toList();
-        Map<Integer, List<CommentMention>> mentionsByCommentId = commentMentionService.getMentionsByCommentIds(commentsIds);
+        Map<Integer, User> usersById = loadUsersById(commentStates);
 
-        return buildResponse(comments, mentionsByCommentId);
+        return buildResponse(commentStates, usersById);
 
     }
 
@@ -77,13 +78,12 @@ public class CommentFacade {
         request.validate();
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
 
-        Comment comment = commentService.getCommentByProjectId(request.getCommentId(), request.getProjectId());
-        validateCommentOwner(comment, userId);
+        CommentState commentState = commentService.getCommentByProjectId(request.getCommentId(), request.getProjectId());
+        validateCommentOwner(commentState, userId);
 
-        commentService.deleteComment(comment);
-        commentMentionService.deleteAllByCommentId(comment.getId());
+        commentService.deleteComment(request.getProjectId(), request.getCommentId());
 
-        return CommentDeleteResponse.of(request.getProjectId(), comment);
+        return CommentDeleteResponse.of(request.getProjectId(), commentState);
     }
 
     @Transactional
@@ -91,9 +91,10 @@ public class CommentFacade {
         request.validate();
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
 
-        Comment comment = commentService.getCommentByProjectId(request.getCommentId(), request.getProjectId());
+        CommentState commentState = commentService.getCommentByProjectId(request.getCommentId(), request.getProjectId());
+        CommentState updatedState = commentService.changeResolved(commentState);
 
-        return CommentStatusChangeResponse.of(request.getProjectId(), commentService.changeResolved(comment));
+        return CommentStatusChangeResponse.of(request.getProjectId(), updatedState);
     }
 
     private void validateParentComment(Integer parentCommentId, Integer projectId, Integer trackId) {
@@ -101,14 +102,14 @@ public class CommentFacade {
             return;
         }
 
-        Comment parentComment = commentService.getCommentByProjectId(parentCommentId, projectId);
-        if (!parentComment.getTrack().getId().equals(trackId)) {
+        CommentState parentComment = commentService.getCommentByProjectId(parentCommentId, projectId);
+        if (!parentComment.getTrackId().equals(trackId)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
     }
 
-    private void validateCommentOwner(Comment comment, Integer userId) {
-        if (!comment.getUser().getId().equals(userId)) {
+    private void validateCommentOwner(CommentState commentState, Integer userId) {
+        if (!commentState.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.COMMENT_ACCESS_DENIED);
         }
     }
@@ -140,34 +141,57 @@ public class CommentFacade {
 
         return users;
     }
+    private Map<Integer, User> loadUsersById(List<CommentState> commentStates) {
+        Set<Integer> userIds = new LinkedHashSet<>();
 
-    private CommentsGetResponse buildResponse(List<Comment> comments, Map<Integer, List<CommentMention>> mentionsByCommentId) {
+        for (CommentState commentState : commentStates) {
+            userIds.add(commentState.getUserId());
+            userIds.addAll(commentState.getMentionedUserIds());
+        }
+
+        List<User> users = userService.getUsersByIds(userIds.stream().toList());
+
+        return users.stream()
+                .collect(HashMap::new, (map, user) -> map.put(user.getId(), user), HashMap::putAll);
+    }
+
+    private CommentsGetResponse buildResponse(List<CommentState> commentStates, Map<Integer, User> usersById) {
         Map<Integer, List<CommentsGetResponse.CommentDto>> repliesByParentId = new HashMap<>();
-        for (Comment c : comments) {
+
+        for (CommentState c : commentStates) {
             if (c.getParentCommentId() != null) {
                 repliesByParentId
                         .computeIfAbsent(c.getParentCommentId(), k -> new ArrayList<>())
-                        .add(toDto(c, mentionsByCommentId, List.of()));
+                        .add(toDto(c, usersById, List.of()));
             }
         }
 
-        List<CommentsGetResponse.CommentDto> rootComments = comments.stream()
+        List<CommentsGetResponse.CommentDto> rootComments = commentStates.stream()
                 .filter(c -> c.getParentCommentId() == null)
-                .map(c -> toDto(c, mentionsByCommentId, repliesByParentId.getOrDefault(c.getId(), List.of())))
+                .map(c -> toDto(c, usersById, repliesByParentId.getOrDefault(c.getCommentId(), List.of())
+                ))
                 .toList();
 
         return CommentsGetResponse.from(rootComments);
     }
 
     private CommentsGetResponse.CommentDto toDto(
-            Comment comment,
-            Map<Integer, List<CommentMention>> mentionsByCommentId,
+            CommentState commentState,
+            Map<Integer, User> usersById,
             List<CommentsGetResponse.CommentDto> replies
     ) {
-        List<CommentsGetResponse.UserSummary> mentionedUsers = mentionsByCommentId.getOrDefault(comment.getId(), List.of()).stream()
+        User user = usersById.get(commentState.getUserId());
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+
+        List<CommentsGetResponse.UserSummary> mentionedUsers = commentState.getMentionedUserIds().stream()
+                .map(usersById::get)
+                .filter(java.util.Objects::nonNull)
                 .map(CommentsGetResponse.UserSummary::from)
                 .toList();
-        return CommentsGetResponse.CommentDto.of(comment, mentionedUsers, replies);
+
+        return CommentsGetResponse.CommentDto.from(commentState, user, mentionedUsers, replies);
     }
 
 }

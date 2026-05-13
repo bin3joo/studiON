@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.comment.dto.websocket;
 
 import com.salmon.studion.domain.auth.entity.User;
+import com.salmon.studion.domain.comment.dto.redis.CommentState;
 import com.salmon.studion.domain.comment.entity.Comment;
 
 import java.math.BigDecimal;
@@ -33,20 +34,24 @@ public record CommentCreateResponse(
         }
     }
 
-    public static CommentCreateResponse of(Integer projectId, Comment comment, List<User> mentionedUsers) {
+    public static CommentCreateResponse of(
+            Integer projectId,
+            CommentState commentState,
+            User user,
+            List<User> mentionedUsers) {
         return new CommentCreateResponse(
                 projectId,
-                comment.getTrack().getId(),
-                comment.getId(),
-                comment.getParentCommentId(),
-                comment.getContent(),
-                comment.getLocation(),
-                comment.getIsResolved(),
-                UserSummary.from(comment.getUser()),
+                commentState.getTrackId(),
+                commentState.getCommentId(),
+                commentState.getParentCommentId(),
+                commentState.getContent(),
+                commentState.getLocation(),
+                commentState.getIsResolved(),
+                UserSummary.from(user),
                 mentionedUsers.stream()
                         .map(UserSummary::from)
                         .toList(),
-                comment.getCreatedAt()
+                commentState.getCreatedAt()
         );
     }
 }

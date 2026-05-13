@@ -1,9 +1,9 @@
 package com.salmon.studion.domain.comment.dto.response;
 
 import com.salmon.studion.domain.auth.entity.User;
+import com.salmon.studion.domain.comment.dto.redis.CommentState;
 import com.salmon.studion.domain.comment.entity.Comment;
 import com.salmon.studion.domain.comment.entity.CommentMention;
-
 import lombok.Getter;
 
 import java.math.BigDecimal;
@@ -31,6 +31,26 @@ public class CommentsGetResponse {
             LocalDateTime createdAt,
             List<CommentDto> replies
     ) {
+        public static CommentDto from(
+                CommentState commentState,
+                User user,
+                List<UserSummary> mentionedUsers,
+                List<CommentDto> replies
+        ) {
+            return new CommentDto(
+                    commentState.getCommentId(),
+                    commentState.getTrackId(),
+                    commentState.getParentCommentId(),
+                    commentState.getContent(),
+                    commentState.getLocation(),
+                    commentState.getIsResolved(),
+                    UserSummary.from(user),
+                    mentionedUsers,
+                    commentState.getCreatedAt(),
+                    replies
+            );
+        }
+
         public static CommentDto of(
                 Comment comment,
                 List<UserSummary> mentionedUsers,

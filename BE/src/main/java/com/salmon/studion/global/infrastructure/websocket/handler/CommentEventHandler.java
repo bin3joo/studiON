@@ -8,7 +8,7 @@ import com.salmon.studion.domain.comment.facade.CommentFacade;
 import com.salmon.studion.global.common.enums.CommentWebSocketEventType;
 import com.salmon.studion.global.infrastructure.websocket.WebSocketMessageSender;
 import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
-import com.salmon.studion.global.infrastructure.websocket.util.WebSocketSessionUtils;
+import com.salmon.studion.global.scheduler.ProjectAutosaveScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
@@ -23,6 +23,7 @@ public class CommentEventHandler {
     private final ObjectMapper objectMapper;
     private final CommentFacade commentFacade;
     private final WebSocketMessageSender webSocketMessageSender;
+    private final ProjectAutosaveScheduler projectAutosaveScheduler;
 
     public void handleCommentEvent(
             WebSocketSession session,
@@ -38,18 +39,21 @@ public class CommentEventHandler {
                 request.setProjectId(projectId);
                 Object response = commentFacade.createComment(request, userId);
                 webSocketMessageSender.broadcast(projectId, CommentWebSocketEventType.COMMENT_ADDED.name(), response);
+                projectAutosaveScheduler.schedule(projectId);
             }
             case COMMENT_DELETE -> {
                 CommentDeleteRequest request = objectMapper.convertValue(raw.getPayload(), CommentDeleteRequest.class);
                 request.setProjectId(projectId);
                 Object response = commentFacade.deleteComment(request, userId);
                 webSocketMessageSender.broadcast(projectId, CommentWebSocketEventType.COMMENT_DELETED.name(), response);
+                projectAutosaveScheduler.schedule(projectId);
             }
             case COMMENT_STATUS_CHANGE -> {
                 CommentStatusChangeRequest request = objectMapper.convertValue(raw.getPayload(), CommentStatusChangeRequest.class);
                 request.setProjectId(projectId);
                 Object response = commentFacade.changeStatus(request, userId);
                 webSocketMessageSender.broadcast(projectId, CommentWebSocketEventType.COMMENT_STATUS_CHANGED.name(), response);
+                projectAutosaveScheduler.schedule(projectId);
             }
 
             case COMMENT_ADDED,

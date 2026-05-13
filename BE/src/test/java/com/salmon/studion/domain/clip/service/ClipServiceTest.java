@@ -1819,4 +1819,220 @@ class ClipServiceTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("마디 수 제한 (200마디)")
+    class BarLimitTest {
+
+        private static final Integer TRACK_ID = 1;
+        private static final Integer DURATION_MS = 8000;
+        private static final Double DURATION_BARS = 4.0; // (8000/1000) * (120/60) / 4
+        private static final String CLIP_STATE_KEY = "project:1:clips";
+        private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
+        private static final String CLIPBOARD_KEY = "project:1:user:1:clipboard";
+
+        private Map<String, String> store;
+
+        @BeforeEach
+        void setUp() {
+            store = new HashMap<>();
+
+            Project mockProject = mock(Project.class);
+            lenient().when(mockProject.getTempo()).thenReturn(120.0);
+            lenient().when(mockProject.getTimeSigNumerator()).thenReturn(4);
+            lenient().when(projectService.getProjectOrThrow(PROJECT_ID)).thenReturn(mockProject);
+
+            AudioMetadata mockAudio = mock(AudioMetadata.class);
+            lenient().when(mockAudio.getId()).thenReturn(42);
+            lenient().when(mockAudio.getDurationMs()).thenReturn(DURATION_MS);
+            lenient().when(audioService.createAudioMetadata(any())).thenReturn(mockAudio);
+
+            lenient().when(trackRepository.findByIdAndProject_Id(TRACK_ID, PROJECT_ID)).thenReturn(Optional.of(mock(Track.class)));
+            lenient().when(valueOperations.increment(CLIP_ID_SEQ_KEY)).thenReturn(100L);
+            lenient().when(valueOperations.get(LOCK_KEY)).thenReturn(String.valueOf(USER_ID));
+
+            lenient().doAnswer(inv -> store.get(inv.getArgument(1).toString()))
+                    .when(hashOperations).get(eq(CLIP_STATE_KEY), any());
+            lenient().doAnswer(inv -> {
+                store.put(inv.getArgument(1).toString(), inv.getArgument(2).toString());
+                return null;
+            }).when(hashOperations).put(eq(CLIP_STATE_KEY), any(), any());
+            lenient().doAnswer(inv -> new ArrayList<>(store.values()))
+                    .when(hashOperations).values(eq(CLIP_STATE_KEY));
+        }
+
+        private String clipStateJson(Double start, Double duration) throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(TRACK_ID).start(start).duration(duration)
+                    .audioStartMs(0).audioDurationMs(DURATION_MS)
+                    .build());
+        }
+
+        private String clipboardJson(Double duration) throws JsonProcessingException {
+            return objectMapper.writeValueAsString(ClipState.builder()
+                    .clipId(CLIP_ID).trackId(TRACK_ID).start(1.0).duration(duration)
+                    .build());
+        }
+
+        @Test
+        @DisplayName("createClip: startBar + duration > 200이면 CLIP_BAR_LIMIT_EXCEEDED 예외를 던진다")
+        void createClip_exceedBarLimit() {
+            ClipCreateRequest req = new ClipCreateRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setTrackId(TRACK_ID);
+            req.setStartBar(197.0); // 197 + 4 = 201 > 200
+            req.setColor("#FF0000");
+            req.setObjectKey("projects/1/audios/test.mp3");
+            req.setOriginalName("test.mp3");
+            req.setStoredName("test.mp3");
+            req.setMimeType(MimeType.MPEG);
+            req.setSizeBytes(100000);
+            req.setDurationMs(DURATION_MS);
+
+            assertThatThrownBy(() -> clipService.createClip(req, USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED));
+        }
+
+        @Test
+        @DisplayName("createClip: startBar + duration = 200이면 예외를 던지지 않는다")
+        void createClip_boundaryBarLimit() {
+            ClipCreateRequest req = new ClipCreateRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setTrackId(TRACK_ID);
+            req.setStartBar(196.0); // 196 + 4 = 200, not > 200
+            req.setColor("#FF0000");
+            req.setObjectKey("projects/1/audios/test.mp3");
+            req.setOriginalName("test.mp3");
+            req.setStoredName("test.mp3");
+            req.setMimeType(MimeType.MPEG);
+            req.setSizeBytes(100000);
+            req.setDurationMs(DURATION_MS);
+
+            assertThat(clipService.createClip(req, USER_ID)).isNotNull();
+        }
+
+        @Test
+        @DisplayName("moveClip: targetStartBar + duration > 200이면 CLIP_BAR_LIMIT_EXCEEDED 예외를 던진다")
+        void moveClip_exceedBarLimit() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(1.0, DURATION_BARS));
+
+            ClipMoveRequest req = new ClipMoveRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(CLIP_ID);
+            req.setTargetTrackId(TRACK_ID);
+            req.setTargetStartBar(197.0); // 197 + 4 = 201 > 200
+
+            assertThatThrownBy(() -> clipService.moveClip(req, USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED));
+        }
+
+        @Test
+        @DisplayName("moveClip: targetStartBar + duration = 200이면 예외를 던지지 않는다")
+        void moveClip_boundaryBarLimit() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(1.0, DURATION_BARS));
+
+            ClipMoveRequest req = new ClipMoveRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(CLIP_ID);
+            req.setTargetTrackId(TRACK_ID);
+            req.setTargetStartBar(196.0); // 196 + 4 = 200, not > 200
+
+            assertThat(clipService.moveClip(req, USER_ID)).isNotNull();
+        }
+
+        @Test
+        @DisplayName("resizeClip: startBar + length > 200이면 CLIP_BAR_LIMIT_EXCEEDED 예외를 던진다")
+        void resizeClip_exceedBarLimit() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(1.0, DURATION_BARS));
+
+            ClipResizeRequest req = new ClipResizeRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(CLIP_ID);
+            req.setStartBar(197.0); // 197 + 4 = 201 > 200
+            req.setLength(DURATION_BARS);
+
+            assertThatThrownBy(() -> clipService.resizeClip(req, USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED));
+        }
+
+        @Test
+        @DisplayName("resizeClip: startBar + length = 200이면 예외를 던지지 않는다")
+        void resizeClip_boundaryBarLimit() throws JsonProcessingException {
+            store.put(String.valueOf(CLIP_ID), clipStateJson(196.0, DURATION_BARS));
+
+            ClipResizeRequest req = new ClipResizeRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(CLIP_ID);
+            req.setStartBar(196.0); // 196 + 4 = 200, not > 200
+            req.setLength(DURATION_BARS);
+
+            assertThat(clipService.resizeClip(req, USER_ID)).isNotNull();
+        }
+
+        @Test
+        @DisplayName("pasteClip: targetStartBar + clipboardDuration > 200이면 CLIP_BAR_LIMIT_EXCEEDED 예외를 던진다")
+        void pasteClip_exceedBarLimit() throws JsonProcessingException {
+            String clipboard = clipboardJson(DURATION_BARS);
+            when(valueOperations.get(CLIPBOARD_KEY)).thenReturn(clipboard);
+
+            ClipPasteRequest req = new ClipPasteRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setTargetTrackId(TRACK_ID);
+            req.setTargetStartBar(197.0); // 197 + 4 = 201 > 200
+
+            assertThatThrownBy(() -> clipService.pasteClip(req, USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED));
+        }
+
+        @Test
+        @DisplayName("pasteClip: targetStartBar + clipboardDuration = 200이면 예외를 던지지 않는다")
+        void pasteClip_boundaryBarLimit() throws JsonProcessingException {
+            String clipboard = clipboardJson(DURATION_BARS);
+            when(valueOperations.get(CLIPBOARD_KEY)).thenReturn(clipboard);
+
+            ClipPasteRequest req = new ClipPasteRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setTargetTrackId(TRACK_ID);
+            req.setTargetStartBar(196.0); // 196 + 4 = 200, not > 200
+
+            assertThat(clipService.pasteClip(req, USER_ID)).isNotNull();
+        }
+
+        @Test
+        @DisplayName("duplicateClip: targetStartBar + duration > 200이면 CLIP_BAR_LIMIT_EXCEEDED 예외를 던진다")
+        void duplicateClip_exceedBarLimit() throws JsonProcessingException {
+            // start=193, duration=4 → targetStartBar=197, 197+4=201 > 200
+            store.put(String.valueOf(CLIP_ID), clipStateJson(193.0, DURATION_BARS));
+
+            ClipDuplicateRequest req = new ClipDuplicateRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(CLIP_ID);
+
+            assertThatThrownBy(() -> clipService.duplicateClip(req, USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED));
+        }
+
+        @Test
+        @DisplayName("duplicateClip: targetStartBar + duration = 200이면 예외를 던지지 않는다")
+        void duplicateClip_boundaryBarLimit() throws JsonProcessingException {
+            // start=192, duration=4 → targetStartBar=196, 196+4=200, not > 200
+            store.put(String.valueOf(CLIP_ID), clipStateJson(192.0, DURATION_BARS));
+
+            ClipDuplicateRequest req = new ClipDuplicateRequest();
+            req.setProjectId(PROJECT_ID);
+            req.setClipId(CLIP_ID);
+
+            assertThat(clipService.duplicateClip(req, USER_ID)).isNotNull();
+        }
+    }
 }

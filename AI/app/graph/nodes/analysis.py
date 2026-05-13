@@ -8,7 +8,7 @@ from typing import Any
 import librosa
 import numpy as np
 import soundfile as sf
-from scipy.signal import resample_poly
+from scipy.signal import lfilter, resample_poly
 
 from app.core.config import get_settings
 from app.graph.nodes.common import artifact_id, workflow_update
@@ -71,6 +71,13 @@ BAND_OVERLAP_FRAME_MIN_LOW_MID_ENERGY = 0.04
 BAND_OVERLAP_FRAME_MIN_ACTIVE_TRACKS = 2
 BAND_OVERLAP_FRAME_MIN_BODY_SUM = 1.05
 BAND_OVERLAP_FRAME_MIN_LOW_MID_SUM = 0.12
+REFINEMENT_SMOOTHING_BINS = 5
+REFINEMENT_CLUSTER_PEAK_RATIO = 0.6
+REFINEMENT_CLUSTER_FLOOR = 1e-4
+CLIPPING_BAND_DRIVEN_MIN_SHARE = 0.22
+CLIPPING_BAND_DRIVEN_MIN_CONSISTENCY = 0.55
+CLIPPING_ANALYSIS_MIN_HZ = 120
+CLIPPING_ANALYSIS_MAX_HZ = 9000
 
 
 class DSPBuildError(RuntimeError):
@@ -101,6 +108,10 @@ def load_project_snapshot(state: WorkflowState) -> WorkflowState:
                 "denominator": state.get("denominator") or snapshot_document.denominator,
                 "bar_mapping": state.get("bar_mapping") or snapshot_document.bar_mapping,
                 "clip_index": state.get("clip_index") or snapshot_document.clip_index,
+                "track_eq_map": state.get("track_eq_map") or {
+                    int(track_id): bands
+                    for track_id, bands in snapshot_document.track_eq_map.items()
+                },
             }
         )
     return workflow_update(
@@ -632,6 +643,10 @@ def _build_compact_dsp_summary(state: WorkflowState) -> tuple[dict[str, object],
         path: _load_audio_clip(path)
         for path in sorted({str(clip["resolved_audio_path"]) for clip in resolved_clips})
     }
+    track_eq_map = {
+        int(track_id): list(bands)
+        for track_id, bands in (state.get("track_eq_map") or {}).items()
+    }
     track_signals: dict[int, np.ndarray] = {}
     mix_signal = np.zeros(track_sample_count, dtype=np.float32)
     for track_id in track_ids:
@@ -643,14 +658,18 @@ def _build_compact_dsp_summary(state: WorkflowState) -> tuple[dict[str, object],
             total_samples=track_sample_count,
         )
         # 복원된 트랙 파형은 이후 트랙 단위 STFT 분석에 사용한다.
+        signal = _apply_track_eq(signal, track_eq_map.get(int(track_id), []))
         track_signals[int(track_id)] = signal
         # 모든 트랙 파형을 더해 mix 파형도 함께 만든다.
         mix_signal += signal
 
+    frequency_bins_hz = _stft_frequency_bins()
     track_frames: dict[int, list[dict[str, object]]] = {}
+    track_power_spectra: dict[int, list[list[float]]] = {}
     for track_id, signal in track_signals.items():
-        track_frames[track_id] = _compute_track_frames(signal)
+        track_frames[track_id], track_power_spectra[track_id] = _compute_track_frame_summary(signal)
     mix_frames = _compute_mix_frames(mix_signal, target_track_id=int(track_ids[0]))
+    mix_power_spectra = _compute_mix_power_spectra(mix_signal)
     track_stats = {
         track_id: _compute_track_stats(track_frames[track_id]) for track_id in track_ids
     }
@@ -671,6 +690,9 @@ def _build_compact_dsp_summary(state: WorkflowState) -> tuple[dict[str, object],
             str(track_id): frames[:4] for track_id, frames in track_frames.items()
         },
         "mix_windows_preview": mix_frames[:4],
+        "track_eqs_applied": {
+            str(track_id): bands for track_id, bands in track_eq_map.items()
+        },
     }
     artifact_payload = {
         "analysis_source": "full_stft",
@@ -682,6 +704,14 @@ def _build_compact_dsp_summary(state: WorkflowState) -> tuple[dict[str, object],
         "frame_count": len(mix_frames),
         "track_frames": {str(track_id): frames for track_id, frames in track_frames.items()},
         "mix_frames": mix_frames,
+        "frequency_bins_hz": frequency_bins_hz,
+        "track_power_spectra": {
+            str(track_id): spectra for track_id, spectra in track_power_spectra.items()
+        },
+        "mix_power_spectra": mix_power_spectra,
+        "track_eqs_applied": {
+            str(track_id): bands for track_id, bands in track_eq_map.items()
+        },
     }
     return summary, artifact_payload
 
@@ -823,7 +853,75 @@ def _build_track_timeline_signal(
     return signal
 
 
-def _compute_track_frames(signal: np.ndarray) -> list[dict[str, object]]:
+def _apply_track_eq(signal: np.ndarray, bands: list[dict[str, object]]) -> np.ndarray:
+    if signal.size == 0 or not bands:
+        return signal
+
+    filtered = signal.astype(np.float32, copy=True)
+    for band in sorted(bands, key=lambda item: int(item["band_order"])):
+        b, a = _design_eq_biquad(
+            eq_type=str(band["eq_type"]),
+            frequency_hz=float(band["frequency_hz"]),
+            q=float(band["q"]),
+            gain_delta_db=float(band["gain_delta_db"]),
+        )
+        filtered = lfilter(b, a, filtered).astype(np.float32, copy=False)
+    return filtered
+
+
+def _design_eq_biquad(
+    *,
+    eq_type: str,
+    frequency_hz: float,
+    q: float,
+    gain_delta_db: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    nyquist_hz = DSP_TARGET_SR / 2.0
+    normalized_frequency_hz = min(max(frequency_hz, 1.0), nyquist_hz - 1.0)
+    omega = (2.0 * math.pi * normalized_frequency_hz) / DSP_TARGET_SR
+    sin_omega = math.sin(omega)
+    cos_omega = math.cos(omega)
+    alpha = sin_omega / (2.0 * max(q, 1e-6))
+    amplitude = math.pow(10.0, gain_delta_db / 40.0)
+
+    if eq_type == "BELL":
+        b0 = 1.0 + alpha * amplitude
+        b1 = -2.0 * cos_omega
+        b2 = 1.0 - alpha * amplitude
+        a0 = 1.0 + alpha / amplitude
+        a1 = -2.0 * cos_omega
+        a2 = 1.0 - alpha / amplitude
+    elif eq_type == "LOW_SHELF":
+        sqrt_a = math.sqrt(amplitude)
+        two_sqrt_a_alpha = 2.0 * sqrt_a * alpha
+        b0 = amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cos_omega + two_sqrt_a_alpha)
+        b1 = 2.0 * amplitude * ((amplitude - 1.0) - (amplitude + 1.0) * cos_omega)
+        b2 = amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cos_omega - two_sqrt_a_alpha)
+        a0 = (amplitude + 1.0) + (amplitude - 1.0) * cos_omega + two_sqrt_a_alpha
+        a1 = -2.0 * ((amplitude - 1.0) + (amplitude + 1.0) * cos_omega)
+        a2 = (amplitude + 1.0) + (amplitude - 1.0) * cos_omega - two_sqrt_a_alpha
+    elif eq_type == "HIGH_SHELF":
+        sqrt_a = math.sqrt(amplitude)
+        two_sqrt_a_alpha = 2.0 * sqrt_a * alpha
+        b0 = amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cos_omega + two_sqrt_a_alpha)
+        b1 = -2.0 * amplitude * ((amplitude - 1.0) + (amplitude + 1.0) * cos_omega)
+        b2 = amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cos_omega - two_sqrt_a_alpha)
+        a0 = (amplitude + 1.0) - (amplitude - 1.0) * cos_omega + two_sqrt_a_alpha
+        a1 = 2.0 * ((amplitude - 1.0) - (amplitude + 1.0) * cos_omega)
+        a2 = (amplitude + 1.0) - (amplitude - 1.0) * cos_omega - two_sqrt_a_alpha
+    else:
+        raise DSPBuildError("SNAPSHOT_TRACK_EQ_INVALID", f"Unsupported EQ type: {eq_type}")
+
+    b = np.array([b0 / a0, b1 / a0, b2 / a0], dtype=np.float64)
+    a = np.array([1.0, a1 / a0, a2 / a0], dtype=np.float64)
+    return b, a
+
+
+def _stft_frequency_bins() -> list[float]:
+    return [float(value) for value in librosa.fft_frequencies(sr=DSP_TARGET_SR, n_fft=STFT_N_FFT)]
+
+
+def _compute_track_frame_summary(signal: np.ndarray) -> tuple[list[dict[str, object]], list[list[float]]]:
     if signal.size < STFT_WIN_LENGTH:
         padded = np.zeros(STFT_WIN_LENGTH, dtype=np.float32)
         padded[: signal.size] = signal
@@ -840,6 +938,7 @@ def _compute_track_frames(signal: np.ndarray) -> list[dict[str, object]]:
     power = np.abs(stft) ** 2
     freqs = librosa.fft_frequencies(sr=DSP_TARGET_SR, n_fft=STFT_N_FFT)
     frames: list[dict[str, object]] = []
+    spectra: list[list[float]] = []
     for frame_index in range(power.shape[1]):
         start_sample = frame_index * STFT_HOP_LENGTH
         end_sample = min(start_sample + STFT_WIN_LENGTH, signal.size)
@@ -882,6 +981,12 @@ def _compute_track_frames(signal: np.ndarray) -> list[dict[str, object]]:
                 ),
             }
         )
+        spectra.append([round(float(value), 8) for value in frame_power.tolist()])
+    return frames, spectra
+
+
+def _compute_track_frames(signal: np.ndarray) -> list[dict[str, object]]:
+    frames, _ = _compute_track_frame_summary(signal)
     return frames
 
 
@@ -916,6 +1021,23 @@ def _compute_mix_frames(signal: np.ndarray, *, target_track_id: int) -> list[dic
             }
         )
     return frames
+
+
+def _compute_mix_power_spectra(signal: np.ndarray) -> list[list[float]]:
+    if signal.size < STFT_WIN_LENGTH:
+        padded = np.zeros(STFT_WIN_LENGTH, dtype=np.float32)
+        padded[: signal.size] = signal
+        signal = padded
+    stft = librosa.stft(
+        signal,
+        n_fft=STFT_N_FFT,
+        hop_length=STFT_HOP_LENGTH,
+        win_length=STFT_WIN_LENGTH,
+        window=STFT_WINDOW,
+        center=False,
+    )
+    power = np.abs(stft) ** 2
+    return [[round(float(value), 8) for value in power[:, frame_index].tolist()] for frame_index in range(power.shape[1])]
 
 
 def _oversampled_true_peak(time_slice: np.ndarray) -> float:
@@ -999,6 +1121,330 @@ def _load_dsp_feature_artifact(state: WorkflowState) -> dict[str, Any]:
     return artifact.payload if artifact is not None else {}
 
 
+def _artifact_frequency_bins(artifact: dict[str, Any]) -> np.ndarray:
+    bins = artifact.get("frequency_bins_hz") or []
+    if not bins:
+        return np.array([], dtype=np.float64)
+    return np.asarray(bins, dtype=np.float64)
+
+
+def _artifact_track_power_spectra(artifact: dict[str, Any], track_id: int) -> list[list[float]]:
+    track_spectra = artifact.get("track_power_spectra", {})
+    if str(track_id) in track_spectra:
+        return list(track_spectra[str(track_id)])
+    if track_id in track_spectra:
+        return list(track_spectra[track_id])
+    return []
+
+
+def _collect_frame_indices_for_region(
+    frames: list[dict[str, object]],
+    *,
+    start_ms: int,
+    end_ms: int,
+) -> list[int]:
+    return [
+        index
+        for index, frame in enumerate(frames)
+        if int(frame.get("start_ms", 0)) < end_ms and int(frame.get("end_ms", 0)) > start_ms
+    ]
+
+
+def _average_power_spectrum(
+    spectra: list[list[float]],
+    frame_indices: list[int],
+) -> np.ndarray | None:
+    if not spectra or not frame_indices:
+        return None
+    selected = [
+        np.asarray(spectra[index], dtype=np.float64)
+        for index in frame_indices
+        if 0 <= index < len(spectra)
+    ]
+    if not selected:
+        return None
+    stacked = np.vstack(selected)
+    return np.mean(stacked, axis=0)
+
+
+def _smooth_score_map(score_map: np.ndarray, kernel_size: int = REFINEMENT_SMOOTHING_BINS) -> np.ndarray:
+    if score_map.size == 0 or kernel_size <= 1:
+        return score_map
+    kernel_size = min(kernel_size, int(score_map.size))
+    kernel = np.ones(kernel_size, dtype=np.float64) / float(kernel_size)
+    return np.convolve(score_map, kernel, mode="same")
+
+
+def _extract_peak_cluster(
+    freqs: np.ndarray,
+    score_map: np.ndarray,
+    *,
+    min_hz: int | None = None,
+    max_hz: int | None = None,
+    peak_ratio: float = REFINEMENT_CLUSTER_PEAK_RATIO,
+) -> dict[str, object] | None:
+    if freqs.size == 0 or score_map.size == 0 or freqs.size != score_map.size:
+        return None
+    mask = np.ones(freqs.shape, dtype=bool)
+    if min_hz is not None:
+        mask &= freqs >= min_hz
+    if max_hz is not None:
+        mask &= freqs <= max_hz
+    masked_indices = np.flatnonzero(mask)
+    if masked_indices.size == 0:
+        return None
+    masked_scores = np.maximum(score_map[masked_indices], 0.0)
+    peak_score = float(np.max(masked_scores))
+    if peak_score <= REFINEMENT_CLUSTER_FLOOR:
+        return None
+    threshold = max(peak_score * peak_ratio, REFINEMENT_CLUSTER_FLOOR)
+    peak_local_index = int(np.argmax(masked_scores))
+    peak_index = int(masked_indices[peak_local_index])
+    left = peak_index
+    right = peak_index
+    while left - 1 >= 0 and mask[left - 1] and score_map[left - 1] >= threshold:
+        left -= 1
+    while right + 1 < score_map.size and mask[right + 1] and score_map[right + 1] >= threshold:
+        right += 1
+    cluster_scores = np.maximum(score_map[left : right + 1], 0.0)
+    cluster_energy = float(np.sum(cluster_scores))
+    if cluster_energy <= REFINEMENT_CLUSTER_FLOOR:
+        return None
+    full_energy = float(np.sum(np.maximum(score_map[masked_indices], 0.0)))
+    weighted_center = float(
+        np.sum(freqs[left : right + 1] * cluster_scores) / max(cluster_energy, 1e-9)
+    )
+    return {
+        "band_low_hz": int(round(float(freqs[left]))),
+        "band_high_hz": int(round(float(freqs[right]))),
+        "center_hz": int(round(weighted_center)),
+        "band_confidence": round(cluster_energy / max(full_energy, 1e-9), 3),
+        "peak_score": peak_score,
+        "cluster_energy": cluster_energy,
+    }
+
+
+def _apply_refined_band(
+    region: dict[str, object],
+    refinement: dict[str, object] | None,
+    *,
+    fallback_low_hz: int | None = None,
+    fallback_high_hz: int | None = None,
+) -> dict[str, object]:
+    updated = deepcopy(region)
+    if refinement is None:
+        updated["center_hz"] = None
+        updated["band_confidence"] = None
+        if "broadband_classification" not in updated:
+            updated["broadband_classification"] = "fallback"
+        if fallback_low_hz is not None:
+            updated["band_low_hz"] = fallback_low_hz
+        if fallback_high_hz is not None:
+            updated["band_high_hz"] = fallback_high_hz
+        return updated
+    updated["band_low_hz"] = refinement["band_low_hz"]
+    updated["band_high_hz"] = refinement["band_high_hz"]
+    updated["center_hz"] = refinement["center_hz"]
+    updated["band_confidence"] = refinement["band_confidence"]
+    return updated
+
+
+def _refine_band_overlap_region(
+    artifact: dict[str, Any],
+    region: dict[str, object],
+) -> dict[str, object]:
+    involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
+    freqs = _artifact_frequency_bins(artifact)
+    if len(involved_track_ids) < 2 or freqs.size == 0:
+        return _apply_refined_band(
+            region,
+            None,
+            fallback_low_hz=int(region.get("band_low_hz") or BAND_RANGES["body"][0]),
+            fallback_high_hz=int(region.get("band_high_hz") or BAND_RANGES["body"][1]),
+        )
+    normalized_spectra: list[np.ndarray] = []
+    for track_id in involved_track_ids:
+        frames = artifact.get("track_frames", {}).get(str(track_id)) or artifact.get("track_frames", {}).get(track_id) or []
+        frame_indices = _collect_frame_indices_for_region(
+            frames,
+            start_ms=int(region["start_ms"]),
+            end_ms=int(region["end_ms"]),
+        )
+        spectrum = _average_power_spectrum(_artifact_track_power_spectra(artifact, track_id), frame_indices)
+        if spectrum is None:
+            continue
+        normalized_spectra.append(spectrum / max(float(np.sum(spectrum)), 1e-9))
+    if len(normalized_spectra) < 2:
+        return _apply_refined_band(
+            region,
+            None,
+            fallback_low_hz=int(region.get("band_low_hz") or BAND_RANGES["body"][0]),
+            fallback_high_hz=int(region.get("band_high_hz") or BAND_RANGES["body"][1]),
+        )
+    overlap_score = np.zeros_like(normalized_spectra[0], dtype=np.float64)
+    for left_index in range(len(normalized_spectra)):
+        for right_index in range(left_index + 1, len(normalized_spectra)):
+            overlap_score += np.minimum(
+                normalized_spectra[left_index],
+                normalized_spectra[right_index],
+            )
+    refinement = _extract_peak_cluster(
+        freqs,
+        _smooth_score_map(overlap_score),
+        min_hz=BAND_RANGES["body"][0],
+        max_hz=BAND_RANGES["presence"][1],
+    )
+    return _apply_refined_band(
+        region,
+        refinement,
+        fallback_low_hz=int(region.get("band_low_hz") or BAND_RANGES["body"][0]),
+        fallback_high_hz=int(region.get("band_high_hz") or BAND_RANGES["body"][1]),
+    )
+
+
+def _refine_prominent_high_band_region(
+    artifact: dict[str, Any],
+    region: dict[str, object],
+    *,
+    min_hz: int,
+    max_hz: int,
+) -> dict[str, object]:
+    track_id = region.get("track_id")
+    freqs = _artifact_frequency_bins(artifact)
+    if track_id is None or freqs.size == 0:
+        return _apply_refined_band(
+            region,
+            None,
+            fallback_low_hz=int(region.get("band_low_hz") or min_hz),
+            fallback_high_hz=int(region.get("band_high_hz") or max_hz),
+        )
+    frames = artifact.get("track_frames", {}).get(str(track_id)) or artifact.get("track_frames", {}).get(track_id) or []
+    frame_indices = _collect_frame_indices_for_region(
+        frames,
+        start_ms=int(region["start_ms"]),
+        end_ms=int(region["end_ms"]),
+    )
+    spectrum = _average_power_spectrum(_artifact_track_power_spectra(artifact, int(track_id)), frame_indices)
+    if spectrum is None:
+        return _apply_refined_band(
+            region,
+            None,
+            fallback_low_hz=int(region.get("band_low_hz") or min_hz),
+            fallback_high_hz=int(region.get("band_high_hz") or max_hz),
+        )
+    log_power = np.log10(np.maximum(spectrum, 1e-9))
+    envelope = _smooth_score_map(log_power, kernel_size=13)
+    prominence = np.maximum(log_power - envelope, 0.0)
+    refinement = _extract_peak_cluster(
+        freqs,
+        _smooth_score_map(prominence),
+        min_hz=min_hz,
+        max_hz=max_hz,
+    )
+    return _apply_refined_band(
+        region,
+        refinement,
+        fallback_low_hz=int(region.get("band_low_hz") or min_hz),
+        fallback_high_hz=int(region.get("band_high_hz") or max_hz),
+    )
+
+
+def _classify_track_clipping_band(
+    artifact: dict[str, Any],
+    region: dict[str, object],
+) -> dict[str, object]:
+    track_id = region.get("track_id")
+    freqs = _artifact_frequency_bins(artifact)
+    if track_id is None or freqs.size == 0:
+        updated = deepcopy(region)
+        updated["broadband_classification"] = "fallback"
+        updated["center_hz"] = None
+        updated["band_confidence"] = None
+        return updated
+    frames = artifact.get("track_frames", {}).get(str(track_id)) or artifact.get("track_frames", {}).get(track_id) or []
+    frame_indices = _collect_frame_indices_for_region(
+        frames,
+        start_ms=int(region["start_ms"]),
+        end_ms=int(region["end_ms"]),
+    )
+    spectrum = _average_power_spectrum(_artifact_track_power_spectra(artifact, int(track_id)), frame_indices)
+    if spectrum is None:
+        updated = deepcopy(region)
+        updated["broadband_classification"] = "fallback"
+        updated["center_hz"] = None
+        updated["band_confidence"] = None
+        return updated
+    analysis_mask = (freqs >= CLIPPING_ANALYSIS_MIN_HZ) & (freqs <= CLIPPING_ANALYSIS_MAX_HZ)
+    normalized = spectrum / max(float(np.sum(spectrum[analysis_mask])), 1e-9)
+    smoothed = _smooth_score_map(normalized)
+    refinement = _extract_peak_cluster(
+        freqs,
+        smoothed,
+        min_hz=CLIPPING_ANALYSIS_MIN_HZ,
+        max_hz=CLIPPING_ANALYSIS_MAX_HZ,
+        peak_ratio=0.72,
+    )
+    updated = deepcopy(region)
+    if refinement is None:
+        updated["band_low_hz"] = None
+        updated["band_high_hz"] = None
+        updated["center_hz"] = None
+        updated["band_confidence"] = None
+        updated["band_hints"] = ["broadband"]
+        updated["broadband_classification"] = "broadband"
+        return updated
+    cluster_mask = (freqs >= refinement["band_low_hz"]) & (freqs <= refinement["band_high_hz"])
+    cluster_share = float(np.sum(normalized[cluster_mask]))
+    per_frame_scores: list[float] = []
+    for index in frame_indices:
+        spectra = _artifact_track_power_spectra(artifact, int(track_id))
+        if not (0 <= index < len(spectra)):
+            continue
+        frame_spectrum = np.asarray(spectra[index], dtype=np.float64)
+        frame_total = float(np.sum(frame_spectrum[analysis_mask]))
+        if frame_total <= 1e-9:
+            continue
+        per_frame_scores.append(float(np.sum(frame_spectrum[cluster_mask]) / frame_total))
+    time_consistency = float(np.mean([score >= max(cluster_share * 0.7, 0.12) for score in per_frame_scores])) if per_frame_scores else 0.0
+    mean_score = float(np.mean(smoothed[analysis_mask])) if np.any(analysis_mask) else 0.0
+    peak_to_mean_ratio = float(refinement["peak_score"]) / max(mean_score, 1e-9)
+    if (
+        cluster_share < CLIPPING_BAND_DRIVEN_MIN_SHARE
+        or time_consistency < CLIPPING_BAND_DRIVEN_MIN_CONSISTENCY
+        or peak_to_mean_ratio < 1.6
+    ):
+        updated["band_low_hz"] = None
+        updated["band_high_hz"] = None
+        updated["center_hz"] = None
+        updated["band_confidence"] = None
+        updated["band_hints"] = ["broadband"]
+        updated["broadband_classification"] = "broadband"
+        return updated
+    updated["band_low_hz"] = refinement["band_low_hz"]
+    updated["band_high_hz"] = refinement["band_high_hz"]
+    updated["center_hz"] = refinement["center_hz"]
+    updated["band_confidence"] = round(min(refinement["band_confidence"], cluster_share), 3)
+    updated["broadband_classification"] = "band_driven"
+    updated["band_hints"] = _derive_track_clipping_band_hints(
+        updated["band_low_hz"],
+        updated["band_high_hz"],
+    )
+    return updated
+
+
+def _derive_track_clipping_band_hints(band_low_hz: int | None, band_high_hz: int | None) -> list[str]:
+    if band_low_hz is None or band_high_hz is None:
+        return ["broadband"]
+    hints: list[str] = []
+    if band_low_hz < 1500:
+        hints.append("low_mid")
+    if band_high_hz >= 4500:
+        hints.append("high")
+    if not hints:
+        hints.append("broadband")
+    return hints
+
+
 def _find_band_overlap_regions(state: WorkflowState) -> list[dict[str, object]]:
     if "band_overlap" not in state.get("issue_types", []):
         return []
@@ -1069,7 +1515,8 @@ def _find_band_overlap_regions(state: WorkflowState) -> list[dict[str, object]]:
                 "summary": "Detected congested low-mid body region across overlapping tracks.",
             }
         )
-    return _merge_candidate_windows("band_overlap", candidates)
+    merged = _merge_candidate_windows("band_overlap", candidates)
+    return [_refine_band_overlap_region(artifact, candidate) for candidate in merged]
 
 
 def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
@@ -1101,7 +1548,8 @@ def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]
                     "summary": "Detected track clipping candidate near the digital ceiling.",
                 }
             )
-    return _merge_candidate_windows("track_clipping", candidates)
+    merged = _merge_candidate_windows("track_clipping", candidates)
+    return [_classify_track_clipping_band(artifact, candidate) for candidate in merged]
 
 
 def _find_master_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
@@ -1142,7 +1590,16 @@ def _find_high_band_harshness_regions(state: WorkflowState) -> list[dict[str, ob
                     ),
                     }
                 )
-    return _merge_candidate_windows("high_band_harshness", candidates)
+    merged = _merge_candidate_windows("high_band_harshness", candidates)
+    return [
+        _refine_prominent_high_band_region(
+            artifact,
+            candidate,
+            min_hz=BAND_RANGES["harshness"][0],
+            max_hz=BAND_RANGES["harshness"][1],
+        )
+        for candidate in merged
+    ]
 
 
 def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
@@ -1192,7 +1649,16 @@ def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
                         "summary": "Detected sibilance candidate after role-aware high-band pass.",
                     }
                 )
-    return _merge_candidate_windows("sibilance", candidates)
+    merged = _merge_candidate_windows("sibilance", candidates)
+    return [
+        _refine_prominent_high_band_region(
+            artifact,
+            candidate,
+            min_hz=BAND_RANGES["sibilance"][0],
+            max_hz=BAND_RANGES["sibilance"][1],
+        )
+        for candidate in merged
+    ]
 
 
 def _merge_candidate_windows(
@@ -1258,6 +1724,7 @@ def _merge_candidate_windows(
 def _detect_residual_master_clipping(state: WorkflowState) -> WorkflowState:
     analysis_regions = deepcopy(state.get("analysis_regions", []))
     detected_issues = [*state.get("detected_issues", [])]
+    artifact = _load_dsp_feature_artifact(state)
     contributors_by_candidate = {
         str(item["candidate_id"]): item for item in state.get("master_clipping_contributors", [])
     }
@@ -1268,7 +1735,10 @@ def _detect_residual_master_clipping(state: WorkflowState) -> WorkflowState:
         contributor = contributors_by_candidate.get(str(candidate.get("candidate_id")))
         promoted_tracks = _promote_master_contributors(candidate, contributor)
         if promoted_tracks:
-            promoted_regions.extend(promoted_tracks)
+            promoted_regions.extend(
+                _classify_track_clipping_band(artifact, promoted_track)
+                for promoted_track in promoted_tracks
+            )
             if _should_keep_residual_master_region(candidate, contributor, promoted_tracks):
                 residual_regions.append(
                     _build_residual_master_region(candidate, contributor, promoted_tracks)
@@ -1595,7 +2065,12 @@ def _materialize_regions(
     for offset, region in enumerate(raw_regions, start=1):
         evidence_doc_id = artifact_id(state, f"{issue}-evidence-{existing_count + offset}")
         severity = _severity_from_score(issue=issue, score=region["score"])
-        requires_user_action = issue == "band_overlap"
+        requires_user_action = issue in {
+            "band_overlap",
+            "track_clipping",
+            "high_band_harshness",
+            "sibilance",
+        }
         region_record = get_workflow_analysis_region_store().create_region(
             AnalysisRegionCreate(
                 job_id=state["job_id"],
@@ -1625,6 +2100,8 @@ def _materialize_regions(
                 "track_body_contributions": region.get("track_body_contributions", {}),
                 "band_low_hz": region.get("band_low_hz"),
                 "band_high_hz": region.get("band_high_hz"),
+                "center_hz": region.get("center_hz"),
+                "band_confidence": region.get("band_confidence"),
                 "score": region["score"],
                 "window_count": region.get("window_count", 1),
                 "source_master_candidate_id": region.get("source_master_candidate_id"),
@@ -1632,6 +2109,8 @@ def _materialize_regions(
                 "contributing_track_ids": region.get("contributing_track_ids", []),
                 "track_contribution_scores": region.get("track_contribution_scores", {}),
                 "contributor_band_hints": region.get("contributor_band_hints", {}),
+                "band_hints": region.get("band_hints", []),
+                "broadband_classification": region.get("broadband_classification"),
                 **_project_region_timeline(
                     state,
                     start_ms=int(region["start_ms"]),
@@ -1657,6 +2136,12 @@ def _materialize_regions(
                     "contributingTrackIds": region.get("contributing_track_ids", []),
                     "trackContributionScores": region.get("track_contribution_scores", {}),
                     "contributorBandHints": region.get("contributor_band_hints", {}),
+                    "bandLowHz": region.get("band_low_hz"),
+                    "bandHighHz": region.get("band_high_hz"),
+                    "centerHz": region.get("center_hz"),
+                    "bandConfidence": region.get("band_confidence"),
+                    "refinementIssueType": issue,
+                    "broadbandClassification": region.get("broadband_classification"),
                     "rawRegion": deepcopy(region),
                 },
             )
@@ -1692,6 +2177,7 @@ def _analysis_region_dedup_key(region: dict[str, object]) -> tuple[object, ...]:
         tuple(region.get("involved_track_ids", [])),
         region.get("band_low_hz"),
         region.get("band_high_hz"),
+        region.get("center_hz"),
         region["start_ms"],
         region["end_ms"],
     )

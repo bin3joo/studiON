@@ -265,6 +265,7 @@ def run_workflow_graph(state: WorkflowState | dict) -> WorkflowState:
         raw_state.setdefault("denominator", context.denominator)
         raw_state.setdefault("bar_mapping", context.bar_mapping)
         raw_state.setdefault("clip_index", context.clip_index)
+        raw_state.setdefault("track_eq_map", context.track_eq_map)
     initial = build_workflow_initial_state(
         job_id=raw_state["job_id"],
         project_id=raw_state["project_id"],

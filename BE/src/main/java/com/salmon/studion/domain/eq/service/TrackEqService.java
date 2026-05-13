@@ -2,6 +2,9 @@ package com.salmon.studion.domain.eq.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.ai.dto.request.ProjectEqBandRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
+import com.salmon.studion.domain.eq.dto.TrackEqCurrentState;
 import com.salmon.studion.domain.eq.dto.TrackEqDraftState;
 import com.salmon.studion.domain.eq.dto.request.TrackEqCommitRequest;
 import com.salmon.studion.domain.eq.dto.request.TrackEqDraftSaveRequest;
@@ -10,6 +13,7 @@ import com.salmon.studion.domain.eq.dto.request.TrackEqResetRequest;
 import com.salmon.studion.domain.eq.dto.response.TrackEqListResponse;
 import com.salmon.studion.domain.eq.dto.response.TrackEqLockResponse;
 import com.salmon.studion.domain.eq.entity.TrackEq;
+import com.salmon.studion.domain.eq.entity.TrackEqBand;
 import com.salmon.studion.domain.eq.repository.TrackEqBandRepository;
 import com.salmon.studion.domain.eq.repository.TrackEqRepository;
 import com.salmon.studion.domain.eq.support.TrackEqRedisKeys;
@@ -23,6 +27,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -126,6 +132,7 @@ public class TrackEqService {
                 .build();
 
         saveDraftState(nextDraft);
+        saveCurrentState(buildDraftCurrentState(trackEq, nextDraft));
         return nextDraft;
     }
 
@@ -146,6 +153,7 @@ public class TrackEqService {
                 .build();
 
         saveDraftState(resetDraft);
+        saveCurrentState(buildDraftCurrentState(trackEq, resetDraft));
         return resetDraft;
     }
 
@@ -163,6 +171,7 @@ public class TrackEqService {
 
         validateDraftBands(draftState.getBands());
         trackEqBandService.replaceTrackEqBandsFromDraft(trackEq.getId(), userId, draftState.getBands());
+        saveCurrentState(buildCommittedCurrentState(trackEq, draftState.getBands()));
 
         redisTemplate.delete(TrackEqRedisKeys.draftKey(trackEq.getProjectId(), trackEq.getId()));
         redisTemplate.delete(lockKey);
@@ -176,7 +185,8 @@ public class TrackEqService {
         }
 
         TrackEq trackEq = TrackEq.create(trackId, projectId);
-        trackEqRepository.save(trackEq);
+        TrackEq persisted = trackEqRepository.save(trackEq);
+        saveCurrentState(buildCommittedCurrentState(persisted, List.of()));
     }
 
     @Transactional
@@ -185,6 +195,7 @@ public class TrackEqService {
             trackEqBandRepository.deleteAllByTrackEq_Id(trackEq.getId());
             redisTemplate.delete(TrackEqRedisKeys.lockKey(trackEq.getProjectId(), trackEq.getId()));
             redisTemplate.delete(TrackEqRedisKeys.draftKey(trackEq.getProjectId(), trackEq.getId()));
+            redisTemplate.delete(TrackEqRedisKeys.currentKey(trackEq.getProjectId(), trackEq.getTrackId()));
             trackEqRepository.delete(trackEq);
         });
     }
@@ -205,7 +216,8 @@ public class TrackEqService {
                 .toList();
 
         if (!toCreate.isEmpty()) {
-            trackEqRepository.saveAll(toCreate);
+            List<TrackEq> created = trackEqRepository.saveAll(toCreate);
+            created.forEach(trackEq -> saveCurrentState(buildCommittedCurrentState(trackEq, List.of())));
         }
 
         List<Integer> orphanTrackEqIds = currentTrackEqs.stream()
@@ -215,8 +227,44 @@ public class TrackEqService {
 
         if (!orphanTrackEqIds.isEmpty()) {
             trackEqBandRepository.deleteAllByTrackEq_IdIn(orphanTrackEqIds);
+            currentTrackEqs.stream()
+                    .filter(trackEq -> orphanTrackEqIds.contains(trackEq.getId()))
+                    .forEach(trackEq -> redisTemplate.delete(
+                            TrackEqRedisKeys.currentKey(trackEq.getProjectId(), trackEq.getTrackId())
+                    ));
             trackEqRepository.deleteAllByIdInBatch(orphanTrackEqIds);
         }
+    }
+
+    @Transactional
+    public List<ProjectTrackEqRequest> getCurrentTrackEqPayloads(Integer projectId, List<Integer> trackIds) {
+        if (trackIds == null || trackIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<ProjectTrackEqRequest> results = new ArrayList<>();
+        for (Integer trackId : trackIds) {
+            if (trackId == null) {
+                continue;
+            }
+            TrackEqCurrentState currentState = getOrHydrateCurrentState(projectId, trackId);
+            if (currentState == null) {
+                continue;
+            }
+            results.add(ProjectTrackEqRequest.create(
+                    trackId,
+                    currentState.getBands().stream()
+                            .map(band -> ProjectEqBandRequest.create(
+                                    band.getBandOrder(),
+                                    band.getEqType(),
+                                    band.getFrequencyHz(),
+                                    band.getQ(),
+                                    band.getGainDeltaDb()
+                            ))
+                            .toList()
+            ));
+        }
+        return results;
     }
 
     private void validateBands(List<com.salmon.studion.domain.eq.dto.request.BandRequest> bands) {
@@ -286,6 +334,144 @@ public class TrackEqService {
         } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.FAIL, "EQ draft 직렬화에 실패했습니다.");
         }
+    }
+
+    private TrackEqCurrentState getOrHydrateCurrentState(Integer projectId, Integer trackId) {
+        String currentKey = TrackEqRedisKeys.currentKey(projectId, trackId);
+        String cached = redisTemplate.opsForValue().get(currentKey);
+        if (cached != null && !cached.isBlank()) {
+            return readCurrentState(cached);
+        }
+
+        return hydrateCurrentState(projectId, trackId);
+    }
+
+    private TrackEqCurrentState hydrateCurrentState(Integer projectId, Integer trackId) {
+        TrackEq trackEq = trackEqRepository.findByTrackId(trackId)
+                .filter(item -> item.getProjectId().equals(projectId))
+                .orElse(null);
+
+        if (trackEq == null) {
+            TrackEqCurrentState emptyState = TrackEqCurrentState.builder()
+                    .projectId(projectId)
+                    .trackId(trackId)
+                    .trackEqId(null)
+                    .updatedAt(LocalDateTime.now())
+                    .source("COMMITTED")
+                    .bands(List.of())
+                    .build();
+            saveCurrentState(emptyState);
+            return emptyState;
+        }
+
+        List<TrackEqBand> committedBands = trackEqBandRepository.findByTrackEq_IdOrderByBandOrderAsc(trackEq.getId());
+        TrackEqCurrentState hydrated = buildCommittedCurrentStateFromBands(
+                trackEq,
+                committedBands.stream().map(this::toCurrentBand).toList()
+        );
+        saveCurrentState(hydrated);
+        return hydrated;
+    }
+
+    private TrackEqCurrentState readCurrentState(String value) {
+        try {
+            return objectMapper.readValue(value, TrackEqCurrentState.class);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.FAIL, "EQ current projection 역직렬화에 실패했습니다.");
+        }
+    }
+
+    private void saveCurrentState(TrackEqCurrentState currentState) {
+        try {
+            redisTemplate.opsForValue().set(
+                    TrackEqRedisKeys.currentKey(currentState.getProjectId(), currentState.getTrackId()),
+                    objectMapper.writeValueAsString(currentState)
+            );
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.FAIL, "EQ current projection 직렬화에 실패했습니다.");
+        }
+    }
+
+    private TrackEqCurrentState buildDraftCurrentState(TrackEq trackEq, TrackEqDraftState draftState) {
+        return TrackEqCurrentState.builder()
+                .projectId(trackEq.getProjectId())
+                .trackId(trackEq.getTrackId())
+                .trackEqId(trackEq.getId())
+                .updatedAt(draftState.getUpdatedAt() != null ? draftState.getUpdatedAt() : LocalDateTime.now())
+                .source("DRAFT")
+                .bands(draftState.getBands().stream()
+                        .sorted(Comparator.comparing(TrackEqDraftState.DraftBand::getBandOrder))
+                        .map(band -> TrackEqCurrentState.CurrentBand.builder()
+                                .bandOrder(band.getBandOrder())
+                                .eqType(band.getEqType())
+                                .frequencyHz(band.getFrequencyHz())
+                                .q(band.getQ())
+                                .gainDeltaDb(band.getGainDeltaDb())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    private TrackEqCurrentState buildCommittedCurrentState(
+            TrackEq trackEq,
+            List<TrackEqDraftState.DraftBand> draftBands
+    ) {
+        return TrackEqCurrentState.builder()
+                .projectId(trackEq.getProjectId())
+                .trackId(trackEq.getTrackId())
+                .trackEqId(trackEq.getId())
+                .updatedAt(LocalDateTime.now())
+                .source("COMMITTED")
+                .bands(draftBands.stream()
+                        .sorted(Comparator.comparing(TrackEqDraftState.DraftBand::getBandOrder))
+                        .map(band -> TrackEqCurrentState.CurrentBand.builder()
+                                .bandOrder(band.getBandOrder())
+                                .eqType(band.getEqType())
+                                .frequencyHz(band.getFrequencyHz())
+                                .q(band.getQ())
+                                .gainDeltaDb(band.getGainDeltaDb())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    private TrackEqCurrentState buildCommittedCurrentStateFromBands(
+            TrackEq trackEq,
+            List<TrackEqCurrentState.CurrentBand> bands
+    ) {
+        return TrackEqCurrentState.builder()
+                .projectId(trackEq.getProjectId())
+                .trackId(trackEq.getTrackId())
+                .trackEqId(trackEq.getId())
+                .updatedAt(LocalDateTime.now())
+                .source("COMMITTED")
+                .bands(bands.stream()
+                        .sorted(Comparator.comparing(TrackEqCurrentState.CurrentBand::getBandOrder))
+                        .toList())
+                .build();
+    }
+
+    private TrackEqCurrentState.CurrentBand toCurrentBand(TrackEqBand band) {
+        return TrackEqCurrentState.CurrentBand.builder()
+                .bandOrder(band.getBandOrder())
+                .eqType(toEqType(band.getEqTypeCode()))
+                .frequencyHz(band.getFrequencyHz())
+                .q(band.getQ())
+                .gainDeltaDb(band.getGainDeltaDb())
+                .build();
+    }
+
+    private String toEqType(Integer eqTypeCode) {
+        if (eqTypeCode == null) {
+            return null;
+        }
+
+        return switch (eqTypeCode) {
+            case 1 -> "BELL";
+            case 2 -> "LOW_SHELF";
+            case 3 -> "HIGH_SHELF";
+            default -> throw new BusinessException(ErrorCode.FAIL, "알 수 없는 EQ type code 입니다. code=" + eqTypeCode);
+        };
     }
 
     private long nextVersion(TrackEqDraftState currentDraft) {

@@ -7,6 +7,7 @@ import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
 import com.salmon.studion.domain.clip.service.ClipService;
 import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
 import com.salmon.studion.global.infrastructure.websocket.handler.ClipEventHandler;
+import com.salmon.studion.global.scheduler.ProjectAutosaveScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -29,6 +30,7 @@ class ClipEventHandlerTest {
 
     @Mock private WebSocketMessageSender webSocketMessageSender;
     @Mock private ClipService clipService;
+    @Mock private ProjectAutosaveScheduler projectAutosaveScheduler;
     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks private ClipEventHandler clipEventHandler;

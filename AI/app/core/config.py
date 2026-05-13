@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     planning_llm_base_url: str | None = None
     planning_llm_api_key: str | None = None
     planning_llm_model: str = "gpt-5.2"
+    planning_llm_temperature: float = 0.0
     planning_llm_timeout_seconds: float = 20.0
     planning_llm_connect_timeout_seconds: float = 5.0
     plan_critic_enabled: bool = False

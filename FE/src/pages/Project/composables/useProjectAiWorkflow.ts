@@ -4,6 +4,7 @@ import type { TrackEqBandState } from '../types'
 import {
   startAiWorkflow,
   getAiWorkflowStatus,
+  sendAiWorkflowFeedback,
   type AiAnalysisRegion,
   type ProjectSnapshotRequest,
 } from '../api/projectAi.api'
@@ -36,6 +37,8 @@ export function useProjectAiWorkflow(projectId: number) {
 
   const aiBeforeBands = ref<TrackEqBandState[]>([])
   const aiAfterBands = ref<TrackEqBandState[]>([])
+  const currentAiJobId = ref<number | null>(null)
+  const selectedAiRegionId = ref<number | null>(null)
 
   const selectedEqTrack = computed(() => {
     const selectedTrackId = trackStore.selectedTrackId
@@ -235,75 +238,107 @@ export function useProjectAiWorkflow(projectId: number) {
     ]
   }
 
-  async function runAiAnalysis() {
-    if (aiAnalyzing.value) return
+  function mapAiSuggestionToEqBands(statusResult: any): TrackEqBandState[] {
+  const suggestionBands =
+    statusResult.projections?.suggestion_group?.eq_bands ??
+    statusResult.projections?.suggestionGroup?.eqBands ??
+    statusResult.projections?.plan_state?.eq_bands ??
+    statusResult.projections?.planState?.eqBands ??
+    []
 
-    try {
-      aiAnalyzing.value = true
-      aiConflict.value = null
-      aiAfterBands.value = []
-
-      const selectedTrack = selectedEqTrack.value
-
-      aiBeforeBands.value = selectedTrack?.eq?.bands
-        ? selectedTrack.eq.bands.map(band => ({ ...band }))
-        : []
-
-      const snapshot = buildProjectSnapshotFromStore()
-
-      if (snapshot.tracks.length === 0) {
-        alert('분석할 트랙이 없습니다.')
-        return
-      }
-
-      if (snapshot.clips.length === 0) {
-        alert('AI 분석을 하려면 먼저 저장된 오디오 클립이 필요합니다.')
-        return
-      }
-
-      const startResult = await startAiWorkflow({
-        project_id: projectId,
-        issue_types: [
-          'band_overlap',
-          'track_clipping',
-          'master_clipping',
-          'sibilance',
-          'high_band_harshness',
-        ],
-        validator_mode: 'PASS',
-        critic_mode: 'PASS',
-        project_snapshot: snapshot,
-      })
-
-      const statusResult = await pollAiWorkflow(startResult.job.job_id)
-      const regions = statusResult.projections.analysis_regions ?? []
-
-      console.log('[AI regions]', regions)
-      console.log('[AI snapshot duration]', snapshot.duration_ms)
-      console.log('[AI project info]', trackStore.projectInfo)
-
-      if (regions.length === 0) {
-        alert('AI가 감지한 충돌 구간이 없습니다.')
-        return
-      }
-
-      aiConflict.value = mapRegionToOverlay(regions[0], snapshot.duration_ms)
-    } catch (error) {
-      console.error(error)
-
-      if (
-        error instanceof Error &&
-        error.message.includes('timeout')
-      ) {
-        alert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.')
-        return
-      }
-
-      alert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.')
-    } finally {
-      aiAnalyzing.value = false
-    }
+  if (!Array.isArray(suggestionBands) || suggestionBands.length === 0) {
+    return createMockAiAfterBands(aiBeforeBands.value)
   }
+
+  return suggestionBands.map((band: any, index: number) => ({
+    bandOrder: band.band_order ?? band.bandOrder ?? index + 1,
+    frequencyHz: band.frequency_hz ?? band.frequencyHz ?? band.freq_hz ?? 500,
+    gainDeltaDb: band.gain_delta_db ?? band.gainDeltaDb ?? band.gain_db ?? 0,
+    q: band.q ?? band.q_factor ?? band.qFactor ?? 1,
+    eqTypeCode: band.eq_type_code ?? band.eqTypeCode ?? 1,
+  })) as TrackEqBandState[]
+}
+
+  async function runAiAnalysis() {
+  if (aiAnalyzing.value) return
+
+  try {
+    aiAnalyzing.value = true
+    aiConflict.value = null
+    aiAfterBands.value = []
+    currentAiJobId.value = null
+    selectedAiRegionId.value = null
+
+    const selectedTrack = selectedEqTrack.value
+
+    aiBeforeBands.value = selectedTrack?.eq?.bands
+      ? selectedTrack.eq.bands.map(band => ({ ...band }))
+      : []
+
+    const snapshot = buildProjectSnapshotFromStore()
+
+    if (snapshot.tracks.length === 0) {
+      alert('분석할 트랙이 없습니다.')
+      return
+    }
+
+    if (snapshot.clips.length === 0) {
+      alert('AI 분석을 하려면 먼저 저장된 오디오 클립이 필요합니다.')
+      return
+    }
+
+    const startResult = await startAiWorkflow({
+      project_id: projectId,
+      issue_types: [
+        'band_overlap',
+        'track_clipping',
+        'master_clipping',
+        'sibilance',
+        'high_band_harshness',
+      ],
+      validator_mode: 'PASS',
+      critic_mode: 'PASS',
+      project_snapshot: snapshot,
+    })
+
+    currentAiJobId.value = startResult.job.job_id
+
+    const statusResult = await pollAiWorkflow(startResult.job.job_id)
+    const regions = statusResult.projections.analysis_regions ?? []
+
+    console.log('[AI regions]', regions)
+    console.log('[AI snapshot duration]', snapshot.duration_ms)
+    console.log('[AI project info]', trackStore.projectInfo)
+
+    if (regions.length === 0) {
+      alert('AI가 감지한 충돌 구간이 없습니다.')
+      return
+    }
+
+    const firstRegion = regions[0] as any
+
+    const numericRegionId = Number(firstRegion.id ?? firstRegion.region_id)
+    selectedAiRegionId.value = Number.isNaN(numericRegionId)
+      ? null
+      : numericRegionId
+
+    aiConflict.value = mapRegionToOverlay(firstRegion, snapshot.duration_ms)
+  } catch (error) {
+    console.error(error)
+
+    if (
+      error instanceof Error &&
+      error.message.includes('timeout')
+    ) {
+      alert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.')
+      return
+    }
+
+    alert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.')
+  } finally {
+    aiAnalyzing.value = false
+  }
+}
 
   function handleApplyAiEq() {
     console.log('AI EQ 적용')
@@ -315,13 +350,43 @@ export function useProjectAiWorkflow(projectId: number) {
     aiAfterBands.value = []
   }
 
-  async function handleRequestAiEqRevision(payload: AiEqRevisionPayload) {
-    console.log('[AI EQ 수정 요청]', payload)
-
-    // TODO: 나중에 AI feedback/resume API 호출
-    // 지금은 After 그래프 화면 확인용 mock
-    aiAfterBands.value = createMockAiAfterBands(aiBeforeBands.value)
+  async function handleRequestAiEqRevision(payload: {
+  selectedTrackIds: number[]
+  message: string
+}) {
+  if (!currentAiJobId.value) {
+    alert('AI 분석 작업 정보가 없습니다. 먼저 AI 분석을 실행해주세요.')
+    return
   }
+
+  try {
+    aiAnalyzing.value = true
+
+    const selectedTrackText =
+      payload.selectedTrackIds.length > 0
+        ? `선택한 트랙 ID: ${payload.selectedTrackIds.join(', ')}. `
+        : ''
+
+    await sendAiWorkflowFeedback(currentAiJobId.value, {
+      project_id: projectId,
+      selected_region_id: selectedAiRegionId.value,
+      preserve_clip_id: null,
+      user_feedback_message: `${selectedTrackText}${payload.message}`.trim(),
+      user_decision: 'RESUME',
+    })
+
+    const statusResult = await pollAiWorkflow(currentAiJobId.value)
+
+    console.log('[AI feedback result]', statusResult)
+
+    aiAfterBands.value = mapAiSuggestionToEqBands(statusResult)
+  } catch (error) {
+    console.error(error)
+    alert(error instanceof Error ? error.message : 'AI 수정 요청 중 오류가 발생했습니다.')
+  } finally {
+    aiAnalyzing.value = false
+  }
+}
 
   return {
     aiAnalyzing,

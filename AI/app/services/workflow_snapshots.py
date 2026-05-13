@@ -37,6 +37,32 @@ class ProjectClip(BaseModel):
         return self
 
 
+class ProjectTrackEqBand(BaseModel):
+    band_order: int = Field(ge=1)
+    eq_type: str
+    frequency_hz: int = Field(gt=0)
+    q: float = Field(gt=0)
+    gain_delta_db: float
+
+    @model_validator(mode="after")
+    def validate_eq_type(self) -> ProjectTrackEqBand:
+        if self.eq_type not in {"BELL", "LOW_SHELF", "HIGH_SHELF"}:
+            raise ValueError("track_eq band eq_type must be one of BELL, LOW_SHELF, HIGH_SHELF")
+        return self
+
+
+class ProjectTrackEq(BaseModel):
+    track_id: int
+    bands: list[ProjectTrackEqBand] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_band_orders(self) -> ProjectTrackEq:
+        band_orders = [band.band_order for band in self.bands]
+        if len(set(band_orders)) != len(band_orders):
+            raise ValueError("track_eq bands must have unique band_order values")
+        return self
+
+
 class ProjectSnapshot(BaseModel):
     duration_ms: int = Field(gt=0)
     bpm: float = Field(gt=0)
@@ -44,6 +70,7 @@ class ProjectSnapshot(BaseModel):
     denominator: int = Field(default=4, ge=1)
     tracks: list[ProjectTrack] = Field(min_length=1)
     clips: list[ProjectClip] = Field(min_length=1)
+    track_eqs: list[ProjectTrackEq] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_links(self) -> ProjectSnapshot:
@@ -53,6 +80,11 @@ class ProjectSnapshot(BaseModel):
         )
         if unknown:
             raise ValueError(f"clips reference unknown track ids: {unknown}")
+        unknown_eq_tracks = sorted(
+            {track_eq.track_id for track_eq in self.track_eqs if track_eq.track_id not in known_tracks}
+        )
+        if unknown_eq_tracks:
+            raise ValueError(f"track_eqs reference unknown track ids: {unknown_eq_tracks}")
         return self
 
 
@@ -68,6 +100,7 @@ class TimelineSnapshotDocument(BaseModel):
     denominator: int
     bar_mapping: list[dict[str, int]] = Field(default_factory=list)
     clip_index: list[dict[str, object | None]] = Field(default_factory=list)
+    track_eq_map: dict[str, list[dict[str, object]]] = Field(default_factory=dict)
     snapshot: dict
 
 
@@ -80,6 +113,7 @@ class SnapshotRuntimeContext:
     denominator: int
     bar_mapping: list[dict[str, int]]
     clip_index: list[dict[str, object | None]]
+    track_eq_map: dict[int, list[dict[str, object]]]
 
 
 class WorkflowSnapshotStore(Protocol):
@@ -160,6 +194,7 @@ def build_snapshot_runtime_context(snapshot: ProjectSnapshot | dict) -> Snapshot
             denominator=snapshot.denominator,
         ),
         clip_index=_build_clip_index(snapshot),
+        track_eq_map=_build_track_eq_map(snapshot),
     )
 
 
@@ -185,6 +220,7 @@ def build_timeline_snapshot_document(
         denominator=context.denominator,
         bar_mapping=context.bar_mapping,
         clip_index=context.clip_index,
+        track_eq_map={str(track_id): bands for track_id, bands in context.track_eq_map.items()},
         snapshot=snapshot.model_dump(mode="python"),
     )
 
@@ -251,6 +287,22 @@ def _build_clip_index(snapshot: ProjectSnapshot) -> list[dict[str, object | None
             key=lambda item: (item.start_ms, item.track_id, item.clip_id),
         )
     ]
+
+
+def _build_track_eq_map(snapshot: ProjectSnapshot) -> dict[int, list[dict[str, object]]]:
+    return {
+        int(track_eq.track_id): [
+            {
+                "band_order": int(band.band_order),
+                "eq_type": band.eq_type,
+                "frequency_hz": int(band.frequency_hz),
+                "q": float(band.q),
+                "gain_delta_db": float(band.gain_delta_db),
+            }
+            for band in sorted(track_eq.bands, key=lambda item: item.band_order)
+        ]
+        for track_eq in snapshot.track_eqs
+    }
 
 
 _memory_store = InMemoryWorkflowSnapshotStore()

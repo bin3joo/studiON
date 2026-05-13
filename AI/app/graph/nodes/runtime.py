@@ -8,6 +8,12 @@ from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workfl
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
 from app.services.workflow_preview_renderer import PreviewRenderError, resolve_preview_excerpt_range
 
+AUTO_PREVIEW_ISSUE_TYPES = (
+    "track_clipping",
+    "high_band_harshness",
+    "sibilance",
+)
+
 
 def load_entry_context(state: WorkflowState) -> WorkflowState:
     dispatch_type = state.get("dispatch_type")
@@ -232,6 +238,11 @@ def auto_fix_non_user_issues(state: WorkflowState) -> WorkflowState:
     high_band_harshness_fix_applied = any(
         group["issueType"] == "high_band_harshness" for group in grouped_recipes
     )
+    auto_preview_suggestions = _build_auto_preview_suggestions(state, grouped_recipes)
+    suggestion_payload = _merge_auto_preview_suggestions(
+        state.get("suggestion_payload") or {},
+        auto_preview_suggestions,
+    )
 
     if grouped_recipes:
         first_group = grouped_recipes[0]
@@ -275,6 +286,8 @@ def auto_fix_non_user_issues(state: WorkflowState) -> WorkflowState:
             "high_band_harshness_fix_applied": high_band_harshness_fix_applied,
             "auto_fix_log_artifact_id": None,
             "auto_fix_recipe_artifact_id": auto_fix_recipe_artifact_id,
+            "has_auto_fixable_eq_issues": bool(auto_preview_suggestions),
+            "suggestion_payload": suggestion_payload,
             "mongo_artifact_ids": mongo_artifact_ids,
             "latest_artifact_id": latest_artifact_id,
             "notes": notes,
@@ -346,10 +359,11 @@ def log_non_user_issue_fixes(state: WorkflowState) -> WorkflowState:
 
 def persist_analysis_result(state: WorkflowState) -> WorkflowState:
     preview_id = state.get("preview_id")
-    user_action_required = any(
-        bool(region.get("requires_user_action")) for region in state.get("analysis_regions", [])
-    ) and bool(_resolve_preview_band_specs(state))
-    if user_action_required:
+    has_user_action_candidates = bool(state.get("ranked_candidate_ids"))
+    has_auto_fixable_eq_issues = bool(state.get("has_auto_fixable_eq_issues"))
+    preview_required = has_user_action_candidates or has_auto_fixable_eq_issues
+    user_action_required = has_user_action_candidates
+    if preview_required:
         preview_id = preview_id or f"{state['job_id']}-preview"
     return workflow_update(
         state,
@@ -358,7 +372,11 @@ def persist_analysis_result(state: WorkflowState) -> WorkflowState:
         progress=92,
         extra={
             "preview_id": preview_id,
+            "has_user_action_candidates": has_user_action_candidates,
+            "has_auto_fixable_eq_issues": has_auto_fixable_eq_issues,
+            "preview_required": preview_required,
             "user_action_required": user_action_required,
+            "auto_preview_generated": False,
         },
     )
 
@@ -374,7 +392,7 @@ def user_action_gate(state: WorkflowState) -> WorkflowState:
 
 def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
     preview_band_specs = _resolve_preview_band_specs(state)
-    if len(preview_band_specs) != 1:
+    if not preview_band_specs:
         return fail_workflow(
             {
                 **state,
@@ -418,7 +436,7 @@ def render_preview(state: WorkflowState) -> WorkflowState:
     try:
         focus_region = _resolve_preview_focus_region(state)
         preview_band_specs = _resolve_preview_band_specs(state)
-        if len(preview_band_specs) != 1:
+        if not preview_band_specs:
             raise PreviewRenderError(
                 "INVALID_PREVIEW_BAND_SPEC_COUNT",
                 "프리뷰 렌더링에는 preview band spec 1개가 필요합니다.",
@@ -456,9 +474,13 @@ def render_preview(state: WorkflowState) -> WorkflowState:
             "preview_started_at": started_at,
             "preview_completed_at": utc_now(),
             # Spring은 이 ISO 8601 값을 DATETIME으로 저장하는 계약을 사용한다.
-            "preview_expired_at": preview_band_specs[0].get("previewExpiresAt"),
+            "preview_expired_at": _resolve_preview_expired_at(preview_band_specs),
             "preview_error_code": None,
             "preview_error_message": None,
+            "auto_preview_generated": (
+                not bool(state.get("user_action_required"))
+                and bool(state.get("preview_required"))
+            ),
         },
     )
 
@@ -680,7 +702,7 @@ def _resolve_preview_action(state: WorkflowState) -> dict[str, object]:
 
 # 프리뷰 생성을 위한 구간을 확정하는 함수
 def _resolve_preview_focus_region(state: WorkflowState) -> dict[str, object]:
-    selected_region_id = state.get("selected_region_id")
+    selected_region_id = _resolve_preview_focus_region_id(state)
     if selected_region_id is None:
         raise PreviewRenderError(
             "PREVIEW_REGION_NOT_FOUND",
@@ -703,6 +725,43 @@ def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, object]]
             if isinstance(band, dict):
                 preview_band_specs.append(band)
     return preview_band_specs
+
+
+def _resolve_preview_focus_region_id(state: WorkflowState) -> int:
+    selected_region_id = state.get("selected_region_id")
+    if selected_region_id is not None:
+        return int(selected_region_id)
+    auto_preview_region_id = _resolve_auto_preview_region_id(state)
+    if auto_preview_region_id is not None:
+        return int(auto_preview_region_id)
+    raise PreviewRenderError(
+        "PREVIEW_REGION_NOT_FOUND",
+        "preview focus region information is required.",
+    )
+
+
+def _resolve_auto_preview_region_id(state: WorkflowState) -> int | None:
+    recipe_groups = _load_auto_fix_recipe_groups(state)
+    for group in recipe_groups:
+        region_ids = group.get("regionIds") or []
+        if region_ids:
+            return int(region_ids[0])
+    for issue_type in AUTO_PREVIEW_ISSUE_TYPES:
+        for region in state.get("analysis_regions", []):
+            if (
+                region.get("issue_type") == issue_type
+                and not bool(region.get("requires_user_action"))
+            ):
+                return int(region["id"])
+    return None
+
+
+def _resolve_preview_expired_at(preview_band_specs: list[dict[str, object]]) -> str | None:
+    for band in preview_band_specs:
+        preview_expires_at = band.get("previewExpiresAt")
+        if isinstance(preview_expires_at, str) and preview_expires_at:
+            return preview_expires_at
+    return None
 
 
 def _build_sibilance_fix_recipe(region: dict[str, object]) -> dict[str, object]:
@@ -782,23 +841,142 @@ def _build_non_user_issue_recipe_groups(state: WorkflowState) -> list[dict[str, 
     return groups
 
 
+def _build_auto_preview_suggestions(
+    state: WorkflowState,
+    grouped_recipes: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    suggestions: list[dict[str, object]] = []
+    for index, group in enumerate(grouped_recipes, start=1):
+        preview_bands = []
+        for recipe in group.get("recipes", []):
+            if not isinstance(recipe, dict):
+                continue
+            try:
+                preview_bands.append(_build_auto_preview_band_spec(state, recipe=recipe))
+            except ValueError:
+                continue
+        if not preview_bands:
+            continue
+        suggestions.append(
+            {
+                "rank": index,
+                "summary": _build_auto_preview_summary(group),
+                "explanation": _build_auto_preview_explanation(group),
+                "previewBands": preview_bands,
+            }
+        )
+    return suggestions
+
+
+def _merge_auto_preview_suggestions(
+    payload: dict[str, object],
+    auto_preview_suggestions: list[dict[str, object]],
+) -> dict[str, object]:
+    merged = deepcopy(payload)
+    existing_suggestions = list(merged.get("suggestions", []))
+    if auto_preview_suggestions:
+        existing_suggestions.extend(deepcopy(auto_preview_suggestions))
+    if not existing_suggestions:
+        return merged
+    merged["groupTitle"] = merged.get("groupTitle") or "Workflow suggestion group"
+    merged["groupSummary"] = merged.get("groupSummary") or "Preview-ready EQ issue actions"
+    merged["suggestions"] = existing_suggestions
+    return merged
+
+
+def _build_auto_preview_band_spec(
+    state: WorkflowState,
+    *,
+    recipe: dict[str, object],
+) -> dict[str, object]:
+    action_type = recipe.get("actionType")
+    if action_type not in {"DYNAMIC_EQ", "EQ_CUT"}:
+        raise ValueError("auto preview band spec requires an EQ-only actionType")
+    if recipe.get("targetScope") != "TRACK":
+        raise ValueError("auto preview band spec requires TRACK scope")
+    target_track_id = recipe.get("targetTrackId")
+    gain_delta_db = recipe.get("gainDeltaDb")
+    band_low_hz = recipe.get("bandLowHz")
+    band_high_hz = recipe.get("bandHighHz")
+    if not isinstance(target_track_id, int):
+        raise ValueError("auto preview band spec requires integer targetTrackId")
+    if not isinstance(gain_delta_db, int | float):
+        raise ValueError("auto preview band spec requires numeric gainDeltaDb")
+    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
+        raise ValueError("auto preview band spec requires integer band bounds")
+    if band_low_hz <= 0 or band_high_hz <= band_low_hz:
+        raise ValueError("auto preview band spec requires valid band bounds")
+    frequency_hz = int(round((band_low_hz * band_high_hz) ** 0.5))
+    params = recipe.get("params") or {}
+    q_value = None
+    if isinstance(params, dict):
+        raw_q = params.get("q")
+        if isinstance(raw_q, int | float) and float(raw_q) > 0:
+            q_value = round(float(raw_q), 3)
+    if q_value is None:
+        q_value = round(float(frequency_hz) / float(band_high_hz - band_low_hz), 3)
+    return {
+        "jobId": int(state["job_id"]),
+        "targetTrackId": target_track_id,
+        "bandOrder": 1,
+        "eqTypeCode": 1,
+        "frequencyHz": frequency_hz,
+        "q": q_value,
+        "gainDeltaDb": round(float(gain_delta_db), 3),
+        "statusCode": 1,
+        "previewExpiresAt": _build_preview_expiry(state),
+    }
+
+
+def _build_preview_expiry(state: WorkflowState) -> str:
+    from datetime import datetime, timedelta
+
+    base_time = state.get("heartbeat_at")
+    preview_expires_at = (
+        datetime.fromisoformat(base_time) if isinstance(base_time, str) else datetime.now()
+    ) + timedelta(minutes=30)
+    return preview_expires_at.isoformat()
+
+
+def _build_auto_preview_summary(group: dict[str, object]) -> str:
+    issue_type = str(group.get("issueType") or "eq_issue")
+    region_count = int(group.get("regionCount") or 0)
+    return f"Auto EQ preview for {issue_type} ({region_count} region(s))"
+
+
+def _build_auto_preview_explanation(group: dict[str, object]) -> str:
+    track_count = len(group.get("trackIds") or [])
+    return (
+        f"Deterministic EQ preview derived from non-user issue recipes "
+        f"across {track_count} track(s)."
+    )
+
+
+def _load_auto_fix_recipe_groups(state: WorkflowState) -> list[dict[str, object]]:
+    artifact_id = state.get("auto_fix_recipe_artifact_id")
+    if not artifact_id:
+        return []
+    artifact = get_workflow_artifact_store().get_artifact(str(artifact_id))
+    if artifact is None:
+        return []
+    groups = artifact.payload.get("groups")
+    if isinstance(groups, list):
+        return [group for group in groups if isinstance(group, dict)]
+    return []
+
+
 def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object] | None:
     score = float(region.get("score", 0.0))
-    band_hints = _collect_track_clipping_band_hints(region)
-    if "high" in band_hints:
-        action_type = "DYNAMIC_EQ"
-        band_low_hz = 4500
-        band_high_hz = 9000
+    resolved_band = _resolve_track_clipping_recipe_band(region)
+    if resolved_band is None:
+        return None
+    band_low_hz, band_high_hz, action_type = resolved_band
+    if action_type == "DYNAMIC_EQ":
         gain_delta_db = -round(min(max(1.0 + (score * 2.2), 1.5), 3.0), 2)
         params: dict[str, object] = {"threshold": -20, "ratio": 2.0}
-    elif "low_mid" in band_hints:
-        action_type = "EQ_CUT"
-        band_low_hz = 180
-        band_high_hz = 1200
+    else:
         gain_delta_db = -round(min(max(0.8 + (score * 1.6), 1.2), 2.8), 2)
         params = {"q": 1.1}
-    else:
-        return None
     return {
         "regionId": region.get("id"),
         "actionType": action_type,
@@ -813,6 +991,26 @@ def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, obj
         "origin": region.get("auto_fix_source", "direct_detection"),
         "sourceMasterCandidateId": region.get("source_master_candidate_id"),
     }
+
+
+def _resolve_track_clipping_recipe_band(
+    region: dict[str, object],
+) -> tuple[int, int, str] | None:
+    band_low_hz = region.get("band_low_hz")
+    band_high_hz = region.get("band_high_hz")
+    if isinstance(band_low_hz, int) and isinstance(band_high_hz, int):
+        band_hints = _collect_track_clipping_band_hints(region)
+        if "high" in band_hints and band_low_hz >= 1500:
+            return band_low_hz, band_high_hz, "DYNAMIC_EQ"
+        return band_low_hz, band_high_hz, "EQ_CUT"
+    if str(region.get("broadband_classification")) == "broadband":
+        return None
+    band_hints = _collect_track_clipping_band_hints(region)
+    if "high" in band_hints:
+        return 4500, 9000, "DYNAMIC_EQ"
+    if "low_mid" in band_hints:
+        return 180, 1200, "EQ_CUT"
+    return None
 
 
 def _build_high_band_harshness_fix_recipe(region: dict[str, object]) -> dict[str, object]:

@@ -136,7 +136,7 @@ def _require_preview_ready(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": preview_id,
         "status": state.get("preview_status"),
-        "preview_target_region": state.get("selected_region_id"),
+        "preview_target_region": _resolve_focus_region_id(state),
         "preview_band_specs": _resolve_preview_band_specs(state),
         "preview_excerpt_range": {
             "start_ms": int(preview_excerpt_range["start_ms"]),
@@ -149,9 +149,9 @@ def _require_preview_ready(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_focus_region(state: dict[str, Any]) -> dict[str, Any]:
-    selected_region_id = state.get("selected_region_id")
+    selected_region_id = _resolve_focus_region_id(state)
     for region in state.get("analysis_regions", []):
-        if selected_region_id is not None and int(region["id"]) == int(selected_region_id):
+        if int(region["id"]) == int(selected_region_id):
             return dict(region)
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
@@ -184,9 +184,18 @@ def _resolve_preview_action(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_compare_actions(state: dict[str, Any], *, mode: str) -> list[dict[str, Any]]:
-    preview_action = _resolve_preview_action(state)
     if mode == "preview":
-        return [preview_action]
+        actions = _resolve_auto_fix_actions(state)
+        try:
+            actions.append(_resolve_preview_action(state))
+        except HTTPException:
+            pass
+        if actions:
+            return actions
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Preview compare requires at least one materialized preview action.",
+        )
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail=f"Unsupported preview compare mode '{mode}'.",
@@ -221,6 +230,7 @@ def _resolve_auto_fix_actions(state: dict[str, Any]) -> list[dict[str, Any]]:
 def _normalize_action_payload(action: dict[str, Any]) -> dict[str, Any]:
     return {
         "action_id": str(action.get("actionId") or ""),
+        "region_id": action.get("regionId"),
         "action_type": action.get("actionType"),
         "target_scope": action.get("targetScope"),
         "target_track_id": action.get("targetTrackId"),
@@ -232,6 +242,27 @@ def _normalize_action_payload(action: dict[str, Any]) -> dict[str, Any]:
         "gain_delta_db": action.get("gainDeltaDb"),
         "params": action.get("params") or {},
     }
+
+
+def _resolve_focus_region_id(state: dict[str, Any]) -> int:
+    selected_region_id = state.get("selected_region_id")
+    if selected_region_id is not None:
+        return int(selected_region_id)
+    artifact_id = state.get("auto_fix_recipe_artifact_id")
+    if artifact_id:
+        artifact = get_workflow_artifact_store().get_artifact(str(artifact_id))
+        if artifact is not None:
+            groups = artifact.payload.get("groups") or []
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                region_ids = group.get("regionIds") or []
+                if region_ids:
+                    return int(region_ids[0])
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Preview focus region was not found.",
+    )
 
 
 def _build_excerpt_track_signals(

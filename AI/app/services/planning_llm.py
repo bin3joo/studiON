@@ -46,12 +46,14 @@ class HTTPPlanningLLMClient:
         base_url: str,
         api_key: str,
         model: str,
+        temperature: float,
         timeout_seconds: float,
         connect_timeout_seconds: float,
     ) -> None:
         self._base_url = base_url
         self._api_key = api_key
         self._model = model
+        self._temperature = temperature
         self._timeout = httpx.Timeout(timeout=timeout_seconds, connect=connect_timeout_seconds)
 
     def generate_plan(
@@ -66,6 +68,7 @@ class HTTPPlanningLLMClient:
     ) -> PlanningLLMResponse:
         request_payload = {
             "model": self._model,
+            "temperature": self._temperature,
             "messages": [
                 {
                     "role": "developer",
@@ -152,6 +155,7 @@ def get_planning_llm_client() -> PlanningLLMClient:
         base_url=settings.planning_llm_base_url,
         api_key=settings.planning_llm_api_key,
         model=settings.planning_llm_model,
+        temperature=settings.planning_llm_temperature,
         timeout_seconds=settings.planning_llm_timeout_seconds,
         connect_timeout_seconds=settings.planning_llm_connect_timeout_seconds,
     )
@@ -179,7 +183,15 @@ def _planner_system_prompt() -> str:
         f"Allowed actionType values: {', '.join(ALLOWED_ACTION_TYPES)}. "
         "For band_overlap, use DYNAMIC_EQ only. "
         "For sibilance, reinterpret the fix as a high-band DYNAMIC_EQ. "
-        "For track_clipping, emit an EQ action only when a band-focused fix is plausible."
+        "For track_clipping, emit an EQ action only when a band-focused fix is plausible. "
+        "For track_clipping with a low-mid or broad body band, prefer EQ_CUT. "
+        "For track_clipping with a clearly high-band focus, prefer DYNAMIC_EQ. "
+        "If the issue or band focus is ambiguous, choose the more conservative action type and smaller cut. "
+        "Prefer the non-preserve track with the strongest contribution to the selected problem. "
+        "If revision notes mention leakage, range too wide, or overreach, tighten the time range and band range instead of widening them. "
+        "If user feedback says to preserve texture, warmth, body, or vocal character, reduce gain more conservatively and avoid wider bands. "
+        "Keep gainDeltaDb modest and usually between about -1.5 and -3.0 dB unless the context strongly requires otherwise. "
+        "Keep the explanation concrete by naming the target track, band focus, and why the preserve target stays untouched."
     )
 
 

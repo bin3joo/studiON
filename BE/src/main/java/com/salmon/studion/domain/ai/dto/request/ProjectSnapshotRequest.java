@@ -31,10 +31,14 @@ public class ProjectSnapshotRequest {
     @JsonProperty("clips")
     private List<ProjectClipRequest> projectClipRequest;
 
+    @JsonProperty("track_eqs")
+    private List<ProjectTrackEqRequest> projectTrackEqRequest;
+
     public static ProjectSnapshotRequest create(
             ProjectSnapshotRequest source,
             List<ProjectTrackRequest> tracks,
-            List<ProjectClipRequest> clips
+            List<ProjectClipRequest> clips,
+            List<ProjectTrackEqRequest> trackEqs
     ) {
         return new ProjectSnapshotRequest(
                 source.getDurationMs(),
@@ -42,7 +46,8 @@ public class ProjectSnapshotRequest {
                 source.getNumerator(),
                 source.getDenominator(),
                 tracks,
-                clips
+                clips,
+                trackEqs
         );
     }
 }

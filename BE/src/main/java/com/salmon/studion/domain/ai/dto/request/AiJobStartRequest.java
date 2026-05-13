@@ -46,7 +46,8 @@ public class AiJobStartRequest {
             Integer jobId,
             AiJobStartApiRequest request,
             Integer requestedBy,
-            Map<Integer, String> audioUrlByMetadataId
+            Map<Integer, String> audioUrlByMetadataId,
+            List<ProjectTrackEqRequest> trackEqs
     ) {
         ProjectSnapshotRequest sourceSnapshot = request.getProjectSnapshot();
         List<ProjectTrackRequest> tracks = sourceSnapshot.getProjectTrackRequest().stream()
@@ -69,7 +70,7 @@ public class AiJobStartRequest {
                 request.getIssueTypes(),
                 request.getValidatorMode(),
                 request.getCriticMode(),
-                ProjectSnapshotRequest.create(sourceSnapshot, tracks, clips)
+                ProjectSnapshotRequest.create(sourceSnapshot, tracks, clips, trackEqs)
         );
     }
 }

@@ -13,7 +13,17 @@ def _resolve_log_level(level: str | None = None) -> int:
 def configure_logging(level: str | None = None) -> None:
     resolved_level = _resolve_log_level(level)
     logging.basicConfig(level=resolved_level, format="%(message)s", force=True)
-    for noisy_logger_name in ("numba", "librosa", "matplotlib", "httpx", "httpcore"):
+    for noisy_logger_name in (
+        "numba",
+        "librosa",
+        "matplotlib",
+        "httpx",
+        "httpcore",
+        "pymongo",
+        "pymongo.topology",
+        "pymongo.serverSelection",
+        "pymongo.connection",
+    ):
         logging.getLogger(noisy_logger_name).setLevel(logging.WARNING)
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(resolved_level),

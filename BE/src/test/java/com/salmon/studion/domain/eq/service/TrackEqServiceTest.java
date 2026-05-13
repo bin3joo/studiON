@@ -9,6 +9,7 @@ import com.salmon.studion.domain.eq.dto.request.TrackEqLockRequest;
 import com.salmon.studion.domain.eq.dto.request.TrackEqResetRequest;
 import com.salmon.studion.domain.eq.dto.response.TrackEqLockResponse;
 import com.salmon.studion.domain.eq.entity.TrackEq;
+import com.salmon.studion.domain.eq.entity.TrackEqBand;
 import com.salmon.studion.domain.eq.repository.TrackEqBandRepository;
 import com.salmon.studion.domain.eq.repository.TrackEqRepository;
 import com.salmon.studion.domain.project.entity.Project;
@@ -77,12 +78,15 @@ class TrackEqServiceTest {
     @DisplayName("createIfAbsent는 track eq가 없으면 생성한다")
     void createIfAbsentCreatesTrackEqWhenMissing() {
         when(trackEqRepository.existsByTrackId(11)).thenReturn(false);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(trackEqRepository.save(any(TrackEq.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         trackEqService.createIfAbsent(11, 22);
 
         verify(trackEqRepository).save(org.mockito.ArgumentMatchers.argThat(trackEq ->
                 trackEq.getTrackId().equals(11) && trackEq.getProjectId().equals(22)
         ));
+        verify(valueOperations).set(eq("project:22:track:11:eq:current"), any(String.class));
     }
 
     @Test
@@ -180,6 +184,7 @@ class TrackEqServiceTest {
         assertThat(draftState.getVersion()).isEqualTo(1L);
         verify(redisTemplate).expire("project:1:track-eq:7:lock", 30L, TimeUnit.SECONDS);
         verify(valueOperations).set(eq("project:1:track-eq:7:draft"), any(String.class), eq(86400L), eq(TimeUnit.SECONDS));
+        verify(valueOperations).set(eq("project:1:track:30:eq:current"), any(String.class));
     }
 
     @Test
@@ -212,6 +217,7 @@ class TrackEqServiceTest {
         assertThat(draftState.getBands()).isEmpty();
         assertThat(draftState.getVersion()).isEqualTo(1L);
         verify(valueOperations).set(eq("project:1:track-eq:7:draft"), any(String.class), eq(86400L), eq(TimeUnit.SECONDS));
+        verify(valueOperations).set(eq("project:1:track:30:eq:current"), any(String.class));
     }
 
     @Test
@@ -250,6 +256,7 @@ class TrackEqServiceTest {
         assertThat(captor.getValue()).hasSize(1);
         assertThat(captor.getValue().get(0).getBandOrder()).isEqualTo(1);
         assertThat(captor.getValue().get(0).getEqType()).isEqualTo("BELL");
+        verify(valueOperations).set(eq("project:1:track:30:eq:current"), any(String.class));
         verify(redisTemplate).delete("project:1:track-eq:7:draft");
         verify(redisTemplate).delete("project:1:track-eq:7:lock");
     }
@@ -281,6 +288,7 @@ class TrackEqServiceTest {
         inOrder.verify(trackEqBandRepository).deleteAllByTrackEq_Id(7);
         inOrder.verify(redisTemplate).delete("project:22:track-eq:7:lock");
         inOrder.verify(redisTemplate).delete("project:22:track-eq:7:draft");
+        inOrder.verify(redisTemplate).delete("project:22:track:11:eq:current");
         inOrder.verify(trackEqRepository).delete(trackEq);
     }
 
@@ -294,6 +302,43 @@ class TrackEqServiceTest {
         verifyNoInteractions(trackEqBandRepository);
     }
 
+    @Test
+    @DisplayName("getCurrentTrackEqPayloads는 Redis projection 누락 시 MySQL committed band로 복구한다")
+    void getCurrentTrackEqPayloadsHydratesMissingProjectionFromMysql() {
+        TrackEq trackEq = trackEq(7, 30, 1);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("project:1:track:30:eq:current")).thenReturn(null);
+        when(trackEqRepository.findByTrackId(30)).thenReturn(Optional.of(trackEq));
+        when(trackEqBandRepository.findByTrackEq_IdOrderByBandOrderAsc(7)).thenReturn(List.of(
+                trackEqBand(trackEq, 1, 1, 4200, 1.2, -2.5, 2)
+        ));
+
+        var payloads = trackEqService.getCurrentTrackEqPayloads(1, List.of(30));
+
+        assertThat(payloads).hasSize(1);
+        assertThat(payloads.get(0).getTrackId()).isEqualTo(30);
+        assertThat(payloads.get(0).getBands()).hasSize(1);
+        assertThat(payloads.get(0).getBands().get(0).getEqType()).isEqualTo("BELL");
+        verify(valueOperations).set(eq("project:1:track:30:eq:current"), any(String.class));
+    }
+
+    @Test
+    @DisplayName("synchronizeWithTrackIds는 신규 projection을 만들고 고아 projection을 삭제한다")
+    void synchronizeWithTrackIdsKeepsCurrentProjectionInSync() {
+        TrackEq orphan = trackEq(7, 11, 22);
+        TrackEq persistedNew = trackEq(9, 13, 22);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(trackEqRepository.findByProjectId(22)).thenReturn(List.of(orphan));
+        when(trackEqRepository.saveAll(any())).thenReturn(List.of(persistedNew));
+
+        trackEqService.synchronizeWithTrackIds(22, List.of(13));
+
+        verify(valueOperations).set(eq("project:22:track:13:eq:current"), any(String.class));
+        verify(redisTemplate).delete("project:22:track:11:eq:current");
+        verify(trackEqBandRepository).deleteAllByTrackEq_IdIn(List.of(7));
+        verify(trackEqRepository).deleteAllByIdInBatch(List.of(7));
+    }
+
     private void baseAuthorizedTrackEq(TrackEq trackEq) {
         when(projectService.getProjectOrThrow(trackEq.getProjectId())).thenReturn(mock(Project.class));
         when(trackEqRepository.findById(trackEq.getId())).thenReturn(Optional.of(trackEq));
@@ -303,6 +348,31 @@ class TrackEqServiceTest {
         TrackEq trackEq = TrackEq.create(trackId, projectId);
         ReflectionTestUtils.setField(trackEq, "id", id);
         return trackEq;
+    }
+
+    private TrackEqBand trackEqBand(
+            TrackEq trackEq,
+            Integer id,
+            Integer eqTypeCode,
+            Integer frequencyHz,
+            Double q,
+            Double gainDeltaDb,
+            Integer bandOrder
+    ) {
+        TrackEqBand band = TrackEqBand.create(
+                trackEq,
+                bandOrder,
+                eqTypeCode,
+                frequencyHz,
+                q,
+                gainDeltaDb,
+                null,
+                null,
+                null,
+                2
+        );
+        ReflectionTestUtils.setField(band, "id", id);
+        return band;
     }
 
     private TrackEqLockRequest lockRequest(Integer projectId, Integer trackEqId, boolean isLocked) {

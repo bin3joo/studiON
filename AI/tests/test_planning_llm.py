@@ -44,6 +44,7 @@ def test_http_planning_llm_client_sends_gms_chat_completions_shape(
         base_url="https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions",
         api_key="secret-key",
         model="gpt-5.2",
+        temperature=0.0,
         timeout_seconds=20.0,
         connect_timeout_seconds=5.0,
     )
@@ -64,6 +65,7 @@ def test_http_planning_llm_client_sends_gms_chat_completions_shape(
     }
     body = captured["json"]
     assert body["model"] == "gpt-5.2"
+    assert body["temperature"] == 0.0
     assert body["messages"][0]["role"] == "developer"
     assert body["messages"][1]["role"] == "user"
     assert response.plan_payload["strategyTitle"] == "Strategy"
@@ -90,6 +92,7 @@ def test_http_planning_llm_client_rejects_invalid_json_payload(
         base_url="https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions",
         api_key="secret-key",
         model="gpt-5.2",
+        temperature=0.0,
         timeout_seconds=20.0,
         connect_timeout_seconds=5.0,
     )

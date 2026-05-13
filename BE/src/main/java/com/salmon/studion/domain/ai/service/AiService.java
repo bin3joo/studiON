@@ -39,6 +39,7 @@ public class AiService {
     private final AudioMetadataRepository audioMetadataRepository;
     private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
+    private final TrackEqService trackEqService;
 
     public AiJobStartResponse startWorkflow(AiJobStartApiRequest request, Integer requestedBy) {
         Integer userId = requireUserId(requestedBy);
@@ -54,12 +55,19 @@ public class AiService {
                 jobId, request.getProjectId(), userId);
 
         Map<Integer, String> audioUrlByMetadataId = buildAudioUrlByMetadataId(request);
-
+        List<ProjectTrackEqRequest> trackEqs = trackEqService.getCurrentTrackEqPayloads(
+                request.getProjectId(),
+                request.getProjectSnapshot().getProjectTrackRequest().stream()
+                        .map(track -> track.getTrackId())
+                        .filter(Objects::nonNull)
+                        .toList()
+        );
         AiJobStartRequest fastApiRequest = AiJobStartRequest.create(
                 jobId,
                 request,
                 userId,
-                audioUrlByMetadataId
+                audioUrlByMetadataId,
+                trackEqs
         );
 
         try {

@@ -62,6 +62,7 @@ class WorkflowState(TypedDict, total=False):
     denominator: int | None
     bar_mapping: list[dict]
     clip_index: list[dict]
+    track_eq_map: dict[int, list[dict]]
     track_ids: list[int]
     sampled_clip_ids: list[int]
     track_representative_specs: list[dict]
@@ -111,7 +112,11 @@ class WorkflowState(TypedDict, total=False):
     preview_expired_at: str | None
     preview_error_code: str | None
     preview_error_message: str | None
+    has_user_action_candidates: bool
+    has_auto_fixable_eq_issues: bool
+    preview_required: bool
     user_action_required: bool
+    auto_preview_generated: bool
     validator_mode: str
     validator_result: ValidatorOutcome | None
     critic_mode: str
@@ -165,6 +170,7 @@ def build_workflow_initial_state(
         "denominator": None,
         "bar_mapping": [],
         "clip_index": [],
+        "track_eq_map": {},
         "track_ids": [],
         "sampled_clip_ids": [],
         "track_representative_specs": [],
@@ -220,7 +226,11 @@ def build_workflow_initial_state(
         "preview_expired_at": None,
         "preview_error_code": None,
         "preview_error_message": None,
+        "has_user_action_candidates": False,
+        "has_auto_fixable_eq_issues": False,
+        "preview_required": False,
         "user_action_required": False,
+        "auto_preview_generated": False,
         "validator_mode": "PASS",
         "validator_result": None,
         "critic_mode": "PASS",

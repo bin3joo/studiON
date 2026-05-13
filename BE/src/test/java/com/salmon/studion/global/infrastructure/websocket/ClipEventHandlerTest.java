@@ -1,22 +1,23 @@
 // package com.salmon.studion.global.infrastructure.websocket;
 
-// import com.fasterxml.jackson.databind.ObjectMapper;
-// import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
-// import com.salmon.studion.domain.clip.dto.response.ClipCreateResponse;
-// import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
-// import com.salmon.studion.domain.clip.service.ClipService;
-// import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
-// import com.salmon.studion.global.infrastructure.websocket.handler.ClipEventHandler;
-// import org.junit.jupiter.api.BeforeEach;
-// import org.junit.jupiter.api.DisplayName;
-// import org.junit.jupiter.api.Nested;
-// import org.junit.jupiter.api.Test;
-// import org.junit.jupiter.api.extension.ExtendWith;
-// import org.mockito.InjectMocks;
-// import org.mockito.Mock;
-// import org.mockito.Spy;
-// import org.mockito.junit.jupiter.MockitoExtension;
-// import org.springframework.web.socket.WebSocketSession;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.salmon.studion.domain.clip.dto.response.ClipCopyResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipCreateResponse;
+import com.salmon.studion.domain.clip.dto.response.ClipMoveResponse;
+import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.global.infrastructure.websocket.common.WsMessage;
+import com.salmon.studion.global.infrastructure.websocket.handler.ClipEventHandler;
+import com.salmon.studion.global.scheduler.ProjectAutosaveScheduler;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.Spy;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.socket.WebSocketSession;
 
 // import java.net.URI;
 // import java.util.Map;
@@ -27,9 +28,10 @@
 // @ExtendWith(MockitoExtension.class)
 // class ClipEventHandlerTest {
 
-//     @Mock private WebSocketMessageSender webSocketMessageSender;
-//     @Mock private ClipService clipService;
-//     @Spy  private ObjectMapper objectMapper = new ObjectMapper();
+    @Mock private WebSocketMessageSender webSocketMessageSender;
+    @Mock private ClipService clipService;
+    @Mock private ProjectAutosaveScheduler projectAutosaveScheduler;
+    @Spy  private ObjectMapper objectMapper = new ObjectMapper();
 
 //     @InjectMocks private ClipEventHandler clipEventHandler;
 

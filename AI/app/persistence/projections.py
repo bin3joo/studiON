@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.graph.state import ApplyState, RuntimeState, WorkflowState
+from app.services.workflow_artifacts import get_workflow_artifact_store
 
 
 # 런타임 진행 상태를 프론트 polling 응답과 저장 projection에서 공통으로 쓰는 형태로 정리한다.
@@ -52,6 +53,8 @@ class AnalysisRegionProjection(BaseModel):
     secondary_track_id: int | None = None
     band_low_hz: int | None = None
     band_high_hz: int | None = None
+    center_hz: int | None = None
+    band_confidence: float | None = None
     detector_score: float | None = None
     involved_track_ids: list[int] = Field(default_factory=list)
     # 프론트 잠금은 트랙 단위가 아니라 실제로 겹치는 clip id 집합 기준으로 판단한다.
@@ -176,6 +179,9 @@ class FeedbackEventProjection(BaseModel):
 class WorkflowGraphProjections(BaseModel):
     runtime_status: RuntimeStatusProjection
     analysis_job: AnalysisJobProjection
+    user_action_required: bool = False
+    preview_required: bool = False
+    auto_preview_generated: bool = False
     analysis_regions: list[AnalysisRegionProjection] = Field(default_factory=list)
     track_vocal_predictions: list[TrackVocalPredictionProjection] = Field(default_factory=list)
     plan_state: PlanStateProjection | None = None
@@ -215,6 +221,9 @@ def build_workflow_projections(state: WorkflowState) -> WorkflowGraphProjections
             started_at=state.get("started_at"),
             completed_at=state.get("completed_at"),
         ),
+        user_action_required=bool(state.get("user_action_required")),
+        preview_required=bool(state.get("preview_required")),
+        auto_preview_generated=bool(state.get("auto_preview_generated")),
         analysis_regions=_build_analysis_regions(state),
         track_vocal_predictions=_build_track_vocal_predictions(state),
         plan_state=_build_plan_state(state),
@@ -280,6 +289,8 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
             secondary_track_id=region.get("secondary_track_id"),
             band_low_hz=region.get("band_low_hz"),
             band_high_hz=region.get("band_high_hz"),
+            center_hz=region.get("center_hz"),
+            band_confidence=region.get("band_confidence"),
             detector_score=region.get("score"),
             involved_track_ids=[
                 int(track_id) for track_id in region.get("involved_track_ids", [])
@@ -466,7 +477,7 @@ def _build_preview_render(
 
 
 def _resolve_preview_region_projection(state: WorkflowState) -> dict[str, Any] | None:
-    selected_region_id = state.get("selected_region_id")
+    selected_region_id = _resolve_preview_region_id(state)
     if selected_region_id is None:
         return None
     for region in state.get("analysis_regions", []):
@@ -483,7 +494,7 @@ def _resolve_preview_action_projection(
     candidate = plan_payload.get("candidate") or {}
     action = candidate.get("action")
     if not isinstance(action, dict):
-        return None
+        return _resolve_auto_preview_action_projection(state)
     return {
         "action_type": action.get("actionType"),
         "target_track_id": action.get("targetTrackId"),
@@ -538,3 +549,45 @@ def _resolve_preview_band_specs(state: WorkflowState) -> list[dict[str, Any]]:
             if isinstance(band, dict):
                 preview_band_specs.append(dict(band))
     return preview_band_specs
+
+
+def _resolve_preview_region_id(state: WorkflowState) -> int | None:
+    selected_region_id = state.get("selected_region_id")
+    if selected_region_id is not None:
+        return int(selected_region_id)
+    artifact_id = state.get("auto_fix_recipe_artifact_id")
+    if not artifact_id:
+        return None
+    artifact = get_workflow_artifact_store().get_artifact(str(artifact_id))
+    if artifact is None:
+        return None
+    groups = artifact.payload.get("groups") or []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        region_ids = group.get("regionIds") or []
+        if region_ids:
+            return int(region_ids[0])
+    return None
+
+
+def _resolve_auto_preview_action_projection(state: WorkflowState) -> dict[str, Any] | None:
+    artifact_id = state.get("auto_fix_recipe_artifact_id")
+    if not artifact_id:
+        return None
+    artifact = get_workflow_artifact_store().get_artifact(str(artifact_id))
+    if artifact is None:
+        return None
+    groups = artifact.payload.get("groups") or []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        recipes = group.get("recipes") or []
+        for recipe in recipes:
+            if not isinstance(recipe, dict):
+                continue
+            return {
+                "action_type": recipe.get("actionType"),
+                "target_track_id": recipe.get("targetTrackId"),
+            }
+    return None

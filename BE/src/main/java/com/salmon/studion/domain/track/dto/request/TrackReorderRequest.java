@@ -11,15 +11,15 @@ import lombok.Setter;
 @NoArgsConstructor
 public class TrackReorderRequest extends TrackRequest{
     private Integer trackId;
-    private Integer targetPreTrackId;
-    private Integer targetPostTrackId;
+    private Integer preTrackId;
+    private Integer postTrackId;
 
     @Override
     public void validate() {
         if(getProjectId() == null || trackId == null)
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
 
-        if(trackId.equals(targetPreTrackId) || trackId.equals(targetPostTrackId))
+        if(trackId.equals(preTrackId) || trackId.equals(postTrackId))
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
     }
 }

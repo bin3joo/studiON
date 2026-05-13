@@ -28,6 +28,9 @@ def run_workflow_dispatch(message: WorkflowDispatchMessage):
             "requested_by": message.requested_by,
             "selected_region_id": message.selected_region_id,
             "preserve_clip_id": message.preserve_clip_id,
+            "issue_id": message.issue_id,
+            "action_type": message.action_type,
+            "action_payload": message.action_payload,
             "user_feedback_message": message.user_feedback_message,
             "user_decision": message.user_decision,
         }

@@ -81,6 +81,9 @@ class WorkflowState(TypedDict, total=False):
     ranking_scores: dict[int, float]
     selected_region_id: int | None
     preserve_clip_id: int | None
+    issue_id: str | None
+    action_type: str | None
+    action_payload: dict | None
     user_feedback_message: str | None
     user_decision: WorkflowUserDecision | None
     user_feedback_recorded_at: str | None
@@ -195,6 +198,9 @@ def build_workflow_initial_state(
         "ranking_scores": {},
         "selected_region_id": None,
         "preserve_clip_id": None,
+        "issue_id": None,
+        "action_type": None,
+        "action_payload": None,
         "user_feedback_message": None,
         "user_decision": None,
         "user_feedback_recorded_at": None,

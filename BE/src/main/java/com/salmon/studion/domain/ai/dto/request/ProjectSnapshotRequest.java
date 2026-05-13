@@ -34,11 +34,15 @@ public class ProjectSnapshotRequest {
     @JsonProperty("track_eqs")
     private List<ProjectTrackEqRequest> projectTrackEqRequest;
 
+    @JsonProperty("master_limiter")
+    private ProjectMasterLimiterRequest projectMasterLimiterRequest;
+
     public static ProjectSnapshotRequest create(
             ProjectSnapshotRequest source,
             List<ProjectTrackRequest> tracks,
             List<ProjectClipRequest> clips,
-            List<ProjectTrackEqRequest> trackEqs
+            List<ProjectTrackEqRequest> trackEqs,
+            ProjectMasterLimiterRequest masterLimiter
     ) {
         return new ProjectSnapshotRequest(
                 source.getDurationMs(),
@@ -47,7 +51,8 @@ public class ProjectSnapshotRequest {
                 source.getDenominator(),
                 tracks,
                 clips,
-                trackEqs
+                trackEqs,
+                masterLimiter
         );
     }
 }

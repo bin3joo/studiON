@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, type StyleValue } from 'vue'
 
 const props = defineProps<{
   conflict: {
@@ -56,7 +56,7 @@ const issueLabel = () => {
   return '하쉬니스'
 }
 
-const bubbleWrapperStyle = computed(() => {
+const bubbleWrapperStyle = computed<StyleValue>(() => {
   if (props.bubblePosition.mode === 'fixed') {
     return {
       position: 'fixed',

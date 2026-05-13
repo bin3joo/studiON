@@ -9,8 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -18,8 +16,15 @@ public class CommentMentionService {
 
     private final CommentMentionRepository commentMentionRepository;
 
+    /**
+     * 저장 시 Redis의 코멘트 멘션 정보를 MySQL에 저장하는 메서드
+     * @param comment
+     * @param mentionUsers
+     */
     @Transactional
-    public void createCommentMention(Comment comment, List<User> mentionUsers) {
+    public void replaceCommentMentions(Comment comment, List<User> mentionUsers) {
+        commentMentionRepository.deleteAllByComment_Id(comment.getId());
+
         if (mentionUsers == null || mentionUsers.isEmpty()) {
             return;
         }
@@ -31,22 +36,35 @@ public class CommentMentionService {
         commentMentionRepository.saveAll(mentions);
     }
 
-    @Transactional(readOnly = true)
-    public List<CommentMention> getCommentMentions(Integer commentId) {
-        return commentMentionRepository.findAllByCommentId(commentId);
-    }
-
-    @Transactional(readOnly = true)
-    public Map<Integer, List<CommentMention>> getMentionsByCommentIds(List<Integer> commentIds) {
-        if (commentIds.isEmpty()) {
-            return Map.of();
-        }
-        return commentMentionRepository.findAllByCommentIds(commentIds).stream()
-                .collect(Collectors.groupingBy(cm -> cm.getComment().getId()));
-   }
-
-    @Transactional
-    public void deleteAllByCommentId(Integer commentId) {
-        commentMentionRepository.deleteAllByComment_Id(commentId);
-    }
+//    @Transactional
+//    public void createCommentMention(Comment comment, List<User> mentionUsers) {
+//        if (mentionUsers == null || mentionUsers.isEmpty()) {
+//            return;
+//        }
+//
+//        List<CommentMention> mentions = mentionUsers.stream()
+//                .map(user -> CommentMention.create(comment, user))
+//                .toList();
+//
+//        commentMentionRepository.saveAll(mentions);
+//    }
+//
+//    @Transactional(readOnly = true)
+//    public List<CommentMention> getCommentMentions(Integer commentId) {
+//        return commentMentionRepository.findAllByCommentId(commentId);
+//    }
+//
+//    @Transactional(readOnly = true)
+//    public Map<Integer, List<CommentMention>> getMentionsByCommentIds(List<Integer> commentIds) {
+//        if (commentIds.isEmpty()) {
+//            return Map.of();
+//        }
+//        return commentMentionRepository.findAllByCommentIds(commentIds).stream()
+//                .collect(Collectors.groupingBy(cm -> cm.getComment().getId()));
+//   }
+//
+//    @Transactional
+//    public void deleteAllByCommentId(Integer commentId) {
+//        commentMentionRepository.deleteAllByComment_Id(commentId);
+//    }
 }

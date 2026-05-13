@@ -29,6 +29,57 @@ public class CommentState {
     private LocalDateTime deletedAt;
     private CommentDeleteReason deleteReason;
 
+    public static CommentState create(
+            Integer commentId,
+            Integer projectId,
+            Integer trackId,
+            Integer userId,
+            Integer parentCommentId,
+            String content,
+            BigDecimal location,
+            List<Integer> mentionedUserIds,
+            LocalDateTime now
+    ) {
+        return new CommentState(
+                commentId,
+                projectId,
+                trackId,
+                userId,
+                parentCommentId,
+                content,
+                location,
+                false,
+                mentionedUserIds == null ? List.of() : mentionedUserIds,
+                now,
+                now,
+                false,
+                null,
+                null
+        );
+    }
+
+    public static CommentState toggleResolved(
+            CommentState commentState,
+            LocalDateTime updatedAt
+    ) {
+        return new CommentState(
+                commentState.getCommentId(),
+                commentState.getProjectId(),
+                commentState.getTrackId(),
+                commentState.getUserId(),
+                commentState.getParentCommentId(),
+                commentState.getContent(),
+                commentState.getLocation(),
+                !Boolean.TRUE.equals(commentState.getIsResolved()),
+                commentState.getMentionedUserIds(),
+                commentState.getCreatedAt(),
+                updatedAt,
+                commentState.getDeleted(),
+                commentState.getDeletedAt(),
+                commentState.getDeleteReason()
+        );
+    }
+
     public static CommentState markDeleted(
             CommentState commentState,
             CommentDeleteReason deleteReason,

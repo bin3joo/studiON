@@ -46,6 +46,9 @@ public class ProjectInviteFacade {
            throw new BusinessException(ErrorCode.PROJECT_MEMBER_ALREADY_EXISTS);
         }
 
+        // TODO: 유저테스트 전용 임시 구현 (추후 수정 필요 - validateProjectMemberLimit())
+        projectMemberService.validateProjectMemberLimit(projectId);
+
         projectMemberService.createProjectMember(project, user);
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

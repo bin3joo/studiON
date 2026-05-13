@@ -38,4 +38,7 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, In
             @Param("userIds") List<Integer> userIds
     );
 
+    // TODO: 유저테스트 전용 임시 구현 (추후 수정 필요 - countByProject_Id())
+    long countByProject_Id(Integer projectId);
+
 }

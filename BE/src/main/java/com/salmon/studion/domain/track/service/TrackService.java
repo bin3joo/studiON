@@ -263,16 +263,16 @@ public class TrackService {
         }
 
         // 새 위치에서 연결
-        if (request.getTargetPreTrackId() != null) {
-            updatePostTrackId(request.getProjectId(), request.getTargetPreTrackId(), request.getTrackId());
+        if (request.getPreTrackId() != null) {
+            updatePostTrackId(request.getProjectId(), request.getPreTrackId(), request.getTrackId());
         }
-        if (request.getTargetPostTrackId() != null) {
-            updatePreTrackId(request.getProjectId(), request.getTargetPostTrackId(), request.getTrackId());
+        if (request.getPostTrackId() != null) {
+            updatePreTrackId(request.getProjectId(), request.getPostTrackId(), request.getTrackId());
         }
 
         // 이동할 트랙 자신 갱신
-        updatePreTrackId(request.getProjectId(), request.getTrackId(), request.getTargetPreTrackId());
-        updatePostTrackId(request.getProjectId(), request.getTrackId(), request.getTargetPostTrackId());
+        updatePreTrackId(request.getProjectId(), request.getTrackId(), request.getPreTrackId());
+        updatePostTrackId(request.getProjectId(), request.getTrackId(), request.getPostTrackId());
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
@@ -291,8 +291,8 @@ public class TrackService {
                             .postTrackId(beforePostTrackId)
                             .build())
                     .after(TrackReorderEventDocument.TrackPosition.builder()
-                            .preTrackId(request.getTargetPreTrackId())
-                            .postTrackId(request.getTargetPostTrackId())
+                            .preTrackId(request.getPreTrackId())
+                            .postTrackId(request.getPostTrackId())
                             .build())
                     .undoable(true)
                     .undone(false)
@@ -304,8 +304,8 @@ public class TrackService {
 
         return TrackReorderResponse.builder()
                 .trackId(request.getTrackId())
-                .preTrackId(request.getTargetPreTrackId())
-                .postTrackId(request.getTargetPostTrackId())
+                .preTrackId(request.getPreTrackId())
+                .postTrackId(request.getPostTrackId())
                 .build();
     }
 

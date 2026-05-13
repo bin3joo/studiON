@@ -60,6 +60,7 @@ const TIMELINE_TRACK_HEADER_WIDTH = 266
 
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
+const masterTrackWrapperRef = ref<HTMLElement | null>(null)
 
 // 재생바 자동 스크롤: 스토어의 RAF 루프에서 직접 컨테이너를 조작하도록 컨테이너 참조를 전달
 watch(timelineContainerRef, (el) => {
@@ -601,6 +602,9 @@ function handlePanelAddReply(parentCommentId: number, content: string) {
 const {
   aiAnalyzing,
   aiConflict,
+  activeAiAnalysisCurrentIndex,
+  aiAnalysisTotalCount,
+  shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
   selectedEqTrack,
@@ -608,6 +612,8 @@ const {
   handleApplyAiEq,
   handleCancelAiEq,
   handleRequestAiEqRevision,
+  goNextAiAnalysis,
+  goPrevAiAnalysis,
 } = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
@@ -743,6 +749,143 @@ const onGlobalDrop = (e: DragEvent) => {
     isInvalidDropModalOpen.value = true;
   }
 };
+
+type AiBubblePosition =
+  | {
+      mode: 'absolute'
+      top: number
+    }
+  | {
+      mode: 'fixed'
+      left: number
+      bottom: number
+    }
+
+function getElementContentTop(container: HTMLElement, targetEl: HTMLElement) {
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = targetEl.getBoundingClientRect()
+
+  return targetRect.top - containerRect.top + container.scrollTop
+}
+
+function getAiBubblePosition(conflict: any): AiBubblePosition {
+  const container = timelineContainerRef.value
+
+  if (!container || !conflict) {
+    return {
+      mode: 'absolute',
+      top: 12,
+    }
+  }
+
+  if (conflict.kind === 'CLIPPING') {
+    const containerRect = container.getBoundingClientRect()
+    const masterRect = masterTrackWrapperRef.value?.getBoundingClientRect()
+
+    const left = Math.min(
+      Math.max(
+        containerRect.left + conflict.endPx - container.scrollLeft + 8,
+        containerRect.left + 280,
+      ),
+      window.innerWidth - 390,
+    )
+
+    return {
+      mode: 'fixed',
+      left,
+      bottom: Math.max(
+        0,
+        window.innerHeight - (masterRect?.bottom ?? window.innerHeight),
+      ),
+    }
+  }
+
+  if (conflict.kind === 'BAND_OVERLAP') {
+    return {
+      mode: 'absolute',
+      top: 12,
+    }
+  }
+
+  if (conflict.kind === 'HARSHNESS' && conflict.targetTrackId) {
+    const targetEl = container.querySelector(
+      `[data-track-id="${conflict.targetTrackId}"]`,
+    ) as HTMLElement | null
+
+    if (!targetEl) {
+      return {
+        mode: 'absolute',
+        top: 12,
+      }
+    }
+
+    const contentTop = getElementContentTop(container, targetEl)
+
+    return {
+      mode: 'absolute',
+      top: Math.max(12, contentTop - 34 - 20),
+    }
+  }
+
+  return {
+    mode: 'absolute',
+    top: 12,
+  }
+}
+
+function scrollToAiConflict(conflict: any) {
+  const container = timelineContainerRef.value
+  if (!container || !conflict) return
+
+  // 스크롤은 하쉬니스만 한다.
+  if (conflict.kind !== 'HARSHNESS') return
+  if (!conflict.targetTrackId) return
+
+  const targetEl = container.querySelector(
+    `[data-track-id="${conflict.targetTrackId}"]`,
+  ) as HTMLElement | null
+
+  if (!targetEl) {
+    console.warn('[AI scroll] target track element not found', conflict.targetTrackId)
+    return
+  }
+
+  const contentTop = getElementContentTop(container, targetEl)
+
+  container.scrollTo({
+    top: Math.max(0, contentTop - 80),
+    behavior: 'smooth',
+  })
+}
+
+async function handleNextAiAnalysis() {
+  goNextAiAnalysis()
+  await nextTick()
+
+  if (aiConflict.value) {
+    scrollToAiConflict(aiConflict.value)
+  }
+}
+
+async function handlePrevAiAnalysis() {
+  goPrevAiAnalysis()
+  await nextTick()
+
+  if (aiConflict.value) {
+    scrollToAiConflict(aiConflict.value)
+  }
+}
+
+const aiBubblePosition = computed<AiBubblePosition>(() => {
+  if (!aiConflict.value) {
+    return {
+      mode: 'absolute',
+      top: 12,
+    }
+  }
+
+  return getAiBubblePosition(aiConflict.value)
+})
 </script>
 
 <template>
@@ -795,9 +938,14 @@ const onGlobalDrop = (e: DragEvent) => {
         </div>
      
         <AiConflictOverlay
-    v-if="aiConflict"
-    :conflict="aiConflict"
-  />
+          v-if="aiConflict"
+          :conflict="aiConflict"
+          :bubble-position="aiBubblePosition"
+          :current-index="activeAiAnalysisCurrentIndex"
+          :total-count="aiAnalysisTotalCount"
+          @next="handleNextAiAnalysis"
+          @prev="handlePrevAiAnalysis"
+        />
      
         <!--  [세로 스크롤] -->
         <div class="w-max min-w-full pb-4 flex-1">
@@ -811,9 +959,12 @@ const onGlobalDrop = (e: DragEvent) => {
     @delete-comment="handleDeleteComment"
   />
 </div>
-
+  <div
+  ref="masterTrackWrapperRef"
+  class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
+  style="will-change: transform;"
+>
         <!-- 마스터 트랙 -->
-        <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]" style="will-change: transform;">
           <TrackItem
             :track="trackStore.masterTrack"
             :is-master="true"
@@ -831,7 +982,7 @@ const onGlobalDrop = (e: DragEvent) => {
       <ProjectEqPanel
         :selected-track="selectedEqTrack"
         :ai-analyzing="aiAnalyzing"
-        :ai-analyzed="!!aiConflict"
+        :ai-analyzed="shouldShowAiEqRevisionPanel"
         :ai-before-bands="aiBeforeBands"
         :ai-after-bands="aiAfterBands"
         @apply-ai-eq="handleApplyAiEq"

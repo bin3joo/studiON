@@ -167,43 +167,94 @@ export const useTrackStore = defineStore('track', () => {
         Tone.getTransport().bpm.value = newBpm;
     })
 
-
-
+    type SelectedTarget =
+    | { type: 'TRACK'; trackId: number }
+    | { type: 'MASTER' }
+    | null
+    const selectedTarget = ref<SelectedTarget>(null)
     // 현재 선택된 클립과 해당 트랙 ID
     const selectedClip = ref<ClipUIState | null>(null);
     const selectedTrackId = ref<number | null>(null);
 
+
+    function selectMasterTrack() {
+    if (selectedClip.value) {
+        selectedClip.value.isSelected = false
+        selectedClip.value = null
+    }
+
+    selectedTrackId.value = null
+    selectedTarget.value = {
+        type: 'MASTER',
+    }
+
+    trackList.value.forEach(t => {
+        t.isSelected = false
+    })
+
+    masterTrack.value.isSelected = true
+}
+
     // 클립 선택 함수
     const selectClip = (clip: ClipUIState, trackId: number) => {
-        // 기존 선택된 클립이 있으면 해제
-        if (selectedClip.value) {
-            selectedClip.value.isSelected = false;
-        }
-        clip.isSelected = true;
-        selectedClip.value = clip;
-        selectedTrackId.value = trackId;
-        // 클립 선택 시 트랙의 시각적 선택 상태는 해제
-        trackList.value.forEach(t => t.isSelected = false);
-    };
+    if (selectedClip.value) {
+        selectedClip.value.isSelected = false
+    }
+
+    clip.isSelected = true
+    selectedClip.value = clip
+    selectedTrackId.value = trackId
+    selectedTarget.value = {
+        type: 'TRACK',
+        trackId,
+    }
+
+    trackList.value.forEach(t => {
+        t.isSelected = false
+    })
+
+    masterTrack.value.isSelected = false
+}
 
     // 트랙 선택 함수 (클립 선택은 해제됨)
     const selectTrack = (trackId: number) => {
-        if (trackId === 999999) return; // 마스터 트랙은 선택/삭제 방지
-        if (selectedClip.value) {
-            selectedClip.value.isSelected = false;
-            selectedClip.value = null;
-        }
-        selectedTrackId.value = trackId;
-        trackList.value.forEach(t => t.isSelected = (t.trackId === trackId));
-    };
+    if (trackId === 999999) {
+        selectMasterTrack()
+        return
+    }
+
+    if (selectedClip.value) {
+        selectedClip.value.isSelected = false
+        selectedClip.value = null
+    }
+
+    selectedTrackId.value = trackId
+    selectedTarget.value = {
+        type: 'TRACK',
+        trackId,
+    }
+
+    trackList.value.forEach(t => {
+        t.isSelected = t.trackId === trackId
+    })
+
+    masterTrack.value.isSelected = false
+}
 
     //  빈 공간 클릭 시 선택 해제 함수
     const deselectAll = () => {
-        if (selectedClip.value) selectedClip.value.isSelected = false;
-        selectedClip.value = null;
-        selectedTrackId.value = null;
-        trackList.value.forEach(t => t.isSelected = false);
-    };
+    if (selectedClip.value) selectedClip.value.isSelected = false
+
+    selectedClip.value = null
+    selectedTrackId.value = null
+    selectedTarget.value = null
+
+    trackList.value.forEach(t => {
+        t.isSelected = false
+    })
+
+    masterTrack.value.isSelected = false
+}
     //1마디당 걸리는 시간 계산
     const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
@@ -1207,7 +1258,8 @@ export const useTrackStore = defineStore('track', () => {
         isSoloed: false,
         clips: [],
         height: 100,
-        isSelected: false
+        isSelected: false,
+        eq: createDefaultTrackEq(),
     });
 
     // 일반 트랙에 변화가 생길 때마다 마스터 트랙에 실시간 병합!
@@ -2083,6 +2135,8 @@ const getTrackSpectrum = (trackId: number): number[] => {
         selectedClip,
         selectedTrackId,
         selectClip,
+        selectedTarget,
+        selectMasterTrack,
         deselectAll,
 
         // 클립보드

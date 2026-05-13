@@ -1,4 +1,4 @@
-package com.salmon.studion.domain.project.service;
+package com.salmon.studion.domain.track.service;
 
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.track.entity.MasterTrack;

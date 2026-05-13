@@ -36,11 +36,12 @@ pipeline {
         }
 
         stage('CI - AI Build') {
+            when {
+                beforeAgent true
+                branch 'release'
+            }
             agent {
                 label 'ai-server'
-            }
-            when {
-                branch 'release'
             }
             steps {
                 sh '''
@@ -48,7 +49,7 @@ pipeline {
                 git fetch origin release
                 git checkout release
                 git pull --ff-only origin release
-                docker compose --env-file .env.prod -f compose.ai.yaml build
+                docker compose --env-file .env.ai -f compose.ai.yaml build
                 '''
             }
         }
@@ -74,17 +75,18 @@ pipeline {
         }
         
         stage('CD - Deploy AI') {
+            when {
+                beforeAgent true
+                branch 'release'
+            }
             agent {
                 label 'ai-server'
-            }
-            when {
-                branch 'release'
             }
             steps {
                 sh '''
                 cd /home/ec2-user/deploy/S14P31A205
-                docker compose --env-file .env.prod -f compose.ai.yaml up -d --scale ai-worker=3
-                docker compose --env-file .env.prod -f compose.ai.yaml ps
+                docker compose --env-file .env.ai -f compose.ai.yaml up -d --scale ai-worker=3
+                docker compose --env-file .env.ai -f compose.ai.yaml ps
                 '''
             }
         }

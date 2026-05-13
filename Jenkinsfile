@@ -40,13 +40,7 @@ pipeline {
                 label 'ai-server'
             }
             when {
-                allOf {
                     branch 'release'
-                    anyOf {
-                        changeset "AI/**"
-                        changeset "compose.ai.yaml"
-                    }
-                }
             }
             steps {
                 sh '''
@@ -84,13 +78,7 @@ pipeline {
                 label 'ai-server'
             }
             when {
-                allOf {
-                    branch 'release'
-                    anyOf {
-                        changeset "AI/**"
-                        changeset "compose.ai.yaml"
-                    }
-                }
+                branch 'release'
             }
             steps {
                 sh '''

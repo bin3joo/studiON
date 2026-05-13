@@ -36,10 +36,7 @@ pipeline {
         }
 
         stage('CI - AI Build') {
-            when {
-                beforeAgent true
-                branch 'release'
-            }
+
             agent {
                 label 'ai-server'
             }

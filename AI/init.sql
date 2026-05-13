@@ -581,3 +581,57 @@ CREATE TABLE `ai_workflow_node_timing` (
   ALTER TABLE `ai_workflow_node_timing`
   ADD CONSTRAINT `PK_AI_WORKFLOW_NODE_TIMING` PRIMARY KEY (`id`);
 
+CREATE TABLE `ai_analysis_job` (
+      `id` INT NOT NULL COMMENT 'AI workflow durable job ID',
+      `projectId` INT NOT NULL COMMENT 'AI workflow target project ID',
+      `status` VARCHAR(32) NOT NULL COMMENT 'Durable workflow job status',
+      `phase` VARCHAR(64) NOT NULL COMMENT 'Current workflow phase',
+      `currentNode` VARCHAR(64) NULL COMMENT 'Last persisted workflow node',
+      `progress` TINYINT NOT NULL DEFAULT 0 COMMENT 'Workflow progress percent',
+      `langgraphThreadId` VARCHAR(128) NOT NULL COMMENT 'LangGraph thread identifier',
+      `timelineSnapshotId` VARCHAR(128) NULL COMMENT 'Timeline snapshot reference',
+      `requestedBy` INT NULL COMMENT 'User who requested the workflow run',
+      `startedAt` VARCHAR(64) NULL COMMENT 'Workflow start time',
+      `completedAt` VARCHAR(64) NULL COMMENT 'Workflow completion time',
+      `errorCode` VARCHAR(64) NULL COMMENT 'Failure code for terminal errors',
+      `errorMessage` VARCHAR(255) NULL COMMENT 'Failure message for terminal errors',
+      `stateJson` JSON NOT NULL COMMENT 'Worker resume용 최소 orchestration 상태'
+  );
+
+  ALTER TABLE `ai_analysis_job`
+  ADD CONSTRAINT `PK_AI_ANALYSIS_JOB` PRIMARY KEY (`id`);
+
+ALTER TABLE `ai_preview_render`
+  ADD COLUMN `analysisRegionId` VARCHAR(128) NOT NULL,
+  ADD COLUMN `userFeedbackMessage` VARCHAR(1000) NULL,
+  ADD COLUMN `preserveClipId` INT NULL;
+
+ALTER TABLE `ai_preview_render`
+  ADD INDEX `IDX_AI_PREVIEW_RENDER_REGION_REQUESTED` (`analysisRegionId`, `requestedAt`),
+  ADD INDEX `IDX_AI_PREVIEW_RENDER_JOB_REQUESTED` (`jobId`, `requestedAt`);
+
+CREATE TABLE `master_limiter` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` INT NOT NULL,
+  `is_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `threshold_db` DOUBLE NOT NULL DEFAULT -6.0,
+  `ceiling_dbfs` DOUBLE NOT NULL DEFAULT -1.0,
+  `attack_ms` DOUBLE NOT NULL DEFAULT 3.0,
+  `release_ms` DOUBLE NOT NULL DEFAULT 80.0,
+  `input_gain_db` DOUBLE NOT NULL DEFAULT 0.0,
+  `makeup_gain_db` DOUBLE NOT NULL DEFAULT 0.0,
+  `job_id` INT NULL,
+  `suggestion_action_id` INT NULL,
+  `applied_suggestion_id` INT NULL,
+  `source_type_code` INT NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_by` INT NULL,
+  `updated_by` INT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `UK_MASTER_LIMITER_PROJECT` (`project_id`)
+);
+
+ALTER TABLE `master_limiter`
+  ADD CONSTRAINT `FK_MASTER_LIMITER_PROJECT`
+  FOREIGN KEY (`project_id`) REFERENCES `project` (`id`);

@@ -22,12 +22,11 @@ from app.graph.nodes.analysis import (
 from app.graph.nodes.review import plan_critic, plan_rule_validator
 from app.graph.nodes.runtime import (
     apply_selected_edit_recipe,
-    auto_fix_non_user_issues,
     fail_workflow,
     finalize_output,
     init_state,
+    issue_router_gate,
     load_entry_context,
-    log_non_user_issue_fixes,
     persist_analysis_result,
     render_preview,
     resume_after_plan_input,
@@ -36,6 +35,8 @@ from app.graph.nodes.runtime import (
 )
 from app.graph.nodes.suggestion import (
     approve_plan,
+    build_issue_payloads,
+    materialize_non_llm_issues,
     materialize_execution_plan,
     planning_agent,
 )
@@ -43,7 +44,7 @@ from app.graph.nodes.suggestion import (
 __all__ = [
     "analyze_master_clipping_contributors",
     "apply_selected_edit_recipe",
-    "auto_fix_non_user_issues",
+    "build_issue_payloads",
     "candidate_ranking",
     "cheap_dsp_scan",
     "clap_gate",
@@ -60,9 +61,10 @@ __all__ = [
     "approve_plan",
     "infer_track_roles",
     "init_state",
+    "issue_router_gate",
     "load_entry_context",
     "load_project_snapshot",
-    "log_non_user_issue_fixes",
+    "materialize_non_llm_issues",
     "materialize_execution_plan",
     "merge_analysis",
     "plan_critic",

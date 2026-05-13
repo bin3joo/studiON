@@ -56,6 +56,9 @@ class WorkflowResumePayload(BaseModel):
     project_id: int
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
+    issue_id: str | None = None
+    action_type: str | None = None
+    action_payload: dict[str, object] | None = None
     user_feedback_message: str | None = None
     user_decision: WorkflowUserDecision = "RESUME"
     requested_by: int | None = None
@@ -146,6 +149,9 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
         requested_by=payload.requested_by,
         selected_region_id=payload.selected_region_id,
         preserve_clip_id=payload.preserve_clip_id,
+        issue_id=payload.issue_id,
+        action_type=payload.action_type,
+        action_payload=payload.action_payload,
         user_feedback_message=payload.user_feedback_message,
         user_decision=payload.user_decision,
     )
@@ -190,6 +196,15 @@ def record_workflow_feedback(payload: WorkflowResumePayload) -> WorkflowDispatch
             "preserve_clip_id": payload.preserve_clip_id
             if payload.preserve_clip_id is not None
             else restored_state.get("preserve_clip_id"),
+            "issue_id": payload.issue_id
+            if payload.issue_id is not None
+            else restored_state.get("issue_id"),
+            "action_type": payload.action_type
+            if payload.action_type is not None
+            else restored_state.get("action_type"),
+            "action_payload": payload.action_payload
+            if payload.action_payload is not None
+            else restored_state.get("action_payload"),
             "user_feedback_message": payload.user_feedback_message,
             "user_decision": payload.user_decision,
             "user_feedback_recorded_at": utc_now(),

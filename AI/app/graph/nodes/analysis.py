@@ -485,7 +485,10 @@ def candidate_ranking(state: WorkflowState) -> WorkflowState:
     for region in state.get("analysis_regions", []):
         score = ranking_score(region)
         ranking_scores[region["id"]] = score
-        if region.get("requires_user_action", True):
+        if (
+            region.get("issue_type") == "band_overlap"
+            and region.get("requires_user_action", True)
+        ):
             ranked_candidates.append(region)
     ranked_candidate_ids = [
         int(region["id"]) for region in sorted(ranked_candidates, key=_candidate_ranking_sort_key)
@@ -1546,6 +1549,9 @@ def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]
                     "end_ms": window["end_ms"],
                     "score": score,
                     "summary": "Detected track clipping candidate near the digital ceiling.",
+                    "recommended_reduction_db": round(max(peak_near_ceiling + 0.9, 1.0), 3),
+                    "current_true_peak_dbtp": round(peak_dbfs, 3),
+                    "target_ceiling_dbtp": -1.0,
                 }
             )
     merged = _merge_candidate_windows("track_clipping", candidates)
@@ -1989,6 +1995,9 @@ def _promote_master_contributors(
                 "summary": (
                     "Promoted track clipping fix from master true-peak contributor analysis."
                 ),
+                "recommended_reduction_db": round(max(float(candidate.get("true_peak_dbfs", 0.0)) + 1.0, 1.0), 3),
+                "current_true_peak_dbtp": round(float(candidate.get("true_peak_dbfs", 0.0)), 3),
+                "target_ceiling_dbtp": -1.0,
                 "source_master_candidate_id": candidate["candidate_id"],
                 "auto_fix_source": "promoted_master_contributor",
                 "contributing_track_ids": contributor.get("contributing_track_ids", []),
@@ -2036,6 +2045,9 @@ def _build_residual_master_region(
         "end_ms": candidate["end_ms"],
         "score": candidate["score"],
         "summary": summary,
+        "recommended_reduction_db": round(max(float(candidate.get("true_peak_dbfs", 0.0)) + 1.0, 1.0), 3),
+        "current_true_peak_dbtp": round(float(candidate.get("true_peak_dbfs", 0.0)), 3),
+        "target_ceiling_dbtp": -1.0,
         "source_master_candidate_id": candidate["candidate_id"],
         "auto_fix_source": "residual_master_clipping",
         "promoted_track_ids": [int(item["track_id"]) for item in promoted_tracks],
@@ -2065,12 +2077,7 @@ def _materialize_regions(
     for offset, region in enumerate(raw_regions, start=1):
         evidence_doc_id = artifact_id(state, f"{issue}-evidence-{existing_count + offset}")
         severity = _severity_from_score(issue=issue, score=region["score"])
-        requires_user_action = issue in {
-            "band_overlap",
-            "track_clipping",
-            "high_band_harshness",
-            "sibilance",
-        }
+        requires_user_action = issue == "band_overlap"
         region_record = get_workflow_analysis_region_store().create_region(
             AnalysisRegionCreate(
                 job_id=state["job_id"],
@@ -2104,6 +2111,9 @@ def _materialize_regions(
                 "band_confidence": region.get("band_confidence"),
                 "score": region["score"],
                 "window_count": region.get("window_count", 1),
+                "recommended_reduction_db": region.get("recommended_reduction_db"),
+                "current_true_peak_dbtp": region.get("current_true_peak_dbtp"),
+                "target_ceiling_dbtp": region.get("target_ceiling_dbtp"),
                 "source_master_candidate_id": region.get("source_master_candidate_id"),
                 "auto_fix_source": region.get("auto_fix_source", "direct_detection"),
                 "contributing_track_ids": region.get("contributing_track_ids", []),
@@ -2131,6 +2141,9 @@ def _materialize_regions(
                     "endMs": region["end_ms"],
                     "score": region["score"],
                     "windowCount": region.get("window_count", 1),
+                    "recommendedReductionDb": region.get("recommended_reduction_db"),
+                    "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
+                    "targetCeilingDbtp": region.get("target_ceiling_dbtp"),
                     "sourceMasterCandidateId": region.get("source_master_candidate_id"),
                     "autoFixSource": region.get("auto_fix_source", "direct_detection"),
                     "contributingTrackIds": region.get("contributing_track_ids", []),

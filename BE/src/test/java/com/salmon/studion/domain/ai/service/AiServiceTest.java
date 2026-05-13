@@ -1,10 +1,12 @@
 package com.salmon.studion.domain.ai.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectEqBandRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectClipRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectMasterLimiterRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectSnapshotRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectTrackRequest;
@@ -19,6 +21,7 @@ import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
 import com.salmon.studion.domain.eq.service.TrackEqService;
+import com.salmon.studion.domain.limiter.service.MasterLimiterService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.common.enums.UserFeedbackType;
 import com.salmon.studion.global.common.response.ErrorCode;
@@ -46,6 +49,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AiServiceTest {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     @Mock
     private FastApiClient fastApiClient;
 
@@ -66,6 +71,9 @@ class AiServiceTest {
 
     @Mock
     private TrackEqService trackEqService;
+
+    @Mock
+    private MasterLimiterService masterLimiterService;
 
     @InjectMocks
     private AiService aiService;
@@ -88,6 +96,9 @@ class AiServiceTest {
                         List.of(ProjectEqBandRequest.create(1, "BELL", 4200, 1.2, -2.5))
                 )
         ));
+        when(masterLimiterService.getCurrentMasterLimiterPayload(3001)).thenReturn(
+                ProjectMasterLimiterRequest.create(true, -6.0, -1.0, 3.0, 80.0, 0.0, 0.0)
+        );
         when(fastApiClient.startWorkflow(any(AiJobStartRequest.class))).thenReturn(
                 buildStartResponse(7001, 3001, "start", "accepted", "workflow")
         );
@@ -113,6 +124,9 @@ class AiServiceTest {
                 .isEqualTo(71);
         assertThat(forwarded.getProjectSnapshotRequest().getProjectTrackEqRequest().get(0).getBands().get(0).getEqType())
                 .isEqualTo("BELL");
+        // AI 시작 경로에서는 limiter가 lazy create 되어 snapshot에 포함되어야 한다.
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectMasterLimiterRequest()).isNotNull();
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectMasterLimiterRequest().getIsEnabled()).isTrue();
         assertThat(response.getJob().getJobId()).isEqualTo(7001);
     }
 
@@ -130,6 +144,9 @@ class AiServiceTest {
 
         when(aiAnalysisJobRepository.save(any(AiAnalysisJob.class))).thenReturn(savedJob);
         when(trackEqService.getCurrentTrackEqPayloads(3003, List.of(71))).thenReturn(List.of());
+        when(masterLimiterService.getCurrentMasterLimiterPayload(3003)).thenReturn(
+                ProjectMasterLimiterRequest.create(false, -6.0, -1.0, 3.0, 80.0, 0.0, 0.0)
+        );
         when(fastApiClient.startWorkflow(any(AiJobStartRequest.class))).thenReturn(
                 buildStartResponse(7003, 3003, "start", "accepted", "workflow")
         );
@@ -156,6 +173,9 @@ class AiServiceTest {
         ));
         when(cdnUrlService.createAudioUrl("audio/test.wav")).thenReturn("https://cdn.test/audio/test.wav");
         when(trackEqService.getCurrentTrackEqPayloads(3002, List.of(71))).thenReturn(List.of());
+        when(masterLimiterService.getCurrentMasterLimiterPayload(3002)).thenReturn(
+                ProjectMasterLimiterRequest.create(false, -6.0, -1.0, 3.0, 80.0, 0.0, 0.0)
+        );
         when(fastApiClient.startWorkflow(any(AiJobStartRequest.class)))
                 .thenThrow(new BusinessException(ErrorCode.AI_FASTAPI_CALL_FAILED, "downstream failed"));
 
@@ -228,6 +248,10 @@ class AiServiceTest {
         AiUserFeedbackRequest forwarded = requestCaptor.getValue();
         assertThat(forwarded.getJobId()).isEqualTo(7030);
         assertThat(forwarded.getProjectId()).isEqualTo(3030);
+        assertThat(forwarded.getIssueId()).isEqualTo("issue-17");
+        assertThat(forwarded.getActionType()).isEqualTo("apply_master_gain_trim");
+        assertThat(forwarded.getActionPayload().path("recommendedReductionDb").asDouble())
+                .isEqualTo(1.5);
         assertThat(forwarded.getUserDecision()).isEqualTo(UserFeedbackType.RESUME);
     }
 
@@ -253,6 +277,13 @@ class AiServiceTest {
     private AiUserFeedbackApiRequest buildFeedbackApiRequest(Integer projectId, UserFeedbackType decision) {
         AiUserFeedbackApiRequest request = new AiUserFeedbackApiRequest();
         ReflectionTestUtils.setField(request, "projectId", projectId);
+        ReflectionTestUtils.setField(request, "issueId", "issue-17");
+        ReflectionTestUtils.setField(request, "actionType", "apply_master_gain_trim");
+        ReflectionTestUtils.setField(
+                request,
+                "actionPayload",
+                OBJECT_MAPPER.createObjectNode().put("recommendedReductionDb", 1.5)
+        );
         ReflectionTestUtils.setField(request, "selectedRegionId", 17);
         ReflectionTestUtils.setField(request, "preserveClipId", 23);
         ReflectionTestUtils.setField(request, "userFeedbackMessage", "keep the kick");

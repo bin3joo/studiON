@@ -414,6 +414,8 @@ def test_workflow_waits_for_user_mix_intent_before_suggestions() -> None:
     assert result["current_node"] == "wait_user_plan_input"
     assert result["preview_id"] is None
     assert result["suggestion_group_id"] is None
+    assert result["suggestion_payload"]["activeIssueId"] is not None
+    assert len(result["suggestion_payload"]["issues"]) >= 1
 
 
 def test_workflow_finalize_without_user_action_when_no_suggestions_exist() -> None:
@@ -465,6 +467,8 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     assert preview_band["eqTypeCode"] == 1
     assert preview_band["statusCode"] == 1
     assert isinstance(preview_band["previewExpiresAt"], str)
+    assert len(result["suggestion_payload"]["issues"]) >= 2
+    assert any(issue["uiMode"] == "master_trim" for issue in result["suggestion_payload"]["issues"])
 
 
 def test_materialize_execution_plan_fails_before_internal_approval() -> None:
@@ -512,7 +516,7 @@ def test_materialize_execution_plan_fails_before_internal_approval() -> None:
     assert result["failure_code"] == "PLAN_NOT_APPROVED"
 
 
-def test_plan_rule_validator_rejects_non_eq_only_action() -> None:
+def test_plan_rule_validator_rejects_non_band_overlap_planning_issue() -> None:
     state = build_workflow_initial_state(
         job_id=10043,
         project_id=20043,
@@ -554,7 +558,7 @@ def test_plan_rule_validator_rejects_non_eq_only_action() -> None:
     result = nodes.plan_rule_validator(state)
 
     assert result["validator_result"] == "REJECT"
-    assert any("not allowed" in note for note in result["plan_revision_notes"])
+    assert any("only supports band_overlap" in note for note in result["plan_revision_notes"])
 
 
 def test_materialize_execution_plan_rejects_master_scope_preview_action() -> None:
@@ -751,7 +755,7 @@ def test_workflow_fails_when_validator_rejects() -> None:
     assert result["durable_status"] == "FAILED"
 
 
-def test_workflow_waits_for_user_plan_input_for_sibilance() -> None:
+def test_workflow_materializes_sibilance_without_planner_loop() -> None:
     sample_rate = 16000
     duration_seconds = 4.8
     time_axis = np.linspace(
@@ -781,16 +785,21 @@ def test_workflow_waits_for_user_plan_input_for_sibilance() -> None:
             "issue_types": ["sibilance"],
         }
     )
-    assert result["current_node"] == "wait_user_plan_input"
-    assert result["runtime_status"] == "waiting_for_user"
-    assert result["ranked_candidate_ids"]
+    assert result["current_node"] == "finalize_output"
+    assert result["runtime_status"] == "completed"
+    assert result["ranked_candidate_ids"] == []
     sibilance_region = next(
         region for region in result["analysis_regions"] if region["issue_type"] == "sibilance"
     )
-    assert sibilance_region["requires_user_action"] is True
+    assert sibilance_region["requires_user_action"] is False
+    sibilance_issue = next(
+        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    )
+    assert sibilance_issue["uiMode"] == "eq_ai"
+    assert sibilance_issue["actions"]
 
 
-def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> None:
+def test_workflow_keeps_band_overlap_preview_and_includes_sibilance_issue_in_mixed_run() -> None:
     sample_rate = 16000
     duration_seconds = 4.8
     time_axis = np.linspace(
@@ -824,22 +833,17 @@ def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> 
         }
     )
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
-    artifact_store = get_workflow_artifact_store()
-    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
-    log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
 
     assert result["current_node"] == "finalize_output"
     preview_band = result["suggestion_payload"]["suggestions"][0]["previewBands"][0]
     assert preview_band["jobId"] == 10042
-    assert result["sibilance_fix_applied"] is True
-    assert result["auto_fix_recipe_artifact_id"] is not None
-    assert result["sibilance_fix_log_id"] is not None
-    assert recipe_artifact is not None
-    assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
-    assert recipe_artifact.payload["groups"][0]["issueType"] == "sibilance"
-    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
-    assert log_artifact is not None
-    assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
+    sibilance_issue = next(
+        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    )
+    assert sibilance_issue["uiMode"] == "eq_ai"
+    assert sibilance_issue["actions"][0]["actionType"] == "DYNAMIC_EQ"
+    assert result["auto_fix_recipe_artifact_id"] is None
+    assert result["sibilance_fix_log_id"] is None
 
 
 def test_workflow_auto_applies_preview_band_spec_and_completes() -> None:
@@ -1071,7 +1075,25 @@ def test_persist_analysis_result_marks_auto_preview_without_user_action() -> Non
     state = build_workflow_initial_state(
         job_id=10031,
         project_id=20031,
-        has_auto_fixable_eq_issues=True,
+        suggestion_payload={
+            "suggestions": [
+                {
+                    "previewBands": [
+                        {
+                            "jobId": 10031,
+                            "targetTrackId": 11,
+                            "bandOrder": 1,
+                            "eqTypeCode": 1,
+                            "frequencyHz": 6200,
+                            "q": 2.0,
+                            "gainDeltaDb": -2.2,
+                            "statusCode": 1,
+                            "previewExpiresAt": "2026-05-07T10:00:00+09:00",
+                        }
+                    ]
+                }
+            ]
+        },
     )
 
     persisted = nodes.persist_analysis_result(state)
@@ -1224,9 +1246,9 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert _clip_id(30, 1) in overlap["affected_clip_ids"]
     assert _clip_id(31, 1) in overlap["affected_clip_ids"]
     assert clipping is not None
-    assert clipping["requires_user_action"] is True
+    assert clipping["requires_user_action"] is False
     assert sibilance["track_id"] == 30
-    assert result["sibilance_fix_applied"] is True
+    assert sibilance["requires_user_action"] is False
     assert result["ranking_scores"][overlap["id"]] > 0
 
 
@@ -1573,7 +1595,7 @@ def test_candidate_ranking_prioritizes_issue_type_before_raw_score() -> None:
     result = nodes.candidate_ranking(initial)
 
     assert result["ranking_scores"][42] > 0
-    assert result["ranked_candidate_ids"] == [41, 42]
+    assert result["ranked_candidate_ids"] == [41]
 
 
 def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> None:
@@ -1647,7 +1669,7 @@ def test_candidate_ranking_uses_severity_and_start_time_as_tie_breakers() -> Non
 
     result = nodes.candidate_ranking(initial)
 
-    assert result["ranked_candidate_ids"] == [53, 52, 51]
+    assert result["ranked_candidate_ids"] == []
 
 
 def test_run_workflow_graph_derives_timeline_metadata_from_project_snapshot() -> None:
@@ -2348,7 +2370,7 @@ def test_detect_high_band_harshness_refines_band_to_prominent_peak() -> None:
     assert regions[0]["band_low_hz"] == 4800
     assert regions[0]["band_high_hz"] < 9000
     assert 5400 <= regions[0]["center_hz"] <= 7000
-    assert regions[0]["requires_user_action"] is True
+    assert regions[0]["requires_user_action"] is False
 
 
 def test_detect_sibilance_refines_band_to_sibilant_cluster() -> None:
@@ -2742,7 +2764,7 @@ def test_detect_track_clipping_marks_band_driven_region_with_precise_band() -> N
     assert regions[0]["band_high_hz"] == 7800
     assert regions[0]["broadband_classification"] == "band_driven"
     assert "high" in regions[0]["band_hints"]
-    assert regions[0]["requires_user_action"] is True
+    assert regions[0]["requires_user_action"] is False
 
 
 def test_detect_track_clipping_keeps_broadband_region_without_band() -> None:
@@ -2895,8 +2917,14 @@ def test_workflow_defaults_include_clipping_detection() -> None:
         or "master_clipping" in result["detected_issues"]
     )
     if "track_clipping" in result["detected_issues"]:
-        assert result["current_node"] == "wait_user_plan_input"
-        assert result["runtime_status"] == "waiting_for_user"
+        assert result["current_node"] == "finalize_output"
+        assert result["runtime_status"] == "completed"
+        clipping_issue = next(
+            issue
+            for issue in result["suggestion_payload"]["issues"]
+            if issue["issueType"] == "track_clipping"
+        )
+        assert clipping_issue["uiMode"] == "master_trim"
     else:
         assert result["current_node"] == "finalize_output"
 
@@ -2994,7 +3022,7 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
     assert len(regions) == 1
     assert regions[0]["track_id"] == 10
     assert regions[0]["issue_type"] == "sibilance"
-    assert regions[0]["requires_user_action"] is True
+    assert regions[0]["requires_user_action"] is False
 
 
 def test_clipping_autofix_excludes_master_clipping_recipe_groups() -> None:

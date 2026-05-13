@@ -439,7 +439,7 @@ def test_start_workflow_job_persists_track_eq_map_in_timeline_snapshot(
     }
 
 
-def test_worker_start_dispatch_waits_for_user_when_track_clipping_is_detected(
+def test_worker_start_dispatch_materializes_track_clipping_without_waiting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -463,11 +463,17 @@ def test_worker_start_dispatch_waits_for_user_when_track_clipping_is_detected(
     )
 
     assert "track_clipping" in resumed["detected_issues"]
-    assert resumed["current_node"] == "wait_user_plan_input"
-    assert resumed["runtime_status"] == "waiting_for_user"
+    assert resumed["current_node"] == "finalize_output"
+    assert resumed["runtime_status"] == "completed"
+    clipping_issue = next(
+        issue
+        for issue in resumed["suggestion_payload"]["issues"]
+        if issue["issueType"] == "track_clipping"
+    )
+    assert clipping_issue["uiMode"] == "master_trim"
 
 
-def test_worker_start_dispatch_waits_for_user_for_sibilance(
+def test_worker_start_dispatch_materializes_sibilance_without_waiting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sample_rate = 16000
@@ -528,16 +534,20 @@ def test_worker_start_dispatch_waits_for_user_for_sibilance(
             dispatch_type="start",
         )
     )
-    assert result["current_node"] == "wait_user_plan_input"
-    assert result["runtime_status"] == "waiting_for_user"
-    assert result["ranked_candidate_ids"]
+    assert result["current_node"] == "finalize_output"
+    assert result["runtime_status"] == "completed"
+    assert result["ranked_candidate_ids"] == []
     sibilance_region = next(
         region for region in result["analysis_regions"] if region["issue_type"] == "sibilance"
     )
-    assert sibilance_region["requires_user_action"] is True
+    assert sibilance_region["requires_user_action"] is False
+    sibilance_issue = next(
+        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    )
+    assert sibilance_issue["uiMode"] == "eq_ai"
 
 
-def test_job_status_api_exposes_auto_preview_projection_flags(
+def test_job_status_api_does_not_expose_preview_for_non_preview_issue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sample_rate = 16000
@@ -593,38 +603,6 @@ def test_job_status_api_exposes_auto_preview_projection_flags(
     store = get_workflow_job_store()
     stored = store.get_job(200032)
     assert stored is not None
-    artifact_store = get_workflow_artifact_store()
-    artifact_store.upsert_artifact(
-        WorkflowArtifactDocument(
-            id="200032-auto-fix",
-            job_id=200032,
-            artifact_type="auto_fix_recipe",
-            payload={
-                "groups": [
-                    {
-                        "issueType": "track_clipping",
-                        "regionIds": [9001],
-                        "trackIds": [8],
-                        "regionCount": 1,
-                        "recipes": [
-                            {
-                                "regionId": 9001,
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 8,
-                                "startMs": 600,
-                                "endMs": 1400,
-                                "bandLowHz": 4500,
-                                "bandHighHz": 7800,
-                                "gainDeltaDb": -2.4,
-                                "params": {"q": 2.1},
-                            }
-                        ],
-                    }
-                ]
-            },
-        )
-    )
     auto_state = build_workflow_initial_state(
         job_id=200032,
         project_id=300032,
@@ -651,36 +629,30 @@ def test_job_status_api_exposes_auto_preview_projection_flags(
             }
         ],
         suggestion_payload={
-            "suggestions": [
+            "activeIssueId": "200032-issue-9001",
+            "navigationOrder": ["200032-issue-9001"],
+            "issues": [
                 {
-                    "previewBands": [
-                        {
-                            "jobId": 200032,
-                            "targetTrackId": 8,
-                            "bandOrder": 1,
-                            "eqTypeCode": 1,
-                            "frequencyHz": 5924,
-                            "q": 2.1,
-                            "gainDeltaDb": -2.4,
-                            "statusCode": 1,
-                            "previewExpiresAt": "2026-05-07T10:00:00+09:00",
-                        }
-                    ]
+                    "issueId": "200032-issue-9001",
+                    "issueType": "track_clipping",
+                    "startMs": 600,
+                    "endMs": 1400,
+                    "trackId": 8,
+                    "bubbleTarget": "master",
+                    "uiMode": "master_trim",
+                    "summary": "Track clipping detected",
+                    "explanation": "Master trim only",
+                    "previewBands": [],
+                    "actions": [{"type": "apply_master_gain_trim", "recommendedReductionDb": 1.5}],
+                    "markers": [],
                 }
-            ]
+            ],
+            "suggestions": [],
         },
-        auto_fix_recipe_artifact_id="200032-auto-fix",
-        preview_id="200032-preview",
-        preview_status="READY",
-        preview_excerpt_start_ms=0,
-        preview_excerpt_end_ms=4800,
-        preview_requested_at="2026-05-07T09:30:00+09:00",
-        preview_started_at="2026-05-07T09:30:01+09:00",
-        preview_completed_at="2026-05-07T09:30:02+09:00",
-        preview_required=True,
-        has_auto_fixable_eq_issues=True,
+        preview_required=False,
+        has_auto_fixable_eq_issues=False,
         user_action_required=False,
-        auto_preview_generated=True,
+        auto_preview_generated=False,
     )
     store.save_graph_state(auto_state)
 
@@ -690,14 +662,12 @@ def test_job_status_api_exposes_auto_preview_projection_flags(
     assert response.status_code == 200
     projections = response.json()["projections"]
     assert projections["user_action_required"] is False
-    assert projections["preview_required"] is True
-    assert projections["auto_preview_generated"] is True
-    assert projections["preview_render"]["status"] == "READY"
-    assert projections["preview_render"]["preview_target_region"] is not None
-    assert projections["preview_render"]["preview_action_track"] is not None
+    assert projections["preview_required"] is False
+    assert projections["auto_preview_generated"] is False
+    assert projections["preview_render"] is None
 
 
-def test_preview_compare_api_supports_auto_preview_without_selected_region(
+def test_preview_compare_api_rejects_non_preview_issue_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sample_rate = 16000
@@ -753,38 +723,6 @@ def test_preview_compare_api_supports_auto_preview_without_selected_region(
     store = get_workflow_job_store()
     stored = store.get_job(200033)
     assert stored is not None
-    artifact_store = get_workflow_artifact_store()
-    artifact_store.upsert_artifact(
-        WorkflowArtifactDocument(
-            id="200033-auto-fix",
-            job_id=200033,
-            artifact_type="auto_fix_recipe",
-            payload={
-                "groups": [
-                    {
-                        "issueType": "track_clipping",
-                        "regionIds": [9002],
-                        "trackIds": [8],
-                        "regionCount": 1,
-                        "recipes": [
-                            {
-                                "regionId": 9002,
-                                "actionType": "DYNAMIC_EQ",
-                                "targetScope": "TRACK",
-                                "targetTrackId": 8,
-                                "startMs": 700,
-                                "endMs": 1500,
-                                "bandLowHz": 4500,
-                                "bandHighHz": 7800,
-                                "gainDeltaDb": -2.1,
-                                "params": {"q": 2.0},
-                            }
-                        ],
-                    }
-                ]
-            },
-        )
-    )
     auto_state = build_workflow_initial_state(
         job_id=200033,
         project_id=300033,
@@ -811,51 +749,40 @@ def test_preview_compare_api_supports_auto_preview_without_selected_region(
             }
         ],
         suggestion_payload={
-            "suggestions": [
+            "activeIssueId": "200033-issue-9002",
+            "navigationOrder": ["200033-issue-9002"],
+            "issues": [
                 {
-                    "previewBands": [
-                        {
-                            "jobId": 200033,
-                            "targetTrackId": 8,
-                            "bandOrder": 1,
-                            "eqTypeCode": 1,
-                            "frequencyHz": 5924,
-                            "q": 2.0,
-                            "gainDeltaDb": -2.1,
-                            "statusCode": 1,
-                            "previewExpiresAt": "2026-05-07T10:00:00+09:00",
-                        }
-                    ]
+                    "issueId": "200033-issue-9002",
+                    "issueType": "track_clipping",
+                    "startMs": 700,
+                    "endMs": 1500,
+                    "trackId": 8,
+                    "bubbleTarget": "master",
+                    "uiMode": "master_trim",
+                    "summary": "Track clipping detected",
+                    "explanation": "Master trim only",
+                    "previewBands": [],
+                    "actions": [{"type": "apply_master_gain_trim", "recommendedReductionDb": 1.5}],
+                    "markers": [],
                 }
-            ]
+            ],
+            "suggestions": [],
         },
-        auto_fix_recipe_artifact_id="200033-auto-fix",
-        preview_id="200033-preview",
-        preview_status="READY",
-        preview_excerpt_start_ms=0,
-        preview_excerpt_end_ms=4800,
-        preview_requested_at="2026-05-07T09:30:00+09:00",
-        preview_started_at="2026-05-07T09:30:01+09:00",
-        preview_completed_at="2026-05-07T09:30:02+09:00",
-        preview_required=True,
-        has_auto_fixable_eq_issues=True,
+        preview_required=False,
+        has_auto_fixable_eq_issues=False,
         user_action_required=False,
-        auto_preview_generated=True,
+        auto_preview_generated=False,
     )
     store.save_graph_state(auto_state)
 
     client = TestClient(create_app())
     response = client.get("/api/v1/internal/workflow/jobs/200033/preview-compare")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["preview"]["status"] == "READY"
-    assert body["focus_region"]["issue_type"] == "track_clipping"
-    assert body["issue_overlay"]["kind"] == "track_clipping"
-    assert len(body["actions"]) >= 1
+    assert response.status_code == 404
 
 
-def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run(
+def test_worker_start_dispatch_keeps_band_overlap_preview_and_includes_sibilance_issue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sample_rate = 16000
@@ -938,9 +865,6 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
             **build_plan_input(waiting),
         )
     )
-    artifact_store = get_workflow_artifact_store()
-    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
-
     assert result["current_node"] == "finalize_output"
     assert result["preview_status"] == "READY"
     assert result["preview_excerpt_start_ms"] is not None
@@ -948,10 +872,11 @@ def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_is
     assert result["preview_excerpt_end_ms"] > result["preview_excerpt_start_ms"]
     preview_band = result["suggestion_payload"]["suggestions"][0]["previewBands"][0]
     assert preview_band["jobId"] == 20015
-    assert result["sibilance_fix_applied"] is True
-    assert recipe_artifact is not None
-    assert recipe_artifact.payload["appliedInMixedIssueFlow"] is True
-    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
+    sibilance_issue = next(
+        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    )
+    assert sibilance_issue["actions"][0]["actionType"] == "DYNAMIC_EQ"
+    assert result["auto_fix_recipe_artifact_id"] is None
 
 
 def test_worker_rejects_plan_resume_from_completed_phase(
@@ -1338,6 +1263,9 @@ def test_feedback_api_uses_path_job_id_for_resume_decision(
         "/api/v1/internal/workflow/jobs/20026/feedback",
         json={
             "project_id": 30026,
+            "issue_id": "issue-20026-1",
+            "action_type": "apply_master_gain_trim",
+            "action_payload": {"recommendedReductionDb": 1.5},
             "user_decision": "RESUME",
             **plan_input,
         },
@@ -1346,6 +1274,9 @@ def test_feedback_api_uses_path_job_id_for_resume_decision(
     assert response.status_code == 200
     assert response.json()["job"]["dispatch_type"] == "resume_plan_input"
     assert queued_messages[-1].job_id == 20026
+    assert queued_messages[-1].issue_id == "issue-20026-1"
+    assert queued_messages[-1].action_type == "apply_master_gain_trim"
+    assert queued_messages[-1].action_payload == {"recommendedReductionDb": 1.5}
     assert queued_messages[-1].user_decision == "RESUME"
 
 
@@ -1432,7 +1363,8 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     assert body["projections"]["analysis_job"]["id"] == 20012
     assert "master_audio" not in body["projections"]
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
-    assert body["projections"]["suggestion_group"] is None
+    assert body["projections"]["suggestion_group"] is not None
+    assert body["projections"]["suggestion_group"]["suggestions"] == []
 
 
 def test_job_status_api_exposes_master_context_preview_metadata(
@@ -1477,6 +1409,52 @@ def test_job_status_api_exposes_master_context_preview_metadata(
     assert preview["preview_action_type"] == "DYNAMIC_EQ"
     assert preview["preview_excerpt_range"]["start_ms"] <= preview["preview_region_start_ms"]
     assert preview["preview_excerpt_range"]["end_ms"] >= preview["preview_region_end_ms"]
+
+
+def test_job_status_api_exposes_issue_navigation_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=200221,
+            project_id=300221,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=200221,
+            project_id=300221,
+            dispatch_type="start",
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=200221,
+            project_id=300221,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/200221")
+
+    assert response.status_code == 200
+    suggestion_group = response.json()["projections"]["suggestion_group"]
+    assert suggestion_group is not None
+    assert suggestion_group["suggestions"]
+    stored = get_workflow_job_store().get_job(200221)
+    assert stored is not None
+    payload = stored.state_snapshot["suggestion_payload"]
+    assert payload["activeIssueId"]
+    assert len(payload["issues"]) == 1
+    assert payload["issues"][0]["uiMode"] == "eq_ai"
 
 
 def test_preview_compare_api_returns_visual_compare_payload(

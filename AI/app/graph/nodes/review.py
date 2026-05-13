@@ -9,10 +9,7 @@ from app.services.plan_critic_llm import (
 )
 
 ISSUE_ALLOWED_ACTIONS = {
-    "band_overlap": {"DYNAMIC_EQ"},
-    "high_band_harshness": {"DYNAMIC_EQ"},
-    "sibilance": {"DYNAMIC_EQ"},
-    "track_clipping": {"DYNAMIC_EQ", "EQ_CUT"},
+    "band_overlap": {"DYNAMIC_EQ", "EQ_CUT"},
 }
 
 
@@ -129,6 +126,8 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
             return f"Plan payload omitted a valid {field_name} field."
 
     issue_type = str(selected_region.get("issue_type") or "")
+    if issue_type != "band_overlap":
+        return "Planner validation only supports band_overlap issues."
     action_type = action.get("actionType")
     if not isinstance(action_type, str):
         return "Plan action omitted a valid actionType."
@@ -185,22 +184,17 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
     ):
         return "Plan payload preserveClipId did not match the selected preserve clip."
 
-    if issue_type == "band_overlap":
-        preserve_track_id = (
-            _resolve_clip_track_id(state, int(preserve_clip_id))
-            if preserve_clip_id
-            else None
-        )
-        if (
-            preserve_track_id is not None
-            and target_track_id is not None
-            and int(target_track_id) == preserve_track_id
-        ):
-            return "Band-overlap plans must not target the preserved clip track."
-    elif issue_type == "sibilance" and action_type != "DYNAMIC_EQ":
-        return "Sibilance plans must use DYNAMIC_EQ in EQ-only mode."
-    elif issue_type == "track_clipping" and action_type not in {"DYNAMIC_EQ", "EQ_CUT"}:
-        return "Track-clipping plans must use an EQ action in EQ-only mode."
+    preserve_track_id = (
+        _resolve_clip_track_id(state, int(preserve_clip_id))
+        if preserve_clip_id
+        else None
+    )
+    if (
+        preserve_track_id is not None
+        and target_track_id is not None
+        and int(target_track_id) == preserve_track_id
+    ):
+        return "Band-overlap plans must not target the preserved clip track."
     return None
 
 

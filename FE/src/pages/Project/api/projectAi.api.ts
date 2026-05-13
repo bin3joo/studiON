@@ -110,3 +110,34 @@ export async function getAiWorkflowStatus(jobId: number) {
 
   return response.data.data
 }
+
+export interface AiWorkflowJobResponse {
+  job_id: number
+  project_id: number
+  dispatch_type: string
+  status: string
+  queue_name: string
+}
+
+export interface AiUserFeedbackRequest {
+  project_id: number
+  selected_region_id?: number | null
+  preserve_clip_id?: number | null
+  user_feedback_message?: string | null
+  user_decision: 'CONFIRM' | 'CANCEL' | 'RESUME'
+}
+
+export async function sendAiWorkflowFeedback(
+  jobId: number,
+  request: AiUserFeedbackRequest,
+): Promise<AiWorkflowJobResponse> {
+  const response = await axiosInstance.post<ApiResponse<AiWorkflowJobResponse>>(
+    `/api/v1/ai/workflow/jobs/${jobId}/feedback`,
+    request,
+    {
+      timeout: 30000,
+    },
+  )
+
+  return response.data.data
+}

@@ -35,12 +35,12 @@ pipeline {
             }
         }
 
-        stage('CD - AI Build') {
+        stage('CI - AI Build') {
             agent {
                 label 'ai-server'
             }
             when {
-                    branch 'release'
+                branch 'release'
             }
             steps {
                 sh '''

@@ -168,10 +168,10 @@ def get_plan_critic_llm_client() -> PlanCriticLLMClient:
 
 def _critic_system_prompt() -> str:
     return (
-        "Review the proposed EQ-only audio-fix plan and return only a JSON object. "
+        "Review the proposed band_overlap planner output and return only a JSON object. "
         'Use the schema {"result":"PASS|REVISE|REJECT","note":"string"}. '
         "Reject plans that violate preserve-track safety, selected-region boundaries, "
-        "the stated user feedback intent, the EQ-only policy, or TRACK-only scope. "
+        "the stated user feedback intent, the band_overlap planner output policy, or TRACK-only scope. "
         "Reject DE_ESSER, GAIN_TRIM, TRUE_PEAK_LIMITER, and MASTER scope. "
         "When revision is needed, write a short, actionable note that the planner can directly apply."
     )

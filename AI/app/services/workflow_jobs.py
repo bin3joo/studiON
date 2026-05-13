@@ -26,6 +26,9 @@ class WorkflowDispatchMessage(BaseModel):
     requested_by: int | None = None
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
+    issue_id: str | None = None
+    action_type: str | None = None
+    action_payload: dict[str, object] | None = None
     user_feedback_message: str | None = None
     user_decision: WorkflowUserDecision | None = None
 
@@ -76,6 +79,9 @@ COMPACT_STATE_KEYS = {
     "analysis_region_ids",
     "selected_region_id",
     "preserve_clip_id",
+    "issue_id",
+    "action_type",
+    "action_payload",
     "user_feedback_message",
     "user_decision",
     "user_feedback_recorded_at",

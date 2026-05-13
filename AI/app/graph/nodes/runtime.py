@@ -51,6 +51,19 @@ def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
     )
 
 
+def issue_router_gate(state: WorkflowState) -> WorkflowState:
+    return workflow_update(
+        state,
+        node="issue_router_gate",
+        phase="issue_router_checked",
+        progress=61,
+        extra={
+            "selected_region_id": state.get("selected_region_id")
+            or next(iter(state.get("ranked_candidate_ids", [])), None)
+        },
+    )
+
+
 def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
     if not state.get("selected_region_id"):
         return fail_workflow(
@@ -359,9 +372,17 @@ def log_non_user_issue_fixes(state: WorkflowState) -> WorkflowState:
 
 def persist_analysis_result(state: WorkflowState) -> WorkflowState:
     preview_id = state.get("preview_id")
+    payload = state.get("suggestion_payload") or {}
+    preview_bands = [
+        band
+        for suggestion in payload.get("suggestions", [])
+        if isinstance(suggestion, dict)
+        for band in suggestion.get("previewBands", [])
+        if isinstance(band, dict)
+    ]
     has_user_action_candidates = bool(state.get("ranked_candidate_ids"))
-    has_auto_fixable_eq_issues = bool(state.get("has_auto_fixable_eq_issues"))
-    preview_required = has_user_action_candidates or has_auto_fixable_eq_issues
+    has_auto_fixable_eq_issues = bool(preview_bands)
+    preview_required = bool(preview_bands)
     user_action_required = has_user_action_candidates
     if preview_required:
         preview_id = preview_id or f"{state['job_id']}-preview"
@@ -552,6 +573,9 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "requested_by": state.get("requested_by"),
             "selected_region_id": state.get("selected_region_id"),
             "preserve_clip_id": state.get("preserve_clip_id"),
+            "issue_id": state.get("issue_id"),
+            "action_type": state.get("action_type"),
+            "action_payload": state.get("action_payload"),
             "user_feedback_message": state.get("user_feedback_message"),
             "user_decision": state.get("user_decision"),
         }
@@ -580,6 +604,12 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
         restored["selected_region_id"] = dispatch.selected_region_id
     if dispatch.preserve_clip_id is not None:
         restored["preserve_clip_id"] = dispatch.preserve_clip_id
+    if dispatch.issue_id is not None:
+        restored["issue_id"] = dispatch.issue_id
+    if dispatch.action_type is not None:
+        restored["action_type"] = dispatch.action_type
+    if dispatch.action_payload is not None:
+        restored["action_payload"] = dispatch.action_payload
     if dispatch.user_feedback_message is not None:
         restored["user_feedback_message"] = dispatch.user_feedback_message
     if dispatch.user_decision is not None:
@@ -863,6 +893,12 @@ def _build_auto_preview_suggestions(
                 "summary": _build_auto_preview_summary(group),
                 "explanation": _build_auto_preview_explanation(group),
                 "previewBands": preview_bands,
+                "issue": _build_auto_preview_issue(
+                    state,
+                    group=group,
+                    preview_bands=preview_bands,
+                    rank=index,
+                ),
             }
         )
     return suggestions
@@ -874,14 +910,118 @@ def _merge_auto_preview_suggestions(
 ) -> dict[str, object]:
     merged = deepcopy(payload)
     existing_suggestions = list(merged.get("suggestions", []))
+    existing_issues = list(merged.get("issues", []))
+    navigation_order = [
+        str(issue_id)
+        for issue_id in merged.get("navigationOrder", [])
+        if isinstance(issue_id, str) and issue_id
+    ]
     if auto_preview_suggestions:
-        existing_suggestions.extend(deepcopy(auto_preview_suggestions))
-    if not existing_suggestions:
+        for suggestion in auto_preview_suggestions:
+            copied = deepcopy(suggestion)
+            issue = copied.pop("issue", None)
+            existing_suggestions.append(copied)
+            if isinstance(issue, dict):
+                existing_issues.append(issue)
+                issue_id = issue.get("issueId")
+                if isinstance(issue_id, str) and issue_id and issue_id not in navigation_order:
+                    navigation_order.append(issue_id)
+    if not existing_suggestions and not existing_issues:
         return merged
     merged["groupTitle"] = merged.get("groupTitle") or "Workflow suggestion group"
     merged["groupSummary"] = merged.get("groupSummary") or "Preview-ready EQ issue actions"
     merged["suggestions"] = existing_suggestions
+    if existing_issues:
+        merged["issues"] = existing_issues
+        merged["navigationOrder"] = navigation_order
+        if not merged.get("activeIssueId") and navigation_order:
+            merged["activeIssueId"] = navigation_order[0]
     return merged
+
+
+def _build_auto_preview_issue(
+    state: WorkflowState,
+    *,
+    group: dict[str, object],
+    preview_bands: list[dict[str, object]],
+    rank: int,
+) -> dict[str, object]:
+    issue_type = str(group.get("issueType") or "eq_issue")
+    region_ids = [int(region_id) for region_id in group.get("regionIds") or []]
+    track_ids = [int(track_id) for track_id in group.get("trackIds") or []]
+    region_map = {
+        int(region["id"]): region
+        for region in state.get("analysis_regions", [])
+        if region.get("id") is not None
+    }
+    target_region = region_map.get(region_ids[0]) if region_ids else None
+    issue_id = f"{state['job_id']}-issue-auto-{rank}"
+    if issue_type in {"track_clipping", "master_clipping"}:
+        bubble_target = "master"
+        ui_mode = "master_trim"
+    elif issue_type == "high_band_harshness":
+        bubble_target = "track"
+        ui_mode = "marker_only"
+    else:
+        bubble_target = "track"
+        ui_mode = "eq_ai"
+
+    actions: list[dict[str, object]] = []
+    for recipe in group.get("recipes", []):
+        if not isinstance(recipe, dict):
+            continue
+        actions.append(
+            {
+                "type": str(recipe.get("actionType") or ""),
+                "targetScope": recipe.get("targetScope"),
+                "targetTrackId": recipe.get("targetTrackId"),
+                "gainDeltaDb": recipe.get("gainDeltaDb"),
+                "startMs": recipe.get("startMs"),
+                "endMs": recipe.get("endMs"),
+                "bandLowHz": recipe.get("bandLowHz"),
+                "bandHighHz": recipe.get("bandHighHz"),
+            }
+        )
+
+    markers: list[dict[str, object]] = []
+    if issue_type == "high_band_harshness":
+        for region_id in region_ids:
+            region = region_map.get(region_id)
+            if not isinstance(region, dict):
+                continue
+            markers.append(
+                {
+                    "trackId": region.get("track_id"),
+                    "centerHz": region.get("center_hz"),
+                    "bandLowHz": region.get("band_low_hz"),
+                    "bandHighHz": region.get("band_high_hz"),
+                }
+            )
+
+    if issue_type in {"track_clipping", "master_clipping"} and actions:
+        gain_delta_db = float(actions[0].get("gainDeltaDb") or 0.0)
+        actions = [
+            {
+                "type": "apply_master_gain_trim",
+                "recommendedReductionDb": round(abs(gain_delta_db), 3),
+                "sourceActionType": actions[0].get("type"),
+            }
+        ]
+
+    return {
+        "issueId": issue_id,
+        "issueType": issue_type,
+        "startMs": target_region.get("start_ms") if isinstance(target_region, dict) else None,
+        "endMs": target_region.get("end_ms") if isinstance(target_region, dict) else None,
+        "trackId": track_ids[0] if track_ids else None,
+        "bubbleTarget": bubble_target,
+        "uiMode": ui_mode,
+        "summary": _build_auto_preview_summary(group),
+        "explanation": _build_auto_preview_explanation(group),
+        "previewBands": preview_bands,
+        "actions": actions,
+        "markers": markers,
+    }
 
 
 def _build_auto_preview_band_spec(

@@ -21,10 +21,15 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "PLANNING_REGION_NOT_FOUND",
-                "failure_message": (
-                    "The selected analysis region could not be restored "
-                    "for planning."
-                ),
+                "failure_message": "The selected analysis region could not be restored for planning.",
+            }
+        )
+    if selected_region.get("issue_type") != "band_overlap":
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "UNSUPPORTED_PLANNING_ISSUE",
+                "failure_message": "Planning is only supported for band_overlap issues.",
             }
         )
 
@@ -79,9 +84,6 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
 
 
 def approve_plan(state: WorkflowState) -> WorkflowState:
-    revision_notes = [
-        *state.get("plan_revision_notes", []),
-    ]
     return workflow_update(
         state,
         node="approve_plan",
@@ -89,7 +91,52 @@ def approve_plan(state: WorkflowState) -> WorkflowState:
         progress=82,
         extra={
             "plan_status": "APPROVED",
-            "plan_revision_notes": revision_notes,
+            "plan_revision_notes": [*state.get("plan_revision_notes", [])],
+        },
+    )
+
+
+def build_issue_payloads(state: WorkflowState) -> WorkflowState:
+    payload = {
+        "groupTitle": "Workflow suggestion group",
+        "groupSummary": "Unified issue navigation payload",
+        "activeIssueId": None,
+        "navigationOrder": [],
+        "issues": [],
+        "suggestions": [],
+    }
+    for region in state.get("analysis_regions", []):
+        issue = _build_initial_issue(state, region)
+        if issue is None:
+            continue
+        payload = _merge_issue_payload(payload, issue=issue)
+
+    first_band_overlap_issue_id = next(
+        (
+            _issue_id(state, int(region["id"]))
+            for region in state.get("analysis_regions", [])
+            if region.get("issue_type") == "band_overlap"
+        ),
+        None,
+    )
+    if first_band_overlap_issue_id:
+        payload["activeIssueId"] = first_band_overlap_issue_id
+    elif payload["navigationOrder"]:
+        payload["activeIssueId"] = payload["navigationOrder"][0]
+
+    notes = [*state.get("notes", [])]
+    if payload["issues"]:
+        notes.append(
+            f"Prepared unified suggestion payload scaffold for {len(payload['issues'])} issue(s)."
+        )
+    return workflow_update(
+        state,
+        node="build_issue_payloads",
+        phase="issue_payloads_built",
+        progress=58,
+        extra={
+            "suggestion_payload": payload,
+            "notes": notes,
         },
     )
 
@@ -103,31 +150,20 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     latest_artifact_id = state.get("latest_artifact_id")
 
     if not candidate:
-        if selected_region is not None and selected_region.get("issue_type") == "sibilance":
-            notes.append("치찰음 이슈는 suggestion 없이 자동 보정 전용 경로로 유지했다.")
         return workflow_update(
             state,
             node="materialize_execution_plan",
             phase="execution_plan_materialized",
             progress=84,
-            extra={
-                "suggestion_payload": {},
-                "suggestion_group_id": None,
-                "user_action_required": False,
-                "notes": notes,
-            },
+            extra={"notes": notes},
         )
 
-    # approved 되지 않은 계획은 바로 실패 처리함.
     if state.get("plan_status") != "APPROVED":
         return fail_workflow(
             {
                 **state,
                 "failure_code": "PLAN_NOT_APPROVED",
-                "failure_message": (
-                    "The execution plan could not be materialized "
-                    "before internal approval."
-                ),
+                "failure_message": "The execution plan could not be materialized before internal approval.",
             }
         )
     if selected_region is None:
@@ -135,18 +171,28 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             {
                 **state,
                 "failure_code": "MATERIALIZE_REGION_NOT_FOUND",
-                "failure_message": (
-                    "The selected analysis region could not be restored "
-                    "for execution plan materialization."
-                ),
+                "failure_message": "The selected analysis region could not be restored for execution plan materialization.",
+            }
+        )
+    if selected_region.get("issue_type") != "band_overlap":
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "INVALID_PLANNING_ISSUE",
+                "failure_message": "Execution plan materialization only supports band_overlap.",
             }
         )
 
-    # 수정 계획에 있는 action 1개를 꺼냄.
-    # 현재는 사실상 action이 1개지만 확장성을 위해 배열로 만들어둠
-    # 확장한 후에는 여러 계획안에 여러 action을 만들어서 사용자에게 줄 예정.
-    action = candidate["action"]
-    suggestion_group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
+    action = candidate.get("action")
+    if not isinstance(action, dict):
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": "INVALID_PLAN_ACTION",
+                "failure_message": "The approved plan did not include a valid action payload.",
+            }
+        )
+
     try:
         preview_band_spec = _build_preview_band_spec(state, action=action)
     except ValueError as exc:
@@ -157,18 +203,35 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
                 "failure_message": str(exc),
             }
         )
-    payload = {
-        "groupTitle": plan_payload.get("strategyTitle") or "Workflow suggestion group",
-        "groupSummary": plan_payload.get("strategySummary"),
-        "suggestions": [
-            {
-                "rank": 1,
-                "summary": plan_payload.get("summary") or "문제 구간 보정 제안",
-                "explanation": plan_payload.get("explanation"),
-                "previewBands": [preview_band_spec],
-            }
-        ],
-    }
+
+    issue_id = _issue_id(state, int(selected_region["id"]))
+    payload = _merge_issue_payload(
+        state.get("suggestion_payload") or {},
+        issue={
+            "issueId": issue_id,
+            "issueType": "band_overlap",
+            "startMs": int(selected_region.get("start_ms") or 0),
+            "endMs": int(selected_region.get("end_ms") or 0),
+            "trackId": selected_region.get("track_id"),
+            "bubbleTarget": "track",
+            "uiMode": "eq_ai",
+            "summary": plan_payload.get("summary") or "Planner-generated summary",
+            "explanation": plan_payload.get("explanation"),
+            "previewBands": [preview_band_spec],
+            "actions": [deepcopy(action)],
+            "markers": [],
+        },
+        suggestion={
+            "rank": 1,
+            "summary": plan_payload.get("summary") or "Planner-generated summary",
+            "explanation": plan_payload.get("explanation"),
+            "previewBands": [preview_band_spec],
+        },
+        active_issue_id=issue_id,
+        group_title=plan_payload.get("strategyTitle"),
+        group_summary=plan_payload.get("strategySummary"),
+    )
+
     execution_plan_artifact_id = artifact_id(state, "execution-plan")
     get_workflow_artifact_store().upsert_artifact(
         WorkflowArtifactDocument(
@@ -186,7 +249,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     )
     mongo_artifact_ids.append(execution_plan_artifact_id)
     latest_artifact_id = execution_plan_artifact_id
-    notes.append("승인된 실행 계획을 Spring 저장용 preview band spec으로 구체화했다.")
+    notes.append("Materialized band_overlap planner output into unified suggestion payload.")
     return workflow_update(
         state,
         node="materialize_execution_plan",
@@ -194,10 +257,50 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         progress=84,
         extra={
             "suggestion_payload": payload,
-            "suggestion_group_id": suggestion_group_id,
-            "user_action_required": True,
+            "suggestion_group_id": state.get("suggestion_group_id") or f"{state['job_id']}-group",
             "mongo_artifact_ids": mongo_artifact_ids,
             "latest_artifact_id": latest_artifact_id,
+            "notes": notes,
+        },
+    )
+
+
+def materialize_non_llm_issues(state: WorkflowState) -> WorkflowState:
+    payload = deepcopy(state.get("suggestion_payload") or {})
+    ranked_ids = {int(region_id) for region_id in state.get("ranked_candidate_ids", [])}
+    issues_added = 0
+
+    for region in state.get("analysis_regions", []):
+        region_id = int(region["id"])
+        if region_id in ranked_ids:
+            continue
+        issue = _build_non_llm_issue(state, region)
+        if issue is None:
+            continue
+        suggestion = None
+        if issue["previewBands"]:
+            suggestion = {
+                "rank": len(payload.get("suggestions", [])) + 1,
+                "summary": issue["summary"],
+                "explanation": issue["explanation"],
+                "previewBands": deepcopy(issue["previewBands"]),
+            }
+        payload = _merge_issue_payload(payload, issue=issue, suggestion=suggestion)
+        issues_added += 1
+
+    if not payload.get("activeIssueId") and payload.get("navigationOrder"):
+        payload["activeIssueId"] = payload["navigationOrder"][0]
+    notes = [*state.get("notes", [])]
+    if issues_added:
+        notes.append(f"Materialized {issues_added} deterministic non-LLM issue contract(s).")
+    return workflow_update(
+        state,
+        node="materialize_non_llm_issues",
+        phase="non_llm_issues_materialized",
+        progress=88,
+        extra={
+            "suggestion_payload": payload,
+            "suggestion_group_id": state.get("suggestion_group_id") or f"{state['job_id']}-group",
             "notes": notes,
         },
     )
@@ -331,6 +434,183 @@ def _resolve_eq_band_values(action: dict[str, object]) -> tuple[int, float]:
     return frequency_hz, round(q, 3)
 
 
+def _build_non_llm_issue(
+    state: WorkflowState,
+    region: dict[str, object],
+) -> dict[str, object] | None:
+    issue_type = str(region.get("issue_type") or "")
+    issue_id = _issue_id(state, int(region["id"]))
+    if issue_type == "track_clipping":
+        return {
+            "issueId": issue_id,
+            "issueType": issue_type,
+            "startMs": int(region.get("start_ms") or 0),
+            "endMs": int(region.get("end_ms") or 0),
+            "trackId": region.get("track_id"),
+            "bubbleTarget": "master",
+            "uiMode": "master_trim",
+            "summary": region.get("summary") or "Track clipping detected",
+            "explanation": "Use a conservative master trim to create headroom for the detected clipping region.",
+            "previewBands": [],
+            "actions": [
+                {
+                    "type": "apply_master_gain_trim",
+                    "recommendedReductionDb": _resolve_recommended_reduction_db(region),
+                    "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
+                    "targetCeilingDbtp": region.get("target_ceiling_dbtp") or -1.0,
+                }
+            ],
+            "markers": [],
+        }
+    if issue_type == "master_clipping":
+        return {
+            "issueId": issue_id,
+            "issueType": issue_type,
+            "startMs": int(region.get("start_ms") or 0),
+            "endMs": int(region.get("end_ms") or 0),
+            "trackId": None,
+            "bubbleTarget": "master",
+            "uiMode": "master_trim",
+            "summary": region.get("summary") or "Master clipping detected",
+            "explanation": "Normalize the user-facing action to a single master trim recommendation.",
+            "previewBands": [],
+            "actions": [
+                {
+                    "type": "apply_master_gain_trim",
+                    "recommendedReductionDb": _resolve_recommended_reduction_db(region),
+                    "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
+                    "targetCeilingDbtp": region.get("target_ceiling_dbtp") or -1.0,
+                }
+            ],
+            "markers": [],
+        }
+    if issue_type == "high_band_harshness":
+        return {
+            "issueId": issue_id,
+            "issueType": issue_type,
+            "startMs": int(region.get("start_ms") or 0),
+            "endMs": int(region.get("end_ms") or 0),
+            "trackId": region.get("track_id"),
+            "bubbleTarget": "track",
+            "uiMode": "marker_only",
+            "summary": region.get("summary") or "High-band harshness detected",
+            "explanation": "Show the band focus as a marker only. No execution action is generated.",
+            "previewBands": [],
+            "actions": [],
+            "markers": [
+                {
+                    "trackId": region.get("track_id"),
+                    "centerHz": region.get("center_hz"),
+                    "bandLowHz": region.get("band_low_hz"),
+                    "bandHighHz": region.get("band_high_hz"),
+                }
+            ],
+        }
+    if issue_type == "sibilance":
+        action = _build_region_action(state, region=region, preserve_clip_id=None, index=1)
+        if action is None:
+            return None
+        return {
+            "issueId": issue_id,
+            "issueType": issue_type,
+            "startMs": int(region.get("start_ms") or 0),
+            "endMs": int(region.get("end_ms") or 0),
+            "trackId": region.get("track_id"),
+            "bubbleTarget": "track",
+            "uiMode": "eq_ai",
+            "summary": region.get("summary") or "Sibilance detected",
+            "explanation": "Deterministic EQ guidance was generated without using the planner loop.",
+            "previewBands": [],
+            "actions": [deepcopy(action)],
+            "markers": [],
+        }
+    return None
+
+
+def _build_initial_issue(
+    state: WorkflowState,
+    region: dict[str, object],
+) -> dict[str, object] | None:
+    issue_type = str(region.get("issue_type") or "")
+    if issue_type == "band_overlap":
+        return {
+            "issueId": _issue_id(state, int(region["id"])),
+            "issueType": issue_type,
+            "startMs": int(region.get("start_ms") or 0),
+            "endMs": int(region.get("end_ms") or 0),
+            "trackId": region.get("track_id"),
+            "bubbleTarget": "track",
+            "uiMode": "eq_ai",
+            "summary": region.get("summary") or "Band overlap detected",
+            "explanation": "Planner input is required before preview bands and EQ actions are materialized.",
+            "previewBands": [],
+            "actions": [],
+            "markers": [],
+        }
+    return _build_non_llm_issue(state, region)
+
+
+def _merge_issue_payload(
+    payload: dict[str, object],
+    *,
+    issue: dict[str, object],
+    suggestion: dict[str, object] | None = None,
+    active_issue_id: str | None = None,
+    group_title: object | None = None,
+    group_summary: object | None = None,
+) -> dict[str, object]:
+    merged = deepcopy(payload)
+    merged.setdefault("groupTitle", "Workflow suggestion group")
+    merged.setdefault("groupSummary", "Unified issue navigation payload")
+    merged.setdefault("activeIssueId", None)
+    merged.setdefault("navigationOrder", [])
+    merged.setdefault("issues", [])
+    merged.setdefault("suggestions", [])
+
+    issue_id = str(issue["issueId"])
+    merged["issues"] = [
+        existing
+        for existing in merged["issues"]
+        if not (isinstance(existing, dict) and str(existing.get("issueId")) == issue_id)
+    ]
+    merged["issues"].append(issue)
+    navigation_order = [
+        str(existing_id)
+        for existing_id in merged["navigationOrder"]
+        if str(existing_id) != issue_id
+    ]
+    navigation_order.append(issue_id)
+    merged["navigationOrder"] = navigation_order
+    if suggestion is not None:
+        merged["suggestions"].append(suggestion)
+    if isinstance(group_title, str) and group_title.strip():
+        merged["groupTitle"] = group_title
+    if isinstance(group_summary, str) and group_summary.strip():
+        merged["groupSummary"] = group_summary
+    if active_issue_id:
+        merged["activeIssueId"] = active_issue_id
+    elif not merged.get("activeIssueId"):
+        merged["activeIssueId"] = issue_id
+    return merged
+
+
+def _issue_id(state: WorkflowState, region_id: int) -> str:
+    return f"{state['job_id']}-issue-{region_id}"
+
+
+def _resolve_recommended_reduction_db(region: dict[str, object]) -> float:
+    explicit = region.get("recommended_reduction_db")
+    if isinstance(explicit, int | float):
+        return round(float(explicit), 3)
+    current_true_peak = region.get("current_true_peak_dbtp")
+    target_ceiling = region.get("target_ceiling_dbtp")
+    if isinstance(current_true_peak, int | float):
+        ceiling = float(target_ceiling) if isinstance(target_ceiling, int | float) else -1.0
+        return round(max(float(current_true_peak) - ceiling, 0.5), 3)
+    score = float(region.get("score") or 0.0)
+    return round(min(max(0.8 + (score * 6.0), 1.0), 4.0), 3)
+
+
 def _build_region_action(
     state: WorkflowState,
     *,
@@ -384,19 +664,6 @@ def _build_region_action(
             gain_delta_db=gain_delta_db,
             params=params,
         )
-    if issue == "high_band_harshness":
-        return build_action(
-            state,
-            index=index,
-            action_type="DYNAMIC_EQ",
-            track_id=int(region.get("track_id") or 0),
-            start_ms=region["start_ms"],
-            end_ms=region["end_ms"],
-            band_low_hz=region.get("band_low_hz"),
-            band_high_hz=region.get("band_high_hz"),
-            gain_delta_db=-1.8,
-            params={"threshold": -19, "ratio": 2.1},
-        )
     return None
 
 
@@ -428,11 +695,7 @@ def _resolve_overlap_target_track(
     primary = int(region.get("track_id") or 0)
     involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
     if involved_track_ids:
-        clip_track_id = (
-            _resolve_clip_track_id(state, preserve_clip_id)
-            if preserve_clip_id
-            else None
-        )
+        clip_track_id = _resolve_clip_track_id(state, preserve_clip_id) if preserve_clip_id else None
         track_scores = {
             int(track_id): float(score)
             for track_id, score in (region.get("track_body_contributions") or {}).items()
@@ -445,10 +708,7 @@ def _resolve_overlap_target_track(
         if not candidate_track_ids:
             return primary
         candidate_track_ids.sort(
-            key=lambda track_id: (
-                track_scores.get(track_id, 0.0),
-                track_id == primary,
-            ),
+            key=lambda track_id: (track_scores.get(track_id, 0.0), track_id == primary),
             reverse=True,
         )
         return candidate_track_ids[0]
@@ -468,7 +728,9 @@ def _resolve_overlap_target_track(
     return secondary
 
 
-def _resolve_clip_track_id(state: WorkflowState, clip_id: int) -> int | None:
+def _resolve_clip_track_id(state: WorkflowState, clip_id: int | None) -> int | None:
+    if clip_id is None:
+        return None
     for clip in state.get("clip_index", []):
         if int(clip.get("clip_id") or 0) == int(clip_id):
             return int(clip["track_id"])

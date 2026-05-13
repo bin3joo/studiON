@@ -27,6 +27,8 @@ AI 관련 작업을 할 때는 아래 순서로 판단한다.
 - 저장소 경계
 - 허용된 상위 흐름
 - 출력 스키마
+- Spring 연동 계약
+- `suggestion_payload`가 EQ-only preview spec에 고정되지 않도록, EQ/limiter 액션과 marker를 함께 담는 방식
 - retrieval 정책
 - validation / critic / eval 규칙
 - AI가 자주 실수하는 금지사항
@@ -43,6 +45,7 @@ AI 관련 작업을 할 때는 아래 순서로 판단한다.
 - 상태 저장 경계
 - interrupt / preview 처리
 - suggestion 출력 형식
+- Spring이 소비하는 EQ/limiter 계약
 - retrieval 정책
 - validation / critic / eval 규칙
 - 공통코드와 연결된 상태값 이름

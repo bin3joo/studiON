@@ -78,6 +78,9 @@ class TrackVocalPredictionProjection(BaseModel):
 class PlanStateProjection(BaseModel):
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
+    issue_id: str | None = None
+    action_type: str | None = None
+    action_payload: dict[str, Any] | None = None
     user_feedback_message: str | None = None
     status: str | None = None
     validator_result: str | None = None
@@ -343,6 +346,9 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
         [
             state.get("selected_region_id"),
             state.get("preserve_clip_id"),
+            state.get("issue_id"),
+            state.get("action_type"),
+            state.get("action_payload"),
             state.get("user_feedback_message"),
             state.get("plan_status"),
             state.get("validator_result"),
@@ -354,6 +360,9 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
     return PlanStateProjection(
         selected_region_id=state.get("selected_region_id"),
         preserve_clip_id=state.get("preserve_clip_id"),
+        issue_id=state.get("issue_id"),
+        action_type=state.get("action_type"),
+        action_payload=state.get("action_payload"),
         user_feedback_message=state.get("user_feedback_message"),
         status=state.get("plan_status"),
         validator_result=state.get("validator_result"),
@@ -367,38 +376,28 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
 # action 파라미터와 선택된 region 문맥을 외부 응답 스키마로 매핑한다.
 def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection | None:
     payload = state.get("suggestion_payload") or {}
-    plan_payload = state.get("plan_payload") or {}
-    candidate = plan_payload.get("candidate") or {}
-    action = candidate.get("action")
-    if not payload or not isinstance(action, dict):
+    if not payload:
         return None
 
     group_id = state.get("suggestion_group_id") or f"{state['job_id']}-group"
     validation_status = _to_validation_status(
         state.get("critic_result") or state.get("validator_result")
     )
+    issue_map = {
+        str(issue.get("issueId")): issue
+        for issue in payload.get("issues", [])
+        if isinstance(issue, dict) and issue.get("issueId")
+    }
     suggestions: list[SuggestionProjection] = []
     for suggestion_index, suggestion in enumerate(payload.get("suggestions", []), start=1):
         suggestion_id = f"{group_id}-suggestion-{suggestion_index}"
-        actions = [
-            SuggestionActionProjection(
-                id=str(candidate.get("candidateId") or suggestion_id),
-                suggestion_id=suggestion_id,
-                action_type=action.get("actionType"),
-                clip_id=action.get("targetClipId"),
-                start_ms=action.get("startMs"),
-                end_ms=action.get("endMs"),
-                band_low_hz=action.get("bandLowHz"),
-                band_high_hz=action.get("bandHighHz"),
-                gain_delta_db=action.get("gainDeltaDb"),
-                move_delta_ms=action.get("moveDeltaMs"),
-                params_json=action.get("params") or {},
-                target_scope=action.get("targetScope", "TRACK"),
-                target_track_id=action.get("targetTrackId"),
-                source_track_id=action.get("sourceTrackId"),
-                source_clip_id=action.get("sourceClipId"),
-            )
-        ]
+        issue = None
+        if suggestion_index <= len(payload.get("navigationOrder", [])):
+            issue = issue_map.get(str(payload["navigationOrder"][suggestion_index - 1]))
+        actions = _build_suggestion_actions(
+            suggestion_id=suggestion_id,
+            issue=issue,
+        )
         suggestions.append(
             SuggestionProjection(
                 id=suggestion_id,
@@ -415,11 +414,13 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
     ranked_region_ids = state.get("ranked_candidate_ids", [])
     # suggestion group은 선택된 region의 시간/마디 문맥을 같이 들고 있어야
     # 프론트가 어떤 구간에 대한 제안인지 자연스럽게 표현할 수 있다.
-    selected_region_id = (
-        state.get("selected_region_id")
-        or next(iter(ranked_region_ids), None)
-        or next(iter(state.get("analysis_region_ids", [])), None)
-    )
+    selected_region_id = _resolve_region_id_from_issue_id(str(payload.get("activeIssueId") or ""))
+    if selected_region_id is None:
+        selected_region_id = (
+            state.get("selected_region_id")
+            or next(iter(ranked_region_ids), None)
+            or next(iter(state.get("analysis_region_ids", [])), None)
+        )
     region_map = {region["id"]: region for region in state.get("analysis_regions", [])}
     selected_region = region_map.get(selected_region_id) if selected_region_id else None
     return SuggestionGroupProjection(
@@ -434,6 +435,49 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
         summary=payload.get("groupSummary"),
         suggestions=suggestions,
     )
+
+
+def _build_suggestion_actions(
+    *,
+    suggestion_id: str,
+    issue: dict[str, Any] | None,
+) -> list[SuggestionActionProjection]:
+    if not isinstance(issue, dict):
+        return []
+    actions: list[SuggestionActionProjection] = []
+    for index, issue_action in enumerate(issue.get("actions", []), start=1):
+        if not isinstance(issue_action, dict):
+            continue
+        actions.append(
+            SuggestionActionProjection(
+                id=f"{suggestion_id}-action-{index}",
+                suggestion_id=suggestion_id,
+                action_type=str(
+                    issue_action.get("type") or issue_action.get("actionType") or ""
+                ),
+                start_ms=issue.get("startMs"),
+                end_ms=issue.get("endMs"),
+                band_low_hz=issue_action.get("bandLowHz"),
+                band_high_hz=issue_action.get("bandHighHz"),
+                gain_delta_db=issue_action.get("gainDeltaDb")
+                or issue_action.get("recommendedReductionDb"),
+                params_json=issue_action,
+                target_scope=str(
+                    issue_action.get("targetScope") or issue.get("bubbleTarget") or "TRACK"
+                ),
+                target_track_id=issue_action.get("targetTrackId") or issue.get("trackId"),
+                source_track_id=issue_action.get("sourceTrackId"),
+                source_clip_id=issue_action.get("sourceClipId"),
+            )
+        )
+    return actions
+
+
+def _resolve_region_id_from_issue_id(issue_id: str) -> int | None:
+    if not issue_id:
+        return None
+    suffix = issue_id.rsplit("-", 1)[-1]
+    return int(suffix) if suffix.isdigit() else None
 
 
 # preview id가 생긴 경우에만 preview projection을 만든다.
@@ -533,6 +577,9 @@ def _build_feedback_event(state: WorkflowState) -> FeedbackEventProjection | Non
         event_type="USER_DECISION_RECORDED",
         payload={
             "decision": decision,
+            "issue_id": state.get("issue_id"),
+            "action_type": state.get("action_type"),
+            "action_payload": state.get("action_payload"),
             "selected_region_id": state.get("selected_region_id"),
             "preserve_clip_id": state.get("preserve_clip_id"),
             "user_feedback_message": state.get("user_feedback_message"),

@@ -7,7 +7,6 @@ import com.salmon.studion.domain.comment.dto.response.CommentsGetResponse;
 import com.salmon.studion.domain.comment.dto.websocket.*;
 import com.salmon.studion.domain.comment.service.CommentService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
-import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.service.TrackService;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -31,7 +30,7 @@ public class CommentFacade {
         request.validate();
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
 
-        Track track = trackService.getTrackInProjectId(request.getProjectId(), request.getTrackId());
+        trackService.validateTrackInProjectWorkingSet(request.getProjectId(), request.getTrackId());
 
         validateParentComment(request.getParentCommentId(), request.getProjectId(), request.getTrackId());
 
@@ -42,7 +41,7 @@ public class CommentFacade {
 
         CommentState commentState = commentService.createComment(
                 request.getProjectId(),
-                track,
+                request.getTrackId(),
                 user,
                 request.getParentCommentId(),
                 request.getContent(),
@@ -58,7 +57,7 @@ public class CommentFacade {
         projectMemberService.validateProjectMember(projectId, userId);
 
         if (trackId != null) {
-            trackService.getTrackInProjectId(projectId, trackId);
+            trackService.validateTrackInProjectWorkingSet(projectId, trackId);
         }
 
         List<CommentState> commentStates = commentService.getComments(projectId, trackId, isResolved, mentionedMe, userId);
@@ -70,7 +69,6 @@ public class CommentFacade {
         Map<Integer, User> usersById = loadUsersById(commentStates);
 
         return buildResponse(commentStates, usersById);
-
     }
 
     @Transactional

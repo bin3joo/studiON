@@ -208,14 +208,6 @@ public class TrackService {
         // 삭제된 트랙의 클립을 Redis에서 삭제
         clipService.deleteClipStatesByTrack(request.getProjectId(), request.getTrackId());
 
-        // 클립 RDB 삭제 후 트랙 RDB 삭제 (FK 제약으로 순서 고정)
-        clipService.deleteClipsByTrackFromRdb(request.getTrackId());
-        try {
-            trackRepository.deleteById(request.getTrackId());
-        } catch (Exception e) {
-            log.error("[RDB 트랙 삭제 실패]: trackId={}", request.getTrackId(), e);
-        }
-
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
 

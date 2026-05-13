@@ -41,7 +41,9 @@ import org.springframework.data.redis.core.ValueOperations;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.salmon.studion.global.common.response.ErrorCode;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -121,8 +123,8 @@ class TrackServiceTest {
         TrackReorderRequest req = new TrackReorderRequest();
         req.setProjectId(PROJECT_ID);
         req.setTrackId(trackId);
-        req.setTargetPreTrackId(targetPre);
-        req.setTargetPostTrackId(targetPost);
+        req.setPreTrackId(targetPre);
+        req.setPostTrackId(targetPost);
         return req;
     }
 
@@ -236,6 +238,29 @@ class TrackServiceTest {
 
             assertThat(fromStore(1).getPostTrackId()).isEqualTo(2);
             assertThat(fromStore(2).getPreTrackId()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("트랙 수가 50개에 도달하면 TRACK_LIMIT_EXCEEDED 예외를 던진다")
+        void addTrack_limitExceeded() {
+            when(hashOperations.size(TRACKS_KEY)).thenReturn(50L);
+
+            assertThatThrownBy(() -> trackService.addTrack(addRequest("track51", "audio"), 0))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
+                            .isEqualTo(ErrorCode.TRACK_LIMIT_EXCEEDED));
+        }
+
+        @Test
+        @DisplayName("트랙 수가 49개이면 정상적으로 추가된다")
+        void addTrack_underLimit() throws JsonProcessingException {
+            when(hashOperations.size(TRACKS_KEY)).thenReturn(49L);
+            when(valueOperations.increment(TRACK_ID_SEQ_KEY)).thenReturn(50L);
+            when(valueOperations.increment(EVENT_SEQ_KEY)).thenReturn(1L);
+
+            TrackAddResponse response = trackService.addTrack(addRequest("track50", "audio"), 0);
+
+            assertThat(response.getTrackId()).isEqualTo(50);
         }
     }
 

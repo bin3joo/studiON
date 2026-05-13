@@ -4,7 +4,6 @@ import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectClipRequest;
-import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackRequest;
 import com.salmon.studion.domain.ai.dto.response.AiJobStartResponse;
@@ -15,7 +14,6 @@ import com.salmon.studion.domain.ai.monitor.AiJobMonitor;
 import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
-import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -52,6 +50,7 @@ public class AiService {
         );
 
         Integer jobId = aiAnalysisJob.getId();
+
         log.info("AiService startWorkflow 호출 | jobId={} projectId={} requestedBy={}",
                 jobId, request.getProjectId(), userId);
 
@@ -73,17 +72,26 @@ public class AiService {
 
         try {
             AiJobStartResponse response = fastApiClient.startWorkflow(fastApiRequest);
+
             aiAnalysisJob.markDispatched(response.getJob());
-            aiJobMonitor.startMonitoring(response.getJob().getJobId(), response.getJob().getProjectId());
+            aiAnalysisJobRepository.save(aiAnalysisJob);
+
+            aiJobMonitor.startMonitoring(
+                    response.getJob().getJobId(),
+                    response.getJob().getProjectId()
+            );
+
             return response;
         } catch (BusinessException e) {
             aiAnalysisJob.markDispatchFailed(
                     e.getErrorCode().getCode(),
                     e.getMessage()
             );
+            aiAnalysisJobRepository.save(aiAnalysisJob);
             throw e;
         } catch (RuntimeException e) {
             aiAnalysisJob.markDispatchFailed("AI_UNKNOWN", e.getMessage());
+            aiAnalysisJobRepository.save(aiAnalysisJob);
             throw e;
         }
     }

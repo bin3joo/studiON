@@ -19,9 +19,11 @@ import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
 import type { TrackEqBandState } from './types'
 import { AlertTriangle } from 'lucide-vue-next';
-import { startAiWorkflow, getAiWorkflowStatus,
-  type AiAnalysisRegion, type ProjectSnapshotRequest,
-} from './api/projectAi.api'
+import { projectApi } from './api/project.api';
+import { useProjectSave } from './composables/useProjectSave';
+import { useCommentStore } from './store/useCommentStore';
+import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
+import { useProjectCollaboration } from './composables/useProjectCollaboration'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -30,6 +32,30 @@ const projectId = route.params.projectId as string
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
 const authStore = useAuthStore(); // Auth 스토어 사용 준비
+const commentStore = useCommentStore(); // 코멘트 전역 상태 사용
+
+// 현재 내 정보 (토큰에서 추출)
+const currentUserId = computed(() => {
+  if (!authStore.accessToken) return null
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
+    return payload.userId || payload.memberId || null
+  } catch(e) {
+    return null
+  }
+})
+
+const {
+  onlineUsers,
+  projectName,
+  syncProjectNameFromStore,
+  registerProjectSocketHandlers,
+  connectProjectSocket,
+  disconnectProjectSocket,
+  handleRename,
+} = useProjectCollaboration(Number(projectId))
+
+const { lastSavedTime, handleSave } = useProjectSave(Number(projectId));
 const TIMELINE_TRACK_HEADER_WIDTH = 266
 
 //휠 이벤트를 적용할 컨테이너
@@ -130,6 +156,11 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
     switch (e.code) {
+      case 'KeyS': // 저장
+        e.preventDefault();
+        handleSave();
+        break;
+
       case 'KeyC': // 복사
         e.preventDefault();
         if (trackStore.selectedClip) {
@@ -245,8 +276,6 @@ const updateMousePos = (e: MouseEvent) => {
  // collabStore.sendMyCursor(e.clientX, e.clientY);
 };
 
-
-
 // 프로젝트 시작 시 트랙 정보 불러오기
 onMounted(async () => {
   //페이지 진입 시 무조건 다크 모드로 강제 전환
@@ -264,49 +293,15 @@ onMounted(async () => {
   if(projectId){
     await trackStore.fetchProject(Number(projectId))
 
-    projectName.value = trackStore.projectInfo.name
-
-    socketService.subscribe('PROJECT_ONLINE_USERS', (payload) => {
-    onlineUsers.value = payload.users
-  })
-
-  socketService.subscribe('USER_JOINED_PROJECT', (payload) => {
-    onlineUsers.value = [
-      ...onlineUsers.value.filter(user => user.userId !== payload.user.userId),
-      payload.user,
-    ]
-  })
-
-  socketService.subscribe('USER_LEFT_PROJECT', (payload) => {
-  console.log('[ProjectPage] USER_LEFT_PROJECT 수신:', payload)
-
-  onlineUsers.value = onlineUsers.value.filter(
-    user => user.userId !== payload.userId
-  )
-})
-
-  socketService.subscribe('PROJECT_RENAMED', (payload) => {
-    projectName.value = payload.name
-    trackStore.projectInfo.name = payload.name
-  })
+    syncProjectNameFromStore()
+    registerProjectSocketHandlers()
 
     socketService.subscribe('COMMENT_ADDED', applyCommentAdded)
     socketService.subscribe('COMMENT_DELETED', applyCommentDeleted)
     socketService.subscribe('COMMENT_STATUS_CHANGED', applyCommentStatusChanged)
     socketService.subscribe('ERROR', handleSocketError)
   
-    // 토큰이 이미 있으면 바로 연결 (문자열인 projectId를 Number로 변환!)
-    if (authStore.accessToken) {
-      socketService.connect(Number(projectId)); 
-    } else {
-      // 토큰이 아직 복구되지 않았다면, 토큰이 들어오는 순간을 기다렸다가 연결
-      const unwatch = watch(() => authStore.accessToken, (newToken) => {
-        if (newToken) {
-          socketService.connect(Number(projectId)); // 여기도 Number() 추가!
-          unwatch(); // 한 번 연결했으면 감시 종료
-        }
-      });
-    }
+    connectProjectSocket()
   }
   
   //키보드 이벤트 리스너 등록 (캡처링 단계에서 가로채서 버튼 클릭 등 방지)
@@ -334,19 +329,12 @@ onUnmounted(()=>{
   window.removeEventListener('pointerdown', unlockAudioEngine, {capture: true});
   window.removeEventListener('keydown', unlockAudioEngine, {capture: true});
   // 웹소켓 연결 해제
-  socketService.disconnect();
+  disconnectProjectSocket()
   // 프로젝트 페이지를 벗어날 때 오디오 재생 즉시 중지
   trackStore.stopPlay();
 })
 
-interface OnlineUser {
-  userId: number
-  nickname: string
-  profileImageUrl: string | null
-}
 
-const onlineUsers = ref<OnlineUser[]>([])
-const projectName = ref('프로젝트')
 const isInviteModalOpen = ref(false)
 const activeSidePanel = ref<SidePanelType>(null)
 
@@ -411,6 +399,16 @@ const hoveredTrackId = ref<string | null>(null)
       comments: [newComment],
     })
   }
+
+  // 코멘트 스토어 동기화
+  if (projectId) {
+    commentStore.fetchComments(Number(projectId));
+  }
+  
+  // 내가 작성한 코멘트가 아니라면 알림 점 표시
+  if (data.author.userId !== currentUserId.value) {
+    commentStore.setHasNewComment(true)
+  }
 }
 
 function findTrackName(trackId: string) {
@@ -444,6 +442,10 @@ function applyCommentDeleted(data: {
       }
     })
     .filter(group => group.comments.length > 0)
+
+  if (projectId) {
+    commentStore.fetchComments(Number(projectId));
+  }
 }
 
 function applyCommentStatusChanged(data: {
@@ -465,6 +467,10 @@ function applyCommentStatusChanged(data: {
   if (!targetGroup) return
 
   targetGroup.resolved = data.isResolved
+
+  if (projectId) {
+    commentStore.fetchComments(Number(projectId));
+  }
 }
 
 function handleSocketError(error: {
@@ -501,27 +507,12 @@ function handleDeleteComment(payload: {
 
 const commentGroups = ref<TrackMeasureCommentGroup[]>([])
 
-function handleRename(nextName: string) {
-  const trimmedName = nextName.trim()
-
-  if (!trimmedName) return
-  if (trimmedName === projectName.value) return
-
-  socketService.publish('PROJECT_RENAME', {
-    name: trimmedName,
-  })
-}
-
 function handleExport() {
   console.log('내보내기')
 }
 
 function handleSaveVersion() {
   console.log('버전 저장')
-}
-
-function handleSave() {
-  console.log('저장')
 }
 
 function handleUndo() {
@@ -545,11 +536,8 @@ function handleOpenHistory() {
 }
 
 function handleOpenComments() {
+  commentStore.setHasNewComment(false)
   activeSidePanel.value = 'comments'
-}
-
-function handleOpenAiPanel() {
-  activeSidePanel.value = 'ai'
 }
 
 function handleCloseSidePanel() {
@@ -591,40 +579,36 @@ function handleSubmitInlineComment(payload: {
   })
 }
 
-const aiAnalyzing = ref(false)
-
-const aiConflict = ref<null | {
-  startPercent: number
-  endPercent: number
-  startPx: number
-  endPx: number
-  barStart: number
-  barEnd: number
-  title: string
-  summary: string
-  bullets: string[]
-}>(null)
-
-const aiBeforeBands = ref<TrackEqBandState[]>([])
-const aiAfterBands = ref<TrackEqBandState[]>([])
-
-const selectedEqTrack = computed(() => {
-  const selectedTrackId = trackStore.selectedTrackId
-
-  if (!selectedTrackId) return null
-
-  return trackStore.trackList.find(track =>
-    track.trackId === selectedTrackId
-  ) ?? null
-})
-
-function handleApplyAiEq() {
-  console.log('AI EQ 적용')
+function handlePanelResolveComment(commentId: number) {
+  socketService.publish('COMMENT_STATUS_CHANGE', {
+    commentId,
+  })
 }
 
-function handleCancelAiEq() {
-  aiConflict.value = null
+function handlePanelAddReply(parentCommentId: number, content: string) {
+  const parent = commentStore.comments.find(c => c.commentId === parentCommentId);
+  if (!parent) return;
+
+  socketService.publish('COMMENT_ADD', {
+    trackId: parent.trackId,
+    parentCommentId,
+    content: content.trim(),
+    location: parent.location,
+    mentionedUserIds: [],
+  })
 }
+
+const {
+  aiAnalyzing,
+  aiConflict,
+  aiBeforeBands,
+  aiAfterBands,
+  selectedEqTrack,
+  runAiAnalysis,
+  handleApplyAiEq,
+  handleCancelAiEq,
+  handleRequestAiEqRevision,
+} = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
   frequencyHz: number
@@ -759,244 +743,6 @@ const onGlobalDrop = (e: DragEvent) => {
     isInvalidDropModalOpen.value = true;
   }
 };
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-async function pollAiWorkflow(jobId: number) {
-  const maxTry = 60 // 2초 * 60 = 최대 120초
-
-  for (let i = 0; i < maxTry; i += 1) {
-    const result = await getAiWorkflowStatus(jobId)
-    const regions = result.projections.analysis_regions ?? []
-
-    if (result.job.status === 'FAILED') {
-      throw new Error(result.job.error_message ?? 'AI 분석에 실패했습니다.')
-    }
-
-    if (
-      result.job.status === 'COMPLETED' ||
-      result.job.status === 'WAITING_USER' ||
-      result.job.progress >= 100 ||
-      regions.length > 0
-    ) {
-      return result
-    }
-
-    await sleep(2000)
-  }
-
-  throw new Error('AI 분석 결과를 가져오지 못했습니다.')
-}
-
-function getAudioMetadataId(clip: any): number | null {
-  return (
-    clip.audioMetadataId ??
-    clip.audio_metadata_id ??
-    clip.audio?.audioMetadataId ??
-    clip.audio?.audio_metadata_id ??
-    null
-  )
-}
-
-function getAudioDurationMs(clip: any, fallbackDurationMs: number): number {
-  return (
-    clip.audioDurationMs ??
-    clip.audio_duration_ms ??
-    clip.audio?.durationMs ??
-    clip.audio?.duration_ms ??
-    clip.audio?.audioDurationMs ??
-    fallbackDurationMs
-  )
-}
-
-function buildProjectSnapshotFromStore(): ProjectSnapshotRequest {
-  const info = trackStore.projectInfo
-
-  const bpm = info.tempo
-  const numerator = info.timeSigNumerator || 4
-  const denominator = info.timeSigDenominator || 4
-
-  const msPerBar = (60000 / bpm) * numerator * (4 / denominator)
-
-  const tracks = trackStore.trackList.map(track => ({
-    track_id: Number(track.trackId),
-    name: track.name ?? '',
-  }))
-
-  const clips = trackStore.trackList.flatMap(track =>
-    track.clips
-      .map(clip => {
-        const audioMetadataId = getAudioMetadataId(clip)
-
-        if (!audioMetadataId) {
-          return null
-        }
-
-        const startMs = Math.round(clip.start * msPerBar)
-        const endMs = Math.round((clip.start + clip.duration) * msPerBar)
-        const clipDurationMs = Math.max(endMs - startMs, 1)
-
-        return {
-          clip_id: Number(clip.clipId),
-          track_id: Number(track.trackId),
-          start_ms: startMs,
-          end_ms: Math.max(endMs, startMs + 1),
-          audio_metadata_id: Number(audioMetadataId),
-          audio_start_ms: Math.round(clip.audioStartMs ?? clip.audio_start_ms ?? 0),
-          audio_duration_ms: Math.round(getAudioDurationMs(clip, clipDurationMs)),
-        }
-      })
-      .filter((clip): clip is ProjectSnapshotRequest['clips'][number] => clip !== null),
-  )
-
-  const baseDurationMs = Math.round(info.totalBarCount * msPerBar)
-  const durationMs = Math.max(
-    baseDurationMs,
-    ...clips.map(clip => clip.end_ms),
-  )
-
-  return {
-    duration_ms: durationMs,
-    bpm,
-    numerator,
-    denominator,
-    tracks,
-    clips,
-  }
-}
-
-function getMsPerBar() {
-  const info = trackStore.projectInfo
-
-  const bpm = info.tempo || 120
-  const numerator = info.timeSigNumerator || 4
-  const denominator = info.timeSigDenominator || 4
-
-  return (60000 / bpm) * numerator * (4 / denominator)
-}
-
-function mapRegionToOverlay(region: AiAnalysisRegion, durationMs: number) {
-  const startMs = region.start_ms ?? 0
-  const endMs = region.end_ms ?? startMs + 1
-
-  const msPerBar = getMsPerBar()
-
-  // 표시용 마디
-  const barStart =
-    region.measure_start ??
-    Math.floor(startMs / msPerBar) + 1
-
-  const barEnd =
-    region.measure_end ??
-    Math.ceil(endMs / msPerBar)
-
-  // 실제 위치 계산용: ms 기준
-  const startBarFloat = startMs / msPerBar
-  const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
-
-  const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
-  const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
-
-  const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
-  const endPercent = Math.max(
-    startPercent + 0.5,
-    Math.min(100, (endMs / durationMs) * 100),
-  )
-
-  return {
-    startPercent,
-    endPercent,
-    startPx,
-    endPx,
-    barStart,
-    barEnd,
-    title: `${barStart}마디에서 ${barEnd}마디 사이`,
-    summary: region.analysis_summary ?? 'AI가 충돌 가능성이 있는 구간을 감지했어요.',
-    bullets: [
-      region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
-      region.band_low_hz && region.band_high_hz
-        ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 충돌이 감지됐어요.`
-        : '주파수 대역 정보가 없습니다.',
-      region.involved_track_ids.length > 0
-        ? `관련 트랙: ${region.involved_track_ids.join(', ')}`
-        : '관련 트랙 정보를 확인 중입니다.',
-    ],
-  }
-}
-
-const runAiAnalysis = async () => {
-  if (aiAnalyzing.value) return
-
-  try {
-    aiAnalyzing.value = true
-    aiConflict.value = null
-
-    const selectedTrack = selectedEqTrack.value
-
-    if (selectedTrack?.eq?.bands) {
-      aiBeforeBands.value = selectedTrack.eq.bands.map(band => ({ ...band }))
-    } else {
-      aiBeforeBands.value = []
-    }
-
-    const snapshot = buildProjectSnapshotFromStore()
-
-    if (snapshot.tracks.length === 0) {
-      alert('분석할 트랙이 없습니다.')
-      return
-    }
-
-    if (snapshot.clips.length === 0) {
-      alert('AI 분석을 하려면 먼저 저장된 오디오 클립이 필요합니다.')
-      return
-    }
-
-    const startResult = await startAiWorkflow({
-      project_id: Number(projectId),
-      issue_types: [
-        'band_overlap',
-        'track_clipping',
-        'master_clipping',
-        'sibilance',
-        'high_band_harshness',
-      ],
-      validator_mode: 'PASS',
-      critic_mode: 'PASS',
-      project_snapshot: snapshot,
-    })
-
-    const statusResult = await pollAiWorkflow(startResult.job.job_id)
-    const regions = statusResult.projections.analysis_regions ?? []
-
-    console.log('[AI regions]', regions)
-    console.log('[AI snapshot duration]', snapshot.duration_ms)
-    console.log('[AI project info]', trackStore.projectInfo)
-
-    if (regions.length === 0) {
-      alert('AI가 감지한 충돌 구간이 없습니다.')
-      return
-    }
-
-    aiConflict.value = mapRegionToOverlay(regions[0], snapshot.duration_ms)
-  } catch (error) {
-    console.error(error)
-
-    if (
-      error instanceof Error &&
-      error.message.includes('timeout')
-    ) {
-      alert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.')
-      return
-    }
-
-    alert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.')
-  } finally {
-    aiAnalyzing.value = false
-  }
-}
-
 </script>
 
 <template>
@@ -1010,7 +756,7 @@ const runAiAnalysis = async () => {
     <ProjectHeader
   :project-name="projectName"
   :online-users="onlineUsers"
-  last-saved-at="13:24"
+  :last-saved-at="lastSavedTime"
   @rename="handleRename"
   @export="handleExport"
   @save-version="handleSaveVersion"
@@ -1034,11 +780,12 @@ const runAiAnalysis = async () => {
       @action-add-track="handleActionAddTrack"
     />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
-    <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
+    <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
-      <div 
-        ref="timelineContainerRef" 
-        class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
+      <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div 
+          ref="timelineContainerRef" 
+          class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
         @pointerdown.stop="trackStore.deselectAll()"
         @scroll="handleHorizontalScroll"
       >
@@ -1046,12 +793,12 @@ const runAiAnalysis = async () => {
         <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
           <TimelineRuler />
         </div>
-
+     
         <AiConflictOverlay
     v-if="aiConflict"
     :conflict="aiConflict"
   />
-
+     
         <!--  [세로 스크롤] -->
         <div class="w-max min-w-full pb-4 flex-1">
   <TrackList
@@ -1068,18 +815,18 @@ const runAiAnalysis = async () => {
         <!-- 마스터 트랙 -->
         <div class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]" style="will-change: transform;">
           <TrackItem
-  :track="trackStore.masterTrack"
-  :is-master="true"
-  :hovered-measure="hoveredMeasure"
-  :hovered-track-id="hoveredTrackId"
-  :commented-groups="commentGroups"
-  @hover-measure="handleHoverMeasure"
-  @submit-inline-comment="handleSubmitInlineComment"
-  @resolve-comment="handleResolveComment"
-  @delete-comment="handleDeleteComment"
-/>
+            :track="trackStore.masterTrack"
+            :is-master="true"
+            :hovered-measure="hoveredMeasure"
+            :hovered-track-id="hoveredTrackId"
+            :commented-groups="commentGroups"
+            @hover-measure="handleHoverMeasure"
+            @submit-inline-comment="handleSubmitInlineComment"
+            @resolve-comment="handleResolveComment"
+            @delete-comment="handleDeleteComment"
+          />
         </div>
-        
+      </div>
       </div>
       <ProjectEqPanel
         :selected-track="selectedEqTrack"
@@ -1089,23 +836,21 @@ const runAiAnalysis = async () => {
         :ai-after-bands="aiAfterBands"
         @apply-ai-eq="handleApplyAiEq"
         @cancel-ai-eq="handleCancelAiEq"
+        @request-ai-eq-revision="handleRequestAiEqRevision"
         @add-eq-band="handleAddEqBand"
         @update-eq-band="handleUpdateEqBand"
         @remove-eq-band="handleRemoveEqBand"
       />
-    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" />
-
-    <section class="px-6 py-4">
-      <div class="relative">
-        
-        <ProjectSidePanel
-          :open="activeSidePanel !== null"
-          :type="activeSidePanel"
-          @close="handleCloseSidePanel"
-        />
-      </div>
-    </section>
- -->
+    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
+    
+    <ProjectSidePanel
+      class="z-[200]"
+      :open="activeSidePanel !== null"
+      :type="activeSidePanel"
+      @close="handleCloseSidePanel"
+      @resolve-comment="handlePanelResolveComment"
+      @add-reply="handlePanelAddReply"
+    />
     </main>
 
     <!-- 협업자 커서 렌더링 -->
@@ -1118,7 +863,7 @@ const runAiAnalysis = async () => {
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->
-    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div class="flex flex-col items-center gap-4 rounded-xl bg-[#1E1E21] p-6 shadow-2xl border border-white/10 w-[320px]">
         <div class="rounded-full bg-red-500/20 p-3">
           <AlertTriangle class="h-6 w-6 text-red-400" />

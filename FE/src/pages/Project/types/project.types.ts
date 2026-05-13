@@ -139,3 +139,15 @@ export interface AcceptInviteCodeData {
 
 // 초대코드 입력 응답 전체
 export type AcceptInviteCodeResponse = ApiResponse<AcceptInviteCodeData | null>
+
+// 프로젝트 저장 응답
+export interface SaveProjectSnapshotResponse {
+  code: string;
+  message: string;
+  isSuccess: boolean;
+  data: {
+    projectId: number;
+    trigger: string;       // 예: "MANUAL"
+    saveAt: string;        // 예: "2026-05-12T15:30:00"
+  };
+}

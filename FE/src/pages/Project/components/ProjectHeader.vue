@@ -15,6 +15,9 @@ import {
 } from 'lucide-vue-next'
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
+import { useCommentStore } from '../store/useCommentStore'
+
+const commentStore = useCommentStore()
 
 interface Props {
   projectName: string
@@ -168,11 +171,12 @@ function cancelProjectNameEdit() {
       <button
         type="button"
         class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        title="저장 (Ctrl + S)"
         @click="emit('save')"
       >
         <Save class="h-4 w-4" />
         <span>저장</span>
-        <span class="text-muted-foreground">마지막 저장 시간 {{ lastSavedAt }}</span>
+        <span class="text-muted-foreground">{{ lastSavedAt }}</span>
       </button>
 
       <button
@@ -240,7 +244,7 @@ function cancelProjectNameEdit() {
         @click="emit('open-comments')"
       >
         <MessageSquare class="h-4 w-4" />
-        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+        <span v-if="commentStore.hasNewComment" class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
       </button>
 
       <button

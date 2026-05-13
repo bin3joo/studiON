@@ -12,6 +12,7 @@ import type {
 import type { FetchCommentsParams, FetchCommentsResponse } from '../types/comment.types';
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
+import type { SaveProjectSnapshotResponse } from '../types/project.types';
 
 // ==========================================
 // [인터페이스] 백엔드 응답 규격 (명세서 기반)
@@ -192,6 +193,14 @@ export const projectApi = {
     //인터셉터를 통해 response.data.data 내의 comments 배열이 반환됨
     return response.data.data.comments;
 
+  },
+
+  // 프로젝트 수동 저장
+  saveProjectSnapshot: async (projectId: number) => {
+    const response = await axiosInstance.post<SaveProjectSnapshotResponse>(
+      `/api/v1/projects/${projectId}/snapshot`
+    );
+    return response.data.data;
   }
 
 }

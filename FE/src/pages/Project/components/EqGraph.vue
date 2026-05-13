@@ -551,6 +551,7 @@ const zeroDbY = computed(() => gainToY(0))
         :y2="zeroDbY"
         stroke="#af8a1d"
         stroke-width="2.2"
+        pointer-events="none"
       />
 
       <!-- EQ 커브 -->
@@ -562,6 +563,7 @@ const zeroDbY = computed(() => gainToY(0))
         stroke-linecap="round"
         stroke-linejoin="round"
         vector-effect="non-scaling-stroke"
+        pointer-events="none"
       />
 
       <!-- 밴드 포인트 -->

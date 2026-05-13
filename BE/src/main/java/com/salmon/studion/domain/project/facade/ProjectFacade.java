@@ -12,7 +12,7 @@ import com.salmon.studion.domain.project.dto.response.ProjectListResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectSnapshotSaveResponse;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.entity.ProjectMember;
-import com.salmon.studion.domain.project.service.MasterTrackService;
+import com.salmon.studion.domain.track.service.MasterTrackService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.domain.project.service.ProjectSaveService;
 import com.salmon.studion.domain.project.service.ProjectService;

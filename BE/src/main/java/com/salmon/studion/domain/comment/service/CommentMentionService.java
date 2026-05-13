@@ -35,36 +35,5 @@ public class CommentMentionService {
 
         commentMentionRepository.saveAll(mentions);
     }
-
-//    @Transactional
-//    public void createCommentMention(Comment comment, List<User> mentionUsers) {
-//        if (mentionUsers == null || mentionUsers.isEmpty()) {
-//            return;
-//        }
-//
-//        List<CommentMention> mentions = mentionUsers.stream()
-//                .map(user -> CommentMention.create(comment, user))
-//                .toList();
-//
-//        commentMentionRepository.saveAll(mentions);
-//    }
-//
-//    @Transactional(readOnly = true)
-//    public List<CommentMention> getCommentMentions(Integer commentId) {
-//        return commentMentionRepository.findAllByCommentId(commentId);
-//    }
-//
-//    @Transactional(readOnly = true)
-//    public Map<Integer, List<CommentMention>> getMentionsByCommentIds(List<Integer> commentIds) {
-//        if (commentIds.isEmpty()) {
-//            return Map.of();
-//        }
-//        return commentMentionRepository.findAllByCommentIds(commentIds).stream()
-//                .collect(Collectors.groupingBy(cm -> cm.getComment().getId()));
-//   }
-//
-//    @Transactional
-//    public void deleteAllByCommentId(Integer commentId) {
-//        commentMentionRepository.deleteAllByComment_Id(commentId);
-//    }
+    
 }

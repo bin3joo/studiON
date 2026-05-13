@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from tempfile import gettempdir
 from types import SimpleNamespace
@@ -204,18 +205,21 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     _TEST_AUDIO_METADATA.clear()
+    cache_dir = Path(gettempdir()) / "studion-ai-audio-cache-test"
+    shutil.rmtree(cache_dir, ignore_errors=True)
     settings = SimpleNamespace(
         mongo_url=None,
         mongo_database="studion_ai",
         mongo_snapshot_collection="timeline_snapshots",
         mongo_artifact_collection="workflow_artifacts",
         audio_root=None,
-        audio_cache_dir=str(Path(gettempdir()) / "studion-ai-audio-cache-test"),
+        audio_cache_dir=str(cache_dir),
         audio_download_timeout_seconds=10.0,
         audio_download_connect_timeout_seconds=2.0,
     )
     monkeypatch.setattr("app.services.workflow_artifacts.get_settings", lambda: settings)
     monkeypatch.setattr("app.services.workflow_snapshots.get_settings", lambda: settings)
+    monkeypatch.setattr("app.services.workflow_audio_paths.get_settings", lambda: settings)
     monkeypatch.setattr(
         "app.services.workflow_snapshots.get_workflow_audio_metadata_store",
         lambda: _FakeAudioMetadataStore(),
@@ -230,6 +234,7 @@ def reset_preview_related_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     artifact_store.reset()
     snapshot_store.reset()
     _TEST_AUDIO_METADATA.clear()
+    shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def test_resolve_clip_audio_path_downloads_and_caches_audio_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,7 +306,11 @@ def test_resolve_clip_audio_path_raises_on_audio_download_failure(
     assert exc.value.code == "AUDIO_DOWNLOAD_FAILED"
 
 
-def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
+def build_project_snapshot(
+    *,
+    track_ids: list[int],
+    track_eqs: list[dict[str, object]] | None = None,
+) -> ProjectSnapshot:
     clips = []
     for index, track_id in enumerate(track_ids, start=1):
         metadata_id = _register_audio_metadata(
@@ -329,6 +338,7 @@ def build_project_snapshot(*, track_ids: list[int]) -> ProjectSnapshot:
                 {"track_id": track_id, "name": f"Track {track_id}"} for track_id in track_ids
             ],
             "clips": clips,
+            "track_eqs": track_eqs or [],
         }
     )
 
@@ -337,6 +347,7 @@ def build_project_snapshot_with_audio(
     *,
     track_audio_paths: dict[int, str],
     duration_ms: int = 4800,
+    track_eqs: list[dict[str, object]] | None = None,
 ) -> ProjectSnapshot:
     return ProjectSnapshot.model_validate(
         {
@@ -364,6 +375,7 @@ def build_project_snapshot_with_audio(
                 }
                 for track_id, audio_path in track_audio_paths.items()
             ],
+            "track_eqs": track_eqs or [],
         }
     )
 
@@ -739,7 +751,7 @@ def test_workflow_fails_when_validator_rejects() -> None:
     assert result["durable_status"] == "FAILED"
 
 
-def test_workflow_autofixes_sibilance_without_preview() -> None:
+def test_workflow_waits_for_user_plan_input_for_sibilance() -> None:
     sample_rate = 16000
     duration_seconds = 4.8
     time_axis = np.linspace(
@@ -769,24 +781,13 @@ def test_workflow_autofixes_sibilance_without_preview() -> None:
             "issue_types": ["sibilance"],
         }
     )
-    artifact_store = get_workflow_artifact_store()
-    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
-    log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
-
-    assert result["current_node"] == "finalize_output"
-    assert result["runtime_status"] == "completed"
-    assert result["sibilance_fix_applied"] is True
-    assert result["sibilance_fix_log_id"] is not None
-    assert result["auto_fix_recipe_artifact_id"] is not None
-    assert recipe_artifact is not None
-    assert recipe_artifact.payload["issueType"] == "sibilance"
-    assert recipe_artifact.payload["appliedInMixedIssueFlow"] is False
-    assert recipe_artifact.payload["regionIds"]
-    assert recipe_artifact.payload["groups"][0]["issueType"] == "sibilance"
-    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
-    assert log_artifact is not None
-    assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
-    assert log_artifact.payload["regionIds"] == recipe_artifact.payload["regionIds"]
+    assert result["current_node"] == "wait_user_plan_input"
+    assert result["runtime_status"] == "waiting_for_user"
+    assert result["ranked_candidate_ids"]
+    sibilance_region = next(
+        region for region in result["analysis_regions"] if region["issue_type"] == "sibilance"
+    )
+    assert sibilance_region["requires_user_action"] is True
 
 
 def test_workflow_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run() -> None:
@@ -867,6 +868,7 @@ def test_user_action_gate_routes_directly_to_apply_when_action_is_required() -> 
         project_id=20036,
         phase="analysis_result_persisted",
         suggestion_payload={"suggestions": [{"previewBands": [{"jobId": 10036}]}]},
+        preview_required=True,
         user_action_required=True,
     )
     gated = nodes.user_action_gate(original)
@@ -892,12 +894,13 @@ def test_workflow_fails_when_no_preview_action_exists() -> None:
     assert failed["failure_code"] == "INVALID_PREVIEW_BAND_SPEC_COUNT"
 
 
-def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
-    failed = nodes.apply_selected_edit_recipe(
+def test_workflow_accepts_multiple_preview_actions_for_combined_preview() -> None:
+    applied = nodes.apply_selected_edit_recipe(
         build_workflow_initial_state(
             job_id=10018,
             project_id=20018,
             phase="analysis_result_persisted",
+            preview_required=True,
             suggestion_payload={
                 "suggestions": [
                     {
@@ -911,9 +914,8 @@ def test_workflow_fails_when_multiple_preview_actions_exist() -> None:
         )
     )
 
-    assert failed["current_node"] == "fail_workflow"
-    assert failed["runtime_status"] == "failed"
-    assert failed["failure_code"] == "INVALID_PREVIEW_BAND_SPEC_COUNT"
+    assert applied["current_node"] == "apply_selected_edit_recipe"
+    assert applied["preview_status"] == "PROCESSING"
 
 
 def test_render_preview_succeeds_without_audio_file_generation() -> None:
@@ -1042,6 +1044,9 @@ def test_workflow_response_contains_unified_projections() -> None:
         "BAND_OVERLAP",
         "SIBILANCE",
     }
+    assert response["projections"]["user_action_required"] is True
+    assert response["projections"]["preview_required"] is True
+    assert response["projections"]["auto_preview_generated"] is False
     assert response["projections"]["suggestion_group"]["id"] == "10042-group"
     assert response["projections"]["preview_render"]["id"] == "10042-preview"
     assert response["projections"]["preview_render"]["status"] == "READY"
@@ -1062,23 +1067,111 @@ def test_workflow_response_contains_unified_projections() -> None:
     assert response["projections"]["analysis_regions"][0]["affected_clip_ids"]
 
 
-def test_workflow_clipping_only_waits_for_user_plan_input() -> None:
-    result = run_workflow_graph(
-        {
-            "job_id": 10031,
-            "project_id": 20031,
-            "project_snapshot": build_project_snapshot(track_ids=[6]),
-            "issue_types": ["clipping"],
-        }
+def test_persist_analysis_result_marks_auto_preview_without_user_action() -> None:
+    state = build_workflow_initial_state(
+        job_id=10031,
+        project_id=20031,
+        has_auto_fixable_eq_issues=True,
     )
 
-    assert result["current_node"] == "finalize_output"
-    assert result["clipping_fix_applied"] is True
-    assert result["preview_id"] is None
-    assert (
-        "track_clipping" in result["detected_issues"]
-        or "master_clipping" in result["detected_issues"]
+    persisted = nodes.persist_analysis_result(state)
+
+    assert persisted["preview_id"] == "10031-preview"
+    assert persisted["preview_required"] is True
+    assert persisted["user_action_required"] is False
+    assert persisted["has_user_action_candidates"] is False
+
+
+def test_render_preview_uses_auto_preview_focus_region_without_selected_region() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="100311-auto-fix",
+            job_id=100311,
+            artifact_type="auto_fix_recipe",
+            payload={
+                "groups": [
+                    {
+                        "issueType": "sibilance",
+                        "regionIds": [9],
+                        "trackIds": [14],
+                        "regionCount": 1,
+                        "recipes": [
+                            {
+                                "regionId": 9,
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 14,
+                                "startMs": 400,
+                                "endMs": 1200,
+                                "bandLowHz": 6000,
+                                "bandHighHz": 7800,
+                                "gainDeltaDb": -2.2,
+                                "params": {"q": 2.1},
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
     )
+    rendered = nodes.render_preview(
+        build_workflow_initial_state(
+            job_id=100311,
+            project_id=200311,
+            preview_id="100311-preview",
+            preview_required=True,
+            auto_fix_recipe_artifact_id="100311-auto-fix",
+            suggestion_payload={
+                "suggestions": [
+                    {
+                        "previewBands": [
+                            {
+                                "jobId": 100311,
+                                "targetTrackId": 14,
+                                "bandOrder": 1,
+                                "eqTypeCode": 1,
+                                "frequencyHz": 6200,
+                                "q": 2.1,
+                                "gainDeltaDb": -2.2,
+                                "statusCode": 1,
+                                "previewExpiresAt": "2026-05-07T10:00:00+09:00",
+                            }
+                        ]
+                    }
+                ]
+            },
+            analysis_regions=[
+                {
+                    "id": 9,
+                    "issue_type": "sibilance",
+                    "requires_user_action": False,
+                    "track_id": 14,
+                    "start_ms": 400,
+                    "end_ms": 1200,
+                    "measure_start": 1,
+                    "measure_end": 1,
+                }
+            ],
+            clip_index=[
+                {
+                    "clip_id": _clip_id(14, 1),
+                    "track_id": 14,
+                    "start_ms": 0,
+                    "end_ms": 2400,
+                    "audio_path": str(Path(gettempdir()) / "missing-auto-preview-source.wav"),
+                    "audio_start_ms": 0,
+                    "audio_duration_ms": 2400,
+                }
+            ],
+            project_duration_ms=2400,
+        )
+    )
+
+    assert rendered["preview_status"] == "READY"
+    assert rendered["auto_preview_generated"] is True
+    assert rendered["preview_excerpt_start_ms"] == 0
+    assert rendered["preview_excerpt_end_ms"] == 2400
 
 
 def test_workflow_analysis_regions_include_detector_metadata() -> None:
@@ -1123,14 +1216,15 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
 
     assert overlap["secondary_track_id"] is None
     assert set(overlap["involved_track_ids"]) == {30, 31}
-    assert overlap["band_low_hz"] == 250
-    assert overlap["band_high_hz"] == 1200
+    assert 250 <= overlap["band_low_hz"] < overlap["band_high_hz"] < 1200
+    assert overlap["center_hz"] is not None
+    assert overlap["band_confidence"] is not None
     assert overlap["measure_start"] == 1
     assert overlap["measure_end"] in {1, 2, 3}
     assert _clip_id(30, 1) in overlap["affected_clip_ids"]
     assert _clip_id(31, 1) in overlap["affected_clip_ids"]
     assert clipping is not None
-    assert clipping["requires_user_action"] is False
+    assert clipping["requires_user_action"] is True
     assert sibilance["track_id"] == 30
     assert result["sibilance_fix_applied"] is True
     assert result["ranking_scores"][overlap["id"]] > 0
@@ -1871,6 +1965,163 @@ def test_workflow_fails_when_audio_source_is_missing() -> None:
     assert result["failure_code"] == "AUDIO_SOURCE_MISSING"
 
 
+def test_project_snapshot_rejects_unknown_track_eq_type() -> None:
+    with pytest.raises(ValueError, match="track_eq band eq_type"):
+        ProjectSnapshot.model_validate(
+            {
+                "duration_ms": 4800,
+                "bpm": 120,
+                "numerator": 4,
+                "denominator": 4,
+                "tracks": [{"track_id": 1, "name": "Track 1"}],
+                "clips": [
+                    {
+                        "clip_id": _clip_id(1, 1),
+                        "track_id": 1,
+                        "start_ms": 0,
+                        "end_ms": 2400,
+                        "audio_metadata_id": _register_audio_metadata(
+                            _audio_metadata_id(1, 1),
+                            _ensure_test_audio_file(1, vocal_like=True),
+                        ),
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 2400,
+                    }
+                ],
+                "track_eqs": [
+                    {
+                        "track_id": 1,
+                        "bands": [
+                            {
+                                "band_order": 1,
+                                "eq_type": "NOTCH",
+                                "frequency_hz": 3200,
+                                "q": 1.0,
+                                "gain_delta_db": -2.0,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
+def test_snapshot_runtime_context_includes_track_eq_map() -> None:
+    snapshot = build_project_snapshot(
+        track_ids=[10],
+        track_eqs=[
+            {
+                "track_id": 10,
+                "bands": [
+                    {
+                        "band_order": 1,
+                        "eq_type": "BELL",
+                        "frequency_hz": 4200,
+                        "q": 1.2,
+                        "gain_delta_db": -2.5,
+                    }
+                ],
+            }
+        ],
+    )
+
+    context = build_snapshot_runtime_context(snapshot)
+
+    assert context.track_eq_map == {
+        10: [
+            {
+                "band_order": 1,
+                "eq_type": "BELL",
+                "frequency_hz": 4200,
+                "q": 1.2,
+                "gain_delta_db": -2.5,
+            }
+        ]
+    }
+
+
+def test_track_eq_changes_dsp_features() -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    signal = (
+        0.28 * np.sin(2 * np.pi * 220 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 480 * time_axis)
+        + 0.32 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "workflow-track-eq-dsp.wav"
+    sf.write(audio_path, signal, sample_rate)
+
+    plain_snapshot = build_project_snapshot_with_audio(track_audio_paths={10: str(audio_path)})
+    eq_snapshot = build_project_snapshot_with_audio(
+        track_audio_paths={10: str(audio_path)},
+        track_eqs=[
+            {
+                "track_id": 10,
+                "bands": [
+                    {
+                        "band_order": 1,
+                        "eq_type": "BELL",
+                        "frequency_hz": 320,
+                        "q": 1.1,
+                        "gain_delta_db": 10.0,
+                    },
+                    {
+                        "band_order": 2,
+                        "eq_type": "HIGH_SHELF",
+                        "frequency_hz": 5000,
+                        "q": 0.707,
+                        "gain_delta_db": -8.0,
+                    },
+                ],
+            }
+        ],
+    )
+
+    plain_context = build_snapshot_runtime_context(plain_snapshot)
+    eq_context = build_snapshot_runtime_context(eq_snapshot)
+    plain_state = build_workflow_initial_state(
+        job_id=11001,
+        project_id=21001,
+        project_duration_ms=plain_context.duration_ms,
+        track_ids=plain_context.track_ids,
+        bpm=plain_context.bpm,
+        numerator=plain_context.numerator,
+        denominator=plain_context.denominator,
+        bar_mapping=plain_context.bar_mapping,
+        clip_index=plain_context.clip_index,
+        track_eq_map=plain_context.track_eq_map,
+    )
+    eq_state = build_workflow_initial_state(
+        job_id=11002,
+        project_id=21002,
+        project_duration_ms=eq_context.duration_ms,
+        track_ids=eq_context.track_ids,
+        bpm=eq_context.bpm,
+        numerator=eq_context.numerator,
+        denominator=eq_context.denominator,
+        bar_mapping=eq_context.bar_mapping,
+        clip_index=eq_context.clip_index,
+        track_eq_map=eq_context.track_eq_map,
+    )
+
+    _, plain_artifact = analysis_nodes._build_compact_dsp_summary(plain_state)
+    _, eq_artifact = analysis_nodes._build_compact_dsp_summary(eq_state)
+    plain_frame = plain_artifact["track_frames"]["10"][0]
+    eq_frame = eq_artifact["track_frames"]["10"][0]
+
+    assert eq_frame["body_energy"] > plain_frame["body_energy"]
+    assert eq_frame["high_band_ratio"] < plain_frame["high_band_ratio"]
+    assert eq_frame["peak_dbfs"] != plain_frame["peak_dbfs"]
+
+
 def test_detect_band_overlap_groups_congested_time_region_across_multiple_tracks() -> None:
     artifact_store = get_workflow_artifact_store()
     artifact_store.reset()
@@ -1964,6 +2215,55 @@ def test_detect_band_overlap_groups_congested_time_region_across_multiple_tracks
     assert regions[0]["secondary_track_id"] is None
 
 
+def test_detect_band_overlap_refines_region_to_actual_overlap_cluster() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-band-refine",
+            job_id=100261,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [100, 250, 400, 550, 700, 1000, 2500, 5000],
+                "track_frames": {
+                    "10": [
+                        {"start_ms": 0, "end_ms": 120, "body_energy": 0.58, "low_mid_energy": 0.07, "window_energy": 0.1},
+                        {"start_ms": 120, "end_ms": 240, "body_energy": 0.57, "low_mid_energy": 0.07, "window_energy": 0.1},
+                    ],
+                    "20": [
+                        {"start_ms": 0, "end_ms": 120, "body_energy": 0.49, "low_mid_energy": 0.06, "window_energy": 0.1},
+                        {"start_ms": 120, "end_ms": 240, "body_energy": 0.5, "low_mid_energy": 0.06, "window_energy": 0.1},
+                    ],
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.01, 0.08, 0.25, 0.72, 0.84, 0.2, 0.02, 0.01],
+                        [0.01, 0.07, 0.24, 0.69, 0.81, 0.18, 0.02, 0.01],
+                    ],
+                    "20": [
+                        [0.01, 0.07, 0.22, 0.66, 0.79, 0.2, 0.02, 0.01],
+                        [0.01, 0.07, 0.23, 0.64, 0.76, 0.18, 0.02, 0.01],
+                    ],
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100261,
+        project_id=200261,
+        issue_types=["band_overlap"],
+        clip_feature_artifact_id="artifact-band-refine",
+    )
+
+    regions = nodes.detect_band_overlap(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["band_low_hz"] == 400
+    assert regions[0]["band_high_hz"] < 1200
+    assert 500 <= regions[0]["center_hz"] <= 700
+    assert regions[0]["band_confidence"] is not None
+
+
 def test_band_overlap_target_track_excludes_preserved_clip_track() -> None:
     region = {
         "issue_type": "band_overlap",
@@ -1994,6 +2294,117 @@ def test_band_overlap_target_track_excludes_preserved_clip_track() -> None:
 
     assert action is not None
     assert action["targetTrackId"] == 20
+
+
+def test_detect_high_band_harshness_refines_band_to_prominent_peak() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-harshness-refine",
+            job_id=100262,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [1000, 2500, 4000, 4800, 5400, 6100, 7200, 8400],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "high_band_ratio": 0.38,
+                            "presence_energy": 0.09,
+                            "spectral_centroid_hz": 4200,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "high_band_ratio": 0.37,
+                            "presence_energy": 0.08,
+                            "spectral_centroid_hz": 4100,
+                            "window_energy": 0.1,
+                        },
+                    ]
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.02, 0.04, 0.08, 0.15, 0.82, 0.79, 0.18, 0.07],
+                        [0.02, 0.04, 0.08, 0.14, 0.79, 0.77, 0.17, 0.07],
+                    ]
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100262,
+        project_id=200262,
+        issue_types=["high_band_harshness"],
+        clip_feature_artifact_id="artifact-harshness-refine",
+    )
+
+    regions = nodes.detect_high_band_harshness(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["band_low_hz"] == 4800
+    assert regions[0]["band_high_hz"] < 9000
+    assert 5400 <= regions[0]["center_hz"] <= 7000
+    assert regions[0]["requires_user_action"] is True
+
+
+def test_detect_sibilance_refines_band_to_sibilant_cluster() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-sibilance-refine",
+            job_id=100263,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [1000, 2500, 4000, 5500, 6200, 7000, 7800, 8400],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "sibilance_ratio": 0.24,
+                            "high_band_ratio": 0.26,
+                            "spectral_centroid_hz": 2600,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "sibilance_ratio": 0.23,
+                            "high_band_ratio": 0.25,
+                            "spectral_centroid_hz": 2500,
+                            "window_energy": 0.1,
+                        },
+                    ]
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.02, 0.03, 0.05, 0.09, 0.18, 0.84, 0.8, 0.18],
+                        [0.02, 0.03, 0.05, 0.09, 0.17, 0.81, 0.78, 0.17],
+                    ]
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100263,
+        project_id=200263,
+        issue_types=["sibilance"],
+        clip_feature_artifact_id="artifact-sibilance-refine",
+        inferred_roles={10: "vocal-like"},
+        vocal_detected=True,
+    )
+
+    regions = nodes.detect_sibilance(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["band_low_hz"] == 6200
+    assert regions[0]["band_high_hz"] < 8500
+    assert 6800 <= regions[0]["center_hz"] <= 8000
 
 
 def test_compute_mix_frames_uses_4x_oversampled_true_peak() -> None:
@@ -2280,6 +2691,115 @@ def test_master_clipping_keeps_master_recipe_when_contributors_are_distributed()
     assert groups == []
 
 
+def test_detect_track_clipping_marks_band_driven_region_with_precise_band() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-track-clipping-band",
+            job_id=100264,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [100, 300, 600, 1200, 3000, 5000, 6500, 7800],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "peak_dbfs": 0.12,
+                            "high_band_ratio": 0.31,
+                            "window_energy": 0.2,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "peak_dbfs": 0.11,
+                            "high_band_ratio": 0.3,
+                            "window_energy": 0.2,
+                        },
+                    ]
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.01, 0.02, 0.02, 0.03, 0.08, 0.22, 0.85, 0.72],
+                        [0.01, 0.02, 0.02, 0.03, 0.08, 0.21, 0.83, 0.69],
+                    ]
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100264,
+        project_id=200264,
+        issue_types=["track_clipping"],
+        clip_feature_artifact_id="artifact-track-clipping-band",
+    )
+
+    regions = nodes.detect_track_clipping(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["band_low_hz"] == 5000
+    assert regions[0]["band_high_hz"] == 7800
+    assert regions[0]["broadband_classification"] == "band_driven"
+    assert "high" in regions[0]["band_hints"]
+    assert regions[0]["requires_user_action"] is True
+
+
+def test_detect_track_clipping_keeps_broadband_region_without_band() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-track-clipping-broadband",
+            job_id=100265,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [100, 300, 600, 1200, 3000, 5000, 6500, 7800],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "peak_dbfs": 0.12,
+                            "high_band_ratio": 0.14,
+                            "window_energy": 0.2,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "peak_dbfs": 0.11,
+                            "high_band_ratio": 0.14,
+                            "window_energy": 0.2,
+                        },
+                    ]
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.2, 0.21, 0.19, 0.18, 0.2, 0.19, 0.21, 0.2],
+                        [0.19, 0.2, 0.2, 0.19, 0.2, 0.19, 0.2, 0.19],
+                    ]
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100265,
+        project_id=200265,
+        issue_types=["track_clipping"],
+        clip_feature_artifact_id="artifact-track-clipping-broadband",
+    )
+
+    regions = nodes.detect_track_clipping(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["band_low_hz"] is None
+    assert regions[0]["band_high_hz"] is None
+    assert regions[0]["center_hz"] is None
+    assert regions[0]["band_confidence"] is None
+    assert regions[0]["broadband_classification"] == "broadband"
+    assert regions[0]["band_hints"] == ["broadband"]
+
+
 def test_track_clipping_recipe_uses_dynamic_eq_for_high_band_hint() -> None:
     recipe = runtime_nodes._build_track_clipping_fix_recipe(
         {
@@ -2296,6 +2816,27 @@ def test_track_clipping_recipe_uses_dynamic_eq_for_high_band_hint() -> None:
     assert recipe["actionType"] == "DYNAMIC_EQ"
     assert recipe["bandLowHz"] == 4500
     assert recipe["bandHighHz"] == 9000
+
+
+def test_track_clipping_recipe_prefers_refined_band_when_available() -> None:
+    recipe = runtime_nodes._build_track_clipping_fix_recipe(
+        {
+            "id": 11,
+            "track_id": 10,
+            "start_ms": 0,
+            "end_ms": 200,
+            "score": 0.42,
+            "band_low_hz": 5200,
+            "band_high_hz": 7600,
+            "band_hints": ["high"],
+            "broadband_classification": "band_driven",
+        }
+    )
+
+    assert recipe is not None
+    assert recipe["actionType"] == "DYNAMIC_EQ"
+    assert recipe["bandLowHz"] == 5200
+    assert recipe["bandHighHz"] == 7600
 
 
 def test_track_clipping_recipe_uses_eq_cut_for_low_mid_hint() -> None:
@@ -2349,12 +2890,15 @@ def test_workflow_defaults_include_clipping_detection() -> None:
         }
     )
 
-    assert result["current_node"] == "finalize_output"
     assert (
         "track_clipping" in result["detected_issues"]
         or "master_clipping" in result["detected_issues"]
     )
-    assert result["clipping_fix_applied"] is False
+    if "track_clipping" in result["detected_issues"]:
+        assert result["current_node"] == "wait_user_plan_input"
+        assert result["runtime_status"] == "waiting_for_user"
+    else:
+        assert result["current_node"] == "finalize_output"
 
 
 def test_workflow_skips_sibilance_when_clap_candidate_is_absent() -> None:
@@ -2450,6 +2994,7 @@ def test_detect_sibilance_uses_only_vocal_like_tracks() -> None:
     assert len(regions) == 1
     assert regions[0]["track_id"] == 10
     assert regions[0]["issue_type"] == "sibilance"
+    assert regions[0]["requires_user_action"] is True
 
 
 def test_clipping_autofix_excludes_master_clipping_recipe_groups() -> None:

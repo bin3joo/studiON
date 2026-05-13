@@ -59,7 +59,7 @@ def route_after_critic(state: WorkflowState) -> str:
 
 # 사용자 선택이 필요한 suggestion/action이 있으면 selection wait로, 없으면 결과를 바로 종료한다.
 def route_after_user_action_gate(state: WorkflowState) -> str:
-    return "apply_selected_edit_recipe" if state.get("user_action_required") else "finalize_output"
+    return "apply_selected_edit_recipe" if state.get("preview_required") else "finalize_output"
 
 
 # preview 이후에는 confirm/retry/cancel만 허용하고, 그 외 값은 안전하게 END로 끊는다.

@@ -247,7 +247,11 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def build_project_snapshot(*, track_ids: list[int]) -> dict:
+def build_project_snapshot(
+    *,
+    track_ids: list[int],
+    track_eqs: list[dict[str, object]] | None = None,
+) -> dict:
     clips = []
     for index, track_id in enumerate(track_ids, start=1):
         metadata_id = _register_audio_metadata(
@@ -272,6 +276,7 @@ def build_project_snapshot(*, track_ids: list[int]) -> dict:
         "denominator": 4,
         "tracks": [{"track_id": track_id, "name": f"Track {track_id}"} for track_id in track_ids],
         "clips": clips,
+        "track_eqs": track_eqs or [],
     }
 
 
@@ -386,7 +391,55 @@ def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.Monkey
     assert stored.status == "WAITING_USER"
 
 
-def test_worker_start_dispatch_for_clipping_autofixes_without_waiting(
+def test_start_workflow_job_persists_track_eq_map_in_timeline_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=29991,
+            project_id=39991,
+            project_snapshot=build_project_snapshot(
+                track_ids=[12],
+                track_eqs=[
+                    {
+                        "track_id": 12,
+                        "bands": [
+                            {
+                                "band_order": 1,
+                                "eq_type": "BELL",
+                                "frequency_hz": 4200,
+                                "q": 1.2,
+                                "gain_delta_db": -2.5,
+                            }
+                        ],
+                    }
+                ],
+            ),
+        )
+    )
+
+    snapshot = get_workflow_snapshot_store().get_snapshot("29991-timeline-snapshot")
+
+    assert snapshot is not None
+    assert snapshot.track_eq_map == {
+        "12": [
+            {
+                "band_order": 1,
+                "eq_type": "BELL",
+                "frequency_hz": 4200,
+                "q": 1.2,
+                "gain_delta_db": -2.5,
+            }
+        ]
+    }
+
+
+def test_worker_start_dispatch_waits_for_user_when_track_clipping_is_detected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -409,12 +462,12 @@ def test_worker_start_dispatch_for_clipping_autofixes_without_waiting(
         )
     )
 
-    assert resumed["current_node"] == "finalize_output"
-    assert resumed["clipping_fix_applied"] is True
-    assert resumed["runtime_status"] == "completed"
+    assert "track_clipping" in resumed["detected_issues"]
+    assert resumed["current_node"] == "wait_user_plan_input"
+    assert resumed["runtime_status"] == "waiting_for_user"
 
 
-def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
+def test_worker_start_dispatch_waits_for_user_for_sibilance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sample_rate = 16000
@@ -475,18 +528,331 @@ def test_worker_start_dispatch_autofixes_sibilance_without_waiting(
             dispatch_type="start",
         )
     )
-    artifact_store = get_workflow_artifact_store()
-    recipe_artifact = artifact_store.get_artifact(result["auto_fix_recipe_artifact_id"])
-    log_artifact = artifact_store.get_artifact(result["sibilance_fix_log_id"])
+    assert result["current_node"] == "wait_user_plan_input"
+    assert result["runtime_status"] == "waiting_for_user"
+    assert result["ranked_candidate_ids"]
+    sibilance_region = next(
+        region for region in result["analysis_regions"] if region["issue_type"] == "sibilance"
+    )
+    assert sibilance_region["requires_user_action"] is True
 
-    assert result["current_node"] == "finalize_output"
-    assert result["sibilance_fix_applied"] is True
-    assert result["sibilance_fix_log_id"] is not None
-    assert recipe_artifact is not None
-    assert recipe_artifact.payload["issueType"] == "sibilance"
-    assert recipe_artifact.payload["groups"][0]["recipes"][0]["actionType"] == "DYNAMIC_EQ"
-    assert log_artifact is not None
-    assert log_artifact.payload["recipeArtifactId"] == result["auto_fix_recipe_artifact_id"]
+
+def test_job_status_api_exposes_auto_preview_projection_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "dispatch-sibilance-autofix-status.wav"
+    sf.write(audio_path, vocal_like, sample_rate)
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=200032,
+            project_id=300032,
+            project_snapshot={
+                "duration_ms": 4800,
+                "bpm": 120,
+                "numerator": 4,
+                "denominator": 4,
+                "tracks": [{"track_id": 8, "name": "Track 8"}],
+                "clips": [
+                    {
+                        "clip_id": _clip_id(8, 1),
+                        "track_id": 8,
+                        "start_ms": 0,
+                        "end_ms": 4800,
+                        "audio_metadata_id": _register_audio_metadata(
+                            _audio_metadata_id(8, 1),
+                            str(audio_path),
+                        ),
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 4800,
+                    }
+                ],
+            },
+            issue_types=["sibilance"],
+        )
+    )
+    store = get_workflow_job_store()
+    stored = store.get_job(200032)
+    assert stored is not None
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="200032-auto-fix",
+            job_id=200032,
+            artifact_type="auto_fix_recipe",
+            payload={
+                "groups": [
+                    {
+                        "issueType": "track_clipping",
+                        "regionIds": [9001],
+                        "trackIds": [8],
+                        "regionCount": 1,
+                        "recipes": [
+                            {
+                                "regionId": 9001,
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 8,
+                                "startMs": 600,
+                                "endMs": 1400,
+                                "bandLowHz": 4500,
+                                "bandHighHz": 7800,
+                                "gainDeltaDb": -2.4,
+                                "params": {"q": 2.1},
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    )
+    auto_state = build_workflow_initial_state(
+        job_id=200032,
+        project_id=300032,
+        timeline_snapshot_id=stored.timeline_snapshot_id,
+        project_duration_ms=4800,
+        clip_index=stored.state_snapshot["clip_index"],
+        track_ids=[8],
+        phase="completed",
+        current_node="finalize_output",
+        runtime_status="completed",
+        durable_status="COMPLETED",
+        analysis_regions=[
+            {
+                "id": 9001,
+                "issue_type": "track_clipping",
+                "requires_user_action": False,
+                "track_id": 8,
+                "start_ms": 600,
+                "end_ms": 1400,
+                "measure_start": 1,
+                "measure_end": 2,
+                "band_low_hz": 4500,
+                "band_high_hz": 7800,
+            }
+        ],
+        suggestion_payload={
+            "suggestions": [
+                {
+                    "previewBands": [
+                        {
+                            "jobId": 200032,
+                            "targetTrackId": 8,
+                            "bandOrder": 1,
+                            "eqTypeCode": 1,
+                            "frequencyHz": 5924,
+                            "q": 2.1,
+                            "gainDeltaDb": -2.4,
+                            "statusCode": 1,
+                            "previewExpiresAt": "2026-05-07T10:00:00+09:00",
+                        }
+                    ]
+                }
+            ]
+        },
+        auto_fix_recipe_artifact_id="200032-auto-fix",
+        preview_id="200032-preview",
+        preview_status="READY",
+        preview_excerpt_start_ms=0,
+        preview_excerpt_end_ms=4800,
+        preview_requested_at="2026-05-07T09:30:00+09:00",
+        preview_started_at="2026-05-07T09:30:01+09:00",
+        preview_completed_at="2026-05-07T09:30:02+09:00",
+        preview_required=True,
+        has_auto_fixable_eq_issues=True,
+        user_action_required=False,
+        auto_preview_generated=True,
+    )
+    store.save_graph_state(auto_state)
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/200032")
+
+    assert response.status_code == 200
+    projections = response.json()["projections"]
+    assert projections["user_action_required"] is False
+    assert projections["preview_required"] is True
+    assert projections["auto_preview_generated"] is True
+    assert projections["preview_render"]["status"] == "READY"
+    assert projections["preview_render"]["preview_target_region"] is not None
+    assert projections["preview_render"]["preview_action_track"] is not None
+
+
+def test_preview_compare_api_supports_auto_preview_without_selected_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample_rate = 16000
+    duration_seconds = 4.8
+    time_axis = np.linspace(
+        0,
+        duration_seconds,
+        int(sample_rate * duration_seconds),
+        endpoint=False,
+    )
+    vocal_like = (
+        0.26 * np.sin(2 * np.pi * 330 * time_axis)
+        + 0.22 * np.sin(2 * np.pi * 520 * time_axis)
+        + 0.24 * np.sin(2 * np.pi * 3600 * time_axis)
+        + 0.48 * np.sin(2 * np.pi * 6800 * time_axis)
+    ).astype(np.float32)
+    audio_dir = Path(gettempdir()) / "studion-ai-test-audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = audio_dir / "dispatch-sibilance-autofix-compare.wav"
+    sf.write(audio_path, vocal_like, sample_rate)
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=200033,
+            project_id=300033,
+            project_snapshot={
+                "duration_ms": 4800,
+                "bpm": 120,
+                "numerator": 4,
+                "denominator": 4,
+                "tracks": [{"track_id": 8, "name": "Track 8"}],
+                "clips": [
+                    {
+                        "clip_id": _clip_id(8, 1),
+                        "track_id": 8,
+                        "start_ms": 0,
+                        "end_ms": 4800,
+                        "audio_metadata_id": _register_audio_metadata(
+                            _audio_metadata_id(8, 1),
+                            str(audio_path),
+                        ),
+                        "audio_start_ms": 0,
+                        "audio_duration_ms": 4800,
+                    }
+                ],
+            },
+            issue_types=["sibilance"],
+        )
+    )
+    store = get_workflow_job_store()
+    stored = store.get_job(200033)
+    assert stored is not None
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="200033-auto-fix",
+            job_id=200033,
+            artifact_type="auto_fix_recipe",
+            payload={
+                "groups": [
+                    {
+                        "issueType": "track_clipping",
+                        "regionIds": [9002],
+                        "trackIds": [8],
+                        "regionCount": 1,
+                        "recipes": [
+                            {
+                                "regionId": 9002,
+                                "actionType": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 8,
+                                "startMs": 700,
+                                "endMs": 1500,
+                                "bandLowHz": 4500,
+                                "bandHighHz": 7800,
+                                "gainDeltaDb": -2.1,
+                                "params": {"q": 2.0},
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    )
+    auto_state = build_workflow_initial_state(
+        job_id=200033,
+        project_id=300033,
+        timeline_snapshot_id=stored.timeline_snapshot_id,
+        project_duration_ms=4800,
+        clip_index=stored.state_snapshot["clip_index"],
+        track_ids=[8],
+        phase="completed",
+        current_node="finalize_output",
+        runtime_status="completed",
+        durable_status="COMPLETED",
+        analysis_regions=[
+            {
+                "id": 9002,
+                "issue_type": "track_clipping",
+                "requires_user_action": False,
+                "track_id": 8,
+                "start_ms": 700,
+                "end_ms": 1500,
+                "measure_start": 1,
+                "measure_end": 2,
+                "band_low_hz": 4500,
+                "band_high_hz": 7800,
+            }
+        ],
+        suggestion_payload={
+            "suggestions": [
+                {
+                    "previewBands": [
+                        {
+                            "jobId": 200033,
+                            "targetTrackId": 8,
+                            "bandOrder": 1,
+                            "eqTypeCode": 1,
+                            "frequencyHz": 5924,
+                            "q": 2.0,
+                            "gainDeltaDb": -2.1,
+                            "statusCode": 1,
+                            "previewExpiresAt": "2026-05-07T10:00:00+09:00",
+                        }
+                    ]
+                }
+            ]
+        },
+        auto_fix_recipe_artifact_id="200033-auto-fix",
+        preview_id="200033-preview",
+        preview_status="READY",
+        preview_excerpt_start_ms=0,
+        preview_excerpt_end_ms=4800,
+        preview_requested_at="2026-05-07T09:30:00+09:00",
+        preview_started_at="2026-05-07T09:30:01+09:00",
+        preview_completed_at="2026-05-07T09:30:02+09:00",
+        preview_required=True,
+        has_auto_fixable_eq_issues=True,
+        user_action_required=False,
+        auto_preview_generated=True,
+    )
+    store.save_graph_state(auto_state)
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/200033/preview-compare")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview"]["status"] == "READY"
+    assert body["focus_region"]["issue_type"] == "track_clipping"
+    assert body["issue_overlay"]["kind"] == "track_clipping"
+    assert len(body["actions"]) >= 1
 
 
 def test_worker_start_dispatch_keeps_preview_flow_and_logs_sibilance_in_mixed_issue_run(

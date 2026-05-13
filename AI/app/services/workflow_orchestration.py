@@ -83,6 +83,10 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
         denominator=snapshot_document.denominator,
         bar_mapping=snapshot_document.bar_mapping,
         clip_index=snapshot_document.clip_index,
+        track_eq_map={
+            int(track_id): bands
+            for track_id, bands in snapshot_document.track_eq_map.items()
+        },
         issue_types=payload.issue_types,
         validator_mode=payload.validator_mode,
         critic_mode=payload.critic_mode,

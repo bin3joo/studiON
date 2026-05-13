@@ -366,35 +366,24 @@ def _build_region_action(
             gain_delta_db=-2.4,
             params={"threshold": -18, "ratio": 2.4, "q": 2.4},
         )
-    if issue == "clipping":
-        band_hints = _collect_track_clipping_band_hints(region)
-        if "high" in band_hints:
-            return build_action(
-                state,
-                index=index,
-                action_type="DYNAMIC_EQ",
-                track_id=int(region.get("track_id") or 0),
-                start_ms=region["start_ms"],
-                end_ms=region["end_ms"],
-                band_low_hz=4500,
-                band_high_hz=9000,
-                gain_delta_db=-2.0,
-                params={"threshold": -20, "ratio": 2.0},
-            )
-        if "low_mid" in band_hints:
-            return build_action(
-                state,
-                index=index,
-                action_type="EQ_CUT",
-                track_id=int(region.get("track_id") or 0),
-                start_ms=region["start_ms"],
-                end_ms=region["end_ms"],
-                band_low_hz=180,
-                band_high_hz=1200,
-                gain_delta_db=-1.8,
-                params={"q": 1.1},
-            )
-        return None
+    if issue == "track_clipping":
+        resolved_band = _resolve_track_clipping_action_band(region)
+        if resolved_band is None:
+            return None
+        band_low_hz, band_high_hz, action_type, params = resolved_band
+        gain_delta_db = -2.0 if action_type == "DYNAMIC_EQ" else -1.8
+        return build_action(
+            state,
+            index=index,
+            action_type=action_type,
+            track_id=int(region.get("track_id") or 0),
+            start_ms=region["start_ms"],
+            end_ms=region["end_ms"],
+            band_low_hz=band_low_hz,
+            band_high_hz=band_high_hz,
+            gain_delta_db=gain_delta_db,
+            params=params,
+        )
     if issue == "high_band_harshness":
         return build_action(
             state,
@@ -408,6 +397,26 @@ def _build_region_action(
             gain_delta_db=-1.8,
             params={"threshold": -19, "ratio": 2.1},
         )
+    return None
+
+
+def _resolve_track_clipping_action_band(
+    region: dict[str, object],
+) -> tuple[int, int, str, dict[str, object]] | None:
+    band_low_hz = region.get("band_low_hz")
+    band_high_hz = region.get("band_high_hz")
+    if isinstance(band_low_hz, int) and isinstance(band_high_hz, int):
+        band_hints = _collect_track_clipping_band_hints(region)
+        if "high" in band_hints and band_low_hz >= 1500:
+            return band_low_hz, band_high_hz, "DYNAMIC_EQ", {"threshold": -20, "ratio": 2.0}
+        return band_low_hz, band_high_hz, "EQ_CUT", {"q": 1.1}
+    if str(region.get("broadband_classification")) == "broadband":
+        return None
+    band_hints = _collect_track_clipping_band_hints(region)
+    if "high" in band_hints:
+        return 4500, 9000, "DYNAMIC_EQ", {"threshold": -20, "ratio": 2.0}
+    if "low_mid" in band_hints:
+        return 180, 1200, "EQ_CUT", {"q": 1.1}
     return None
 
 

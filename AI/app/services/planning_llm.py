@@ -46,12 +46,14 @@ class HTTPPlanningLLMClient:
         base_url: str,
         api_key: str,
         model: str,
+        temperature: float,
         timeout_seconds: float,
         connect_timeout_seconds: float,
     ) -> None:
         self._base_url = base_url
         self._api_key = api_key
         self._model = model
+        self._temperature = temperature
         self._timeout = httpx.Timeout(timeout=timeout_seconds, connect=connect_timeout_seconds)
 
     def generate_plan(
@@ -66,6 +68,7 @@ class HTTPPlanningLLMClient:
     ) -> PlanningLLMResponse:
         request_payload = {
             "model": self._model,
+            "temperature": self._temperature,
             "messages": [
                 {
                     "role": "developer",
@@ -152,6 +155,7 @@ def get_planning_llm_client() -> PlanningLLMClient:
         base_url=settings.planning_llm_base_url,
         api_key=settings.planning_llm_api_key,
         model=settings.planning_llm_model,
+        temperature=settings.planning_llm_temperature,
         timeout_seconds=settings.planning_llm_timeout_seconds,
         connect_timeout_seconds=settings.planning_llm_connect_timeout_seconds,
     )

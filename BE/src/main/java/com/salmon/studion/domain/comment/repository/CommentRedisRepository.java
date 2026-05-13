@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.comment.dto.redis.CommentState;
 import com.salmon.studion.domain.comment.entity.Comment;
 import com.salmon.studion.domain.comment.entity.CommentMention;
+import com.salmon.studion.global.common.enums.CommentDeleteReason;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -12,10 +13,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Repository
@@ -149,6 +148,136 @@ public class CommentRedisRepository {
     }
 
     /**
+     * comment 삭제 마킹
+     * @param projectId
+     * @param commentId
+     * @param deleteReason
+     * @param deletedAt
+     */
+    public void markDeleted(
+            Integer projectId,
+            Integer commentId,
+            CommentDeleteReason deleteReason,
+            LocalDateTime deletedAt
+    ) {
+        CommentState commentState = getOrLoad(projectId, commentId);
+
+        CommentState deletedState = CommentState.markDeleted(commentState, deleteReason, deletedAt);
+
+        save(deletedState);
+
+        addDeletedCommentId(projectId, commentId);
+    }
+
+    /**
+     * comment 삭제 마킹 (부모 comment가 삭제된 경우)
+     * @param projectId
+     * @param parentCommentId
+     * @param deletedAt
+     */
+    public void markDeletedCascadeByParent(
+            Integer projectId,
+            Integer parentCommentId,
+            LocalDateTime deletedAt
+    ) {
+        List<CommentState> states = findAllOrLoadByProjectId(projectId);
+
+        states.stream()
+                .filter(state -> parentCommentId.equals(state.getCommentId()) || isDescendantOf(states, state, parentCommentId))
+                .filter(state -> !Boolean.TRUE.equals(state.getDeleted()))
+                .forEach(state -> {
+                    CommentDeleteReason reason = parentCommentId.equals(state.getCommentId())
+                            ? CommentDeleteReason.DIRECT
+                            : CommentDeleteReason.PARENT_CASCADE;
+                    markDeleted(projectId, state.getCommentId(), reason, deletedAt);
+                });
+    }
+
+    /**
+     * comment 삭제 마킹 (Track이 삭제된 경우)
+     * @param projectId
+     * @param trackId
+     * @param deletedAt
+     */
+    public void markDeletedByTrack(
+            Integer projectId,
+            Integer trackId,
+            LocalDateTime deletedAt
+    ) {
+        List<CommentState> states = findAllOrLoadByProjectId(projectId);
+
+        states.stream()
+                .filter(state -> trackId.equals(state.getTrackId()))
+                .filter(state -> !Boolean.TRUE.equals(state.getDeleted()))
+                .forEach(state -> markDeleted(
+                        projectId,
+                        state.getCommentId(),
+                        CommentDeleteReason.TRACK_DELETE,
+                        deletedAt
+                ));
+    }
+
+    /**
+     * 삭제 마킹된 comment Id 목록 조회
+     * @param projectId
+     * @return
+     */
+    public Set<Integer> getDeletedCommentIds(Integer projectId) {
+        Set<String> members = redisTemplate.opsForSet().members(deletedCommentsKey(projectId));
+
+        if (members == null || members.isEmpty()) {
+            return Set.of();
+        }
+
+        return members.stream().map(Integer::parseInt).collect(Collectors.toSet());
+    }
+
+    /**
+     * deleted set 에 삭제할 comment Id 추가
+     * @param projectId
+     * @param commentId
+     */
+    public void addDeletedCommentId(Integer projectId, Integer commentId) {
+        redisTemplate.opsForSet().add(deletedCommentsKey(projectId), String.valueOf(commentId));
+    }
+
+    /**
+     * deleted set 에 삭제된 comment Id 제거
+     * @param projectId
+     * @param commentId
+     */
+    public void removeDeletedCommentId(Integer projectId, Integer commentId) {
+        redisTemplate.opsForSet().remove(deletedCommentsKey(projectId), String.valueOf(commentId));
+    }
+
+    /**
+     * 특정 project의 deleted set 전체 삭제
+     * @param projectId
+     */
+    public void clearDeletedCommentIds(Integer projectId) {
+        redisTemplate.delete(deletedCommentsKey(projectId));
+    }
+
+    /**
+     * Redis hash와 deleted set에서 comment 1개 삭제
+     * @param projectId
+     * @param commentId
+     */
+    public void deleteCommentState(Integer projectId, Integer commentId) {
+        redisTemplate.opsForHash().delete(commentsKey(projectId), String.valueOf(commentId));
+        removeDeletedCommentId(projectId, commentId);
+    }
+
+    /**
+     * 특정 project의 comment를 Redis(comments hash, deleted_comments set)에서 전체 제거
+     * @param projectId
+     */
+    public void clearProjectCommentStates(Integer projectId) {
+        redisTemplate.delete(commentsKey(projectId));
+        redisTemplate.delete(deletedCommentsKey(projectId));
+    }
+
+    /**
      * MySQL에서 comment를 1개 조회한 뒤 state로 변환
      * @param projectId
      * @param commentId
@@ -191,7 +320,38 @@ public class CommentRedisRepository {
                 );
     }
 
+    /**
+     * 특정 부모 comment의 자식인지 판별
+     * @param commentStateList
+     * @param target
+     * @param ancestorCommentId
+     * @return
+     */
+    private boolean isDescendantOf(
+            List<CommentState> commentStateList,
+            CommentState target,
+            Integer ancestorCommentId
+    ) {
+        Map<Integer, CommentState> stateMap = commentStateList.stream()
+                .collect(Collectors.toMap(CommentState::getCommentId, Function.identity(), (a, b) -> a));
 
+        Integer currentParentId = target.getParentCommentId();
+
+        while (currentParentId != null) {
+            if (ancestorCommentId.equals(currentParentId)) {
+                return true;
+            }
+
+            CommentState parent = stateMap.get(currentParentId);
+            if (parent == null) {
+                return false;
+            }
+
+            currentParentId = parent.getParentCommentId();
+        }
+
+        return false;
+    }
 
     /**
      * Redis 시퀀스가 없는 경우, MySQL max id 기준으로 초기화

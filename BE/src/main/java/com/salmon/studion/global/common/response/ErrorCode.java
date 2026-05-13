@@ -37,6 +37,7 @@ public enum ErrorCode {
     TRACK_NOT_FOUND(HttpStatus.NOT_FOUND, "T_001", "트랙을 찾을 수 없습니다."),
     TRACK_ACCESS_DENIED(HttpStatus.FORBIDDEN, "T_002", "트랙 접근 권한이 없습니다."),
     TRACK_LOCKED(HttpStatus.CONFLICT, "T_003", "다른 사용자가 트랙을 작업 중입니다."),
+    TRACK_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "T_004", "트랙은 최대 50개까지 생성할 수 있습니다."),
 
     // 오디오 A_000
     AUDIO_NOT_FOUND(HttpStatus.NOT_FOUND, "A_001", "오디오 파일을 찾을 수 없습니다."),
@@ -62,6 +63,7 @@ public enum ErrorCode {
     CLIP_NOT_FOUND(HttpStatus.NOT_FOUND, "CL_001", "클립을 찾을 수 없습니다."),
     CLIP_LOCKED(HttpStatus.CONFLICT, "CL_002", "다른 사용자가 편집 중인 클립입니다."),
     CLIP_OVERLAP(HttpStatus.CONFLICT, "CL_003", "해당 위치에 클립이 이미 존재합니다."),
+    CLIP_BAR_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "CL_004", "클립이 최대 마디(200)를 초과합니다."),
 
     // AI AI_000
     AI_FASTAPI_CALL_FAILED(HttpStatus.BAD_GATEWAY, "AI_001", "AI 서버 호출에 실패했습니다."),

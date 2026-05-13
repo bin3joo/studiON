@@ -38,6 +38,7 @@ public class TrackService {
     private static final String TRACK_ID_SEQ_KEY = "global:track:id_seq";
     private static final String EVENT_SEQ_KEY = "project:%d:event:seq";
     private static final String DELETED_TRACKS_KEY = "project:%d:deleted_tracks";
+    private static final int MAX_TRACK_COUNT = 50;
 
     private final ProjectService projectService;
     private final ClipService clipService;
@@ -132,6 +133,13 @@ public class TrackService {
         // 프로젝트 존재여부 확인
         Project project = projectService.getProjectOrThrow(request.getProjectId());
 
+        // 트랙 수 제한 확인
+        String trackKey = String.format(TRACKS_KEY, request.getProjectId());
+        Long trackCount = redisTemplate.opsForHash().size(trackKey);
+        if (trackCount >= MAX_TRACK_COUNT) {
+            throw new BusinessException(ErrorCode.TRACK_LIMIT_EXCEEDED);
+        }
+
         Integer newTrackId = redisTemplate.opsForValue()
                 .increment(TRACK_ID_SEQ_KEY).intValue();
 
@@ -207,14 +215,6 @@ public class TrackService {
 
         // 삭제된 트랙의 클립을 Redis에서 삭제
         clipService.deleteClipStatesByTrack(request.getProjectId(), request.getTrackId());
-
-        // 클립 RDB 삭제 후 트랙 RDB 삭제 (FK 제약으로 순서 고정)
-        clipService.deleteClipsByTrackFromRdb(request.getTrackId());
-        try {
-            trackRepository.deleteById(request.getTrackId());
-        } catch (Exception e) {
-            log.error("[RDB 트랙 삭제 실패]: trackId={}", request.getTrackId(), e);
-        }
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));

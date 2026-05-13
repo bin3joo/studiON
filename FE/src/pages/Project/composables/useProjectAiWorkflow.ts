@@ -11,21 +11,31 @@ import {
 
 const TIMELINE_TRACK_HEADER_WIDTH = 266
 
-type AiConflictOverlayState = {
+type AiIssueKind = 'BAND_OVERLAP' | 'CLIPPING' | 'HARSHNESS'
+type AiIssueTargetType = 'TIMELINE' | 'MASTER_TRACK' | 'TRACK'
+
+type AiAnalysisItem = {
+  id: string | number
+  kind: AiIssueKind
+  targetType: AiIssueTargetType
+  targetTrackId: number | null
+
   startPercent: number
   endPercent: number
   startPx: number
   endPx: number
+
   barStart: number
   barEnd: number
+
   title: string
   summary: string
   bullets: string[]
-}
 
-type AiEqRevisionPayload = {
-  selectedTrackIds: number[]
-  message: string
+  bandLowHz: number | null
+  bandHighHz: number | null
+
+  recommendedGainReductionDb: number | null
 }
 
 export function useProjectAiWorkflow(projectId: number) {
@@ -33,7 +43,15 @@ export function useProjectAiWorkflow(projectId: number) {
 
   const aiAnalyzing = ref(false)
 
-  const aiConflict = ref<AiConflictOverlayState | null>(null)
+  const aiAnalysisItems = ref<AiAnalysisItem[]>([])
+  const activeAiAnalysisIndex = ref(0)
+
+  const activeAiAnalysis = computed(() => {
+    return aiAnalysisItems.value[activeAiAnalysisIndex.value] ?? null
+  })
+
+  // 기존 ProjectPage / Overlay 호환용
+  const aiConflict = computed(() => activeAiAnalysis.value)
 
   const aiBeforeBands = ref<TrackEqBandState[]>([])
   const aiAfterBands = ref<TrackEqBandState[]>([])
@@ -41,14 +59,18 @@ export function useProjectAiWorkflow(projectId: number) {
   const selectedAiRegionId = ref<number | null>(null)
 
   const selectedEqTrack = computed(() => {
-    const selectedTrackId = trackStore.selectedTrackId
+  if (trackStore.selectedTarget?.type === 'MASTER') {
+    return trackStore.masterTrack
+  }
 
-    if (!selectedTrackId) return null
+  const selectedTrackId = trackStore.selectedTrackId
 
-    return trackStore.trackList.find(track =>
-      track.trackId === selectedTrackId
-    ) ?? null
-  })
+  if (!selectedTrackId) return null
+
+  return trackStore.trackList.find(track =>
+    track.trackId === selectedTrackId
+  ) ?? null
+})
 
   function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms))
@@ -168,57 +190,136 @@ export function useProjectAiWorkflow(projectId: number) {
     }
   }
 
-  function mapRegionToOverlay(
-    region: AiAnalysisRegion,
-    durationMs: number,
-  ): AiConflictOverlayState {
-    const startMs = region.start_ms ?? 0
-    const endMs = region.end_ms ?? startMs + 1
+  function mapRegionToAnalysisItem(
+  region: AiAnalysisRegion,
+  durationMs: number,
+): AiAnalysisItem {
+  const startMs = region.start_ms ?? 0
+  const endMs = region.end_ms ?? startMs + 1
 
-    const msPerBar = getMsPerBar()
+  const msPerBar = getMsPerBar()
 
-    const barStart =
-      region.measure_start ??
-      Math.floor(startMs / msPerBar) + 1
+  const barStart =
+    region.measure_start ??
+    Math.floor(startMs / msPerBar) + 1
 
-    const barEnd =
-      region.measure_end ??
-      Math.ceil(endMs / msPerBar)
+  const barEnd =
+    region.measure_end ??
+    Math.ceil(endMs / msPerBar)
 
-    const startBarFloat = startMs / msPerBar
-    const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
+  const startBarFloat = startMs / msPerBar
+  const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
 
-    const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
-    const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
+  const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
+  const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
 
-    const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
-    const endPercent = Math.max(
-      startPercent + 0.5,
-      Math.min(100, (endMs / durationMs) * 100),
-    )
+  const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
+  const endPercent = Math.max(
+    startPercent + 0.5,
+    Math.min(100, (endMs / durationMs) * 100),
+  )
 
-    const involvedTrackIds = region.involved_track_ids ?? []
+  const kind = mapIssueTypeToKind(region.issue_type)
+  const involvedTrackIds = region.involved_track_ids ?? []
 
-    return {
-      startPercent,
-      endPercent,
-      startPx,
-      endPx,
-      barStart,
-      barEnd,
-      title: `${barStart}마디에서 ${barEnd}마디 사이`,
-      summary: region.analysis_summary ?? 'AI가 충돌 가능성이 있는 구간을 감지했어요.',
-      bullets: [
-        region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
-        region.band_low_hz && region.band_high_hz
-          ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 충돌이 감지됐어요.`
-          : '주파수 대역 정보가 없습니다.',
-        involvedTrackIds.length > 0
-          ? `관련 트랙: ${involvedTrackIds.join(', ')}`
-          : '관련 트랙 정보를 확인 중입니다.',
-      ],
-    }
+  let targetType: AiIssueTargetType = 'TIMELINE'
+  let targetTrackId: number | null = null
+
+  if (kind === 'BAND_OVERLAP') {
+    targetType = 'TIMELINE'
+    targetTrackId =
+      involvedTrackIds[0] ??
+      region.track_id ??
+      region.secondary_track_id ??
+      null
   }
+
+  if (kind === 'CLIPPING') {
+    targetType = 'MASTER_TRACK'
+    targetTrackId = null
+  }
+
+  if (kind === 'HARSHNESS') {
+    targetType = 'TRACK'
+    targetTrackId =
+      region.track_id ??
+      involvedTrackIds[0] ??
+      null
+  }
+
+  const titlePrefix =
+    kind === 'BAND_OVERLAP'
+      ? '대역 중복'
+      : kind === 'CLIPPING'
+        ? '클리핑'
+        : '하쉬니스'
+
+  return {
+    id: region.id,
+    kind,
+    targetType,
+    targetTrackId,
+
+    startPercent,
+    endPercent,
+    startPx,
+    endPx,
+
+    barStart,
+    barEnd,
+
+    title: `${titlePrefix} · ${barStart}마디에서 ${barEnd}마디 사이`,
+    summary: region.analysis_summary ?? 'AI가 문제가 발생한 구간을 감지했어요.',
+    bullets: [
+      region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
+      region.band_low_hz && region.band_high_hz
+        ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 문제가 감지됐어요.`
+        : '주파수 대역 정보가 없습니다.',
+      involvedTrackIds.length > 0
+        ? `관련 트랙: ${involvedTrackIds.join(', ')}`
+        : kind === 'CLIPPING'
+          ? '마스터 트랙에서 확인이 필요합니다.'
+          : '관련 트랙 정보를 확인 중입니다.',
+    ],
+
+    bandLowHz: region.band_low_hz,
+    bandHighHz: region.band_high_hz,
+
+    // AI 응답 확정 전 임시값
+    recommendedGainReductionDb: kind === 'CLIPPING' ? -3 : null,
+  }
+}
+
+  function mapIssueTypeToKind(issueType: string | null): AiIssueKind {
+  const normalized = issueType?.toLowerCase() ?? ''
+
+  if (
+    normalized.includes('clipping') ||
+    normalized.includes('clip')
+  ) {
+    return 'CLIPPING'
+  }
+
+  if (
+    normalized.includes('harshness') ||
+    normalized.includes('harsh') ||
+    normalized.includes('high_band') ||
+    normalized.includes('sibilance') ||
+    normalized.includes('sibilant')
+  ) {
+    return 'HARSHNESS'
+  }
+
+  if (
+    normalized.includes('band_overlap') ||
+    normalized.includes('overlap') ||
+    normalized.includes('masking')
+  ) {
+    return 'BAND_OVERLAP'
+  }
+
+  return 'BAND_OVERLAP'
+}
 
   function createMockAiAfterBands(beforeBands: TrackEqBandState[]): TrackEqBandState[] {
     const copiedBands = beforeBands.map(band => ({ ...band }))
@@ -264,7 +365,8 @@ export function useProjectAiWorkflow(projectId: number) {
 
   try {
     aiAnalyzing.value = true
-    aiConflict.value = null
+    aiAnalysisItems.value = []
+    activeAiAnalysisIndex.value = 0
     aiAfterBands.value = []
     currentAiJobId.value = null
     selectedAiRegionId.value = null
@@ -315,14 +417,14 @@ export function useProjectAiWorkflow(projectId: number) {
       return
     }
 
-    const firstRegion = regions[0] as any
+    aiAnalysisItems.value = regions.map(region =>
+  mapRegionToAnalysisItem(region, snapshot.duration_ms),
+)
 
-    const numericRegionId = Number(firstRegion.id ?? firstRegion.region_id)
-    selectedAiRegionId.value = Number.isNaN(numericRegionId)
-      ? null
-      : numericRegionId
+      activeAiAnalysisIndex.value = 0
 
-    aiConflict.value = mapRegionToOverlay(firstRegion, snapshot.duration_ms)
+      syncSelectedRegionIdFromActiveItem()
+      applyActiveAiAnalysisSelection()
   } catch (error) {
     console.error(error)
 
@@ -345,10 +447,12 @@ export function useProjectAiWorkflow(projectId: number) {
   }
 
   function handleCancelAiEq() {
-    aiConflict.value = null
-    aiBeforeBands.value = []
-    aiAfterBands.value = []
-  }
+  aiAnalysisItems.value = []
+  activeAiAnalysisIndex.value = 0
+  selectedAiRegionId.value = null
+  aiBeforeBands.value = []
+  aiAfterBands.value = []
+}
 
   async function handleRequestAiEqRevision(payload: {
   selectedTrackIds: number[]
@@ -388,6 +492,76 @@ export function useProjectAiWorkflow(projectId: number) {
   }
 }
 
+function syncSelectedRegionIdFromActiveItem() {
+  const item = activeAiAnalysis.value
+
+  if (!item) {
+    selectedAiRegionId.value = null
+    return
+  }
+
+  const numericRegionId = Number(item.id)
+
+  selectedAiRegionId.value = Number.isNaN(numericRegionId)
+    ? null
+    : numericRegionId
+}
+
+function applyActiveAiAnalysisSelection() {
+  const item = activeAiAnalysis.value
+
+  if (!item) return
+
+  if (item.kind === 'CLIPPING') {
+    trackStore.selectMasterTrack?.()
+    return
+  }
+
+  if (item.targetTrackId) {
+    trackStore.selectTrack?.(item.targetTrackId)
+  }
+}
+
+function resetAiEqSuggestionOnNavigation() {
+  aiAfterBands.value = []
+}
+
+function goNextAiAnalysis() {
+  if (aiAnalysisItems.value.length === 0) return
+
+  activeAiAnalysisIndex.value =
+    (activeAiAnalysisIndex.value + 1) % aiAnalysisItems.value.length
+
+  syncSelectedRegionIdFromActiveItem()
+  resetAiEqSuggestionOnNavigation()
+  applyActiveAiAnalysisSelection()
+}
+
+function goPrevAiAnalysis() {
+  if (aiAnalysisItems.value.length === 0) return
+
+  activeAiAnalysisIndex.value =
+    activeAiAnalysisIndex.value === 0
+      ? aiAnalysisItems.value.length - 1
+      : activeAiAnalysisIndex.value - 1
+
+  syncSelectedRegionIdFromActiveItem()
+  resetAiEqSuggestionOnNavigation()
+  applyActiveAiAnalysisSelection()
+}
+
+const activeAiAnalysisCurrentIndex = computed(() => {
+  return activeAiAnalysisIndex.value
+})
+
+const aiAnalysisTotalCount = computed(() => {
+  return aiAnalysisItems.value.length
+})
+
+const shouldShowAiEqRevisionPanel = computed(() => {
+  return activeAiAnalysis.value?.kind === 'BAND_OVERLAP'
+})
+
   return {
     aiAnalyzing,
     aiConflict,
@@ -398,5 +572,12 @@ export function useProjectAiWorkflow(projectId: number) {
     handleApplyAiEq,
     handleCancelAiEq,
     handleRequestAiEqRevision,
+    aiAnalysisItems,
+    activeAiAnalysis,
+    activeAiAnalysisCurrentIndex,
+    aiAnalysisTotalCount,
+    shouldShowAiEqRevisionPanel,
+    goNextAiAnalysis,
+    goPrevAiAnalysis,
   }
 }

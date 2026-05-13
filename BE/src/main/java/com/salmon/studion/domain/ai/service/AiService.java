@@ -2,6 +2,7 @@ package com.salmon.studion.domain.ai.service;
 
 import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartApiRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectClipRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -23,4 +24,15 @@ public interface CommentRepository extends JpaRepository<Comment, Integer>, Comm
 
     boolean existsByParentCommentIdAndDeletedAtIsNull(Integer commentId);
 
+    @Query("""
+        SELECT c
+        FROM Comment c
+        JOIN FETCH c.user
+        JOIN FETCH c.track
+        WHERE c.track.project.id = :projectId
+    """)
+    List<Comment> findAllByProjectId(@Param("projectId") Integer projectId);
+
+    @Query("SELECT COALESCE(MAX(c.id), 0) FROM Comment c")
+    Integer findMaxId();
 }

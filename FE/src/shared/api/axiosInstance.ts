@@ -45,7 +45,24 @@ axiosInstance.interceptors.response.use(
 
     return response
   },
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config
+
+    if (error.response?.status === 401 && !originalRequest._isRetry && !originalRequest.url?.includes('/auth/reissue')) {
+      originalRequest._isRetry = true
+      
+      const authStore = useAuthStore()
+      const success = await authStore.silentRefresh()
+      
+      if (success && authStore.accessToken) {
+        originalRequest.headers.Authorization = `Bearer ${authStore.accessToken}`
+        return axiosInstance(originalRequest)
+      } else {
+        // Refresh failed, clear token
+        authStore.clearAccessToken()
+      }
+    }
+
     if (error.response) {
       error.message =
         error.response.data?.errorMessage ||

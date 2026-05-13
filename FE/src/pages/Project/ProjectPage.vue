@@ -13,12 +13,15 @@ import * as Tone from 'tone' //오디오 엔진
 import AiConflictOverlay from './components/AiConflictOverlay.vue'
 import TrackItem from './components/TrackItem.vue'//트랙 아이템 마스터 트랙 렌더링용 
 import RemoteCursors from './components/RemoteCursors.vue' //커서 컴포넌트
+import { useCollabStore } from './store/useCollabStore';//공동 작업 스토어 
 import {socketService} from '../../core/services/socket.service'; //웹 소켓 서비스
+import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
 import type { TrackEqBandState } from './types'
 import { AlertTriangle } from 'lucide-vue-next';
 import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
+import { useCommentStore } from './store/useCommentStore';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
 
@@ -27,6 +30,21 @@ type SidePanelType = 'comments' | 'history' | 'ai' | null
 const route = useRoute()
 const projectId = route.params.projectId as string
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
+const collabStore = useCollabStore(); //공동 작업 스토어 사용
+const authStore = useAuthStore(); // Auth 스토어 사용 준비
+const commentStore = useCommentStore(); // 코멘트 전역 상태 사용
+
+// 현재 내 정보 (토큰에서 추출)
+const currentUserId = computed(() => {
+  if (!authStore.accessToken) return null
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
+    return payload.userId || payload.memberId || null
+  } catch(e) {
+    return null
+  }
+})
+
 const {
   onlineUsers,
   projectName,
@@ -381,6 +399,16 @@ const hoveredTrackId = ref<string | null>(null)
       comments: [newComment],
     })
   }
+
+  // 코멘트 스토어 동기화
+  if (projectId) {
+    commentStore.fetchComments(Number(projectId));
+  }
+  
+  // 내가 작성한 코멘트가 아니라면 알림 점 표시
+  if (data.author.userId !== currentUserId.value) {
+    commentStore.setHasNewComment(true)
+  }
 }
 
 function findTrackName(trackId: string) {
@@ -414,6 +442,10 @@ function applyCommentDeleted(data: {
       }
     })
     .filter(group => group.comments.length > 0)
+
+  if (projectId) {
+    commentStore.fetchComments(Number(projectId));
+  }
 }
 
 function applyCommentStatusChanged(data: {
@@ -435,6 +467,10 @@ function applyCommentStatusChanged(data: {
   if (!targetGroup) return
 
   targetGroup.resolved = data.isResolved
+
+  if (projectId) {
+    commentStore.fetchComments(Number(projectId));
+  }
 }
 
 function handleSocketError(error: {
@@ -500,6 +536,7 @@ function handleOpenHistory() {
 }
 
 function handleOpenComments() {
+  commentStore.setHasNewComment(false)
   activeSidePanel.value = 'comments'
 }
 
@@ -538,6 +575,25 @@ function handleSubmitInlineComment(payload: {
     parentCommentId: null,
     content: trimmed,
     location: payload.measure,
+    mentionedUserIds: [],
+  })
+}
+
+function handlePanelResolveComment(commentId: number) {
+  socketService.publish('COMMENT_STATUS_CHANGE', {
+    commentId,
+  })
+}
+
+function handlePanelAddReply(parentCommentId: number, content: string) {
+  const parent = commentStore.comments.find(c => c.commentId === parentCommentId);
+  if (!parent) return;
+
+  socketService.publish('COMMENT_ADD', {
+    trackId: parent.trackId,
+    parentCommentId,
+    content: content.trim(),
+    location: parent.location,
     mentionedUserIds: [],
   })
 }
@@ -724,11 +780,12 @@ const onGlobalDrop = (e: DragEvent) => {
       @action-add-track="handleActionAddTrack"
     />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
-    <main class="flex flex-1 flex-col overflow-hidden bg-muted/10">
+    <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
-      <div 
-        ref="timelineContainerRef" 
-        class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar"
+      <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div 
+          ref="timelineContainerRef" 
+          class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
         @pointerdown.stop="trackStore.deselectAll()"
         @scroll="handleHorizontalScroll"
       >
@@ -736,12 +793,12 @@ const onGlobalDrop = (e: DragEvent) => {
         <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
           <TimelineRuler />
         </div>
-
+     
         <AiConflictOverlay
     v-if="aiConflict"
     :conflict="aiConflict"
   />
-
+     
         <!--  [세로 스크롤] -->
         <div class="w-max min-w-full pb-4 flex-1">
   <TrackList
@@ -769,7 +826,7 @@ const onGlobalDrop = (e: DragEvent) => {
             @delete-comment="handleDeleteComment"
           />
         </div>
-        
+      </div>
       </div>
       <ProjectEqPanel
         :selected-track="selectedEqTrack"
@@ -784,18 +841,16 @@ const onGlobalDrop = (e: DragEvent) => {
         @update-eq-band="handleUpdateEqBand"
         @remove-eq-band="handleRemoveEqBand"
       />
-    <!--
-      <section class="px-6 py-4">
-        <div class="relative">
-          
-          <ProjectSidePanel
-            :open="activeSidePanel !== null"
-            :type="activeSidePanel"
-            @close="handleCloseSidePanel"
-          />
-        </div>
-      </section>
-  -->
+    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
+    
+    <ProjectSidePanel
+      class="z-[200]"
+      :open="activeSidePanel !== null"
+      :type="activeSidePanel"
+      @close="handleCloseSidePanel"
+      @resolve-comment="handlePanelResolveComment"
+      @add-reply="handlePanelAddReply"
+    />
     </main>
 
     <!-- 협업자 커서 렌더링 -->

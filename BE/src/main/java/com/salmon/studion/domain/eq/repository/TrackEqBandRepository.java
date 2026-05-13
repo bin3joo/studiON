@@ -6,12 +6,12 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface TrackEqBandRepository extends JpaRepository<TrackEqBand, Integer> {
 
     List<TrackEqBand> findByTrackEq_IdOrderByBandOrderAsc (Integer trackEqId);
+    List<TrackEqBand> findByTrackEq_IdInOrderByTrackEq_IdAscBandOrderAsc(Collection<Integer> trackEqIds);
     void deleteAllByTrackEq_Id (Integer trackEqId);
 
     void deleteAllByTrackEq_IdIn(Collection<Integer> orphanTrackEqIds);

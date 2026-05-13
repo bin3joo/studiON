@@ -3,8 +3,10 @@ package com.salmon.studion.domain.ai.service;
 import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectEqBandRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectClipRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectSnapshotRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectTrackRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackRequest;
@@ -16,6 +18,7 @@ import com.salmon.studion.domain.ai.monitor.AiJobMonitor;
 import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.common.enums.UserFeedbackType;
 import com.salmon.studion.global.common.response.ErrorCode;
@@ -61,6 +64,9 @@ class AiServiceTest {
     @Mock
     private ProjectMemberService projectMemberService;
 
+    @Mock
+    private TrackEqService trackEqService;
+
     @InjectMocks
     private AiService aiService;
 
@@ -76,6 +82,12 @@ class AiServiceTest {
                 audioMetadata(8101, "audio/test.wav")
         ));
         when(cdnUrlService.createAudioUrl("audio/test.wav")).thenReturn("https://cdn.test/audio/test.wav");
+        when(trackEqService.getCurrentTrackEqPayloads(3001, List.of(71))).thenReturn(List.of(
+                ProjectTrackEqRequest.create(
+                        71,
+                        List.of(ProjectEqBandRequest.create(1, "BELL", 4200, 1.2, -2.5))
+                )
+        ));
         when(fastApiClient.startWorkflow(any(AiJobStartRequest.class))).thenReturn(
                 buildStartResponse(7001, 3001, "start", "accepted", "workflow")
         );
@@ -90,8 +102,17 @@ class AiServiceTest {
         assertThat(forwarded.getJobId()).isEqualTo(7001);
         assertThat(forwarded.getProjectId()).isEqualTo(3001);
         assertThat(forwarded.getRequestedBy()).isEqualTo(91);
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectTrackRequest().get(0).getTrackId())
+                .isEqualTo(71);
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectClipRequest().get(0).getClipId())
+                .isEqualTo(7101);
         assertThat(forwarded.getProjectSnapshotRequest().getProjectClipRequest().get(0).getAudioUrl())
                 .isEqualTo("https://cdn.test/audio/test.wav");
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectTrackEqRequest()).hasSize(1);
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectTrackEqRequest().get(0).getTrackId())
+                .isEqualTo(71);
+        assertThat(forwarded.getProjectSnapshotRequest().getProjectTrackEqRequest().get(0).getBands().get(0).getEqType())
+                .isEqualTo("BELL");
         assertThat(response.getJob().getJobId()).isEqualTo(7001);
     }
 
@@ -108,6 +129,7 @@ class AiServiceTest {
         ReflectionTestUtils.setField(savedJob, "id", 7003);
 
         when(aiAnalysisJobRepository.save(any(AiAnalysisJob.class))).thenReturn(savedJob);
+        when(trackEqService.getCurrentTrackEqPayloads(3003, List.of(71))).thenReturn(List.of());
         when(fastApiClient.startWorkflow(any(AiJobStartRequest.class))).thenReturn(
                 buildStartResponse(7003, 3003, "start", "accepted", "workflow")
         );
@@ -133,6 +155,7 @@ class AiServiceTest {
                 audioMetadata(8101, "audio/test.wav")
         ));
         when(cdnUrlService.createAudioUrl("audio/test.wav")).thenReturn("https://cdn.test/audio/test.wav");
+        when(trackEqService.getCurrentTrackEqPayloads(3002, List.of(71))).thenReturn(List.of());
         when(fastApiClient.startWorkflow(any(AiJobStartRequest.class)))
                 .thenThrow(new BusinessException(ErrorCode.AI_FASTAPI_CALL_FAILED, "downstream failed"));
 

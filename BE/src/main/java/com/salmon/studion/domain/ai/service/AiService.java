@@ -4,6 +4,7 @@ import com.salmon.studion.domain.ai.client.FastApiClient;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiJobStartRequest;
 import com.salmon.studion.domain.ai.dto.request.ProjectClipRequest;
+import com.salmon.studion.domain.ai.dto.request.ProjectTrackEqRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackApiRequest;
 import com.salmon.studion.domain.ai.dto.request.AiUserFeedbackRequest;
 import com.salmon.studion.domain.ai.dto.response.AiJobStartResponse;
@@ -14,6 +15,7 @@ import com.salmon.studion.domain.ai.monitor.AiJobMonitor;
 import com.salmon.studion.domain.ai.repository.AiAnalysisJobRepository;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -39,8 +41,8 @@ public class AiService {
     private final AudioMetadataRepository audioMetadataRepository;
     private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
+    private final TrackEqService trackEqService;
 
-    @Transactional
     public AiJobStartResponse startWorkflow(AiJobStartApiRequest request, Integer requestedBy) {
         Integer userId = requireUserId(requestedBy);
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
@@ -54,11 +56,19 @@ public class AiService {
                 jobId, request.getProjectId(), userId);
 
         Map<Integer, String> audioUrlByMetadataId = buildAudioUrlByMetadataId(request);
+        List<ProjectTrackEqRequest> trackEqs = trackEqService.getCurrentTrackEqPayloads(
+                request.getProjectId(),
+                request.getProjectSnapshot().getProjectTrackRequest().stream()
+                        .map(track -> track.getTrackId())
+                        .filter(Objects::nonNull)
+                        .toList()
+        );
         AiJobStartRequest fastApiRequest = AiJobStartRequest.create(
                 jobId,
                 request,
                 userId,
-                audioUrlByMetadataId
+                audioUrlByMetadataId,
+                trackEqs
         );
 
         try {

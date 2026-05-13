@@ -8,13 +8,17 @@ import com.salmon.studion.domain.audio.dto.response.AudioListResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioMetadataCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioUploadUrlResponse;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
+import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
 import com.salmon.studion.domain.audio.service.AudioService;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.infrastructure.cdn.CdnUrlService;
 import com.salmon.studion.global.infrastructure.s3.S3StorageService;
 import com.salmon.studion.global.infrastructure.s3.dto.PresignedUrlResult;
+import com.salmon.studion.global.common.response.ErrorCode;
+import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -26,12 +30,19 @@ public class AudioFacade {
     private static final Integer MAX_AUDIO_SIZE_BYTES = 50 * 1024 * 1024;   // 50MB
 
     private final AudioService audioService;
+    private final AudioMetadataRepository audioMetadataRepository; // TODO: 유저테스트 전용 임시 추가 (추후 수정 필요)
     private final S3StorageService s3StorageService;
     private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
 
+    // TODO: 유저테스트 전용 임시 추가 (추후 수정 필요)
+    @Value("${app.audio.temp-user-total-limit-bytes}")
+    private Long tempUserTotalLimitBytes;
+
     public AudioUploadUrlResponse getAudioUploadUrl(Integer projectId, AudioUploadUrlRequest audioUploadUrlRequest, Integer userId) {
         projectMemberService.validateProjectMember(projectId, userId);
+        // TODO: 유저테스트 전용 임시 추가 (추후 수정 필요 - validateTempUserTotalAudioLimit)
+        validateTempUserTotalAudioLimit(userId, audioUploadUrlRequest.getSizeBytes());
 
         audioService.validateMimeTypeAndExtension(audioUploadUrlRequest.getOriginalName(), audioUploadUrlRequest.getMimeType());
 
@@ -47,6 +58,8 @@ public class AudioFacade {
 
     public AudioMetadataCreateResponse createAudioMetadata(Integer projectId, AudioMetadataCreateRequest request, Integer userId) {
         projectMemberService.validateProjectMember(projectId, userId);
+        // TODO: 유저테스트 전용 임시 추가 (추후 수정 필요 - validateTempUserTotalAudioLimit)
+        validateTempUserTotalAudioLimit(userId, request.getSizeBytes());
 
         audioService.validateMimeTypeAndExtension(request.getOriginalName(), request.getMimeType());
 
@@ -88,5 +101,15 @@ public class AudioFacade {
                 .toList();
 
         return AudioListResponse.of(audios);
+    }
+
+    // TODO: 유저테스트 전용 임시 구현 (추후 수정 필요 - validateTempUserTotalAudioLimit())
+    private void validateTempUserTotalAudioLimit(Integer userId, Integer requestedSizeBytes) {
+        long currentTotalSizeBytes = audioMetadataRepository.sumSizeBytesByCreatedBy(userId);
+        long nextTotalSizeBytes = currentTotalSizeBytes + requestedSizeBytes.longValue();
+
+        if (nextTotalSizeBytes > tempUserTotalLimitBytes) {
+            throw new BusinessException(ErrorCode.FAIL, "유저테스트 전용 임시 제한으로 오디오 업로드 총 용량을 초과했습니다.");
+        }
     }
 }

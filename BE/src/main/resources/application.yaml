@@ -84,6 +84,9 @@ logging:
 
 app:
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  audio:
+    # TODO: 유저테스트 전용 임시 추가 (추후 삭제 필요 - 현재 100MB)
+    temp-user-total-limit-bytes: ${TEMP_USER_TOTAL_AUDIO_LIMIT_BYTES:104857600}
 
 ai:
   fastapi:

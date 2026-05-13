@@ -42,6 +42,7 @@ public class ClipService {
     private static final String CLIP_ID_SEQ_KEY = "global:clip:id_seq";
     private static final String CLIP_CLIPBOARD_KEY = "project:%d:user:%d:clipboard";
     private static final String DELETED_CLIPS_KEY = "project:%d:deleted_clips";
+    private static final int MAX_BAR_COUNT = 200;
 
     private final ProjectService projectService;
     private final AudioService audioService;
@@ -204,6 +205,8 @@ public class ClipService {
                 * (project.getTempo() / 60.0)
                 / project.getTimeSigNumerator();
 
+        validateBarLimit(request.getStartBar(), durationBars);
+
         Integer clipId = redisTemplate.opsForValue()
                 .increment(CLIP_ID_SEQ_KEY).intValue();
 
@@ -271,6 +274,8 @@ public class ClipService {
         }
 
         ClipState state = getOrLoadClipState(request.getProjectId(), request.getClipId());
+
+        validateBarLimit(request.getTargetStartBar(), state.getDuration());
 
         Integer beforeTrackId = state.getTrackId();
         Double beforeStartBar = state.getStart();
@@ -344,6 +349,8 @@ public class ClipService {
 
         Double beforeStart = state.getStart();
         Double beforeDuration = state.getDuration();
+
+        validateBarLimit(request.getStartBar(), request.getLength());
 
         // 같은 트랙 내 다른 클립과 겹침 여부 확인
         String clipHashKey = String.format(CLIP_STATE_KEY, request.getProjectId());
@@ -646,6 +653,8 @@ public class ClipService {
             throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
+        validateBarLimit(request.getTargetStartBar(), clipboardState.getDuration());
+
         Integer newClipId = redisTemplate.opsForValue()
                 .increment(CLIP_ID_SEQ_KEY).intValue();
 
@@ -709,6 +718,8 @@ public class ClipService {
 
         Integer targetTrackId = original.getTrackId();
         Double targetStartBar = original.getStart() + original.getDuration();
+
+        validateBarLimit(targetStartBar, original.getDuration());
 
         Integer newClipId = redisTemplate.opsForValue()
                 .increment(CLIP_ID_SEQ_KEY).intValue();
@@ -906,5 +917,11 @@ public class ClipService {
     private void validateTrackInProject(Integer trackId, Integer projectId) {
         trackRepository.findByIdAndProject_Id(trackId, projectId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+    }
+
+    private void validateBarLimit(double startBar, double duration) {
+        if (startBar + duration > MAX_BAR_COUNT) {
+            throw new BusinessException(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED);
+        }
     }
 }

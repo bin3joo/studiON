@@ -1103,6 +1103,38 @@ const onWorkAreaMouseLeave = () => {
           <span class="text-xs font-bold">업로드 중...</span>
         </div>
 
+        <!-- [고스트 클립 1] 잘라내기(Cut) 된 클립의 잔상 표시 -->
+        <div 
+          v-if="trackStore.isCutAction && trackStore.clipboardTrackId === track.trackId && trackStore.clipboardClip"
+          class="absolute inset-y-1 z-0 flex items-center justify-center rounded-md border-2 border-dashed border-primary/50 bg-primary/10 pointer-events-none"
+          :style="{ 
+            left: `${trackStore.clipboardClip.start * trackStore.pixelPerBar}px`,
+            width: `${trackStore.clipboardClip.duration * trackStore.pixelPerBar}px`
+          }"
+        >
+          <span class="text-[10px] font-semibold text-primary/60 px-2 truncate">잘라낸 클립 (붙여넣기 대기 중)</span>
+        </div>
+
+        <!-- [고스트 클립 2] 이동(Drag) 중인 클립의 원본 위치 잔상 표시 -->
+        <div 
+          v-if="activeClip && activeClip.isDragging && !isMaster"
+          class="absolute inset-y-1 z-0 rounded-md border-2 border-dashed border-primary/50 bg-primary/10 pointer-events-none transition-opacity duration-200"
+          :style="{ 
+            left: `${startClipBar * trackStore.pixelPerBar}px`,
+            width: `${activeClip.duration * trackStore.pixelPerBar}px`
+          }"
+        ></div>
+
+        <!-- [고스트 클립 3] 크기 조절(Resize) 중인 클립의 원본 위치/크기 잔상 표시 -->
+        <div 
+          v-if="resizeState.isResizing && resizeState.clip && !isMaster"
+          class="absolute inset-y-1 z-0 rounded-md border-2 border-dashed border-primary/50 bg-primary/10 pointer-events-none transition-opacity duration-200"
+          :style="{ 
+            left: `${resizeState.origStart * trackStore.pixelPerBar}px`,
+            width: `${resizeState.origDuration * trackStore.pixelPerBar}px`
+          }"
+        ></div>
+
       <!-- 실제 클립 렌더링 및 클립 전용 우클릭 이벤트(z-10) -->
         <div 
           v-for="clip in visibleClips" 

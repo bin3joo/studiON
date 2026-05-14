@@ -269,6 +269,7 @@ export const useTrackStore = defineStore('track', () => {
 
     //복사/잘라내기 한 클립 데이터를 보관할 클립보드
     const clipboardClip = ref<ClipUIState | null>(null);
+    const clipboardTrackId = ref<number | null>(null);
     const isCutAction = ref(false);
     const uploadingTrackId = ref<number | null>(null);
     const uploadingBar = ref<number | null>(null); //현재 보관된 데이터가 '잘라내기'로 들어왔는지 여부
@@ -1085,6 +1086,7 @@ export const useTrackStore = defineStore('track', () => {
     // 잘라내기
     const cutClip = (clip: ClipUIState, trackId: number) => {
         clipboardClip.value = { ...JSON.parse(JSON.stringify(clip)), clipId: clip.clipId };
+        clipboardTrackId.value = trackId;
         isCutAction.value = true;
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clip.clipId, trackId);
@@ -1159,6 +1161,13 @@ export const useTrackStore = defineStore('track', () => {
             targetTrackId: targetTrackId,
             targetStartBar: resolvedStart
         });
+
+        // 3. 붙여넣기 완료 시 잔상 제거 (초기화)
+        if (isCutAction.value) {
+            isCutAction.value = false;
+            clipboardClip.value = null;
+            clipboardTrackId.value = null;
+        }
     };
 
     // 삭제
@@ -2146,6 +2155,8 @@ export const useTrackStore = defineStore('track', () => {
         viewportLeft,
         viewportRight,
         clipboardClip,
+        clipboardTrackId,
+        isCutAction,
         copyClip,
         cutClip,
         pasteClip,

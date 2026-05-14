@@ -16,8 +16,10 @@ import {
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
 import { useCommentStore } from '../store/useCommentStore'
+import { useTrackStore } from '../store/useTrackStore'
 
 const commentStore = useCommentStore()
+const trackStore = useTrackStore()
 
 interface Props {
   projectName: string
@@ -93,6 +95,33 @@ function cancelProjectNameEdit() {
   editingProjectName.value = props.projectName || ''
   isEditingProjectName.value = false
 }
+
+// 프로젝트의 실제 총 재생 시간(Length) 계산
+const projectLengthFormatted = computed(() => {
+  let maxEndBar = 0
+  trackStore.trackList.forEach(track => {
+    track.clips.forEach(clip => {
+      const endBar = clip.start + clip.duration
+      if (endBar > maxEndBar) {
+        maxEndBar = endBar
+      }
+    })
+  })
+
+  // 1박자(beat) = 60000 / BPM ms
+  // 1마디(bar) = 1박자 * timeSigNumerator
+  const msPerBeat = 60000 / trackStore.bpm
+  const msPerBar = msPerBeat * trackStore.projectInfo.timeSigNumerator
+  const totalMs = maxEndBar * msPerBar
+
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return '0:00'
+
+  const totalSeconds = Math.floor(totalMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+})
 </script>
 
 <template>
@@ -159,6 +188,13 @@ function cancelProjectNameEdit() {
 
     <!-- 가운데 -->
     <div class="hidden items-center gap-2 lg:flex">
+      
+      <!-- 새로 추가된 프로젝트 재생 시간 (대시보드와 동일한 Length) -->
+      <div class="mr-2 flex items-center gap-2 rounded-lg bg-secondary/30 px-3 py-2 text-xs font-mono-tight text-foreground border border-border/50">
+        <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">총 재생 시간 :</span>
+        <span class="font-semibold text-primary/90">{{ projectLengthFormatted }}</span>
+      </div>
+
       <button
         type="button"
         class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"

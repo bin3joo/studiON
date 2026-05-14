@@ -212,23 +212,33 @@ onMounted(() => {
               />
             </div>
 
-            <!-- Tracks, Length, Size (제목 앞) -->
+            <!-- Length, Size, BARS (제목 앞) -->
             <div class="hidden items-center gap-6 border-r border-border pr-6 md:flex shrink-0">
 
-              <div class="flex flex-col">
-                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
+              <div class="flex flex-col w-16 items-end">
+                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground whitespace-nowrap">
                   Length
                 </span>
-                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
+                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground text-right whitespace-nowrap">
                   {{ formatPlayTime(project.totalPlayTime) }}
                 </span>
               </div>
-              <div class="flex flex-col">
-                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
+
+              <div class="flex flex-col w-16 items-end">
+                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground whitespace-nowrap">
                   Size
                 </span>
-                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
+                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground text-right whitespace-nowrap">
                   {{ formatAudioSize(project.totalAudioSize) }}
+                </span>
+              </div>
+
+              <div class="flex flex-col w-12 items-end">
+                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground whitespace-nowrap">
+                  Bars
+                </span>
+                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground text-right whitespace-nowrap">
+                  {{ project.totalBarCount }}
                 </span>
               </div>
             </div>
@@ -238,12 +248,6 @@ onMounted(() => {
               <h3 class="truncate font-display text-xl leading-tight tracking-wide text-foreground md:text-2xl">
                 {{ project.projectName }}
               </h3>
-
-              <div class="mt-1.5 flex items-center gap-2 text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
-                <span>{{ project.totalBarCount }} BARS</span>
-                <span class="h-1 w-1 rounded-full bg-muted-foreground/50" />
-                <span class="text-primary/80">{{ formatPlayTime(project.totalPlayTime) }}</span>
-              </div>
             </div>
           </div>
 

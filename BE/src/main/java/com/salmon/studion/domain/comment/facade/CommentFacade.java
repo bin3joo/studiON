@@ -68,7 +68,25 @@ public class CommentFacade {
 
         Map<Integer, User> usersById = loadUsersById(commentStates);
 
-        return buildResponse(commentStates, usersById);
+        return CommentsGetResponse.from(buildCommentDtoList(commentStates, usersById));
+    }
+
+    @Transactional(readOnly = true)
+    public List<CommentsGetResponse.CommentDto> getCommentsForProjectDetail(Integer projectId, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        List<CommentState> commentStates = commentService.getComments(projectId, null, null, false, userId);
+        if (commentStates.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Integer, User> usersById = loadUsersById(commentStates);
+        return buildCommentDtoList(commentStates, usersById);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasCommentWorkingSet(Integer projectId) {
+        return commentService.hasCommentWorkingSet(projectId);
     }
 
     @Transactional
@@ -153,7 +171,7 @@ public class CommentFacade {
                 .collect(HashMap::new, (map, user) -> map.put(user.getId(), user), HashMap::putAll);
     }
 
-    private CommentsGetResponse buildResponse(List<CommentState> commentStates, Map<Integer, User> usersById) {
+    private List<CommentsGetResponse.CommentDto> buildCommentDtoList(List<CommentState> commentStates, Map<Integer, User> usersById) {
         Map<Integer, List<CommentsGetResponse.CommentDto>> repliesByParentId = new HashMap<>();
 
         for (CommentState c : commentStates) {
@@ -164,13 +182,10 @@ public class CommentFacade {
             }
         }
 
-        List<CommentsGetResponse.CommentDto> rootComments = commentStates.stream()
+        return commentStates.stream()
                 .filter(c -> c.getParentCommentId() == null)
-                .map(c -> toDto(c, usersById, repliesByParentId.getOrDefault(c.getCommentId(), List.of())
-                ))
+                .map(c -> toDto(c, usersById, repliesByParentId.getOrDefault(c.getCommentId(), List.of())))
                 .toList();
-
-        return CommentsGetResponse.from(rootComments);
     }
 
     private CommentsGetResponse.CommentDto toDto(

@@ -1,11 +1,11 @@
 package com.salmon.studion.domain.project.dto.response;
 
+import com.salmon.studion.domain.comment.dto.response.CommentsGetResponse;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.global.common.enums.ProjectMode;
 import com.salmon.studion.global.common.enums.RootNote;
 import com.salmon.studion.global.common.enums.TrackType;
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -27,6 +27,7 @@ public class ProjectDetailResponse {
     private Integer totalPlayTimeMs;
     private MasterTrackResponse masterTrack;
     private List<TrackResponse> tracks;
+    private List<CommentsGetResponse.CommentDto> comments;
 
     public record MasterTrackResponse (
             Integer masterTrackId,
@@ -69,7 +70,8 @@ public class ProjectDetailResponse {
     public static ProjectDetailResponse of(
             Project project,
             MasterTrackResponse masterTrack,
-            List<TrackResponse> tracks
+            List<TrackResponse> tracks,
+            List<CommentsGetResponse.CommentDto> comments
     ) {
         return new ProjectDetailResponse(
                 project.getId(),
@@ -82,7 +84,8 @@ public class ProjectDetailResponse {
                 project.getTotalBarCount(),
                 project.getTotalPlayTimeMs(),
                 masterTrack,
-                tracks
+                tracks,
+                comments
         );
     }
 }

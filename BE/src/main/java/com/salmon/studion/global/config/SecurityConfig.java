@@ -3,6 +3,7 @@ package com.salmon.studion.global.config;
 import com.salmon.studion.global.auth.CustomOAuth2UserService;
 import com.salmon.studion.global.auth.filter.JwtAuthenticationFilter;
 import com.salmon.studion.global.auth.handler.OAuth2SuccessHandler;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -13,6 +14,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -37,6 +39,12 @@ public class SecurityConfig {
                                 .httpBasic(AbstractHttpConfigurer::disable)
                                 .sessionManagement(session -> session
                                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                // /api/** 요청에서 인증 실패 시 Google 로그인 페이지로 리다이렉트하지 말고 401 Unauthorized 반환해라
+                                .exceptionHandling(exception -> exception
+                                                .defaultAuthenticationEntryPointFor(
+                                                                (request, response, authException) -> response
+                                                                                .sendError(HttpServletResponse.SC_UNAUTHORIZED),
+                                                                PathPatternRequestMatcher.withDefaults().matcher("/api/**")))
                                 .authorizeHttpRequests(auth -> auth
                                                 .requestMatchers(
                                                                 "/error",

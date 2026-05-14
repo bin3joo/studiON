@@ -1,12 +1,12 @@
 CREATE TABLE `clip` (
 	`id`	INT	NOT NULL	COMMENT '클립id',
-	`trackId`	INT	NOT NULL	COMMENT '트랙id',
-	`audioMetadataId`	INT	NOT NULL	COMMENT '오디오 메타데이터id',
+	`track_id`	INT	NOT NULL	COMMENT '트랙id',
+	`audio_metadata_id`	INT	NOT NULL	COMMENT '오디오 메타데이터id',
 	`color`	CHAR(7)	NOT NULL	DEFAULT '#FFFFFF'	COMMENT '클립색상',
 	`start`	DECIMAL(11, 7)	NOT NULL	DEFAULT 1	COMMENT '시작점 (마디기준)',
 	`duration`	DECIMAL(11,7)	NOT NULL	DEFAULT 1	COMMENT '클립길이 (마디기준)',
-	`audioStartMs`	BIGINT	NOT NULL	DEFAULT 0	COMMENT '오디오 시작점 (오디오기준)',
-	`audioDurationMs`	BIGINT	NOT NULL	COMMENT '오디오 길이 (오디오기준)'
+	`audio_start_ms`	BIGINT	NOT NULL	DEFAULT 0	COMMENT '오디오 시작점 (오디오기준)',
+	`audio_duration_ms`	BIGINT	NOT NULL	COMMENT '오디오 길이 (오디오기준)'
 );
 
 CREATE TABLE `comment_mention` (
@@ -134,13 +134,13 @@ CREATE TABLE `comment` (
 
 CREATE TABLE `audio_metadata` (
 	`id`	INT	NOT NULL	COMMENT '오디오메타데이터id',
-	`objectKey`	VARCHAR(1024)	NOT NULL	COMMENT 'S3_key',
-	`originalName`	VARCHAR(255)	NOT NULL	COMMENT '사용자가 입력한 원본 파일명',
-	`storedName`	VARCHAR(255)	NOT NULL	COMMENT '서버 관리용 파일명(UUID)',
-	`mimeType`	ENUM	NULL	COMMENT '콘텐츠 형식/전송 타입(audio/mpeg, audio/wav)',
-	`sizeBytes`	INT	NOT NULL	COMMENT '파일 크기(바이트 단위)',
-	`durationMs`	INT	NOT NULL	COMMENT '오디오 길이',
-	`deletedAt`	DATETIME	NULL	COMMENT '삭제일시(soft delete)'
+	`object_key`	VARCHAR(1024)	NOT NULL	COMMENT 'S3_key',
+	`original_name`	VARCHAR(255)	NOT NULL	COMMENT '사용자가 입력한 원본 파일명',
+	`stored_name`	VARCHAR(255)	NOT NULL	COMMENT '서버 관리용 파일명(UUID)',
+	`mime_type`	ENUM	NULL	COMMENT '콘텐츠 형식/전송 타입(audio/mpeg, audio/wav)',
+	`size_bytes`	INT	NOT NULL	COMMENT '파일 크기(바이트 단위)',
+	`duration_ms`	INT	NOT NULL	COMMENT '오디오 길이',
+	`deleted_at`	DATETIME	NULL	COMMENT '삭제일시(soft delete)'
 );
 
 CREATE TABLE `ai_suggestion` (
@@ -299,9 +299,8 @@ CREATE TABLE `ai_analysis_region` (
 
 CREATE TABLE `project_master_audio_version` (
 	`id`	INT	NOT NULL	COMMENT '버전id',
-	`projectId`	INT	NOT NULL	COMMENT '프로젝트id',
-	`audioMetadataId`	INT	NOT NULL	COMMENT '오디오메타데이터id',
-	`order`	TINYINT	NOT NULL	COMMENT '정렬순서',
+	`project_id`	INT	NOT NULL	COMMENT '프로젝트id',
+	`audio_metadata_id`	INT	NOT NULL	COMMENT '오디오메타데이터id',
 	`name`	VARCHAR(30)	NOT NULL	COMMENT '이름',
 	`memo`	VARCHAR(255)	NULL	COMMENT '메모'
 );
@@ -332,19 +331,24 @@ CREATE TABLE `ai_suggestion_group` (
 
 CREATE TABLE `ai_preview_render` (
 	`id`	INT	NOT NULL	COMMENT '프리뷰 렌더 ID',
-	`jobId`	INT	NOT NULL	COMMENT 'AI 분석 작업 ID',
-	`suggestionId`	INT	NOT NULL	COMMENT '수정안 ID',
-	`statusCode`	TINYINT	NOT NULL	COMMENT '프리뷰 생성 상태 코드',
-	`renderNo`	TINYINT	NOT NULL	DEFAULT 1	COMMENT '프리뷰 렌더 시도 번호',
-	`objectKey`	VARCHAR(1024)	NULL	COMMENT '프리뷰 오디오 파일 저장 키',
-	`durationMs`	MEDIUMINT	NULL	COMMENT '프리뷰 길이(ms)',
-	`requestedBy`	INT	NOT NULL	COMMENT '프리뷰 요청 사용자 ID',
-	`requestedAt`	DATETIME	NOT NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '프리뷰 요청 시각',
-	`startedAt`	DATETIME	NULL	COMMENT '렌더 시작 시각',
-	`completedAt`	DATETIME	NULL	COMMENT '렌더 완료 시각',
-	`expiredAt`	DATETIME	NULL	COMMENT '프리뷰 만료 시각',
-	`errorCode`	CHAR(5)	NULL	COMMENT '오류 코드',
-	`errorMessage`	VARCHAR(1000)	NULL	COMMENT '오류 메시지'
+	`job_id`	INT	NOT NULL	COMMENT 'AI 분석 작업 ID',
+	`analysis_region_id`	VARCHAR(128)	NOT NULL	COMMENT '분석 구간 ID',
+	`suggestion_id`	VARCHAR(128)	NULL	COMMENT '수정안 ID',
+	`status`	VARCHAR(32)	NOT NULL	COMMENT '프리뷰 생성 상태',
+	`render_no`	INT	NOT NULL	DEFAULT 1	COMMENT '프리뷰 렌더 시도 번호',
+	`object_key`	VARCHAR(1024)	NULL	COMMENT '프리뷰 오디오 파일 저장 키',
+	`duration_ms`	INT	NULL	COMMENT '프리뷰 길이(ms)',
+	`requested_by`	INT	NULL	COMMENT '프리뷰 요청 사용자 ID',
+	`requested_at`	VARCHAR(64)	NOT NULL	COMMENT '프리뷰 요청 시각',
+	`started_at`	VARCHAR(64)	NULL	COMMENT '렌더 시작 시각',
+	`completed_at`	VARCHAR(64)	NULL	COMMENT '렌더 완료 시각',
+	`expired_at`	VARCHAR(64)	NULL	COMMENT '프리뷰 만료 시각',
+	`error_code`	VARCHAR(64)	NULL	COMMENT '오류 코드',
+	`error_message`	VARCHAR(1000)	NULL	COMMENT '오류 메시지',
+	`user_feedback_message`	VARCHAR(1000)	NULL	COMMENT '프리뷰 재요청 메시지',
+	`preserve_clip_id`	INT	NULL	COMMENT '보존 대상 클립 ID',
+	INDEX `idx_ai_preview_render_job_requested` (`job_id`, `requested_at`),
+	INDEX `idx_ai_preview_render_region_requested` (`analysis_region_id`, `requested_at`)
 );
 
 CREATE TABLE `ai_main_clip_selection` (
@@ -357,17 +361,20 @@ CREATE TABLE `ai_main_clip_selection` (
 
 CREATE TABLE `ai_analysis_job` (
 	`id`	INT	NOT NULL	COMMENT 'AI 분석 작업 ID',
-	`projectId`	INT	NOT NULL	COMMENT '프로젝트 ID',
-	`timelineSnapshotId`	INT	NULL	COMMENT '분석 기준 타임라인 스냅샷 ID',
-	`langgraphThreadId`	VARCHAR(100)	NOT NULL	COMMENT 'LangGraph 스레드 ID',
-	`statusCode`	TINYINT	NOT NULL	COMMENT '작업 상태 코드',
+	`project_id`	INT	NOT NULL	COMMENT '프로젝트 ID',
+	`status`	VARCHAR(32)	NOT NULL	COMMENT '작업 상태',
+	`phase`	VARCHAR(64)	NOT NULL	COMMENT '현재 workflow phase',
+	`current_node`	VARCHAR(64)	NULL	COMMENT '현재 LangGraph 노드',
 	`progress`	TINYINT	NOT NULL	DEFAULT 0	COMMENT '진행률 0~100',
-	`currentNode`	VARCHAR(100)	NULL	COMMENT '현재 LangGraph 노드',
-	`errorCode`	CHAR(5)	NULL	COMMENT '오류 코드',
-	`errorMessage`	VARCHAR(1000)	NULL	COMMENT '오류 메시지',
-	`requestedBy`	INT	NOT NULL	COMMENT '요청 사용자 ID',
-	`startedAt`	DATETIME	NULL	COMMENT '작업 시작 시각',
-	`completedAt`	DATETIME	NULL	COMMENT '작업 완료 시각'
+	`langgraph_thread_id`	VARCHAR(128)	NOT NULL	COMMENT 'LangGraph 스레드 ID',
+	`timeline_snapshot_id`	VARCHAR(128)	NULL	COMMENT '분석 기준 타임라인 스냅샷 ID',
+	`requested_by`	INT	NULL	COMMENT '요청 사용자 ID',
+	`started_at`	VARCHAR(64)	NULL	COMMENT '작업 시작 시각',
+	`completed_at`	VARCHAR(64)	NULL	COMMENT '작업 완료 시각',
+	`error_code`	VARCHAR(64)	NULL	COMMENT '오류 코드',
+	`error_message`	VARCHAR(255)	NULL	COMMENT '오류 메시지',
+	`state_artifact_id`	VARCHAR(128)	NULL	COMMENT 'Mongo durable state 아티팩트 ID',
+	`state_json`	JSON	NOT NULL	COMMENT 'Worker resume용 최소 orchestration 상태'
 );
 
 CREATE TABLE `dm_room` (
@@ -555,20 +562,20 @@ REFERENCES `user` (
 
 CREATE TABLE `ai_workflow_node_timing` (
       `id` BIGINT NOT NULL COMMENT '워크플로우 노드 타이밍 ID',
-      `jobId` INT NOT NULL COMMENT 'AI 분석 작업 ID',
-      `nodeName` VARCHAR(100) NOT NULL COMMENT 'LangGraph 노드명',
+      `job_id` INT NOT NULL COMMENT 'AI 분석 작업 ID',
+      `node_name` VARCHAR(100) NOT NULL COMMENT 'LangGraph 노드명',
       `phase` VARCHAR(100) NULL COMMENT '노드 실행 시점 phase',
-      `sequenceNo` SMALLINT NOT NULL COMMENT '해당 job 내 실행 순서',
-      `statusCode` TINYINT NOT NULL COMMENT '노드 실행 상태 코드',
-      `waitCategoryCode` TINYINT NOT NULL COMMENT '대기/작업 유형 코드',
-      `startedAt` DATETIME NOT NULL COMMENT '노드 시작 시각',
-      `completedAt` DATETIME NULL COMMENT '노드 종료 시각',
-      `durationMs` INT NULL COMMENT '노드 소요 시간(ms)',
-      `queueWaitMs` INT NULL COMMENT '큐 대기 시간(ms)',
-      `errorCode` CHAR(5) NULL COMMENT '오류 코드',
-      `errorMessage` VARCHAR(1000) NULL COMMENT '오류 메시지',
-      `artifactDocId` VARCHAR(64) NULL COMMENT 'MongoDB 상세 타이밍/메타 문서 ID',
-      `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '생성 시각'
+      `sequence_no` SMALLINT NOT NULL COMMENT '해당 job 내 실행 순서',
+      `status_code` TINYINT NOT NULL COMMENT '노드 실행 상태 코드',
+      `wait_category_code` TINYINT NOT NULL COMMENT '대기/작업 유형 코드',
+      `started_at` DATETIME NOT NULL COMMENT '노드 시작 시각',
+      `completed_at` DATETIME NULL COMMENT '노드 종료 시각',
+      `duration_ms` INT NULL COMMENT '노드 소요 시간(ms)',
+      `queue_wait_ms` INT NULL COMMENT '큐 대기 시간(ms)',
+      `error_code` CHAR(5) NULL COMMENT '오류 코드',
+      `error_message` VARCHAR(1000) NULL COMMENT '오류 메시지',
+      `artifact_doc_id` VARCHAR(64) NULL COMMENT 'MongoDB 상세 타이밍/메타 문서 ID',
+      `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '생성 시각'
   );
 
   ALTER TABLE `ai_workflow_node_timing`

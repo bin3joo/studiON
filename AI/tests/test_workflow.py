@@ -463,12 +463,20 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     assert execution_plan_artifact is not None
     assert execution_plan_artifact.artifact_type == "execution_plan"
     preview_band = execution_plan_artifact.payload["previewBandSpecs"][0]
+    planned_issue = next(
+        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "band_overlap"
+    )
+    planned_action = planned_issue["actions"][0]
     assert preview_band["jobId"] == 10003
     assert preview_band["targetTrackId"] is not None
     assert preview_band["bandOrder"] == 1
     assert preview_band["eqTypeCode"] == 1
     assert preview_band["statusCode"] == 1
     assert isinstance(preview_band["previewExpiresAt"], str)
+    assert planned_action["frequencyHz"] == preview_band["frequencyHz"]
+    assert planned_action["q"] == preview_band["q"]
+    assert planned_action["sourceType"] == "AI_CONFIRM"
+    assert planned_action["jobId"] == 10003
     assert len(result["suggestion_payload"]["issues"]) >= 2
     assert any(issue["uiMode"] == "master_limiter" for issue in result["suggestion_payload"]["issues"])
 
@@ -2872,6 +2880,52 @@ def test_detect_track_clipping_marks_band_driven_region_with_precise_band() -> N
     assert regions[0]["broadband_classification"] == "band_driven"
     assert "high" in regions[0]["band_hints"]
     assert regions[0]["requires_user_action"] is False
+
+
+def test_detect_track_clipping_uses_true_peak_for_limiter_recommendation() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-track-clipping-true-peak",
+            job_id=100266,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "peak_dbfs": -0.2,
+                            "true_peak_dbfs": 0.45,
+                            "high_band_ratio": 0.2,
+                            "window_energy": 0.2,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "peak_dbfs": -0.22,
+                            "true_peak_dbfs": 0.42,
+                            "high_band_ratio": 0.19,
+                            "window_energy": 0.19,
+                        },
+                    ]
+                }
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100266,
+        project_id=200266,
+        issue_types=["track_clipping"],
+        clip_feature_artifact_id="artifact-track-clipping-true-peak",
+    )
+
+    regions = nodes.detect_track_clipping(state)["analysis_regions"]
+
+    assert len(regions) == 1
+    assert regions[0]["current_true_peak_dbtp"] > 0.4
+    assert regions[0]["recommended_reduction_db"] > 1.3
 
 
 def test_detect_track_clipping_keeps_broadband_region_without_band() -> None:

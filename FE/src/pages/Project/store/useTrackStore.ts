@@ -313,7 +313,7 @@ export const useTrackStore = defineStore('track', () => {
             // 기본 50마디를 늘려주되, 만약 클립이 너무 길어서 50마디로도 부족하면 그 클립 길이에 맞춰서 넉넉하게 늘려줍니다.
             const extendAmount = Math.max(50, Math.ceil(endBar - currentTotalBars) + 10);
             projectInfo.value.totalBarCount += extendAmount;
-            console.log(`타임라인이 자동으로 ${projectInfo.value.totalBarCount}마디로 확장되었습니다.`);
+           // console.log(`타임라인이 자동으로 ${projectInfo.value.totalBarCount}마디로 확장되었습니다.`);
         }
     };
 
@@ -660,7 +660,7 @@ export const useTrackStore = defineStore('track', () => {
                 // 더 이상 필요 없는 blobUrl 키 제거 및 메모리 해제
                 audioBufferCache.delete(data._localBlobUrl);
                 URL.revokeObjectURL(data._localBlobUrl);
-                console.log(`[CLIP_CREATE 최적화] 로컬 AudioBuffer → CDN URL 키로 이전 완료 (네트워크 다운로드 생략)`);
+               // console.log(`[CLIP_CREATE 최적화] 로컬 AudioBuffer → CDN URL 키로 이전 완료 (네트워크 다운로드 생략)`);
             }
 
             // 3. Vue 반응성 확보: 배열 안의 실제 반응형 객체를 다시 찾아서 audio를 통째로 교체
@@ -675,14 +675,14 @@ export const useTrackStore = defineStore('track', () => {
 
                 // [원복] 오디오 Culling 시 디코딩 부하로 인한 끊김이 발생하여 미리 로딩
                 loadClipPlayer(reactiveClip, data.trackId);
-                console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 예약 완료 (ID: ${reactiveClip.clipId})`);
+               // console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 예약 완료 (ID: ${reactiveClip.clipId})`);
 
                 // 겹침 방지 (업로드한 당사자만 서버에 반영)
                 const isInitiator = uploadingTrackId.value === track.trackId;
                 resolveClipOverlap(reactiveClip, track, isInitiator);
             }
         } catch (error) {
-            console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
+           // console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
             const failedClip = track.clips.find(c => c.clipId === data.clipId);
             if (failedClip && failedClip.audio) {
                 failedClip.audio = { ...failedClip.audio, originalName: "오디오 로딩 실패" };
@@ -746,14 +746,14 @@ export const useTrackStore = defineStore('track', () => {
                 const afterStart = data.after.startBar;
                 const afterDuration = data.after.length;
 
-                console.log(`[CLIP_RESIZE 수신] clipId: ${data.clipId}`);
-                console.log(`  - before: start=${beforeStart}, duration=${beforeDuration}`);
-                console.log(`  - after: start=${afterStart}, duration=${afterDuration}`);
-                console.log(`  - 현재 로컬 상태: start=${clip.start}, duration=${clip.duration}`);
+                // console.log(`[CLIP_RESIZE 수신] clipId: ${data.clipId}`);
+                // console.log(`  - before: start=${beforeStart}, duration=${beforeDuration}`);
+                // console.log(`  - after: start=${afterStart}, duration=${afterDuration}`);
+                // console.log(`  - 현재 로컬 상태: start=${clip.start}, duration=${clip.duration}`);
 
                 // 내가 보낸 리사이즈 요청이라 이미 로컬 상태가 갱신되어 있다면 이중 적용(파형 밀림 현상) 방지
                 if (Math.abs(clip.start - afterStart) < 0.0001 && Math.abs(clip.duration - afterDuration) < 0.0001) {
-                    console.log(`  => (스킵) 이미 로컬 상태가 최신입니다 (내가 보낸 요청).`);
+                   // console.log(`  => (스킵) 이미 로컬 상태가 최신입니다 (내가 보낸 요청).`);
                     break;
                 }
 
@@ -762,7 +762,7 @@ export const useTrackStore = defineStore('track', () => {
                 const newAudioStartMs = Math.round(clip.audioStartMs + (afterStart - beforeStart) * msPerBar);
                 const newAudioDurationMs = Math.round(afterDuration * msPerBar);
 
-                console.log(`  => (적용) 오디오 갱신: audioStartMs ${clip.audioStartMs} -> ${newAudioStartMs}, audioDurationMs ${clip.audioDurationMs} -> ${newAudioDurationMs}`);
+               // console.log(`  => (적용) 오디오 갱신: audioStartMs ${clip.audioStartMs} -> ${newAudioStartMs}, audioDurationMs ${clip.audioDurationMs} -> ${newAudioDurationMs}`);
 
                 clip.start = afterStart;
                 clip.duration = afterDuration;
@@ -806,7 +806,7 @@ export const useTrackStore = defineStore('track', () => {
             clip.start = resolvedStart;
             // 내가 복제/생성을 지시한 당사자라면 백엔드에도 위치 이동을 동기화합니다.
             if (isInitiator) {
-                console.log(`[Overlap Resolution] 클립 겹침 감지됨. 서버로 이동 요청 전송 (새 위치: ${resolvedStart})`);
+               // console.log(`[Overlap Resolution] 클립 겹침 감지됨. 서버로 이동 요청 전송 (새 위치: ${resolvedStart})`);
                 confirmMoveClip(clip.clipId, track.trackId, resolvedStart);
             }
         }
@@ -855,7 +855,7 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         if (!originalClip) {
-            console.error(`[에러] 붙여넣기 할 원본 클립(ID: ${data.sourceClipId})을 화면에서 찾을 수 없습니다!`);
+           // console.error(`[에러] 붙여넣기 할 원본 클립(ID: ${data.sourceClipId})을 화면에서 찾을 수 없습니다!`);
             return;
         }
 
@@ -995,7 +995,7 @@ export const useTrackStore = defineStore('track', () => {
     });
     // 5. 클립 복사 및 잘라내기 응답 
     socketService.subscribePersistent('CLIP_COPY', (data) => {
-        console.log(`[통신] 백엔드 클립보드에 복사 완료 (clipId: ${data.clipId})`);
+       // console.log(`[통신] 백엔드 클립보드에 복사 완료 (clipId: ${data.clipId})`);
     });
 
     // ==========================================
@@ -1004,7 +1004,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 실제 오디오 파일 업로드 & 클립 추가 Action
     const uploadAndAddAudioClip = async (file: File, trackId: number, startBar: number) => {
-        console.log(`========== [Upload & Add Clip Start (Pessimistic UI)] ==========`);
+       // console.log(`========== [Upload & Add Clip Start (Pessimistic UI)] ==========`);
         uploadingTrackId.value = trackId;
         uploadingBar.value = startBar;
 
@@ -1017,7 +1017,7 @@ export const useTrackStore = defineStore('track', () => {
             const localBuffer = await fetchAndCacheAudioBuffer(localBlobUrl);
             durationMs = Math.round(localBuffer.duration * 1000);
         } catch (e) {
-            console.error(`[Upload] 로컬 파일 디코딩 실패:`, e);
+           // console.error(`[Upload] 로컬 파일 디코딩 실패:`, e);
             URL.revokeObjectURL(localBlobUrl);
             uploadingTrackId.value = null;
             uploadingBar.value = null;
@@ -1043,7 +1043,7 @@ export const useTrackStore = defineStore('track', () => {
                 }
             });
 
-            console.log(`[Upload] S3 파일 업로드 완료 (objectKey: ${uploadTicket.objectKey})`);
+           // console.log(`[Upload] S3 파일 업로드 완료 (objectKey: ${uploadTicket.objectKey})`);
             // 5. 웹소켓으로 클립 생성(CLIP_CREATE) 브로드캐스트 요청 (현재 합의된 백엔드 스펙)
             socketService.publish('CLIP_CREATE', {
                 projectId: projectInfo.value.projectId,
@@ -1060,10 +1060,10 @@ export const useTrackStore = defineStore('track', () => {
                 _localBlobUrl: localBlobUrl
             });
 
-            console.log(`[Upload] 백엔드로 CLIP_CREATE 발신 완료. 렌더링은 브로드캐스트 수신 후 진행됩니다.`);
+           // console.log(`[Upload] 백엔드로 CLIP_CREATE 발신 완료. 렌더링은 브로드캐스트 수신 후 진행됩니다.`);
             // 프론트엔드 로직 종료 (렌더링은 수신부에서 일괄 처리)
         } catch (error) {
-            console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
+           // console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
             URL.revokeObjectURL(localBlobUrl);
             alert("파일 업로드에 실패했습니다.");
             uploadingTrackId.value = null;
@@ -1152,7 +1152,7 @@ export const useTrackStore = defineStore('track', () => {
             }
         }
 
-        console.log(`[통신] 백엔드에 붙여넣기(CLIP_PASTE) 요청 전송`);
+       // console.log(`[통신] 백엔드에 붙여넣기(CLIP_PASTE) 요청 전송`);
         pendingPasteCount.value++;
         socketService.publish('CLIP_PASTE', {
             projectId: projectInfo.value.projectId,
@@ -1163,7 +1163,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 삭제
     const deleteClip = (clipId: number, trackId: number) => {
-        console.log(`[통신] 백엔드에 클립 삭제(CLIP_DELETE) 요청 전송`);
+       // console.log(`[통신] 백엔드에 클립 삭제(CLIP_DELETE) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clipId, trackId);
         socketService.publish('CLIP_DELETE', {
@@ -1175,7 +1175,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 4. 클립 복제 (Duplicate)
     const duplicateClip = (clip: ClipUIState, trackId: number) => {
-        console.log(`[통신] 백엔드에 클립 복제(CLIP_DUPLICATE) 요청 전송`);
+       // console.log(`[통신] 백엔드에 클립 복제(CLIP_DUPLICATE) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clip.clipId, trackId);
         pendingDuplicateOriginalClipIds.add(clip.clipId);
@@ -1194,12 +1194,12 @@ export const useTrackStore = defineStore('track', () => {
     const splitClip = async (clipId: number, trackId: number) => {
         const now = Date.now();
         if (now - lastSplitTime < 500) {
-            console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
+           // console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
             return;
         }
 
         if (pendingSplitOriginalClipIds.has(clipId)) {
-            console.warn("이전 분할 요청이 처리 중입니다. (네트워크 대기)");
+           // console.warn("이전 분할 요청이 처리 중입니다. (네트워크 대기)");
             return;
         }
 
@@ -1219,7 +1219,7 @@ export const useTrackStore = defineStore('track', () => {
             return;
         }
 
-        console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
+       // console.log(`[통신] 클립 분할(CLIP_SPLIT) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clipId, trackId);
         pendingSplitOriginalClipIds.add(clipId);
@@ -1233,7 +1233,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 6. 클립 길이 조절 (Resize / Trim)
     const resizeClip = (clipId: number, trackId: number, newStart: number, newDuration: number, trimLeftBars: number) => {
-        console.log(`[통신] 클립 리사이즈(CLIP_RESIZE) 요청 전송`);
+       // console.log(`[통신] 클립 리사이즈(CLIP_RESIZE) 요청 전송`);
         socketService.publish('CLIP_RESIZE', {
             projectId: projectInfo.value.projectId,
             clipId: clipId,
@@ -1291,7 +1291,7 @@ export const useTrackStore = defineStore('track', () => {
     //새로운 트랙 추가 액션
     const addTrack = () => {
         const newTrackName = `트랙 ${trackList.value.length + 1}`;
-        console.log(`[통신] 트랙 추가(TRACK_ADD) 요청 전송`);
+      //  console.log(`[통신] 트랙 추가(TRACK_ADD) 요청 전송`);
 
         socketService.publish('TRACK_ADD', {
             projectId: projectInfo.value.projectId,
@@ -1410,17 +1410,17 @@ export const useTrackStore = defineStore('track', () => {
 
     // 트랙 패닝 조절 (-100 ~ 100)
     const setTrackPan = (trackId: number, pan: number) => {
-        console.log(`[패닝 디버그] setTrackPan 호출! trackId=${trackId}, pan=${pan}`);
+       // console.log(`[패닝 디버그] setTrackPan 호출! trackId=${trackId}, pan=${pan}`);
         if (trackId === 999999) {
             masterTrack.value.pan = pan;
             masterPanner.pan.value = pan / 100;
-            console.log(`[패닝 디버그] 마스터 패너 적용 완료: masterPanner.pan.value=${masterPanner.pan.value}`);
+           // console.log(`[패닝 디버그] 마스터 패너 적용 완료: masterPanner.pan.value=${masterPanner.pan.value}`);
             return;
         }
 
         const track = trackList.value.find(t => t.trackId === trackId);
         if (!track) {
-            console.error(`[패닝 디버그] 트랙을 찾을 수 없음! trackId=${trackId}`);
+          //  console.error(`[패닝 디버그] 트랙을 찾을 수 없음! trackId=${trackId}`);
             return;
         }
 
@@ -1428,11 +1428,11 @@ export const useTrackStore = defineStore('track', () => {
         const panner = trackPanners.get(trackId);
         if (panner) {
             panner.pan.value = pan / 100;
-            console.log(`[패닝 디버그] 트랙 ${trackId} 패너 적용 완료: panner.pan.value=${panner.pan.value}`);
+          //  console.log(`[패닝 디버그] 트랙 ${trackId} 패너 적용 완료: panner.pan.value=${panner.pan.value}`);
         } else {
-            console.error(`[패닝 디버그] 트랙 ${trackId}의 panner를 trackPanners Map에서 찾을 수 없음!`);
-            console.log(`[패닝 디버그] 현재 trackPanners 키 목록:`, [...trackPanners.keys()]);
-            console.log(`[패닝 디버그] 현재 trackVolumes 키 목록:`, [...trackVolumes.keys()]);
+            // console.error(`[패닝 디버그] 트랙 ${trackId}의 panner를 trackPanners Map에서 찾을 수 없음!`);
+            // console.log(`[패닝 디버그] 현재 trackPanners 키 목록:`, [...trackPanners.keys()]);
+            // console.log(`[패닝 디버그] 현재 trackVolumes 키 목록:`, [...trackVolumes.keys()]);
         }
 
         socketService.publish('TRACK_PAN_CHANGE', {
@@ -1445,7 +1445,7 @@ export const useTrackStore = defineStore('track', () => {
     //트랙 삭제 기능
     const deleteTrack = (trackId: number) => {
         if (trackId === 999999) return;
-        console.log(`[통신] 백엔드에 트랙 삭제(TRACK_DELETE) 요청 전송`);
+       // console.log(`[통신] 백엔드에 트랙 삭제(TRACK_DELETE) 요청 전송`);
 
         socketService.publish('TRACK_DELETE', {
             projectId: projectInfo.value.projectId,
@@ -1461,7 +1461,7 @@ export const useTrackStore = defineStore('track', () => {
 
         track.name = newName; // UI 즉각 반영
 
-        console.log(`[통신] 백엔드에 트랙 이름 변경(TRACK_RENAME) 요청 전송`);
+      //  console.log(`[통신] 백엔드에 트랙 이름 변경(TRACK_RENAME) 요청 전송`);
         socketService.publish('TRACK_RENAME', {
             projectId: projectInfo.value.projectId,
             trackId: trackId,
@@ -1482,7 +1482,7 @@ export const useTrackStore = defineStore('track', () => {
         const preTrackId = targetIndex > 0 ? trackList.value[targetIndex - 1].trackId : null;
         const postTrackId = targetIndex < trackList.value.length - 1 ? trackList.value[targetIndex + 1].trackId : null;
 
-        console.log(`[통신] 백엔드에 트랙 순서 변경(TRACK_REORDER) 요청 전송`);
+      //  console.log(`[통신] 백엔드에 트랙 순서 변경(TRACK_REORDER) 요청 전송`);
         socketService.publish('TRACK_REORDER', {
             projectId: projectInfo.value.projectId,
             trackId: draggedTrackId,
@@ -1497,7 +1497,7 @@ export const useTrackStore = defineStore('track', () => {
 
     // 드래그 앤 드롭 종료 시 서버 확정 통신
     const confirmMoveClip = (clipId: number, targetTrackId: number, targetStartBar: number) => {
-        console.log(`[통신] 백엔드에 클립 이동(CLIP_MOVE) 요청 전송`);
+       // console.log(`[통신] 백엔드에 클립 이동(CLIP_MOVE) 요청 전송`);
 
         socketService.publish('CLIP_MOVE', {
             projectId: projectInfo.value.projectId,
@@ -1542,7 +1542,7 @@ export const useTrackStore = defineStore('track', () => {
                 playheadPosition.value = Tone.getTransport().seconds / secondsPerBar.value;
             }
         } catch (e) {
-            console.error("재생 에러:", e);
+           // console.error("재생 에러:", e);
         }
     };
 
@@ -1571,7 +1571,7 @@ export const useTrackStore = defineStore('track', () => {
                 const audioOffsetSec = clip.audioStartMs / 1000;
                 newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
             } catch (e) {
-                console.error("[Audio Load Error]:", e);
+               // console.error("[Audio Load Error]:", e);
                 disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
             }
         }
@@ -1638,7 +1638,7 @@ export const useTrackStore = defineStore('track', () => {
             });
             observer.observe({ entryTypes: ['longtask'] });
         } catch (e) {
-            console.error("Long Task Observer 초기화 실패", e);
+          //  console.error("Long Task Observer 초기화 실패", e);
         }
     }
 
@@ -1652,16 +1652,16 @@ export const useTrackStore = defineStore('track', () => {
 
         // 프레임 드랍 감지 (30ms 이상 지연되면 멈칫거림으로 간주)
         if (timeSinceLastFrame > 30 && loopFrameCount > 10) {
-            console.warn(`🚨 [프레임 드랍 감지] 루프 지연 시간: ${timeSinceLastFrame.toFixed(2)}ms`);
+           // console.warn(`🚨 [프레임 드랍 감지] 루프 지연 시간: ${timeSinceLastFrame.toFixed(2)}ms`);
 
             // Long Task API를 통해 직전에 메인 스레드를 막은 원인을 분석
             if (longTasks.length > 0) {
                 const lastTask = longTasks[longTasks.length - 1];
-                console.warn(`🔍 [원인 분석] 최근 Long Task 발견: 
-- 소요 시간: ${lastTask.duration.toFixed(2)}ms
-- 원인(name): ${lastTask.name}
-- 발생 시점: ${lastTask.startTime.toFixed(2)}
-- 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a: any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
+//                 console.warn(`🔍 [원인 분석] 최근 Long Task 발견: 
+// - 소요 시간: ${lastTask.duration.toFixed(2)}ms
+// - 원인(name): ${lastTask.name}
+// - 발생 시점: ${lastTask.startTime.toFixed(2)}
+// - 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a: any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
             }
         }
 
@@ -1721,11 +1721,11 @@ export const useTrackStore = defineStore('track', () => {
         // 현재 루프 실행에 걸린 시간 측정
         const totalLoopTime = performance.now() - loopStart;
         if (totalLoopTime > 15) {
-            console.error(`🐢 [루프 자체 병목] updatePlayheadLoop 실행에 ${totalLoopTime.toFixed(2)}ms 소요!`);
+           // console.error(`🐢 [루프 자체 병목] updatePlayheadLoop 실행에 ${totalLoopTime.toFixed(2)}ms 소요!`);
         }
 
         if (currentPositionBar >= projectInfo.value.totalBarCount) {
-            console.log("⏹️ [재생 종료] 끝까지 도달하여 정지합니다.");
+           // console.log("⏹️ [재생 종료] 끝까지 도달하여 정지합니다.");
             stopPlay();
             return;
         }
@@ -1771,7 +1771,7 @@ export const useTrackStore = defineStore('track', () => {
 
     //오디오 파일 로딩 및 Transport 조절 함수
     const setupAudioEngine = async (tracks: TrackUIState[]) => {
-        console.log("========== [Audio Engine Setup Start] ==========");
+       // console.log("========== [Audio Engine Setup Start] ==========");
 
         for (const track of tracks) {
             if (!trackVolumes.has(track.trackId)) {
@@ -1785,7 +1785,7 @@ export const useTrackStore = defineStore('track', () => {
 
                 trackVolumes.set(track.trackId, vol);
                 trackPanners.set(track.trackId, panner);
-                console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
+               // console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
             }
 
             rebuildTrackEqChain(track.trackId);
@@ -1797,10 +1797,10 @@ export const useTrackStore = defineStore('track', () => {
 
             for (const clip of track.clips) {
                 if (!clip.audio?.cdnUrl) {
-                    console.warn(`[Setup ⚠️] 클립 ${clip.clipId}에 오디오 URL이 없어 로딩 건너뜀.`);
+                   // console.warn(`[Setup ⚠️] 클립 ${clip.clipId}에 오디오 URL이 없어 로딩 건너뜀.`);
                     continue;
                 }
-                console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
+              //  console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
                 try {
                     // [최적화] 캐시에서 AudioBuffer를 가져오거나 한 번만 fetch+decode
                     const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
@@ -1814,7 +1814,7 @@ export const useTrackStore = defineStore('track', () => {
                         track.trackId,
                     );
 
-                    console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
+                   // console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
                     const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
@@ -1823,21 +1823,21 @@ export const useTrackStore = defineStore('track', () => {
                     player.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec);
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
-                    console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
+                   // console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
                     disposeClipAudio(clip.clipId);
                 }
             }
         }
-        console.log("========== [Audio Engine Setup End] ==========");
+       // console.log("========== [Audio Engine Setup End] ==========");
     }
 
     // 프로젝트 진입 시 기존 오디오 자원 완벽 초기화 (유령 오디오, 중복 스케줄링 누수 방지)
     const disposeAllAudio = () => {
-        console.log("========== [Audio Engine Cleanup Start] ==========");
+       // console.log("========== [Audio Engine Cleanup Start] ==========");
         clipPlayers.forEach((player, clipId) => {
             player.unsync();
             player.dispose();
-            console.log(`[Dispose] 유령 클립 방지: 클립 ${clipId} 오디오 자원 해제 완료`);
+           // console.log(`[Dispose] 유령 클립 방지: 클립 ${clipId} 오디오 자원 해제 완료`);
         });
         clipPlayers.clear();
 
@@ -1854,16 +1854,16 @@ export const useTrackStore = defineStore('track', () => {
         trackAnalyzers.forEach(analyzer => analyzer.dispose());
         trackAnalyzers.clear();
 
-        console.log("========== [Audio Engine Cleanup End] ==========");
+       // console.log("========== [Audio Engine Cleanup End] ==========");
     };
 
     //클립 위치가 변경되었을 때 오디오 엔진 스케줄을 재설정 하는 함수
     const resyncClip = (clipId: number, newStartBar: number) => {
-        console.log(`  └─ [Resync] 클립 ID ${clipId} 재동기화 시작 (새 위치: ${newStartBar}마디)`);
+       // console.log(`  └─ [Resync] 클립 ID ${clipId} 재동기화 시작 (새 위치: ${newStartBar}마디)`);
 
         const player = clipPlayers.get(clipId);
         if (!player) {
-            console.error(`  └─ [Resync 🚨] 클립 ID ${clipId}의 오디오 플레이어를 찾을 수 없습니다! (유령 클립)`);
+           // console.error(`  └─ [Resync 🚨] 클립 ID ${clipId}의 오디오 플레이어를 찾을 수 없습니다! (유령 클립)`);
             return;
         }
 
@@ -1877,7 +1877,7 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         if (!targetClip) {
-            console.error(`  └─ [Resync 🚨] 트랙 리스트에서 클립 데이터를 찾을 수 없습니다!`);
+           // console.error(`  └─ [Resync 🚨] 트랙 리스트에서 클립 데이터를 찾을 수 없습니다!`);
             return;
         }
 
@@ -1891,13 +1891,13 @@ export const useTrackStore = defineStore('track', () => {
 
         const safeDurationSec = Math.max(0.01, Math.min(requestedDuration, maxDuration));
 
-        console.log(`  └─ [Resync] 타임라인 스케줄링 -> 시작: ${exactStartTimeSec.toFixed(2)}초, Offset: ${audioOffsetSec.toFixed(2)}초, 재생길이: ${safeDurationSec.toFixed(2)}초`);
+       // console.log(`  └─ [Resync] 타임라인 스케줄링 -> 시작: ${exactStartTimeSec.toFixed(2)}초, Offset: ${audioOffsetSec.toFixed(2)}초, 재생길이: ${safeDurationSec.toFixed(2)}초`);
 
         if (safeDurationSec > 0) {
             player.sync().start(exactStartTimeSec, audioOffsetSec, safeDurationSec);
-            console.log(`  └─ [Resync] 스케줄링 등록 완료! (상태: 정상)`);
+          //  console.log(`  └─ [Resync] 스케줄링 등록 완료! (상태: 정상)`);
         } else {
-            console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
+          //  console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
         }
     };
 
@@ -1914,7 +1914,7 @@ export const useTrackStore = defineStore('track', () => {
         const currentBands = track.eq?.bands ?? []
 
         if (currentBands.length >= MAX_EQ_BANDS) {
-            console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
+          //  console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
             return
         }
 
@@ -2036,8 +2036,8 @@ export const useTrackStore = defineStore('track', () => {
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 
-            console.log('[fetchProject] data:', data)
-            console.log('[fetchProject] data.name:', data.name)
+            // console.log('[fetchProject] data:', data)
+            // console.log('[fetchProject] data.name:', data.name)
 
             if (data) {
                 const MIN_TOTAL_BAR_COUNT = 100
@@ -2082,7 +2082,7 @@ export const useTrackStore = defineStore('track', () => {
                 setupAudioEngine(trackList.value);
             }
         } catch (error) {
-            console.error("프로젝트 로딩 실패:", error);
+          //  console.error("프로젝트 로딩 실패:", error);
         }
     };
 

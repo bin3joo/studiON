@@ -69,7 +69,7 @@ def build_action(
     params: dict | None = None,
     target_scope: str = "TRACK",
 ) -> dict:
-    return {
+    action = {
         "actionType": action_type,
         "targetTrackId": track_id,
         "targetClipId": None,
@@ -81,6 +81,46 @@ def build_action(
         "params": params or {},
         "targetScope": target_scope,
         "actionId": f"{state['job_id']}-action-{index}",
+        "jobId": int(state["job_id"]),
+    }
+    static_eq_band = _resolve_static_eq_band_fields(
+        band_low_hz=band_low_hz,
+        band_high_hz=band_high_hz,
+        params=params or {},
+        target_scope=target_scope,
+    )
+    if static_eq_band is not None:
+        action.update(static_eq_band)
+        action["sourceType"] = "AI_CONFIRM"
+    return action
+
+
+def _resolve_static_eq_band_fields(
+    *,
+    band_low_hz: int | None,
+    band_high_hz: int | None,
+    params: dict,
+    target_scope: str,
+) -> dict[str, object] | None:
+    if target_scope != "TRACK":
+        return None
+    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
+        return None
+    if band_low_hz <= 0 or band_high_hz <= band_low_hz:
+        return None
+
+    frequency_hz = int(round((band_low_hz * band_high_hz) ** 0.5))
+    q_value = params.get("q") if isinstance(params, dict) else None
+    if isinstance(q_value, int | float) and float(q_value) > 0:
+        q = round(float(q_value), 3)
+    else:
+        q = round(float(frequency_hz) / float(band_high_hz - band_low_hz), 3)
+    if q <= 0:
+        return None
+    return {
+        "frequencyHz": frequency_hz,
+        "q": q,
+        "eqType": "BELL",
     }
 
 

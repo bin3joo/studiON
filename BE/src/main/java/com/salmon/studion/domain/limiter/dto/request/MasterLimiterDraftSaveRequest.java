@@ -25,17 +25,7 @@ public class MasterLimiterDraftSaveRequest extends MasterLimiterRequest {
 
     @Override
     public void validate() {
-        if (
-                getProjectId() == null
-                        || isEnabled == null
-                        || thresholdDb == null
-                        || ceilingDbfs == null
-                        || attackMs == null
-                        || releaseMs == null
-                        || inputGainDb == null
-                        || makeupGainDb == null
-                        || sourceType == null
-        ) {
+        if (getProjectId() == null || sourceType == null) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
     }

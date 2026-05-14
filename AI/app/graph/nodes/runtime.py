@@ -971,18 +971,21 @@ def _build_auto_preview_issue(
     for recipe in group.get("recipes", []):
         if not isinstance(recipe, dict):
             continue
-        actions.append(
-            {
-                "type": str(recipe.get("actionType") or ""),
-                "targetScope": recipe.get("targetScope"),
-                "targetTrackId": recipe.get("targetTrackId"),
-                "gainDeltaDb": recipe.get("gainDeltaDb"),
-                "startMs": recipe.get("startMs"),
-                "endMs": recipe.get("endMs"),
-                "bandLowHz": recipe.get("bandLowHz"),
-                "bandHighHz": recipe.get("bandHighHz"),
-            }
-        )
+        action = {
+            "type": str(recipe.get("actionType") or ""),
+            "targetScope": recipe.get("targetScope"),
+            "targetTrackId": recipe.get("targetTrackId"),
+            "gainDeltaDb": recipe.get("gainDeltaDb"),
+            "startMs": recipe.get("startMs"),
+            "endMs": recipe.get("endMs"),
+            "bandLowHz": recipe.get("bandLowHz"),
+            "bandHighHz": recipe.get("bandHighHz"),
+            "jobId": int(state["job_id"]),
+        }
+        if action["type"] in {"DYNAMIC_EQ", "EQ_CUT"}:
+            action.update(_build_static_eq_action_fields(recipe))
+            action["sourceType"] = "AI_CONFIRM"
+        actions.append(action)
 
     markers: list[dict[str, object]] = []
     if issue_type == "high_band_harshness":
@@ -1002,6 +1005,7 @@ def _build_auto_preview_issue(
     if issue_type in {"track_clipping", "master_clipping"} and actions:
         actions = [
             _build_master_limiter_issue_action(
+                job_id=int(state["job_id"]),
                 action=actions[0],
                 source_track_id=track_ids[0] if track_ids else None,
             )
@@ -1130,6 +1134,28 @@ def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, obj
     }
 
 
+def _build_static_eq_action_fields(recipe: dict[str, object]) -> dict[str, object]:
+    band_low_hz = recipe.get("bandLowHz")
+    band_high_hz = recipe.get("bandHighHz")
+    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
+        raise ValueError("static eq action fields require integer band bounds")
+    if band_low_hz <= 0 or band_high_hz <= band_low_hz:
+        raise ValueError("static eq action fields require valid band bounds")
+
+    frequency_hz = int(round((band_low_hz * band_high_hz) ** 0.5))
+    params = recipe.get("params") or {}
+    q_value = params.get("q") if isinstance(params, dict) else None
+    if isinstance(q_value, int | float) and float(q_value) > 0:
+        q = round(float(q_value), 3)
+    else:
+        q = round(float(frequency_hz) / float(band_high_hz - band_low_hz), 3)
+    return {
+        "frequencyHz": frequency_hz,
+        "q": q,
+        "eqType": "BELL",
+    }
+
+
 def _resolve_clipping_limiter_reduction_db(region: dict[str, object]) -> float:
     explicit = region.get("recommended_reduction_db")
     if isinstance(explicit, int | float):
@@ -1145,6 +1171,7 @@ def _resolve_clipping_limiter_reduction_db(region: dict[str, object]) -> float:
 
 def _build_master_limiter_issue_action(
     *,
+    job_id: int,
     action: dict[str, object],
     source_track_id: int | None,
 ) -> dict[str, object]:
@@ -1152,9 +1179,18 @@ def _build_master_limiter_issue_action(
     issue_action: dict[str, object] = {
         "type": "apply_master_limiter",
         "targetScope": "MASTER",
+        "jobId": job_id,
+        "sourceType": "AI_APPLIED",
+        "isEnabled": True,
         "estimatedGainReductionDb": params.get("estimatedGainReductionDb"),
         "currentTruePeakDbtp": params.get("currentTruePeakDbtp"),
+        "ceilingDbfs": params.get("ceilingDbfs") or -1.0,
         "targetCeilingDbtp": params.get("ceilingDbfs") or -1.0,
+        "thresholdDb": None,
+        "attackMs": None,
+        "releaseMs": None,
+        "inputGainDb": None,
+        "makeupGainDb": None,
         "sourceActionType": action.get("type"),
     }
     if source_track_id is not None:

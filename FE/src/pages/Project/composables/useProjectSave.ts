@@ -17,7 +17,7 @@ export function useProjectSave(projectId: number) {
             const response = await projectApi.saveProjectSnapshot(projectId)
             lastSavedTime.value = formatTime(response.saveAt)
         } catch (error) {
-            console.error('저장 실패:', error)
+           // console.error('저장 실패:', error)
         }
     }
 

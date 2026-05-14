@@ -1,5 +1,5 @@
 <script lang="ts">
-const audioCache = new Map<string, { channelData: Float32Array, sampleRate: number }>();
+const audioCache = new Map<string, { channels: Float32Array[], sampleRate: number }>();
 </script>
 
 <script setup lang="ts">
@@ -17,7 +17,7 @@ const props = defineProps<{
 const trackStore = useTrackStore();
 
 // 오디오 데이터를 담을 반응형 변수 (shallowRef로 대용량 데이터 성능 최적화)
-const audioData = shallowRef<{ channelData: Float32Array, sampleRate: number } | null>(null);
+const audioData = shallowRef<{ channels: Float32Array[], sampleRate: number } | null>(null);
 
 // 브라우저 렌더링 한계치를 피하기 위한 최대 캔버스 너비 (안전하게 8000픽셀로 설정)
 // [최적화] 기존 8000에서 2000으로 대폭 축소.
@@ -58,36 +58,40 @@ const loadAudioData = async () => {
       // 스토어의 전역 캐시에서 AudioBuffer를 가져옴 (이미 디코딩되어 있으면 즉시 반환)
       const audioBuffer = await trackStore.fetchAndCacheAudioBuffer(audioUrl);
       
+      const numChannels = Math.min(2, audioBuffer.numberOfChannels); // 최대 2채널만 처리
+      const channels = [];
+      for (let i = 0; i < numChannels; i++) {
+        channels.push(audioBuffer.getChannelData(i));
+      }
+      
       cached = {
-        // [최적화] getChannelData()의 참조를 그대로 사용 (new Float32Array 복사 제거)
-        // WAV 50MB 파일 기준 약 50MB의 불필요한 메모리 할당과 GC 부하가 사라집니다.
-        channelData: audioBuffer.getChannelData(0),
+        channels,
         sampleRate: audioBuffer.sampleRate
       };
       audioCache.set(audioUrl, cached);
     } catch (error) {
-      console.error("[Waveform] 오디오 데이터 로드 실패:", error);
+     // console.error("[Waveform] 오디오 데이터 로드 실패:", error);
       return;
     }
   }
 
   // [최적화] 메인 스레드 렌더링 병목을 없애기 위해 오디오 로드 시점에 전체 워커 풀에 배열을 단 1회 브로드캐스트 캐싱합니다.
-  waveformRendererPool.broadcastCacheAudio(audioUrl, cached!.channelData);
+  waveformRendererPool.broadcastCacheAudio(audioUrl, cached!.channels);
   
   audioData.value = cached;
 };
 
 onMounted(() => {
-  console.log('[Waveform 🔍] onMounted - clipId:', props.clip.clipId, 'cdnUrl:', props.clip.audio?.cdnUrl || '(비어있음)');
+ // console.log('[Waveform 🔍] onMounted - clipId:', props.clip.clipId, 'cdnUrl:', props.clip.audio?.cdnUrl || '(비어있음)');
   loadAudioData();
 });
 
 // cdnUrl이 비동기로 나중에 채워지는 경우(다른 사용자의 CLIP_CREATE 수신 시)
 // URL이 빈 문자열 → 실제 URL로 변경될 때 파형 데이터를 다시 로딩
 watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
-  console.log('[Waveform 🔍] watch 감지! clipId:', props.clip.clipId, 'oldUrl:', oldUrl || '(없음)', 'newUrl:', newUrl || '(없음)', 'audioData 있음?:', !!audioData.value);
+ // console.log('[Waveform 🔍] watch 감지! clipId:', props.clip.clipId, 'oldUrl:', oldUrl || '(없음)', 'newUrl:', newUrl || '(없음)', 'audioData 있음?:', !!audioData.value);
   if (newUrl && newUrl !== oldUrl && !audioData.value) {
-    console.log('[Waveform 🔍] → loadAudioData 재호출!');
+   // console.log('[Waveform 🔍] → loadAudioData 재호출!');
     loadAudioData();
   }
 });

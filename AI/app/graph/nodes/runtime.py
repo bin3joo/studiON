@@ -51,19 +51,6 @@ def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
     )
 
 
-def issue_router_gate(state: WorkflowState) -> WorkflowState:
-    return workflow_update(
-        state,
-        node="issue_router_gate",
-        phase="issue_router_checked",
-        progress=61,
-        extra={
-            "selected_region_id": state.get("selected_region_id")
-            or next(iter(state.get("ranked_candidate_ids", [])), None)
-        },
-    )
-
-
 def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
     if not state.get("selected_region_id"):
         return fail_workflow(

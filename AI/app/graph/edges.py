@@ -28,14 +28,6 @@ def route_after_dsp_scan(state: WorkflowState) -> str:
 # 사용자 입력이 필요한 후보가 있으면 plan input 대기 상태로, 없으면 바로 실행 계획 구체화로 보낸다.
 def route_after_candidate_ranking(state: WorkflowState) -> str:
     if state.get("ranked_candidate_ids"):
-        return "issue_router_gate"
-    return "materialize_non_llm_issues"
-
-
-def route_after_issue_router_gate(state: WorkflowState) -> str:
-    active_issue_id = str((state.get("suggestion_payload") or {}).get("activeIssueId") or "")
-    region_issue_id = f"{state['job_id']}-issue-{int(state['selected_region_id'])}"
-    if active_issue_id == region_issue_id:
         return "wait_user_plan_input"
     return "materialize_non_llm_issues"
 

@@ -697,8 +697,49 @@ const onDrop = (e: DragEvent) => {
 };
 
 // ==========================================
-// 볼륨/패닝 직접 입력 로직
+// 볼륨/패닝 드래그 및 직접 입력 로직
 // ==========================================
+
+// 볼륨 슬라이더 드래그 로직
+const isDraggingVolume = ref(false);
+const localVolume = ref(0);
+
+const displayVolume = computed(() => {
+  return isDraggingVolume.value ? localVolume.value : (props.track.volume || 0);
+});
+
+const handleVolumeInput = (e: Event) => {
+  isDraggingVolume.value = true;
+  const val = Number((e.target as HTMLInputElement).value);
+  localVolume.value = parseFloat(trackStore.getVolumeFromPercent(val).toFixed(1));
+};
+
+const handleVolumeChange = (e: Event) => {
+  isDraggingVolume.value = false;
+  const val = Number((e.target as HTMLInputElement).value);
+  const finalVolume = parseFloat(trackStore.getVolumeFromPercent(val).toFixed(1));
+  trackStore.setTrackVolume(props.track.trackId, finalVolume);
+};
+
+// 패닝 슬라이더 드래그 로직
+const isDraggingPan = ref(false);
+const localPan = ref(0);
+
+const displayPan = computed(() => {
+  return isDraggingPan.value ? localPan.value : (props.track.pan || 0);
+});
+
+const handlePanInput = (e: Event) => {
+  isDraggingPan.value = true;
+  localPan.value = Number((e.target as HTMLInputElement).value);
+};
+
+const handlePanChange = (e: Event) => {
+  isDraggingPan.value = false;
+  const pan = Number((e.target as HTMLInputElement).value);
+  trackStore.setTrackPan(props.track.trackId, pan);
+};
+
 const isEditingVolume = ref(false);
 const volumeInputRef = ref<HTMLInputElement | null>(null);
 const editVolumeValue = ref<number | string>(0); // 입력 중인 임시 값 저장용
@@ -957,14 +998,15 @@ const onWorkAreaMouseLeave = () => {
           <!-- 1. 볼륨 커스텀 슬라이더 (드래그 조작용) -->
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60 flex items-center">
             <!-- 게이지 -->
-            <div class="absolute left-0 h-full rounded-full bg-[#ff9800] shadow-[0_0_8px_#ff9800]" :style="{ width: `${trackStore.getVolumePercent(track.volume || 0)}%` }"></div>
+            <div class="absolute left-0 h-full rounded-full bg-[#ff9800] shadow-[0_0_8px_#ff9800]" :style="{ width: `${trackStore.getVolumePercent(displayVolume)}%` }"></div>
             <!-- 핸들 -->
-            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c] pointer-events-none" :style="{ left: `${trackStore.getVolumePercent(track.volume || 0)}%` }"></div>
+            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c] pointer-events-none" :style="{ left: `${trackStore.getVolumePercent(displayVolume)}%` }"></div>
             <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
             <input 
               type="range" min="0" max="100" step="0.1" 
-              :value="trackStore.getVolumePercent(track.volume || 0)" 
-              @input="e => trackStore.setTrackVolume(track.trackId, parseFloat(trackStore.getVolumeFromPercent(Number((e.target as HTMLInputElement).value)).toFixed(1)))"
+              :value="trackStore.getVolumePercent(displayVolume)" 
+              @input="handleVolumeInput"
+              @change="handleVolumeChange"
               class="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
             />
           </div>
@@ -988,7 +1030,7 @@ const onWorkAreaMouseLeave = () => {
               step="0.1"
             />
             <span v-else class="font-mono text-[10px] tabular-nums text-white pointer-events-none">
-              {{ (track.volume || 0).toFixed(1) }}
+              {{ displayVolume.toFixed(1) }}
             </span>
           </div>
         </div>
@@ -1000,14 +1042,15 @@ const onWorkAreaMouseLeave = () => {
           <!-- 1. 팬 커스텀 슬라이더 (드래그 조작용) -->
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60 flex items-center">
             <!-- 게이지 -->
-            <div class="absolute h-full rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" :style="{ left: track.pan < 0 ? `${50 + track.pan / 2}%` : '50%', width: `${Math.abs(track.pan) / 2}%` }"></div>
+            <div class="absolute h-full rounded-full bg-[#d4d4d4] shadow-[0_0_8px_rgba(255,255,255,0.4)]" :style="{ left: displayPan < 0 ? `${50 + displayPan / 2}%` : '50%', width: `${Math.abs(displayPan) / 2}%` }"></div>
             <!-- 핸들 -->
-            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c] pointer-events-none" :style="{ left: `${50 + track.pan / 2}%` }"></div>
+            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-gray-300 bg-[#1c1c1c] pointer-events-none" :style="{ left: `${50 + displayPan / 2}%` }"></div>
             <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
             <input 
               type="range" min="-100" max="100" step="1" 
-              :value="track.pan" 
-              @input="e => trackStore.setTrackPan(track.trackId, parseInt((e.target as HTMLInputElement).value))"
+              :value="displayPan" 
+              @input="handlePanInput"
+              @change="handlePanChange"
               class="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
             />
           </div>
@@ -1031,7 +1074,7 @@ const onWorkAreaMouseLeave = () => {
               step="1"
             />
             <span v-else class="font-mono text-[10px] tabular-nums text-white pointer-events-none">
-              {{ track.pan === 0 ? 'C' : (track.pan > 0 ? `R${track.pan}` : `L${Math.abs(track.pan)}`) }}
+              {{ displayPan === 0 ? 'C' : (displayPan > 0 ? `R${displayPan}` : `L${Math.abs(displayPan)}`) }}
             </span>
           </div>
         </div>

@@ -21,7 +21,8 @@ import type { TrackEqBandState } from './types'
 import { AlertTriangle } from 'lucide-vue-next';
 import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
-import { useCommentStore } from './store/useCommentStore';
+import { useCommentStore } from './store/useCommentStore'
+import ExportModal from './components/ExportModal.vue';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
 
@@ -508,8 +509,10 @@ function handleDeleteComment(payload: {
 
 const commentGroups = ref<TrackMeasureCommentGroup[]>([])
 
+const isExportModalOpen = ref(false)
+
 function handleExport() {
-  console.log('내보내기')
+  isExportModalOpen.value = true
 }
 
 function handleSaveVersion() {
@@ -915,6 +918,11 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
     @dragover.prevent="onGlobalDragOver"
     @drop.prevent="onGlobalDrop"
   >
+    <ExportModal 
+      :is-open="isExportModalOpen"
+      :project-name="projectName"
+      @close="isExportModalOpen = false"
+    />
     <ProjectHeader
   :project-name="projectName"
   :online-users="onlineUsers"

@@ -153,7 +153,7 @@ function cancelProjectNameEdit() {
         @click="emit('export')"
       >
         <Download class="h-4 w-4" />
-        <span>내보내기</span>
+        <span>다운로드</span>
       </button>
     </div>
 

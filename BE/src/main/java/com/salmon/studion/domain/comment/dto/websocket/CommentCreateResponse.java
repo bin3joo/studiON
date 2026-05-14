@@ -2,7 +2,6 @@ package com.salmon.studion.domain.comment.dto.websocket;
 
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.comment.dto.redis.CommentState;
-import com.salmon.studion.domain.comment.entity.Comment;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

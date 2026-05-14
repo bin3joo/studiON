@@ -153,7 +153,7 @@ function cancelProjectNameEdit() {
         @click="emit('export')"
       >
         <Download class="h-4 w-4" />
-        <span>내보내기</span>
+        <span>다운로드</span>
       </button>
     </div>
 
@@ -161,8 +161,9 @@ function cancelProjectNameEdit() {
     <div class="hidden items-center gap-2 lg:flex">
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
-        data-guide="version-save" @click="emit('save-version')"
+        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        data-guide="version-save" 
+        disabled
       >
         <Camera class="h-4 w-4" />
         <span>버전 저장</span>

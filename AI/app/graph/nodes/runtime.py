@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.graph.nodes.common import append_transition, artifact_id, workflow_update
+from app.graph.nodes.common import append_transition, artifact_id, clear_raw_dsp_state, workflow_update
 from app.graph.state import WorkflowState, utc_now
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
@@ -478,7 +478,7 @@ def finalize_output(state: WorkflowState) -> WorkflowState:
         progress=100,
         runtime_status="completed",
         durable_status="COMPLETED",
-        extra={"completed_at": utc_now(), "notes": notes},
+        extra={"completed_at": utc_now(), "notes": notes, **clear_raw_dsp_state()},
     )
 
 
@@ -506,6 +506,7 @@ def fail_workflow(state: WorkflowState) -> WorkflowState:
             "preview_expired_at": state.get("preview_expired_at"),
             "preview_error_code": state.get("preview_error_code"),
             "preview_error_message": state.get("preview_error_message"),
+            **clear_raw_dsp_state(),
         },
     )
 

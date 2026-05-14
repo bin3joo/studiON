@@ -11,7 +11,7 @@ import soundfile as sf
 from scipy.signal import resample_poly
 
 from app.core.config import get_settings
-from app.graph.nodes.common import artifact_id, workflow_update
+from app.graph.nodes.common import artifact_id, clear_raw_dsp_state, workflow_update
 from app.graph.state import WorkflowState, utc_now
 from app.services.clap_inference import (
     CLAPExcerptPayload,
@@ -145,9 +145,8 @@ def sample_track_clips(state: WorkflowState) -> WorkflowState:
 - materialized_regions : state에 넣기 직전의 완성된 region 리스트
 """
 def cheap_dsp_scan(state: WorkflowState) -> WorkflowState:
-    current_artifact_id = artifact_id(state, "cheap-dsp")
     try:
-        summary, artifact_payload = _build_compact_dsp_summary(state)
+        summary, raw_dsp_payload = _build_compact_dsp_summary(state)
     except DSPBuildError as exc:
         return workflow_update(
             state,
@@ -160,17 +159,9 @@ def cheap_dsp_scan(state: WorkflowState) -> WorkflowState:
                 "completed_at": utc_now(),
                 "failure_code": exc.code,
                 "failure_message": exc.message,
+                **clear_raw_dsp_state(),
             },
         )
-
-    get_workflow_artifact_store().upsert_artifact(
-        WorkflowArtifactDocument(
-            id=current_artifact_id,
-            job_id=state["job_id"],
-            artifact_type="full_stft_frame_summary",
-            payload=artifact_payload,
-        )
-    )
     return workflow_update(
         state,
         node="cheap_dsp_scan",
@@ -178,10 +169,8 @@ def cheap_dsp_scan(state: WorkflowState) -> WorkflowState:
         progress=18,
         extra={
             "analysis_regions": deepcopy(state.get("analysis_regions", [])),
-            "clip_feature_artifact_id": current_artifact_id,
             "dsp_scan_summary": summary,
-            "mongo_artifact_ids": [*state.get("mongo_artifact_ids", []), current_artifact_id],
-            "latest_artifact_id": current_artifact_id,
+            **raw_dsp_payload,
         },
     )
 
@@ -983,6 +972,25 @@ def _ms_to_samples(duration_ms: int) -> int:
 
 
 def _load_dsp_feature_artifact(state: WorkflowState) -> dict[str, Any]:
+    raw_track_frames = state.get("track_frames") or {}
+    raw_mix_frames = state.get("mix_frames") or []
+    raw_track_power_spectra = state.get("track_power_spectra") or {}
+    raw_mix_power_spectra = state.get("mix_power_spectra") or []
+    raw_frequency_bins_hz = state.get("frequency_bins_hz") or []
+    if (
+        raw_track_frames
+        or raw_mix_frames
+        or raw_track_power_spectra
+        or raw_mix_power_spectra
+        or raw_frequency_bins_hz
+    ):
+        return {
+            "track_frames": raw_track_frames,
+            "mix_frames": raw_mix_frames,
+            "track_power_spectra": raw_track_power_spectra,
+            "mix_power_spectra": raw_mix_power_spectra,
+            "frequency_bins_hz": raw_frequency_bins_hz,
+        }
     artifact_id_value = state.get("clip_feature_artifact_id")
     if not artifact_id_value:
         return {}

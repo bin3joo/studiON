@@ -33,6 +33,8 @@ services:
     build: ./BE
     env_file:
       - .env.prod
+    environment:
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
     restart: on-failure:2
     # Redis healthcheck 통과 후 backend 시작
     depends_on:

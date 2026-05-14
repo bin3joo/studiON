@@ -4,7 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { Plus } from 'lucide-vue-next'
 import { Button } from '@/shared/ui/button'
 import ThemeToggle from '@/shared/ui/theme/ThemeToggle.vue'
-import { buildCreateProjectPayload, createProject } from '@/pages/Project/api/project.api'
+import { buildCreateProjectPayload, createProject, projectApi } from '@/pages/Project/api/project.api'
 import type { CreateProjectResponse, ProjectId } from '@/pages/Project/types/project.types'
 import InviteCodeInputButton from './InviteCodeInputButton.vue'
 import logoLight from '@/assets/logo_light.png'
@@ -45,6 +45,10 @@ async function handleCreateProjectClick() {
     if (!projectId) {
       throw new Error('생성된 프로젝트 ID를 확인할 수 없습니다.')
     }
+
+    //라우팅 전 강제로 스냅샷 저장 호출
+    //백엔드의 Redis 캐시에만 존재하는 디폴트 트랙을 DB로 넣음
+    await projectApi.saveProjectSnapshot(projectId);
 
     await router.push({
       path: `/project/${projectId}`,

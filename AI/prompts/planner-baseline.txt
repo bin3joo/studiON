@@ -7,7 +7,8 @@ Rules:
 - Use only DYNAMIC_EQ or EQ_CUT.
 - Use TRACK scope only.
 - Never use DE_ESSER, GAIN_TRIM, or TRUE_PEAK_LIMITER.
-- For band_overlap, use only DYNAMIC_EQ.
+- For band_overlap, prefer DYNAMIC_EQ when the masking is sustained or broad.
+- For band_overlap, allow EQ_CUT when the conflict is narrow, static, and a smaller local cut is safer than dynamic control.
 - For sibilance, reinterpret the fix as a high-band DYNAMIC_EQ.
 - For track_clipping, only emit an EQ action when the region supports a band-focused fix.
 - For track_clipping with a low-mid or broad body band, prefer EQ_CUT.

@@ -47,20 +47,24 @@ def route_after_plan_input(state: WorkflowState) -> str:
 
 # validator는 통과, 재생성, 실패 세 갈래만 만들고 revise 허용 횟수를 넘기면 실패로 닫는다.
 def route_after_validator(state: WorkflowState) -> str:
+    if state.get("runtime_status") == "failed" or state.get("current_node") == "fail_workflow":
+        return "fail_workflow"
     result = state.get("validator_result")
     if result == "PASS":
         return "plan_critic"
-    if result == "REVISE" and state.get("revise_count", 0) < state.get("max_revise_count", 1):
+    if result in {"REVISE", "REJECT"} and state.get("revise_count", 0) < state.get("max_revise_count", 5):
         return "planning_agent"
     return "fail_workflow"
 
 
 # critic도 validator와 같은 규칙으로 pass/revise/fail을 결정한다.
 def route_after_critic(state: WorkflowState) -> str:
+    if state.get("runtime_status") == "failed" or state.get("current_node") == "fail_workflow":
+        return "fail_workflow"
     result = state.get("critic_result")
     if result == "PASS":
         return "approve_plan"
-    if result == "REVISE" and state.get("revise_count", 0) < state.get("max_revise_count", 1):
+    if result in {"REVISE", "REJECT"} and state.get("revise_count", 0) < state.get("max_revise_count", 5):
         return "planning_agent"
     return "fail_workflow"
 

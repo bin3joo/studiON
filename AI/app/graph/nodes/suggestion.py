@@ -112,6 +112,14 @@ def build_issue_payloads(state: WorkflowState) -> WorkflowState:
             continue
         payload = _merge_issue_payload(payload, issue=issue)
 
+    ranked_issue_id = next(
+        (
+            _issue_id(state, int(region_id))
+            for region_id in state.get("ranked_candidate_ids", [])
+            if _issue_id(state, int(region_id)) in payload["navigationOrder"]
+        ),
+        None,
+    )
     first_band_overlap_issue_id = next(
         (
             _issue_id(state, int(region["id"]))
@@ -120,7 +128,9 @@ def build_issue_payloads(state: WorkflowState) -> WorkflowState:
         ),
         None,
     )
-    if first_band_overlap_issue_id:
+    if ranked_issue_id:
+        payload["activeIssueId"] = ranked_issue_id
+    elif first_band_overlap_issue_id:
         payload["activeIssueId"] = first_band_overlap_issue_id
     elif payload["navigationOrder"]:
         payload["activeIssueId"] = payload["navigationOrder"][0]

@@ -107,6 +107,8 @@ export const useTrackStore = defineStore('track', () => {
     let cachedScrollLeft = 0;
     let cachedClientWidth = 0;
 
+    const isAutoScrollActive = ref(true); // 수동 스크롤 시 자동 스크롤 일시 정지용
+
     const setTimelineContainer = (el: HTMLElement | null) => {
         if (timelineContainer) {
             timelineContainer.removeEventListener('scroll', handleScroll);
@@ -120,10 +122,8 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     const handleScroll = () => {
-        // [최적화] 재생 중일 때는 자동 스크롤(updatePlayheadLoop)이 cachedScrollLeft를 관리하므로,
-        // 여기서 scrollLeft를 동기적으로 읽으면 심각한 Layout Thrashing과 스크롤 Jitter(경합)가 발생합니다.
-        // 따라서 정지 상태일 때만 사용자의 수동 스크롤 위치를 기록합니다.
-        if (timelineContainer && !isPlaying.value) {
+        // [최적화] 재생 중이더라도 자동 스크롤이 비활성화(사용자 수동 조작) 상태면 스크롤을 동기화합니다.
+        if (timelineContainer && (!isPlaying.value || !isAutoScrollActive.value)) {
             cachedScrollLeft = timelineContainer.scrollLeft;
         }
     };
@@ -1528,11 +1528,13 @@ export const useTrackStore = defineStore('track', () => {
                     Tone.getTransport().start("+0.01");
                 }
 
+                isAutoScrollActive.value = true;
                 isPlaying.value = true;
                 updatePlayheadLoop();
                 scrollAnimationLoop();
             } else {
                 Tone.getTransport().pause();
+                isAutoScrollActive.value = true;
                 isPlaying.value = false;
                 if (animationFrameId) cancelAnimationFrame(animationFrameId);
                 if (scrollRAFId) cancelAnimationFrame(scrollRAFId);
@@ -1679,7 +1681,7 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         // 1-1. 스크롤 위치 계산만 수행 (DOM 쓰기는 scrollAnimationLoop에서 분리 처리)
-        if (cachedClientWidth > 0) {
+        if (cachedClientWidth > 0 && isAutoScrollActive.value) {
             const relativeX = px - cachedScrollLeft;
             const threshold = cachedClientWidth * 0.7;
             if (relativeX > threshold) {
@@ -1734,6 +1736,7 @@ export const useTrackStore = defineStore('track', () => {
     // 완전 정지 (처음으로 되돌림)
     const stopPlay = () => {
         Tone.getTransport().stop();
+        isAutoScrollActive.value = true;
         isPlaying.value = false;
         playheadPosition.value = 0;
         cancelAnimationFrame(animationFrameId);
@@ -2179,6 +2182,7 @@ export const useTrackStore = defineStore('track', () => {
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,
         fetchAndCacheAudioBuffer,
+        isAutoScrollActive,
 
         addTrackEqBand,
         updateTrackEqBand,

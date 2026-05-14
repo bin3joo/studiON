@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
-import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus } from 'lucide-vue-next';
+import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload } from 'lucide-vue-next';
 import * as Tone from 'tone';
 
 const trackStore = useTrackStore();
@@ -54,7 +54,13 @@ const emit = defineEmits<{
   (e: 'action-split'): void
   (e: 'action-delete'): void
   (e: 'action-add-track'): void
+  (e: 'action-upload'): void
 }>()
+
+const hasSelectedTrack = computed(() => trackStore.selectedTrackId !== null);
+const hasSelectedClip = computed(() => trackStore.selectedClip !== null);
+const hasClipboard = computed(() => trackStore.clipboardClip !== null);
+const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || trackStore.selectedClip !== null);
 </script>
 
 <template>
@@ -85,21 +91,59 @@ const emit = defineEmits<{
 
     <!-- 단축키 도구 모음 (타임라인 1에 맞춤) -->
     <div class="absolute left-[224px] flex items-center gap-1" role="group" aria-label="클립 및 트랙 도구">
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복사 (Ctrl/Cmd + C)" @click="emit('action-copy')">
+      <!-- 트랙 이벤트: 트랙이 선택되어야 활성화 -->
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="오디오 업로드" 
+        :disabled="!hasSelectedTrack"
+        @click="emit('action-upload')"
+      >
+        <Upload class="h-4 w-4" />
+      </button>
+
+      <!-- 클립 이벤트: 클립이 선택되어야 활성화 -->
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="복사 (Ctrl/Cmd + C)" 
+        :disabled="!hasSelectedClip"
+        @click="emit('action-copy')"
+      >
         <Copy class="h-4 w-4" />
       </button>
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="잘라내기 (Ctrl/Cmd + X)" @click="emit('action-cut')">
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="잘라내기 (Ctrl/Cmd + X)" 
+        :disabled="!hasSelectedClip"
+        @click="emit('action-cut')"
+      >
         <Scissors class="h-4 w-4" />
       </button>
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="붙여넣기 (Ctrl/Cmd + V)" @click="emit('action-paste')">
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="붙여넣기 (Ctrl/Cmd + V)" 
+        :disabled="!hasClipboard"
+        @click="emit('action-paste')"
+      >
         <ClipboardPaste class="h-4 w-4" />
       </button>
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="분할 (Ctrl/Cmd + E)" @click="emit('action-split')">
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="분할 (Ctrl/Cmd + E)" 
+        :disabled="!hasSelectedClip"
+        @click="emit('action-split')"
+      >
         <Split class="h-4 w-4" />
       </button>
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white" title="복제 (Ctrl/Cmd + D)" @click="emit('action-duplicate')">
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="복제 (Ctrl/Cmd + D)" 
+        :disabled="!hasSelectedClip"
+        @click="emit('action-duplicate')"
+      >
         <CopyPlus class="h-4 w-4" />
       </button>
+
+      <!-- 공통: 코멘트는 항상 활성화 -->
       <button 
         :class="[
           'inline-flex h-8 w-8 items-center justify-center rounded transition',
@@ -113,7 +157,14 @@ const emit = defineEmits<{
       >
         <MessageSquarePlus class="h-4 w-4" />
       </button>
-      <button class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-red-400" title="삭제 (Del/Backspace)" @click="emit('action-delete')">
+
+      <!-- 공통: 삭제는 트랙이나 클립 중 하나라도 선택되면 활성화 -->
+      <button 
+        class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-red-400 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
+        title="삭제 (Del/Backspace)" 
+        :disabled="!hasAnySelection"
+        @click="emit('action-delete')"
+      >
         <Trash2 class="h-4 w-4" />
       </button>
     </div>
@@ -162,7 +213,7 @@ const emit = defineEmits<{
 
       <div 
         :aria-label="`현재 템포: ${trackStore.projectInfo.tempo.toFixed(2)} BPM`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5"
+        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
       >
         <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">BPM</span>
         <span class="font-display text-xs tracking-wider text-white tabular-nums">
@@ -172,7 +223,7 @@ const emit = defineEmits<{
 
       <div 
         :aria-label="`현재 박자: ${trackStore.projectInfo.timeSigNumerator}분의 ${trackStore.projectInfo.timeSigDenominator}박자`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5"
+        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
       >
         <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
         <div class="flex items-center gap-1 font-display text-xs tracking-wider text-white tabular-nums">
@@ -187,8 +238,8 @@ const emit = defineEmits<{
         <button 
           :aria-label="`현재 키: ${displayKey}. 클릭하여 변경`"
           :aria-expanded="isKeyPickerOpen"
-          class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 transition-colors hover:border-white/20"
-          @click="isKeyPickerOpen = !isKeyPickerOpen"
+          disabled
+          class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
         >
           <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">키</span>
           <span class="font-display text-xs tracking-wider text-white">{{ displayKey }}</span>

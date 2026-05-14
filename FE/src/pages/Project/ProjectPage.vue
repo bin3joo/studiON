@@ -63,6 +63,7 @@ const TIMELINE_TRACK_HEADER_WIDTH = 266
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
 const masterTrackWrapperRef = ref<HTMLElement | null>(null)
+const toolbarFileInputRef = ref<HTMLInputElement | null>(null)
 
 // 재생바 자동 스크롤: 스토어의 RAF 루프에서 직접 컨테이너를 조작하도록 컨테이너 참조를 전달
 watch(timelineContainerRef, (el) => {
@@ -72,6 +73,9 @@ watch(timelineContainerRef, (el) => {
 
 //휠할때 마우스가 가르키는 위치에서 휠되게 
 const handleWheel = (e: WheelEvent) => {
+  // 사용자가 수동으로 휠을 조작했으므로 자동 스크롤 일시 정지
+  trackStore.isAutoScrollActive = false;
+
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
     
@@ -691,6 +695,24 @@ function handleActionCut() {
   }
 }
 
+function handleActionUpload() {
+  if (trackStore.selectedTrackId && toolbarFileInputRef.value) {
+    toolbarFileInputRef.value.click();
+  }
+}
+
+function handleToolbarFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  if (trackStore.selectedTrackId) {
+    trackStore.uploadAndAddAudioClip(file, trackStore.selectedTrackId, trackStore.playheadPosition);
+  }
+
+  target.value = '';
+}
+
 function handleActionPaste() {
   if (trackStore.clipboardClip) {
     let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
@@ -775,6 +797,8 @@ function handleBackgroundPointerDown(e: PointerEvent) {
       e.clientY >= rect.top + target.clientHeight;
       
     if (isScrollbarClick) {
+      // 스크롤바 조작 시 자동 스크롤 일시 정지
+      trackStore.isAutoScrollActive = false;
       return; // 스크롤바를 누른 경우 선택 해제 무시
     }
   }
@@ -984,6 +1008,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <PlayController
       :ai-analyzing="aiAnalyzing"
       @run-ai-analysis="runAiAnalysis"
+      @action-upload="handleActionUpload"
       @action-copy="handleActionCopy"
       @action-cut="handleActionCut"
       @action-paste="handleActionPaste"
@@ -993,6 +1018,15 @@ function closeProjectGuide(doNotShowAgain: boolean) {
       @action-add-track="handleActionAddTrack"
     />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
+    <!-- 툴바 공통 파일 업로드용 인풋 -->
+    <input 
+      type="file" 
+      ref="toolbarFileInputRef" 
+      accept="audio/*" 
+      class="hidden" 
+      @change="handleToolbarFileUpload" 
+    />
+
     <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
       <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1065,7 +1099,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
     
     <ProjectSidePanel
-      class="z-[200]"
+      class="z-50"
       :open="activeSidePanel !== null"
       :type="activeSidePanel"
       @close="handleCloseSidePanel"

@@ -430,7 +430,8 @@ def _process_action_signal(signal: np.ndarray, *, action: dict[str, Any]) -> np.
         processed = signal * _db_to_linear(float(gain_delta_db or 0.0))
         return _apply_post_action(processed, action.get("params") or {})
     if action_type == "TRUE_PEAK_LIMITER":
-        return _apply_limiter(signal, ceiling_dbfs=-1.0)
+        params = action.get("params") or {}
+        return _apply_limiter(signal, ceiling_dbfs=float(params.get("ceilingDbfs") or -1.0))
     if action_type in {"DYNAMIC_EQ", "EQ_CUT", "DE_ESSER"}:
         band_low_hz, band_high_hz = _resolve_action_band(action)
         processed = _apply_band_gain(
@@ -551,6 +552,14 @@ def _build_issue_overlay(
             region_after=after_mono[region_slice],
         )
     if issue_type == "track_clipping":
+        if str(action.get("target_scope")) == "MASTER":
+            return _build_master_clipping_overlay(
+                before_mono,
+                after_mono,
+                kind="track_clipping",
+                region_before=before_mono[region_slice],
+                region_after=after_mono[region_slice],
+            )
         target_track = int(action.get("target_track_id") or focus_region.get("track_id") or 0)
         before_track = _to_mono(track_signals.get(target_track, np.zeros((0, 2), dtype=np.float32)))
         after_track = _to_mono(
@@ -603,7 +612,7 @@ def _resolve_metric_signals(
     after_mono: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, str]:
     issue_type = str(focus_region.get("issue_type") or "")
-    if issue_type == "master_clipping":
+    if issue_type == "master_clipping" or str(action.get("target_scope")) == "MASTER":
         return before_mono, after_mono, "master"
 
     target_track_id = int(action.get("target_track_id") or focus_region.get("track_id") or 0)

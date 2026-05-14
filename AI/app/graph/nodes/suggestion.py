@@ -49,6 +49,7 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             selected_region_id=selected_region_id,
             preserve_clip_id=int(preserve_clip_id),
             user_feedback_message=state.get("user_feedback_message"),
+            selection_context=_build_selection_context(state, selected_region, int(preserve_clip_id)),
             region=deepcopy(selected_region),
             clip_context=_build_clip_context(state, selected_region, int(preserve_clip_id)),
             revision_notes=[*state.get("plan_revision_notes", [])],
@@ -346,6 +347,28 @@ def _build_clip_context(
             }
         )
     return clip_context
+
+
+def _build_selection_context(
+    state: WorkflowState,
+    region: dict[str, object],
+    preserve_clip_id: int,
+) -> dict[str, object]:
+    preserve_track_id = _resolve_clip_track_id(state, preserve_clip_id)
+    involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
+    non_preserve_track_ids = [
+        track_id
+        for track_id in involved_track_ids
+        if preserve_track_id is None or track_id != preserve_track_id
+    ]
+    return {
+        "selectedTrackId": preserve_track_id,
+        "preserveTrackId": preserve_track_id,
+        "selectedTrackIsProtected": preserve_track_id is not None,
+        "selectedClipId": preserve_clip_id,
+        "preserveClipId": preserve_clip_id,
+        "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
+    }
 
 
 def _normalize_plan_payload(

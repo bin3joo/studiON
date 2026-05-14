@@ -53,6 +53,7 @@ def test_http_planning_llm_client_sends_gms_chat_completions_shape(
         selected_region_id=1,
         preserve_clip_id=10,
         user_feedback_message="keep vocal",
+        selection_context={"selectedTrackId": 1, "preserveTrackId": 1, "selectedTrackIsProtected": True},
         region={"issue_type": "band_overlap", "start_ms": 1000, "end_ms": 2200},
         clip_context=[{"clip_id": 10, "track_id": 1, "is_preserve_target": True}],
         revision_notes=[],
@@ -68,6 +69,7 @@ def test_http_planning_llm_client_sends_gms_chat_completions_shape(
     assert body["temperature"] == 0.0
     assert body["messages"][0]["role"] == "developer"
     assert body["messages"][1]["role"] == "user"
+    assert '"selectionContext"' in body["messages"][1]["content"]
     assert response.plan_payload["strategyTitle"] == "Strategy"
     assert response.plan_payload["candidate"]["action"]["actionType"] == "DYNAMIC_EQ"
 
@@ -102,6 +104,7 @@ def test_http_planning_llm_client_rejects_invalid_json_payload(
             selected_region_id=1,
             preserve_clip_id=10,
             user_feedback_message=None,
+            selection_context={"selectedTrackId": 1, "preserveTrackId": 1, "selectedTrackIsProtected": True},
             region={"issue_type": "clipping", "start_ms": 1000, "end_ms": 2200},
             clip_context=[],
             revision_notes=[],

@@ -68,7 +68,7 @@ public class CommentService {
 
     @Transactional(readOnly = true)
     public CommentState getCommentByProjectId(Integer commentId, Integer projectId) {
-        if (projectDirtyStateService.isDirty(projectId)) {
+        if (projectDirtyStateService.isDirty(projectId) || commentRedisRepository.hasWorkingSet(projectId)) {
             CommentState commentState = commentRedisRepository.getOrLoad(projectId, commentId);
 
             if (Boolean.TRUE.equals(commentState.getDeleted())) {
@@ -99,13 +99,14 @@ public class CommentService {
             boolean mentionedMe,
             Integer userId
     ) {
-        if (projectDirtyStateService.isDirty(projectId)) {
+        boolean useWorkingSet = projectDirtyStateService.isDirty(projectId) || commentRedisRepository.hasWorkingSet(projectId);
+
+        if (useWorkingSet) {
             return commentRedisRepository.findAllOrLoadByProjectId(projectId).stream()
                     .filter(commentState -> !Boolean.TRUE.equals(commentState.getDeleted()))
                     .filter(commentState -> trackId == null || trackId.equals(commentState.getTrackId()))
                     .filter(commentState -> isResolved == null || isResolved.equals(commentState.getIsResolved()))
-                    .filter(commentState -> !mentionedMe
-                            || commentState.getMentionedUserIds().stream().anyMatch(id -> id.equals(userId)))
+                    .filter(commentState -> !mentionedMe || commentState.getMentionedUserIds().stream().anyMatch(id -> id.equals(userId)))
                     .toList();
         }
 
@@ -146,7 +147,7 @@ public class CommentService {
 
     @Transactional(readOnly = true)
     public boolean hasActiveChildren(Integer projectId, Integer commentId) {
-        if (projectDirtyStateService.isDirty(projectId)) {
+        if (projectDirtyStateService.isDirty(projectId) || commentRedisRepository.hasWorkingSet(projectId)) {
             return commentRedisRepository.findAllOrLoadByProjectId(projectId).stream()
                     .anyMatch(commentState ->
                             commentId.equals(commentState.getParentCommentId())

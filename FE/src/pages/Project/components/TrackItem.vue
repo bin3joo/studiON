@@ -1246,7 +1246,7 @@ const onWorkAreaMouseLeave = () => {
       <!-- 트랙 우클릭 시에만 보여줄 메뉴 (클립 우클릭 시엔 비활성화/숨김) -->
       <template v-if="menuState.type === 'track'">
         <button @click="triggerFileInput" class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-white/10">
-          <span class="flex items-center gap-2"><UploadIcon class="h-4 w-4" /> 오디오 불러오기</span>
+          <span class="flex items-center gap-2"><UploadIcon class="h-4 w-4" /> 오디오 업로드</span>
           <span class="text-[10px] text-gray-500">Ctrl+I</span>
         </button>
         <div class="my-1 h-px w-full bg-[#393C45]"></div>

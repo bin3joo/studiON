@@ -6,6 +6,11 @@ import {
   getAiWorkflowStatus,
   sendAiWorkflowFeedback,
   type AiAnalysisRegion,
+  type AiIssueMarker,
+  type AiIssueUiMode,
+  type AiSuggestionAction,
+  type AiSuggestionIssue,
+  type AiSuggestionPayload,
   type ProjectSnapshotRequest,
 } from '../api/projectAi.api'
 
@@ -16,7 +21,10 @@ type AiIssueTargetType = 'TIMELINE' | 'MASTER_TRACK' | 'TRACK'
 
 type AiAnalysisItem = {
   id: string | number
+  issueType: string
   kind: AiIssueKind
+  uiMode: AiIssueUiMode
+
   targetType: AiIssueTargetType
   targetTrackId: number | null
 
@@ -30,12 +38,17 @@ type AiAnalysisItem = {
 
   title: string
   summary: string
+  explanation: string | null
   bullets: string[]
 
   bandLowHz: number | null
   bandHighHz: number | null
 
   recommendedGainReductionDb: number | null
+
+  previewBands: TrackEqBandState[]
+  actions: AiSuggestionAction[]
+  markers: AiIssueMarker[]
 }
 
 export function useProjectAiWorkflow(projectId: number) {
@@ -77,30 +90,107 @@ export function useProjectAiWorkflow(projectId: number) {
   }
 
   async function pollAiWorkflow(jobId: number) {
-    const maxTry = 60
+  const maxTry = 60
 
-    for (let i = 0; i < maxTry; i += 1) {
-      const result = await getAiWorkflowStatus(jobId)
-      const regions = result.projections.analysis_regions ?? []
+  for (let i = 0; i < maxTry; i += 1) {
+    const result = await getAiWorkflowStatus(jobId)
+    const regions = result.projections.analysis_regions ?? []
+    const suggestionPayload = getSuggestionPayload(result.projections)
 
-      if (result.job.status === 'FAILED') {
-        throw new Error(result.job.error_message ?? 'AI 분석에 실패했습니다.')
-      }
+    const status = result.job.status?.toLowerCase()
+    const phase = result.job.phase?.toLowerCase()
+    const hasSuggestionIssues = Boolean(suggestionPayload?.issues?.length)
 
-      if (
-        result.job.status === 'COMPLETED' ||
-        result.job.status === 'WAITING_USER' ||
-        result.job.progress >= 100 ||
-        regions.length > 0
-      ) {
-        return result
-      }
+    console.log('[AI poll]', {
+      try: i + 1,
+      status: result.job.status,
+      phase: result.job.phase,
+      progress: result.job.progress,
+      regionsLength: regions.length,
+      hasSuggestionIssues,
+      projectionKeys: Object.keys(result.projections ?? {}),
+    })
 
-      await sleep(2000)
+    if (status === 'failed') {
+      throw new Error(result.job.error_message ?? 'AI 분석에 실패했습니다.')
     }
 
-    throw new Error('AI 분석 결과를 가져오지 못했습니다.')
+    if (
+      status === 'completed' ||
+      status === 'waiting_user' ||
+      status === 'waiting_user_plan_input' ||
+      phase === 'completed' ||
+      phase === 'waiting_user' ||
+      phase === 'waiting_for_user_plan_input' ||
+      result.job.progress >= 100 ||
+      regions.length > 0 ||
+      hasSuggestionIssues
+    ) {
+      return result
+    }
+
+    await sleep(2000)
   }
+
+  throw new Error('AI 분석 결과를 가져오지 못했습니다.')
+}
+
+async function pollAiFeedbackResult(jobId: number) {
+  const maxTry = 60
+
+  for (let i = 0; i < maxTry; i += 1) {
+    const result = await getAiWorkflowStatus(jobId)
+
+    const status = result.job.status?.toLowerCase()
+    const phase = result.job.phase?.toLowerCase()
+    const hasSuggestion = hasAiEqSuggestion(result)
+
+    if (import.meta.env.DEV) {
+      console.debug('[AI feedback poll]', {
+        try: i + 1,
+        status: result.job.status,
+        phase: result.job.phase,
+        progress: result.job.progress,
+        hasSuggestion,
+        projectionKeys: Object.keys(result.projections ?? {}),
+      })
+    }
+
+    if (status === 'failed') {
+      const revisionNotes =
+        (result.projections as any)?.plan_state?.revision_notes
+
+      if (import.meta.env.DEV) {
+        console.error('[AI feedback failed]', {
+          jobId,
+          job: result.job,
+          planState: (result.projections as any)?.plan_state,
+          revisionNotes,
+          projections: result.projections,
+        })
+      }
+
+      throw new Error('AI 수정안 생성에 실패했습니다.')
+    }
+
+    if (hasSuggestion) {
+      return result
+    }
+
+    // 수정안 없이 completed면 더 기다려도 의미 없을 가능성이 높음
+    if (
+      status === 'completed' ||
+      phase === 'completed' ||
+      result.job.progress >= 100
+    ) {
+      return result
+    }
+
+    await sleep(2000)
+  }
+
+  throw new Error('AI 수정안을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.')
+}
 
   function getAudioMetadataId(clip: any): number | null {
     return (
@@ -254,9 +344,24 @@ export function useProjectAiWorkflow(projectId: number) {
         ? '클리핑'
         : '하쉬니스'
 
+  const regionId =
+    region.id ??
+    (region as any).region_id ??
+    `${kind}-${startMs}-${endMs}`
+
+  const uiMode: AiIssueUiMode =
+    kind === 'CLIPPING'
+      ? 'master_trim'
+      : kind === 'HARSHNESS'
+        ? 'marker_only'
+        : 'eq_ai'
+
   return {
-    id: region.id,
+    id: regionId,
+    issueType: region.issue_type ?? '',
     kind,
+    uiMode,
+
     targetType,
     targetTrackId,
 
@@ -270,6 +375,7 @@ export function useProjectAiWorkflow(projectId: number) {
 
     title: `${titlePrefix} · ${barStart}마디에서 ${barEnd}마디 사이`,
     summary: region.analysis_summary ?? 'AI가 문제가 발생한 구간을 감지했어요.',
+    explanation: null,
     bullets: [
       region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
       region.band_low_hz && region.band_high_hz
@@ -285,9 +391,141 @@ export function useProjectAiWorkflow(projectId: number) {
     bandLowHz: region.band_low_hz,
     bandHighHz: region.band_high_hz,
 
-    // AI 응답 확정 전 임시값
     recommendedGainReductionDb: kind === 'CLIPPING' ? -3 : null,
+
+    previewBands: [],
+    actions: [],
+    markers: [],
   }
+}
+
+function getSuggestionPayload(projections: any): AiSuggestionPayload | null {
+  return (
+    projections?.suggestion_payload ??
+    projections?.suggestionPayload ??
+    projections?.suggestion_group?.suggestion_payload ??
+    projections?.suggestionGroup?.suggestionPayload ??
+    projections?.suggestionGroups?.[0]?.suggestion_payload ??
+    projections?.suggestionGroups?.[0]?.suggestionPayload ??
+    null
+  )
+}
+
+function isBandOverlapIssue(issue: AiSuggestionIssue) {
+  return issue.issueType === 'band_overlap' && issue.uiMode === 'eq_ai'
+}
+
+function mapPreviewBandsToEqBands(previewBands: any[] = []): TrackEqBandState[] {
+  return previewBands.map((band, index) => ({
+    bandOrder: band.band_order ?? band.bandOrder ?? index + 1,
+    frequencyHz: band.frequency_hz ?? band.frequencyHz ?? 500,
+    gainDeltaDb: band.gain_delta_db ?? band.gainDeltaDb ?? 0,
+    q: band.q ?? 1,
+    eqTypeCode: band.eq_type_code ?? band.eqTypeCode ?? 1,
+  })) as TrackEqBandState[]
+}
+
+function mapBandOverlapIssueToAnalysisItem(
+  issue: AiSuggestionIssue,
+  durationMs: number,
+): AiAnalysisItem {
+  const startMs = issue.startMs ?? 0
+  const endMs = issue.endMs ?? startMs + 1
+
+  const msPerBar = getMsPerBar()
+
+  const barStart = Math.floor(startMs / msPerBar) + 1
+  const barEnd = Math.max(barStart, Math.ceil(endMs / msPerBar))
+
+  const startBarFloat = startMs / msPerBar
+  const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
+
+  const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
+  const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
+
+  const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
+  const endPercent = Math.max(
+    startPercent + 0.5,
+    Math.min(100, (endMs / durationMs) * 100),
+  )
+
+  const firstAction = issue.actions?.[0]
+
+  const bandLowHz = firstAction?.bandLowHz ?? null
+  const bandHighHz = firstAction?.bandHighHz ?? null
+
+  const targetTrackId =
+    issue.trackId ??
+    firstAction?.targetTrackId ??
+    null
+
+  const previewBands = mapPreviewBandsToEqBands(issue.previewBands)
+
+  return {
+    id: issue.issueId,
+    issueType: issue.issueType,
+    kind: 'BAND_OVERLAP',
+    uiMode: issue.uiMode,
+
+    targetType: targetTrackId ? 'TRACK' : 'TIMELINE',
+    targetTrackId,
+
+    startPercent,
+    endPercent,
+    startPx,
+    endPx,
+
+    barStart,
+    barEnd,
+
+    title: `대역 중복 · ${barStart}마디에서 ${barEnd}마디 사이`,
+    summary: issue.summary ?? 'AI가 대역 중복 가능성이 있는 구간을 감지했어요.',
+    explanation: issue.explanation ?? null,
+    bullets: [
+      '문제 유형: band_overlap',
+      bandLowHz && bandHighHz
+        ? `${bandLowHz}Hz~${bandHighHz}Hz 대역에서 충돌이 감지됐어요.`
+        : '주파수 대역 정보가 없습니다.',
+      targetTrackId
+        ? `관련 트랙: ${targetTrackId}`
+        : '관련 트랙 정보를 확인 중입니다.',
+    ],
+
+    bandLowHz,
+    bandHighHz,
+
+    recommendedGainReductionDb: null,
+
+    previewBands,
+    actions: issue.actions ?? [],
+    markers: issue.markers ?? [],
+  }
+}
+
+function mapBandOverlapPayloadToAnalysisItems(
+  payload: AiSuggestionPayload,
+  durationMs: number,
+): AiAnalysisItem[] {
+  const issueMap = new Map(
+    payload.issues.map(issue => [issue.issueId, issue]),
+  )
+
+  const orderedIssues =
+    payload.navigationOrder?.length
+      ? payload.navigationOrder
+          .map(issueId => issueMap.get(issueId))
+          .filter((issue): issue is AiSuggestionIssue => Boolean(issue))
+      : payload.issues
+
+  return orderedIssues
+    .filter(isBandOverlapIssue)
+    .map(issue => mapBandOverlapIssueToAnalysisItem(issue, durationMs))
+}
+
+function syncAiPreviewBandsFromActiveItem() {
+  const item = activeAiAnalysis.value
+
+  aiAfterBands.value = item?.previewBands ?? []
 }
 
   function mapIssueTypeToKind(issueType: string | null): AiIssueKind {
@@ -321,43 +559,42 @@ export function useProjectAiWorkflow(projectId: number) {
   return 'BAND_OVERLAP'
 }
 
-  function createMockAiAfterBands(beforeBands: TrackEqBandState[]): TrackEqBandState[] {
-    const copiedBands = beforeBands.map(band => ({ ...band }))
-
-    const nextOrder =
-      copiedBands.length > 0
-        ? Math.max(...copiedBands.map(band => band.bandOrder)) + 1
-        : 1
-
-    return [
-      ...copiedBands,
-      {
-        bandOrder: nextOrder,
-        frequencyHz: 500,
-        gainDeltaDb: -3,
-      } as TrackEqBandState,
-    ]
-  }
-
-  function mapAiSuggestionToEqBands(statusResult: any): TrackEqBandState[] {
+function mapAiSuggestionToEqBands(statusResult: any): TrackEqBandState[] {
   const suggestionBands =
     statusResult.projections?.suggestion_group?.eq_bands ??
     statusResult.projections?.suggestionGroup?.eqBands ??
     statusResult.projections?.plan_state?.eq_bands ??
     statusResult.projections?.planState?.eqBands ??
+    statusResult.projections?.suggestion_payload?.issues?.flatMap((issue: any) =>
+      issue.previewBands ?? [],
+    ) ??
+    statusResult.projections?.suggestionPayload?.issues?.flatMap((issue: any) =>
+      issue.previewBands ?? [],
+    ) ??
     []
 
   if (!Array.isArray(suggestionBands) || suggestionBands.length === 0) {
-    return createMockAiAfterBands(aiBeforeBands.value)
+    return []
   }
 
-  return suggestionBands.map((band: any, index: number) => ({
-    bandOrder: band.band_order ?? band.bandOrder ?? index + 1,
-    frequencyHz: band.frequency_hz ?? band.frequencyHz ?? band.freq_hz ?? 500,
-    gainDeltaDb: band.gain_delta_db ?? band.gainDeltaDb ?? band.gain_db ?? 0,
-    q: band.q ?? band.q_factor ?? band.qFactor ?? 1,
-    eqTypeCode: band.eq_type_code ?? band.eqTypeCode ?? 1,
-  })) as TrackEqBandState[]
+  return suggestionBands
+    .map((band: any, index: number) => ({
+      bandOrder: Number(band.band_order ?? band.bandOrder ?? index + 1),
+      frequencyHz: Number(band.frequency_hz ?? band.frequencyHz ?? band.freq_hz ?? 500),
+      gainDeltaDb: Number(band.gain_delta_db ?? band.gainDeltaDb ?? band.gain_db ?? 0),
+      q: Number(band.q ?? band.q_factor ?? band.qFactor ?? 1),
+      eqTypeCode: Number(band.eq_type_code ?? band.eqTypeCode ?? 1),
+    }))
+    .filter(band =>
+      Number.isFinite(band.frequencyHz) &&
+      Number.isFinite(band.gainDeltaDb) &&
+      Number.isFinite(band.q) &&
+      Number.isFinite(band.eqTypeCode),
+    ) as TrackEqBandState[]
+}
+
+function hasAiEqSuggestion(statusResult: any) {
+  return mapAiSuggestionToEqBands(statusResult).length > 0
 }
 
   async function runAiAnalysis() {
@@ -405,26 +642,33 @@ export function useProjectAiWorkflow(projectId: number) {
 
     currentAiJobId.value = startResult.job.job_id
 
-    const statusResult = await pollAiWorkflow(startResult.job.job_id)
-    const regions = statusResult.projections.analysis_regions ?? []
+const statusResult = await pollAiWorkflow(startResult.job.job_id)
+const suggestionPayload = getSuggestionPayload(statusResult.projections)
+const regions = statusResult.projections.analysis_regions ?? []
 
-    console.log('[AI regions]', regions)
-    console.log('[AI snapshot duration]', snapshot.duration_ms)
-    console.log('[AI project info]', trackStore.projectInfo)
+const bandOverlapItems = suggestionPayload
+  ? mapBandOverlapPayloadToAnalysisItems(
+      suggestionPayload,
+      snapshot.duration_ms,
+    )
+  : []
 
-    if (regions.length === 0) {
-      alert('AI가 감지한 충돌 구간이 없습니다.')
-      return
-    }
+if (bandOverlapItems.length > 0) {
+  aiAnalysisItems.value = bandOverlapItems
+} else if (regions.length > 0) {
+  aiAnalysisItems.value = regions.map(region =>
+    mapRegionToAnalysisItem(region, snapshot.duration_ms),
+  )
+} else {
+  alert('AI가 감지한 문제 구간이 없습니다.')
+  return
+}
 
-    aiAnalysisItems.value = regions.map(region =>
-  mapRegionToAnalysisItem(region, snapshot.duration_ms),
-)
+activeAiAnalysisIndex.value = 0
 
-      activeAiAnalysisIndex.value = 0
-
-      syncSelectedRegionIdFromActiveItem()
-      applyActiveAiAnalysisSelection()
+syncSelectedRegionIdFromActiveItem()
+applyActiveAiAnalysisSelection()
+syncAiPreviewBandsFromActiveItem()
   } catch (error) {
     console.error(error)
 
@@ -446,12 +690,48 @@ export function useProjectAiWorkflow(projectId: number) {
     console.log('AI EQ 적용')
   }
 
-  function handleCancelAiEq() {
+function handleCancelAiEq() {
   aiAnalysisItems.value = []
   activeAiAnalysisIndex.value = 0
   selectedAiRegionId.value = null
+  currentAiJobId.value = null
   aiBeforeBands.value = []
   aiAfterBands.value = []
+}
+
+function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
+  const item = activeAiAnalysis.value
+
+  if (!item) return null
+
+  const selectedTrackId =
+    selectedTrackIds[0] ??
+    item.targetTrackId ??
+    null
+
+  if (!selectedTrackId) return null
+
+  const targetTrack = trackStore.trackList.find(track =>
+    Number(track.trackId) === Number(selectedTrackId),
+  )
+
+  if (!targetTrack) return null
+
+  const issueStartBar = Math.max(0, item.barStart - 1)
+  const issueEndBar = Math.max(issueStartBar + 0.25, item.barEnd)
+
+  const overlappingClip = targetTrack.clips.find(clip => {
+    const clipStartBar = Number(clip.start)
+    const clipEndBar = clipStartBar + Number(clip.duration)
+
+    return clipStartBar < issueEndBar && clipEndBar > issueStartBar
+  })
+
+  if (!overlappingClip) return null
+
+  const clipId = Number(overlappingClip.clipId)
+
+  return Number.isNaN(clipId) ? null : clipId
 }
 
   async function handleRequestAiEqRevision(payload: {
@@ -467,23 +747,46 @@ export function useProjectAiWorkflow(projectId: number) {
     aiAnalyzing.value = true
 
     const selectedTrackText =
-      payload.selectedTrackIds.length > 0
-        ? `선택한 트랙 ID: ${payload.selectedTrackIds.join(', ')}. `
-        : ''
+  payload.selectedTrackIds.length > 0
+    ? `선택한 트랙 ID: ${payload.selectedTrackIds.join(', ')}. `
+    : ''
 
-    await sendAiWorkflowFeedback(currentAiJobId.value, {
-      project_id: projectId,
-      selected_region_id: selectedAiRegionId.value,
-      preserve_clip_id: null,
-      user_feedback_message: `${selectedTrackText}${payload.message}`.trim(),
-      user_decision: 'RESUME',
-    })
+const item = activeAiAnalysis.value
+const preserveClipId = findPreserveClipIdFromSelectedTrack(payload.selectedTrackIds)
 
-    const statusResult = await pollAiWorkflow(currentAiJobId.value)
+if (preserveClipId==null) {
+  alert('선택한 트랙에서 AI 분석 구간과 겹치는 클립을 찾지 못했습니다.')
+  return
+}
 
-    console.log('[AI feedback result]', statusResult)
+await sendAiWorkflowFeedback(currentAiJobId.value, {
+  project_id: projectId,
+  issue_id: item ? String(item.id) : null,
+  action_type: null,
+  action_payload: {
+    selected_track_ids: payload.selectedTrackIds,
+    preserve_clip_id: preserveClipId,
+  },
+  selected_region_id: selectedAiRegionId.value,
+  preserve_clip_id: preserveClipId,
+  user_feedback_message: `${selectedTrackText}${payload.message}`.trim(),
+  user_decision: 'RESUME',
+})
 
-    aiAfterBands.value = mapAiSuggestionToEqBands(statusResult)
+    const statusResult = await pollAiFeedbackResult(currentAiJobId.value)
+
+if (import.meta.env.DEV) {
+  console.debug('[AI feedback result]', statusResult)
+}
+
+const nextBands = mapAiSuggestionToEqBands(statusResult)
+
+if (nextBands.length === 0) {
+  alert('AI 수정안이 아직 생성되지 않았습니다. 잠시 후 다시 시도해주세요.')
+  return
+}
+
+aiAfterBands.value = nextBands
   } catch (error) {
     console.error(error)
     alert(error instanceof Error ? error.message : 'AI 수정 요청 중 오류가 발생했습니다.')
@@ -535,6 +838,7 @@ function goNextAiAnalysis() {
   syncSelectedRegionIdFromActiveItem()
   resetAiEqSuggestionOnNavigation()
   applyActiveAiAnalysisSelection()
+  syncAiPreviewBandsFromActiveItem()
 }
 
 function goPrevAiAnalysis() {
@@ -548,6 +852,7 @@ function goPrevAiAnalysis() {
   syncSelectedRegionIdFromActiveItem()
   resetAiEqSuggestionOnNavigation()
   applyActiveAiAnalysisSelection()
+  syncAiPreviewBandsFromActiveItem()
 }
 
 const activeAiAnalysisCurrentIndex = computed(() => {
@@ -559,7 +864,7 @@ const aiAnalysisTotalCount = computed(() => {
 })
 
 const shouldShowAiEqRevisionPanel = computed(() => {
-  return activeAiAnalysis.value?.kind === 'BAND_OVERLAP'
+  return activeAiAnalysis.value?.uiMode === 'eq_ai'
 })
 
   return {
@@ -581,3 +886,4 @@ const shouldShowAiEqRevisionPanel = computed(() => {
     goPrevAiAnalysis,
   }
 }
+

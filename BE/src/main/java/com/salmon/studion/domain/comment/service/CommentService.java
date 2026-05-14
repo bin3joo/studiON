@@ -141,6 +141,11 @@ public class CommentService {
     }
 
     @Transactional
+    public void deleteCommentsByTrack(Integer projectId, Integer trackId) {
+        commentRedisRepository.markDeletedByTrack(projectId, trackId, LocalDateTime.now());
+    }
+
+    @Transactional
     public void deleteComment(Integer projectId, Integer commentId) {
         commentRedisRepository.markDeletedCascadeByParent(projectId, commentId, LocalDateTime.now());
     }

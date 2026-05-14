@@ -91,39 +91,102 @@ public class MasterLimiterService {
         request.validate();
         MasterLimiter limiter = getAuthorizedLimiter(request.getProjectId(), userId);
         validateOwnedLockAndRefreshTtl(request.getProjectId(), userId);
-        validateLimiterValues(
-                request.getThresholdDb(),
-                request.getCeilingDbfs(),
-                request.getAttackMs(),
-                request.getReleaseMs(),
-                request.getInputGainDb(),
-                request.getMakeupGainDb(),
-                request.getSourceType()
-        );
-
         MasterLimiterDraftState currentDraft = getDraftState(request.getProjectId());
+        ResolvedLimiterDraftValues resolvedValues = resolveDraftValues(
+                request,
+                limiter,
+                currentDraft
+        );
+        validateLimiterValues(
+                resolvedValues.thresholdDb(),
+                resolvedValues.ceilingDbfs(),
+                resolvedValues.attackMs(),
+                resolvedValues.releaseMs(),
+                resolvedValues.inputGainDb(),
+                resolvedValues.makeupGainDb(),
+                resolvedValues.sourceType()
+        );
         MasterLimiterDraftState nextDraft = MasterLimiterDraftState.builder()
                 .projectId(request.getProjectId())
                 .masterLimiterId(limiter.getId())
                 .updatedBy(userId)
                 .updatedAt(LocalDateTime.now())
                 .version(nextVersion(currentDraft))
-                .isEnabled(request.getIsEnabled())
-                .thresholdDb(request.getThresholdDb())
-                .ceilingDbfs(request.getCeilingDbfs())
-                .attackMs(request.getAttackMs())
-                .releaseMs(request.getReleaseMs())
-                .inputGainDb(request.getInputGainDb())
-                .makeupGainDb(request.getMakeupGainDb())
-                .jobId(request.getJobId())
-                .suggestionActionId(request.getSuggestionActionId())
-                .appliedSuggestionId(request.getAppliedSuggestionId())
-                .sourceType(request.getSourceType())
+                .isEnabled(resolvedValues.isEnabled())
+                .thresholdDb(resolvedValues.thresholdDb())
+                .ceilingDbfs(resolvedValues.ceilingDbfs())
+                .attackMs(resolvedValues.attackMs())
+                .releaseMs(resolvedValues.releaseMs())
+                .inputGainDb(resolvedValues.inputGainDb())
+                .makeupGainDb(resolvedValues.makeupGainDb())
+                .jobId(resolvedValues.jobId())
+                .suggestionActionId(resolvedValues.suggestionActionId())
+                .appliedSuggestionId(resolvedValues.appliedSuggestionId())
+                .sourceType(resolvedValues.sourceType())
                 .build();
 
         saveDraftState(nextDraft);
         saveCurrentState(buildDraftCurrentState(limiter, nextDraft));
         return nextDraft;
+    }
+
+    private ResolvedLimiterDraftValues resolveDraftValues(
+            MasterLimiterDraftSaveRequest request,
+            MasterLimiter limiter,
+            MasterLimiterDraftState currentDraft
+    ) {
+        if (!"AI_APPLIED".equals(request.getSourceType())) {
+            requireCompleteDraftRequest(request);
+            return new ResolvedLimiterDraftValues(
+                    request.getIsEnabled(),
+                    request.getThresholdDb(),
+                    request.getCeilingDbfs(),
+                    request.getAttackMs(),
+                    request.getReleaseMs(),
+                    request.getInputGainDb(),
+                    request.getMakeupGainDb(),
+                    request.getJobId(),
+                    request.getSuggestionActionId(),
+                    request.getAppliedSuggestionId(),
+                    request.getSourceType()
+            );
+        }
+
+        Boolean baseEnabled = currentDraft != null ? currentDraft.getIsEnabled() : limiter.getIsEnabled();
+        Double baseThreshold = currentDraft != null ? currentDraft.getThresholdDb() : limiter.getThresholdDb();
+        Double baseCeiling = currentDraft != null ? currentDraft.getCeilingDbfs() : limiter.getCeilingDbfs();
+        Double baseAttack = currentDraft != null ? currentDraft.getAttackMs() : limiter.getAttackMs();
+        Double baseRelease = currentDraft != null ? currentDraft.getReleaseMs() : limiter.getReleaseMs();
+        Double baseInputGain = currentDraft != null ? currentDraft.getInputGainDb() : limiter.getInputGainDb();
+        Double baseMakeupGain = currentDraft != null ? currentDraft.getMakeupGainDb() : limiter.getMakeupGainDb();
+
+        return new ResolvedLimiterDraftValues(
+                request.getIsEnabled() != null ? request.getIsEnabled() : baseEnabled,
+                request.getThresholdDb() != null ? request.getThresholdDb() : baseThreshold,
+                request.getCeilingDbfs() != null ? request.getCeilingDbfs() : baseCeiling,
+                request.getAttackMs() != null ? request.getAttackMs() : baseAttack,
+                request.getReleaseMs() != null ? request.getReleaseMs() : baseRelease,
+                request.getInputGainDb() != null ? request.getInputGainDb() : baseInputGain,
+                request.getMakeupGainDb() != null ? request.getMakeupGainDb() : baseMakeupGain,
+                request.getJobId(),
+                request.getSuggestionActionId(),
+                request.getAppliedSuggestionId(),
+                request.getSourceType()
+        );
+    }
+
+    private void requireCompleteDraftRequest(MasterLimiterDraftSaveRequest request) {
+        if (
+                request.getIsEnabled() == null
+                        || request.getThresholdDb() == null
+                        || request.getCeilingDbfs() == null
+                        || request.getAttackMs() == null
+                        || request.getReleaseMs() == null
+                        || request.getInputGainDb() == null
+                        || request.getMakeupGainDb() == null
+        ) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
     }
 
     @Transactional
@@ -389,5 +452,19 @@ public class MasterLimiterService {
             case "AI_APPLIED" -> 3;
             default -> throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE, "sourceType 값이 올바르지 않습니다.");
         };
+    }
+    private record ResolvedLimiterDraftValues(
+            Boolean isEnabled,
+            Double thresholdDb,
+            Double ceilingDbfs,
+            Double attackMs,
+            Double releaseMs,
+            Double inputGainDb,
+            Double makeupGainDb,
+            Integer jobId,
+            Integer suggestionActionId,
+            Integer appliedSuggestionId,
+            String sourceType
+    ) {
     }
 }

@@ -43,7 +43,7 @@ public class TrackEqBandService {
                                 trackEqBand.getJobId(),
                                 trackEqBand.getSuggestionActionId(),
                                 trackEqBand.getAppliedSuggestionId(),
-                                toSourceType(trackEqBand.getSourceTypeCode())
+                                toSourceTypeForProjection(trackEqBand.getSourceTypeCode())
                         ))
                         .toList())
                 .build();
@@ -104,9 +104,9 @@ public class TrackEqBandService {
                 request.getFrequencyHz(),
                 request.getQ(),
                 request.getGainDeltaDb(),
-                null,
-                null,
-                null,
+                request.getJobId(),
+                request.getSuggestionActionId(),
+                request.getAppliedSuggestionId(),
                 toSourceTypeCode(request.getSourceType())
         );
     }
@@ -119,9 +119,9 @@ public class TrackEqBandService {
                 request.getFrequencyHz(),
                 request.getQ(),
                 request.getGainDeltaDb(),
-                null,
-                null,
-                null,
+                request.getJobId(),
+                request.getSuggestionActionId(),
+                request.getAppliedSuggestionId(),
                 toSourceTypeCode(request.getSourceType())
         );
     }
@@ -150,14 +150,14 @@ public class TrackEqBandService {
 
     private Integer toSourceTypeCode(String sourceType) {
         return switch (sourceType) {
-            case "AI_CONFIRM" -> 1;
+            case "AI_CONFIRM", "AI_APPLIED" -> 1;
             case "USER_MANUAL" -> 2;
             case "SYSTEM" -> 3;
             default -> throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE, "지원하지 않는 sourceType입니다: " + sourceType);
         };
     }
 
-    private String toSourceType(Integer sourceTypeCode) {
+    String toSourceTypeForProjection(Integer sourceTypeCode) {
         if (sourceTypeCode == null) {
             return null;
         }

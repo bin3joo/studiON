@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.concurrent.TimeUnit;
@@ -113,22 +114,30 @@ public class TrackEqService {
 
         validateOwnedLockAndRefreshTtl(trackEq.getProjectId(), trackEq.getId(), userId);
         TrackEqDraftState currentDraft = getDraftState(trackEq.getProjectId(), trackEq.getId());
+        List<TrackEqDraftState.DraftBand> nextBands;
+        if (isAiBandMergeRequest(request.getBands())) {
+            List<TrackEqDraftState.DraftBand> baseBands = currentDraft != null
+                    ? currentDraft.getBands()
+                    : getOrHydrateCurrentState(trackEq.getProjectId(), trackEq.getTrackId()).getBands().stream()
+                    .map(this::toDraftBand)
+                    .toList();
+            nextBands = mergeAiDraftBands(
+                    baseBands,
+                    request.getBands().stream().map(this::toDraftBand).toList()
+            );
+        } else {
+            nextBands = request.getBands().stream()
+                    .map(this::toDraftBand)
+                    .toList();
+        }
+        validateDraftBands(nextBands);
         TrackEqDraftState nextDraft = TrackEqDraftState.builder()
                 .projectId(trackEq.getProjectId())
                 .trackEqId(trackEq.getId())
                 .updatedBy(userId)
                 .updatedAt(LocalDateTime.now())
                 .version(nextVersion(currentDraft))
-                .bands(request.getBands().stream()
-                        .map(band -> TrackEqDraftState.DraftBand.builder()
-                                .bandOrder(band.getBandOrder())
-                                .eqType(band.getEqType())
-                                .frequencyHz(band.getFrequencyHz())
-                                .q(band.getQ())
-                                .gainDeltaDb(band.getGainDeltaDb())
-                                .sourceType(band.getSourceType())
-                                .build())
-                        .toList())
+                .bands(nextBands)
                 .build();
 
         saveDraftState(nextDraft);
@@ -407,6 +416,10 @@ public class TrackEqService {
                                 .frequencyHz(band.getFrequencyHz())
                                 .q(band.getQ())
                                 .gainDeltaDb(band.getGainDeltaDb())
+                                .sourceType(band.getSourceType())
+                                .jobId(band.getJobId())
+                                .suggestionActionId(band.getSuggestionActionId())
+                                .appliedSuggestionId(band.getAppliedSuggestionId())
                                 .build())
                         .toList())
                 .build();
@@ -430,6 +443,10 @@ public class TrackEqService {
                                 .frequencyHz(band.getFrequencyHz())
                                 .q(band.getQ())
                                 .gainDeltaDb(band.getGainDeltaDb())
+                                .sourceType(band.getSourceType())
+                                .jobId(band.getJobId())
+                                .suggestionActionId(band.getSuggestionActionId())
+                                .appliedSuggestionId(band.getAppliedSuggestionId())
                                 .build())
                         .toList())
                 .build();
@@ -458,7 +475,126 @@ public class TrackEqService {
                 .frequencyHz(band.getFrequencyHz())
                 .q(band.getQ())
                 .gainDeltaDb(band.getGainDeltaDb())
+                .sourceType(trackEqBandService.toSourceTypeForProjection(band.getSourceTypeCode()))
+                .jobId(band.getJobId())
+                .suggestionActionId(band.getSuggestionActionId())
+                .appliedSuggestionId(band.getAppliedSuggestionId())
                 .build();
+    }
+
+    private TrackEqDraftState.DraftBand toDraftBand(com.salmon.studion.domain.eq.dto.request.BandRequest band) {
+        return TrackEqDraftState.DraftBand.builder()
+                .bandOrder(band.getBandOrder())
+                .eqType(band.getEqType())
+                .frequencyHz(band.getFrequencyHz())
+                .q(band.getQ())
+                .gainDeltaDb(band.getGainDeltaDb())
+                .sourceType(band.getSourceType())
+                .jobId(band.getJobId())
+                .suggestionActionId(band.getSuggestionActionId())
+                .appliedSuggestionId(band.getAppliedSuggestionId())
+                .build();
+    }
+
+    private TrackEqDraftState.DraftBand toDraftBand(TrackEqCurrentState.CurrentBand band) {
+        return TrackEqDraftState.DraftBand.builder()
+                .bandOrder(band.getBandOrder())
+                .eqType(band.getEqType())
+                .frequencyHz(band.getFrequencyHz())
+                .q(band.getQ())
+                .gainDeltaDb(band.getGainDeltaDb())
+                .sourceType(band.getSourceType())
+                .jobId(band.getJobId())
+                .suggestionActionId(band.getSuggestionActionId())
+                .appliedSuggestionId(band.getAppliedSuggestionId())
+                .build();
+    }
+
+    private boolean isAiBandMergeRequest(List<com.salmon.studion.domain.eq.dto.request.BandRequest> bands) {
+        return !bands.isEmpty() && bands.stream().allMatch(band -> isAiSourceType(band.getSourceType()));
+    }
+
+    private boolean isAiSourceType(String sourceType) {
+        return "AI_CONFIRM".equals(sourceType) || "AI_APPLIED".equals(sourceType);
+    }
+
+    private List<TrackEqDraftState.DraftBand> mergeAiDraftBands(
+            List<TrackEqDraftState.DraftBand> baseBands,
+            List<TrackEqDraftState.DraftBand> incomingAiBands
+    ) {
+        List<TrackEqDraftState.DraftBand> merged = new ArrayList<>(baseBands);
+        Set<Integer> usedOrders = merged.stream()
+                .map(TrackEqDraftState.DraftBand::getBandOrder)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(HashSet::new));
+
+        for (TrackEqDraftState.DraftBand incomingBand : incomingAiBands) {
+            int matchIndex = findMatchingAiBandIndex(merged, incomingBand);
+            Integer assignedOrder = incomingBand.getBandOrder();
+            if (matchIndex >= 0) {
+                TrackEqDraftState.DraftBand existingBand = merged.remove(matchIndex);
+                assignedOrder = existingBand.getBandOrder();
+            } else if (assignedOrder == null || usedOrders.contains(assignedOrder)) {
+                assignedOrder = nextAvailableBandOrder(usedOrders);
+            }
+            TrackEqDraftState.DraftBand normalizedBand = TrackEqDraftState.DraftBand.builder()
+                    .bandOrder(assignedOrder)
+                    .eqType(incomingBand.getEqType())
+                    .frequencyHz(incomingBand.getFrequencyHz())
+                    .q(incomingBand.getQ())
+                    .gainDeltaDb(incomingBand.getGainDeltaDb())
+                    .sourceType("AI_CONFIRM")
+                    .jobId(incomingBand.getJobId())
+                    .suggestionActionId(incomingBand.getSuggestionActionId())
+                    .appliedSuggestionId(incomingBand.getAppliedSuggestionId())
+                    .build();
+            merged.add(normalizedBand);
+            usedOrders.add(assignedOrder);
+        }
+
+        return merged.stream()
+                .sorted(Comparator.comparing(TrackEqDraftState.DraftBand::getBandOrder))
+                .toList();
+    }
+
+    private int findMatchingAiBandIndex(
+            List<TrackEqDraftState.DraftBand> existingBands,
+            TrackEqDraftState.DraftBand incomingBand
+    ) {
+        for (int index = 0; index < existingBands.size(); index++) {
+            TrackEqDraftState.DraftBand existingBand = existingBands.get(index);
+            if (!isAiSourceType(existingBand.getSourceType())) {
+                continue;
+            }
+            if (
+                    incomingBand.getAppliedSuggestionId() != null
+                            && Objects.equals(existingBand.getAppliedSuggestionId(), incomingBand.getAppliedSuggestionId())
+            ) {
+                return index;
+            }
+            if (
+                    incomingBand.getSuggestionActionId() != null
+                            && Objects.equals(existingBand.getSuggestionActionId(), incomingBand.getSuggestionActionId())
+            ) {
+                return index;
+            }
+            if (
+                    incomingBand.getJobId() != null
+                            && Objects.equals(existingBand.getJobId(), incomingBand.getJobId())
+                            && Objects.equals(existingBand.getBandOrder(), incomingBand.getBandOrder())
+            ) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private int nextAvailableBandOrder(Set<Integer> usedOrders) {
+        int nextBandOrder = 1;
+        while (usedOrders.contains(nextBandOrder)) {
+            nextBandOrder += 1;
+        }
+        return nextBandOrder;
     }
 
     private String toEqType(Integer eqTypeCode) {

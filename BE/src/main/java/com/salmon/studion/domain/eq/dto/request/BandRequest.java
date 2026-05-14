@@ -33,4 +33,9 @@ public class BandRequest {
     private String sourceType;
 
 
+    private Integer jobId;
+
+    private Integer suggestionActionId;
+
+    private Integer appliedSuggestionId;
 }

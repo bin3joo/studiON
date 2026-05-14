@@ -32,5 +32,9 @@ public class TrackEqCurrentState {
         private Integer frequencyHz;
         private Double q;
         private Double gainDeltaDb;
+        private String sourceType;
+        private Integer jobId;
+        private Integer suggestionActionId;
+        private Integer appliedSuggestionId;
     }
 }

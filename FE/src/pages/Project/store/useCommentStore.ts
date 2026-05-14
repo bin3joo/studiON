@@ -27,7 +27,7 @@ export const useCommentStore = defineStore('commentStore', () => {
       })
       comments.value = response
     } catch (error) {
-      console.error('코멘트 목록 조회 실패:', error)
+     // console.error('코멘트 목록 조회 실패:', error)
     } finally {
       isLoading.value = false
     }

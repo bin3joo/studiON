@@ -90,7 +90,7 @@ function encodeWAV24Bit(
 export function useAudioExport() {
   const trackStore = useTrackStore()
 
-  const exportMasterAudio = async (): Promise<Blob> => {
+  const exportMasterAudio = async (isMono: boolean = false): Promise<Blob> => {
     const tracks = trackStore.trackList
 
     // 가장 마지막 클립의 종료 지점(Max Duration) 계산
@@ -110,7 +110,7 @@ export function useAudioExport() {
     // 여유 공간(Reverb/Delay Tail 등)을 위해 1초 추가
     const renderDurationSec = maxDurationBar * secondsPerBar + 1.0
     const sampleRate = 48000
-    const channels = 2
+    const channels = isMono ? 1 : 2
 
     // 트랙 중 하나라도 솔로(Solo)가 켜져 있는지 확인
     const isAnyTrackSoloed = tracks.some((t) => t.isSoloed)

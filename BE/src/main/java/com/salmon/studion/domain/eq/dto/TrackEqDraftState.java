@@ -32,5 +32,8 @@ public class TrackEqDraftState {
         private Double q;
         private Double gainDeltaDb;
         private String sourceType;
+        private Integer jobId;
+        private Integer suggestionActionId;
+        private Integer appliedSuggestionId;
     }
 }

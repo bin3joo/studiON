@@ -209,6 +209,11 @@ export interface AiAnalysisRegion {
   band_high_hz: number | null
   involved_track_ids: number[]
   affected_clip_ids: number[]
+
+  requires_user_action?: boolean
+  contributing_track_ids?: number[]
+  track_contribution_scores?: Record<string, number>
+  contributor_band_hints?: Record<string, string[]>
 }
 
 export async function startAiWorkflow(payload: AiJobStartRequest) {

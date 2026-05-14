@@ -86,7 +86,7 @@ onMounted(async () => {
       activeGroupCode.value = firstGroup.code
     }
   } catch (error) {
-    console.error(error)
+   // console.error(error)
     errorMessage.value = '포지션 목록을 불러오지 못했습니다.'
   }
 })
@@ -159,7 +159,7 @@ async function handleSubmit() {
 
     done.value = true
   } catch (error) {
-    console.error(error)
+   // console.error(error)
     errorMessage.value = '온보딩 처리 중 오류가 발생했습니다.'
   } finally {
     isLoading.value = false

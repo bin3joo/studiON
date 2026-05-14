@@ -1540,10 +1540,10 @@ def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]
     candidates = []
     for track_id, windows in track_frames_by_id.items():
         for window in windows:
-            peak_dbfs = float(window["peak_dbfs"])
-            if peak_dbfs < -0.1:
+            true_peak_dbfs = float(window.get("true_peak_dbfs", window["peak_dbfs"]))
+            if true_peak_dbfs < -0.1:
                 continue
-            peak_near_ceiling = max(peak_dbfs + 0.1, 0.0)
+            peak_near_ceiling = max(true_peak_dbfs + 0.1, 0.0)
             score = round(
                 (peak_near_ceiling * 1.15)
                 + (float(window.get("high_band_ratio", 0.0)) * 0.25)
@@ -1558,7 +1558,7 @@ def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]
                     "score": score,
                     "summary": "Detected track clipping candidate near the digital ceiling.",
                     "recommended_reduction_db": round(max(peak_near_ceiling + 0.9, 1.0), 3),
-                    "current_true_peak_dbtp": round(peak_dbfs, 3),
+                    "current_true_peak_dbtp": round(true_peak_dbfs, 3),
                     "target_ceiling_dbtp": -1.0,
                 }
             )

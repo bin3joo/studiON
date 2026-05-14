@@ -195,6 +195,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         )
 
     try:
+        action = _build_application_eq_action(state, action=action)
         preview_band_spec = _build_preview_band_spec(state, action=action)
     except ValueError as exc:
         return fail_workflow(
@@ -243,7 +244,10 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
                 "selectedRegionId": int(selected_region["id"]),
                 "issueType": selected_region.get("issue_type"),
                 "preserveClipId": state.get("preserve_clip_id"),
-                "planPayload": deepcopy(plan_payload),
+                "planPayload": {
+                    **deepcopy(plan_payload),
+                    "candidate": {**deepcopy(candidate), "action": deepcopy(action)},
+                },
                 "previewBandSpecs": [deepcopy(preview_band_spec)],
             },
         )
@@ -437,6 +441,11 @@ def _build_preview_band_spec(
 
 
 def _resolve_eq_band_values(action: dict[str, object]) -> tuple[int, float]:
+    frequency_hz = action.get("frequencyHz")
+    q_value = action.get("q")
+    if isinstance(frequency_hz, int) and isinstance(q_value, int | float) and float(q_value) > 0:
+        return frequency_hz, round(float(q_value), 3)
+
     band_low_hz = action.get("bandLowHz")
     band_high_hz = action.get("bandHighHz")
     if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
@@ -457,6 +466,21 @@ def _resolve_eq_band_values(action: dict[str, object]) -> tuple[int, float]:
     return frequency_hz, round(q, 3)
 
 
+def _build_application_eq_action(
+    state: WorkflowState,
+    *,
+    action: dict[str, object],
+) -> dict[str, object]:
+    normalized = deepcopy(action)
+    frequency_hz, q = _resolve_eq_band_values(normalized)
+    normalized["frequencyHz"] = frequency_hz
+    normalized["q"] = q
+    normalized["eqType"] = normalized.get("eqType") or "BELL"
+    normalized["jobId"] = int(state["job_id"])
+    normalized["sourceType"] = normalized.get("sourceType") or "AI_CONFIRM"
+    return normalized
+
+
 def _build_non_llm_issue(
     state: WorkflowState,
     region: dict[str, object],
@@ -475,7 +499,7 @@ def _build_non_llm_issue(
             "summary": region.get("summary") or "Track clipping detected",
             "explanation": "Apply a conservative true-peak limiter on the master bus to control clipping without editing individual track EQ.",
             "previewBands": [],
-            "actions": [_build_master_limiter_action(region)],
+            "actions": [_build_master_limiter_action(state, region)],
             "markers": [],
         }
     if issue_type == "master_clipping":
@@ -490,7 +514,7 @@ def _build_non_llm_issue(
             "summary": region.get("summary") or "Master clipping detected",
             "explanation": "Apply a conservative true-peak limiter on the master bus to control the detected clipping region.",
             "previewBands": [],
-            "actions": [_build_master_limiter_action(region)],
+            "actions": [_build_master_limiter_action(state, region)],
             "markers": [],
         }
     if issue_type == "high_band_harshness":
@@ -621,6 +645,7 @@ def _resolve_recommended_reduction_db(region: dict[str, object]) -> float:
 
 
 def _build_master_limiter_action(
+    state: WorkflowState,
     region: dict[str, object],
     *,
     source_action_type: str | None = None,
@@ -628,9 +653,18 @@ def _build_master_limiter_action(
     action: dict[str, object] = {
         "type": "apply_master_limiter",
         "targetScope": "MASTER",
+        "jobId": int(state["job_id"]),
+        "sourceType": "AI_APPLIED",
+        "isEnabled": True,
         "estimatedGainReductionDb": _resolve_recommended_reduction_db(region),
         "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
+        "ceilingDbfs": region.get("target_ceiling_dbtp") or -1.0,
         "targetCeilingDbtp": region.get("target_ceiling_dbtp") or -1.0,
+        "thresholdDb": None,
+        "attackMs": None,
+        "releaseMs": None,
+        "inputGainDb": None,
+        "makeupGainDb": None,
     }
     if region.get("track_id") is not None:
         action["sourceTrackId"] = region.get("track_id")

@@ -704,4 +704,28 @@ public class TrackService {
                 .toList();
         trackRepository.saveAll(toSave);
     }
+
+    public boolean existsTrackInProjectWorkingSet(Integer projectId, Integer trackId) {
+        String trackKey = String.format(TRACKS_KEY, projectId);
+        String deletedKey = String.format(DELETED_TRACKS_KEY, projectId);
+
+        Object redisTrack = redisTemplate.opsForHash().get(trackKey, String.valueOf(trackId));
+        if (redisTrack != null) {
+            return true;
+        }
+
+        Boolean isDeleted = redisTemplate.opsForSet().isMember(deletedKey, String.valueOf(trackId));
+        if (Boolean.TRUE.equals(isDeleted)) {
+            return false;
+        }
+
+        return trackRepository.findByIdAndProject_Id(trackId, projectId).isPresent();
+    }
+
+    public void validateTrackInProjectWorkingSet(Integer projectId, Integer trackId) {
+        if (!existsTrackInProjectWorkingSet(projectId, trackId)) {
+            throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
+        }
+    }
+
 }

@@ -21,6 +21,8 @@ public interface CommentMentionRepository extends JpaRepository<CommentMention, 
 
     void deleteAllByComment_Id(Integer commentId);
 
+    void deleteAllByComment_IdIn(List<Integer> commentIds);
+
     @Query("""
         SELECT cm
         FROM CommentMention cm

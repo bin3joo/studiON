@@ -451,6 +451,11 @@ def _normalize_datetime_value(value: object) -> str | None:
 def _sanitize_state_snapshot(state: WorkflowState) -> tuple[dict, str | None]:
     snapshot = deepcopy(dict(state))
     snapshot.pop("project_snapshot", None)
+    snapshot.pop("track_frames", None)
+    snapshot.pop("mix_frames", None)
+    snapshot.pop("track_power_spectra", None)
+    snapshot.pop("mix_power_spectra", None)
+    snapshot.pop("frequency_bins_hz", None)
 
     compact_state = {key: snapshot[key] for key in COMPACT_STATE_KEYS if key in snapshot}
     spillover_state = {key: snapshot[key] for key in SPILLOVER_STATE_KEYS if key in snapshot}

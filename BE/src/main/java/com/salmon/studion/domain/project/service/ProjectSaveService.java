@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.project.service;
 
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.domain.comment.service.CommentService;
 import com.salmon.studion.domain.project.dto.response.ProjectSnapshotSaveResponse;
 import com.salmon.studion.domain.track.service.TrackService;
 import com.salmon.studion.global.common.enums.ProjectSaveTrigger;
@@ -21,6 +22,7 @@ public class ProjectSaveService {
     private final ProjectDirtyStateService projectDirtyStateService;
     private final TrackService trackService;
     private final ClipService clipService;
+    private final CommentService commentService;
 
     private static final int MAX_AUTOSAVE_FAIL_COUNT = 5;
 
@@ -34,6 +36,8 @@ public class ProjectSaveService {
 
             trackService.clearDeletedTrackKeys(projectId);
             clipService.clearDeletedClipKeys(projectId);
+            commentService.clearDeletedCommentKeys(projectId);
+
             projectDirtyStateService.markSaveSuccess(projectId);
             return response;
         } catch (RuntimeException e) {
@@ -66,6 +70,8 @@ public class ProjectSaveService {
 
             trackService.clearDeletedTrackKeys(projectId);
             clipService.clearDeletedClipKeys(projectId);
+            commentService.clearDeletedCommentKeys(projectId);
+
             projectDirtyStateService.markSaveSuccess(projectId);
             return Optional.of(response);
         } catch (RuntimeException e) {

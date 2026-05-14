@@ -120,31 +120,14 @@ public class CommentRedisRepository {
      * @return
      */
     public List<CommentState> findAllOrLoadByProjectId(Integer projectId) {
-        List<CommentState> cached = findAllByProjectId(projectId);
-        if (!cached.isEmpty()) {
-            return cached;
-        }
+        Map<Integer, CommentState> mergedStates = new HashMap<>();
 
-        List<Comment> comments = commentRepository.findAllByProjectId(projectId);
-        if (comments.isEmpty()) {
-            return List.of();
-        }
+        loadAllFromMysql(projectId).forEach(state -> mergedStates.put(state.getCommentId(), state));
+        findAllByProjectId(projectId).forEach(state -> mergedStates.put(state.getCommentId(), state));
 
-        Map<Integer, List<Integer>> mentionUserIdsByCommentId = loadMentionUserIdsByCommentIds(
-                comments.stream().map(Comment::getId).toList()
-        );
-
-        List<CommentState> states = comments.stream()
-                .map(comment -> CommentState.from(
-                        comment,
-                        projectId,
-                        mentionUserIdsByCommentId.getOrDefault(comment.getId(), List.of())
-                ))
+        return mergedStates.values().stream()
                 .sorted(defaultOrder())
                 .toList();
-
-        saveAll(states);
-        return states;
     }
 
     /**
@@ -407,5 +390,24 @@ public class CommentRedisRepository {
      */
     private String deletedCommentsKey(Integer projectId) {
         return DELETED_COMMENTS_KEY.formatted(projectId);
+    }
+
+    private List<CommentState> loadAllFromMysql(Integer projectId) {
+        List<Comment> comments = commentRepository.findAllByProjectId(projectId);
+        if (comments.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Integer, List<Integer>> mentionUserIdsByCommentId = loadMentionUserIdsByCommentIds(
+                comments.stream().map(Comment::getId).toList()
+        );
+
+        return comments.stream()
+                .map(comment -> CommentState.from(
+                        comment,
+                        projectId,
+                        mentionUserIdsByCommentId.getOrDefault(comment.getId(), List.of())
+                ))
+                .toList();
     }
 }

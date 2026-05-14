@@ -4,6 +4,7 @@ import ProjectPage from '@/pages/Project/ProjectPage.vue'
 import OnboardingPage from '@/pages/Onboarding/OnboardingPage.vue'
 import ProfileSetupPage from '@/pages/Onboarding/ProfileSetupPage.vue'
 import AuthCallbackPage from '@/pages/Auth/AuthCallbackPage.vue'
+import { pageView } from '@/shared/lib/gtag'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -43,6 +44,15 @@ const router = createRouter({
       component: ProjectPage,
     },
   ],
+})
+
+router.afterEach((to) => {
+  const title =
+    typeof to.meta.title === 'string'
+      ? to.meta.title
+      : document.title
+
+  pageView(to.fullPath, title)
 })
 
 export default router

@@ -126,6 +126,11 @@ public class CommentService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public boolean hasCommentWorkingSet(Integer projectId) {
+        return commentRedisRepository.hasWorkingSet(projectId);
+    }
+
     @Transactional
     public CommentState changeResolved(CommentState commentState) {
         CommentState updatedState = CommentState.toggleResolved(commentState, LocalDateTime.now());

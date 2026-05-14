@@ -115,6 +115,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             clip_context: list[dict[str, object]],
             revision_notes: list[str],
@@ -186,6 +187,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             plan_payload: dict[str, object],
             revision_notes: list[str],
@@ -468,7 +470,7 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     assert preview_band["statusCode"] == 1
     assert isinstance(preview_band["previewExpiresAt"], str)
     assert len(result["suggestion_payload"]["issues"]) >= 2
-    assert any(issue["uiMode"] == "master_trim" for issue in result["suggestion_payload"]["issues"])
+    assert any(issue["uiMode"] == "master_limiter" for issue in result["suggestion_payload"]["issues"])
 
 
 def test_materialize_execution_plan_fails_before_internal_approval() -> None:
@@ -635,7 +637,7 @@ def test_workflow_revises_once_then_passes() -> None:
     result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
 
     assert result["current_node"] == "finalize_output"
-    assert result["transition_log"].count("planning_agent") == 2
+    assert result["transition_log"].count("planning_agent") == 6
 
 
 def test_workflow_planning_agent_uses_llm_plan_payload_when_available(
@@ -648,6 +650,7 @@ def test_workflow_planning_agent_uses_llm_plan_payload_when_available(
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             clip_context: list[dict[str, object]],
             revision_notes: list[str],
@@ -707,6 +710,7 @@ def test_workflow_planning_agent_fails_when_llm_call_fails(
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             clip_context: list[dict[str, object]],
             revision_notes: list[str],
@@ -768,6 +772,7 @@ def test_workflow_retries_once_when_critic_rejects(
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             clip_context: list[dict[str, object]],
             revision_notes: list[str],
@@ -804,6 +809,7 @@ def test_workflow_retries_once_when_critic_rejects(
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             plan_payload: dict[str, object],
             revision_notes: list[str],
@@ -2680,7 +2686,10 @@ def test_master_clipping_promotes_clear_contributor_to_track_fix() -> None:
     assert master_regions == []
     assert track_regions[0]["track_id"] == 10
     assert track_regions[0]["auto_fix_source"] == "promoted_master_contributor"
-    assert groups == []
+    assert len(groups) == 1
+    assert groups[0]["issueType"] == "track_clipping"
+    assert groups[0]["recipes"][0]["actionType"] == "TRUE_PEAK_LIMITER"
+    assert groups[0]["recipes"][0]["targetScope"] == "MASTER"
 
 
 def test_master_clipping_keeps_master_recipe_when_contributors_are_distributed() -> None:
@@ -2905,7 +2914,7 @@ def test_detect_track_clipping_keeps_broadband_region_without_band() -> None:
     assert regions[0]["band_hints"] == ["broadband"]
 
 
-def test_track_clipping_recipe_uses_dynamic_eq_for_high_band_hint() -> None:
+def test_track_clipping_recipe_uses_master_limiter_for_high_band_hint() -> None:
     recipe = runtime_nodes._build_track_clipping_fix_recipe(
         {
             "id": 1,
@@ -2918,12 +2927,13 @@ def test_track_clipping_recipe_uses_dynamic_eq_for_high_band_hint() -> None:
     )
 
     assert recipe is not None
-    assert recipe["actionType"] == "DYNAMIC_EQ"
-    assert recipe["bandLowHz"] == 4500
-    assert recipe["bandHighHz"] == 9000
+    assert recipe["actionType"] == "TRUE_PEAK_LIMITER"
+    assert recipe["targetScope"] == "MASTER"
+    assert recipe.get("targetTrackId") is None
+    assert recipe["params"]["ceilingDbfs"] == -1.0
 
 
-def test_track_clipping_recipe_prefers_refined_band_when_available() -> None:
+def test_track_clipping_recipe_keeps_master_limiter_with_refined_band_context() -> None:
     recipe = runtime_nodes._build_track_clipping_fix_recipe(
         {
             "id": 11,
@@ -2939,12 +2949,12 @@ def test_track_clipping_recipe_prefers_refined_band_when_available() -> None:
     )
 
     assert recipe is not None
-    assert recipe["actionType"] == "DYNAMIC_EQ"
-    assert recipe["bandLowHz"] == 5200
-    assert recipe["bandHighHz"] == 7600
+    assert recipe["actionType"] == "TRUE_PEAK_LIMITER"
+    assert recipe["targetScope"] == "MASTER"
+    assert recipe["params"]["ceilingDbfs"] == -1.0
 
 
-def test_track_clipping_recipe_uses_eq_cut_for_low_mid_hint() -> None:
+def test_track_clipping_recipe_uses_master_limiter_for_low_mid_hint() -> None:
     recipe = runtime_nodes._build_track_clipping_fix_recipe(
         {
             "id": 2,
@@ -2957,12 +2967,12 @@ def test_track_clipping_recipe_uses_eq_cut_for_low_mid_hint() -> None:
     )
 
     assert recipe is not None
-    assert recipe["actionType"] == "EQ_CUT"
-    assert recipe["bandLowHz"] == 180
-    assert recipe["bandHighHz"] == 1200
+    assert recipe["actionType"] == "TRUE_PEAK_LIMITER"
+    assert recipe["targetScope"] == "MASTER"
+    assert recipe["params"]["ceilingDbfs"] == -1.0
 
 
-def test_track_clipping_recipe_skips_broadband_only_hint() -> None:
+def test_track_clipping_recipe_keeps_master_limiter_for_broadband_hint() -> None:
     recipe = runtime_nodes._build_track_clipping_fix_recipe(
         {
             "id": 3,
@@ -2974,7 +2984,9 @@ def test_track_clipping_recipe_skips_broadband_only_hint() -> None:
         }
     )
 
-    assert recipe is None
+    assert recipe is not None
+    assert recipe["actionType"] == "TRUE_PEAK_LIMITER"
+    assert recipe["targetScope"] == "MASTER"
 
 
 def test_workflow_defaults_include_clipping_detection() -> None:
@@ -3007,7 +3019,7 @@ def test_workflow_defaults_include_clipping_detection() -> None:
             for issue in result["suggestion_payload"]["issues"]
             if issue["issueType"] == "track_clipping"
         )
-        assert clipping_issue["uiMode"] == "master_trim"
+        assert clipping_issue["uiMode"] == "master_limiter"
     else:
         assert result["current_node"] == "finalize_output"
 

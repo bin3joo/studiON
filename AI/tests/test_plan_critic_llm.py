@@ -39,6 +39,7 @@ def test_http_plan_critic_llm_client_sends_anthropic_shape(
         selected_region_id=1,
         preserve_clip_id=10,
         user_feedback_message="keep vocal",
+        selection_context={"selectedTrackId": 1, "preserveTrackId": 1, "selectedTrackIsProtected": True},
         region={"issue_type": "band_overlap"},
         plan_payload={"strategyTitle": "Strategy"},
         revision_notes=[],
@@ -53,6 +54,7 @@ def test_http_plan_critic_llm_client_sends_anthropic_shape(
     body = captured["json"]
     assert body["model"] == "claude-sonnet-4-5-20250929"
     assert body["messages"][0]["role"] == "user"
+    assert '"selectionContext"' in body["messages"][0]["content"]
     assert response.result == "PASS"
     assert response.note == "Looks safe."
 
@@ -85,6 +87,7 @@ def test_http_plan_critic_llm_client_rejects_invalid_json_payload(
             selected_region_id=1,
             preserve_clip_id=10,
             user_feedback_message=None,
+            selection_context={"selectedTrackId": 1, "preserveTrackId": 1, "selectedTrackIsProtected": True},
             region={"issue_type": "clipping"},
             plan_payload={"strategyTitle": "Strategy"},
             revision_notes=[],

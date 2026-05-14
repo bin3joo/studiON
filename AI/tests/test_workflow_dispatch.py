@@ -178,6 +178,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             clip_context: list[dict[str, object]],
             revision_notes: list[str],
@@ -231,6 +232,7 @@ def patch_planning_clients(monkeypatch: pytest.MonkeyPatch) -> None:
             selected_region_id: int,
             preserve_clip_id: int,
             user_feedback_message: str | None,
+            selection_context: dict[str, object],
             region: dict[str, object],
             plan_payload: dict[str, object],
             revision_notes: list[str],
@@ -470,7 +472,7 @@ def test_worker_start_dispatch_materializes_track_clipping_without_waiting(
         for issue in resumed["suggestion_payload"]["issues"]
         if issue["issueType"] == "track_clipping"
     )
-    assert clipping_issue["uiMode"] == "master_trim"
+    assert clipping_issue["uiMode"] == "master_limiter"
 
 
 def test_worker_start_dispatch_materializes_sibilance_without_waiting(
@@ -639,11 +641,11 @@ def test_job_status_api_does_not_expose_preview_for_non_preview_issue(
                     "endMs": 1400,
                     "trackId": 8,
                     "bubbleTarget": "master",
-                    "uiMode": "master_trim",
+                    "uiMode": "master_limiter",
                     "summary": "Track clipping detected",
-                    "explanation": "Master trim only",
+                    "explanation": "Master limiter only",
                     "previewBands": [],
-                    "actions": [{"type": "apply_master_gain_trim", "recommendedReductionDb": 1.5}],
+                    "actions": [{"type": "apply_master_limiter", "estimatedGainReductionDb": 1.5}],
                     "markers": [],
                 }
             ],
@@ -759,11 +761,11 @@ def test_preview_compare_api_rejects_non_preview_issue_payload(
                     "endMs": 1500,
                     "trackId": 8,
                     "bubbleTarget": "master",
-                    "uiMode": "master_trim",
+                    "uiMode": "master_limiter",
                     "summary": "Track clipping detected",
-                    "explanation": "Master trim only",
+                    "explanation": "Master limiter only",
                     "previewBands": [],
-                    "actions": [{"type": "apply_master_gain_trim", "recommendedReductionDb": 1.5}],
+                    "actions": [{"type": "apply_master_limiter", "estimatedGainReductionDb": 1.5}],
                     "markers": [],
                 }
             ],
@@ -1264,8 +1266,8 @@ def test_feedback_api_uses_path_job_id_for_resume_decision(
         json={
             "project_id": 30026,
             "issue_id": "issue-20026-1",
-            "action_type": "apply_master_gain_trim",
-            "action_payload": {"recommendedReductionDb": 1.5},
+            "action_type": "apply_master_limiter",
+            "action_payload": {"estimatedGainReductionDb": 1.5, "targetCeilingDbtp": -1.0},
             "user_decision": "RESUME",
             **plan_input,
         },
@@ -1275,8 +1277,8 @@ def test_feedback_api_uses_path_job_id_for_resume_decision(
     assert response.json()["job"]["dispatch_type"] == "resume_plan_input"
     assert queued_messages[-1].job_id == 20026
     assert queued_messages[-1].issue_id == "issue-20026-1"
-    assert queued_messages[-1].action_type == "apply_master_gain_trim"
-    assert queued_messages[-1].action_payload == {"recommendedReductionDb": 1.5}
+    assert queued_messages[-1].action_type == "apply_master_limiter"
+    assert queued_messages[-1].action_payload == {"estimatedGainReductionDb": 1.5, "targetCeilingDbtp": -1.0}
     assert queued_messages[-1].user_decision == "RESUME"
 
 

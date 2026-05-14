@@ -460,7 +460,8 @@ def _build_suggestion_actions(
                 band_low_hz=issue_action.get("bandLowHz"),
                 band_high_hz=issue_action.get("bandHighHz"),
                 gain_delta_db=issue_action.get("gainDeltaDb")
-                or issue_action.get("recommendedReductionDb"),
+                or issue_action.get("recommendedReductionDb")
+                or issue_action.get("estimatedGainReductionDb"),
                 params_json=issue_action,
                 target_scope=str(
                     issue_action.get("targetScope") or issue.get("bubbleTarget") or "TRACK"

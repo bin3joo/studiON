@@ -261,6 +261,15 @@ public class CommentRedisRepository {
     }
 
     /**
+     * 특정 project의 코멘트 working set 존재 여부 확인
+     * @param projectId
+     * @return
+     */
+    public boolean hasWorkingSet(Integer projectId) {
+        return redisTemplate.hasKey(commentsKey(projectId)) || redisTemplate.hasKey(deletedCommentsKey(projectId));
+    }
+
+    /**
      * MySQL에서 comment를 1개 조회한 뒤 state로 변환
      * @param projectId
      * @param commentId

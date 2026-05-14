@@ -33,6 +33,7 @@ class PlanningLLMClient(Protocol):
         selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
+        selection_context: dict[str, object],
         region: dict[str, object],
         clip_context: list[dict[str, object]],
         revision_notes: list[str],
@@ -62,6 +63,7 @@ class HTTPPlanningLLMClient:
         selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
+        selection_context: dict[str, object],
         region: dict[str, object],
         clip_context: list[dict[str, object]],
         revision_notes: list[str],
@@ -81,6 +83,7 @@ class HTTPPlanningLLMClient:
                             "selectedRegionId": selected_region_id,
                             "preserveClipId": preserve_clip_id,
                             "userFeedbackMessage": user_feedback_message,
+                            "selectionContext": selection_context,
                             "revisionNotes": revision_notes,
                             "region": region,
                             "clipContext": clip_context,
@@ -165,11 +168,14 @@ def _planner_system_prompt() -> str:
     return (
         "You are generating one safe band_overlap correction plan for an audio workflow. "
         "Return only a JSON object and do not add markdown or commentary. "
-        "Use the selected region, preserve clip, clip context, and revision notes exactly as given. "
+        "Use the selected region, preserve clip, selection context, clip context, and revision notes exactly as given. "
         "This planner path is only for band_overlap issues. "
         "The only allowed action types are DYNAMIC_EQ and EQ_CUT. "
         "The action must always use TRACK scope. MASTER scope is forbidden. "
         "Never target the preserve clip track. "
+        "If selectionContext.selectedTrackId equals selectionContext.preserveTrackId, "
+        "treat that selected track as the protected reference, not the required modification target. "
+        "In that case, prefer modifying a non-preserve overlapping track. "
         "Keep targetClipId null. "
         "Keep startMs and endMs inside the selected region. "
         "Keep bandLowHz and bandHighHz inside the selected region band when they are provided. "

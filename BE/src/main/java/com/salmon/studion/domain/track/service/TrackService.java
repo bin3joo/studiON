@@ -3,6 +3,7 @@ package com.salmon.studion.domain.track.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.domain.comment.service.CommentService;
 import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
@@ -42,6 +43,7 @@ public class TrackService {
 
     private final ProjectService projectService;
     private final ClipService clipService;
+    private final CommentService commentService;
     private final TrackEqService trackEqService;
     private final TrackRepository trackRepository;
     private final TrackEventRepository trackEventRepository;
@@ -55,6 +57,70 @@ public class TrackService {
      */
     public List<Track> getTracksByProjectId(Integer projectId) {
         return trackRepository.findByProject_Id(projectId);
+    }
+
+    public boolean hasTrackWorkingSet(Integer projectId) {
+        return redisTemplate.hasKey(String.format(TRACKS_KEY, projectId)) || redisTemplate.hasKey(String.format(DELETED_TRACKS_KEY, projectId));
+    }
+
+    public List<Track> getTracksForProjectDetail(Integer projectId) {
+        Map<Integer, Track> merged = trackRepository.findByProject_Id(projectId).stream()
+                .map(this::copyTrack)
+                .collect(Collectors.toMap(
+                        Track::getId,
+                        track -> track,
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new
+                ));
+
+        Map<Object, Object> redisEntries = redisTemplate.opsForHash().entries(String.format(TRACKS_KEY, projectId));
+        if (!redisEntries.isEmpty()) {
+            Project project = projectService.getProjectOrThrow(projectId);
+
+            for (Object value : redisEntries.values()) {
+                TrackState state = parseTrackState((String) value);
+
+                Track existing = merged.get(state.getTrackId());
+                if (existing != null) {
+                    existing.update(
+                            state.getName(),
+                            state.getPreTrackId(),
+                            state.getPostTrackId(),
+                            state.getIsSoloed(),
+                            state.getIsMuted(),
+                            state.getVolume(),
+                            state.getPan()
+                    );
+                    merged.put(state.getTrackId(), existing);
+                    continue;
+                }
+
+                merged.put(
+                        state.getTrackId(),
+                        Track.create(
+                                state.getTrackId(),
+                                project,
+                                state.getPreTrackId(),
+                                state.getPostTrackId(),
+                                TrackType.valueOf(state.getType().toUpperCase()),
+                                state.getName(),
+                                state.getIsSoloed(),
+                                state.getIsMuted(),
+                                state.getVolume(),
+                                state.getPan()
+                        )
+                );
+            }
+        }
+
+        Set<String> deletedIds = redisTemplate.opsForSet().members(String.format(DELETED_TRACKS_KEY, projectId));
+        if (deletedIds != null) {
+            deletedIds.stream()
+                    .map(Integer::parseInt)
+                    .forEach(merged::remove);
+        }
+
+        return sortTracksForDetail(merged.values().stream().toList());
     }
 
     /*
@@ -215,6 +281,9 @@ public class TrackService {
 
         // 삭제된 트랙의 클립을 Redis에서 삭제
         clipService.deleteClipStatesByTrack(request.getProjectId(), request.getTrackId());
+
+        // 삭제된 트랙의 코멘트도 Redis working set에서 삭제 마킹
+        commentService.deleteCommentsByTrack(request.getProjectId(), request.getTrackId());
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
@@ -545,11 +614,14 @@ public class TrackService {
     }
 
     /*
-        Redis에서 Track을 삭제한다.
+        Track을 Redis hash에서 삭제한 후, deleted_tracks에 남긴다.
      */
     private void removeTrackToRedis(Integer projectId, TrackState track) {
         String key = String.format(TRACKS_KEY, projectId);
+        String deletedKey = String.format(DELETED_TRACKS_KEY, projectId);
+
         redisTemplate.opsForHash().delete(key, String.valueOf(track.getTrackId()));
+        redisTemplate.opsForSet().add(deletedKey, String.valueOf(track.getTrackId()));
     }
 
     /*
@@ -726,6 +798,47 @@ public class TrackService {
         if (!existsTrackInProjectWorkingSet(projectId, trackId)) {
             throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
         }
+    }
+
+    private Track copyTrack(Track track) {
+        return Track.create(
+                track.getId(),
+                track.getProject(),
+                track.getPreTrackId(),
+                track.getPostTrackId(),
+                track.getTrackType(),
+                track.getName(),
+                track.getIsSoloed(),
+                track.getIsMuted(),
+                track.getVolume(),
+                track.getPan()
+        );
+    }
+
+    private List<Track> sortTracksForDetail(List<Track> tracks) {
+        Map<Integer, Track> byId = tracks.stream()
+                .collect(Collectors.toMap(Track::getId, track -> track));
+
+        List<Track> ordered = new java.util.ArrayList<>();
+        java.util.Set<Integer> visited = new java.util.HashSet<>();
+
+        Track head = tracks.stream()
+                .filter(track -> track.getPreTrackId() == null || !byId.containsKey(track.getPreTrackId()))
+                .findFirst()
+                .orElse(null);
+
+        while (head != null && visited.add(head.getId())) {
+            ordered.add(head);
+            Integer nextId = head.getPostTrackId();
+            head = nextId == null ? null : byId.get(nextId);
+        }
+
+        tracks.stream()
+                .filter(track -> !visited.contains(track.getId()))
+                .sorted(java.util.Comparator.comparing(Track::getId))
+                .forEach(ordered::add);
+
+        return ordered;
     }
 
 }

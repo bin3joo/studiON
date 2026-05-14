@@ -846,6 +846,12 @@ async function handleApplyClippingIssue() {
   if (!item || item.kind !== 'CLIPPING') return
 
   const action = getActiveClippingTrimAction()
+
+if (!action || action.recommendedReductionDb == null) {
+  alert('클리핑 적용값이 없습니다.')
+  return
+}
+const clippingAction = action
   const recommendedReductionDb = action?.recommendedReductionDb
 
   if (recommendedReductionDb == null) {
@@ -861,7 +867,7 @@ async function handleApplyClippingIssue() {
     await saveMasterLimiterDraft(projectId, {
       isEnabled: true,
       thresholdDb: currentLimiter.thresholdDb,
-      ceilingDbfs: action.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
+      ceilingDbfs: clippingAction.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
       attackMs: currentLimiter.attackMs,
       releaseMs: currentLimiter.releaseMs,
 

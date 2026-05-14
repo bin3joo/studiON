@@ -175,6 +175,7 @@ onUnmounted(() => {
       class="relative shrink-0 cursor-pointer touch-none"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       @click.stop="onClick"
+      @pointerdown.stop
     >
       
       <div

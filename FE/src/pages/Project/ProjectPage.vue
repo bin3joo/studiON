@@ -21,9 +21,11 @@ import type { TrackEqBandState } from './types'
 import { AlertTriangle } from 'lucide-vue-next';
 import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
-import { useCommentStore } from './store/useCommentStore';
+import { useCommentStore } from './store/useCommentStore'
+import ExportModal from './components/ExportModal.vue';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
+import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -61,6 +63,7 @@ const TIMELINE_TRACK_HEADER_WIDTH = 266
 //휠 이벤트를 적용할 컨테이너
 const timelineContainerRef = ref<HTMLElement | null>(null)
 const masterTrackWrapperRef = ref<HTMLElement | null>(null)
+const toolbarFileInputRef = ref<HTMLInputElement | null>(null)
 
 // 재생바 자동 스크롤: 스토어의 RAF 루프에서 직접 컨테이너를 조작하도록 컨테이너 참조를 전달
 watch(timelineContainerRef, (el) => {
@@ -70,6 +73,9 @@ watch(timelineContainerRef, (el) => {
 
 //휠할때 마우스가 가르키는 위치에서 휠되게 
 const handleWheel = (e: WheelEvent) => {
+  // 사용자가 수동으로 휠을 조작했으므로 자동 스크롤 일시 정지
+  trackStore.isAutoScrollActive = false;
+
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
     
@@ -319,6 +325,15 @@ if(timelineContainerRef.value) {
   window.addEventListener('pointerdown', unlockAudioEngine, {capture: true});
   window.addEventListener('keydown', unlockAudioEngine, {capture: true});
 
+await nextTick()
+
+const hasSeenGuide =
+  localStorage.getItem(PROJECT_GUIDE_STORAGE_KEY) === 'true'
+
+if (FORCE_SHOW_PROJECT_GUIDE || !hasSeenGuide) {
+  isProjectGuideOpen.value = true
+}
+
 })
 
 onUnmounted(()=>{
@@ -508,8 +523,10 @@ function handleDeleteComment(payload: {
 
 const commentGroups = ref<TrackMeasureCommentGroup[]>([])
 
+const isExportModalOpen = ref(false)
+
 function handleExport() {
-  console.log('내보내기')
+  isExportModalOpen.value = true
 }
 
 function handleSaveVersion() {
@@ -678,6 +695,24 @@ function handleActionCut() {
   }
 }
 
+function handleActionUpload() {
+  if (trackStore.selectedTrackId && toolbarFileInputRef.value) {
+    toolbarFileInputRef.value.click();
+  }
+}
+
+function handleToolbarFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  if (trackStore.selectedTrackId) {
+    trackStore.uploadAndAddAudioClip(file, trackStore.selectedTrackId, trackStore.playheadPosition);
+  }
+
+  target.value = '';
+}
+
 function handleActionPaste() {
   if (trackStore.clipboardClip) {
     let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
@@ -762,6 +797,8 @@ function handleBackgroundPointerDown(e: PointerEvent) {
       e.clientY >= rect.top + target.clientHeight;
       
     if (isScrollbarClick) {
+      // 스크롤바 조작 시 자동 스크롤 일시 정지
+      trackStore.isAutoScrollActive = false;
       return; // 스크롤바를 누른 경우 선택 해제 무시
     }
   }
@@ -905,6 +942,39 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
 
   return getAiBubblePosition(aiConflict.value)
 })
+
+const PROJECT_GUIDE_STORAGE_KEY = 'studion-project-guide-seen'
+
+const FORCE_SHOW_PROJECT_GUIDE =
+  import.meta.env.VITE_FORCE_PROJECT_GUIDE === 'true'
+
+const isProjectGuideOpen = ref(false)
+
+const projectGuideSteps = [
+  {
+    selector: '[data-guide="version-save"]',
+    title: '버전 저장',
+    description: '현재 작업 상태를 새 버전으로 저장해 변경 이력을 관리할 수 있어요.',
+  },
+  {
+    selector: '[data-guide="comment"]',
+    title: '코멘트',
+    description: '프로젝트에 남겨진 코멘트를 확인하고 팀원과 피드백을 주고받을 수 있어요.',
+  },
+  {
+    selector: '[data-guide="ai-analysis"]',
+    title: 'AI 분석',
+    description: 'AI가 오디오를 분석해 충돌 구간과 개선 포인트를 알려줘요.',
+  },
+]
+
+function closeProjectGuide(doNotShowAgain: boolean) {
+  if (doNotShowAgain) {
+    localStorage.setItem(PROJECT_GUIDE_STORAGE_KEY, 'true')
+  }
+
+  isProjectGuideOpen.value = false
+}
 </script>
 
 <template>
@@ -915,6 +985,11 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
     @dragover.prevent="onGlobalDragOver"
     @drop.prevent="onGlobalDrop"
   >
+    <ExportModal 
+      :is-open="isExportModalOpen"
+      :project-name="projectName"
+      @close="isExportModalOpen = false"
+    />
     <ProjectHeader
   :project-name="projectName"
   :online-users="onlineUsers"
@@ -933,6 +1008,7 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
     <PlayController
       :ai-analyzing="aiAnalyzing"
       @run-ai-analysis="runAiAnalysis"
+      @action-upload="handleActionUpload"
       @action-copy="handleActionCopy"
       @action-cut="handleActionCut"
       @action-paste="handleActionPaste"
@@ -942,6 +1018,15 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
       @action-add-track="handleActionAddTrack"
     />
     <!-- flex-1 -> 남은 공간 차지, flex-col -> 위에서 아래로 쌓음, overflow-hidden -> 넘치는 부분 숨김, bg-muted/10 -> 배경색+투명도 -->
+    <!-- 툴바 공통 파일 업로드용 인풋 -->
+    <input 
+      type="file" 
+      ref="toolbarFileInputRef" 
+      accept="audio/*" 
+      class="hidden" 
+      @change="handleToolbarFileUpload" 
+    />
+
     <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
       <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1014,7 +1099,7 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
     <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
     
     <ProjectSidePanel
-      class="z-[200]"
+      class="z-50"
       :open="activeSidePanel !== null"
       :type="activeSidePanel"
       @close="handleCloseSidePanel"
@@ -1048,6 +1133,12 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
       </div>
     </div>
   </div>
+
+  <ProjectGuideOverlay
+  :steps="projectGuideSteps"
+  :open="isProjectGuideOpen"
+  @close="closeProjectGuide"
+/>
 </template>
 
 <style scoped>

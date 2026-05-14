@@ -56,11 +56,6 @@ DSP_SCAN_PATH_MAP = {
 }
 
 RANKING_PATH_MAP = {
-    "issue_router_gate": "issue_router_gate",
-    "materialize_non_llm_issues": "materialize_non_llm_issues",
-}
-
-ISSUE_ROUTER_PATH_MAP = {
     "wait_user_plan_input": "wait_user_plan_input",
     "materialize_non_llm_issues": "materialize_non_llm_issues",
 }
@@ -166,7 +161,6 @@ def build_workflow_graph():
     graph.add_node("merge_analysis", nodes.merge_analysis)
     graph.add_node("build_issue_payloads", nodes.build_issue_payloads)
     graph.add_node("candidate_ranking", nodes.candidate_ranking)
-    graph.add_node("issue_router_gate", nodes.issue_router_gate)
     graph.add_node("wait_user_plan_input", nodes.wait_user_plan_input)
     graph.add_node("planning_agent", nodes.planning_agent)
     graph.add_node("plan_rule_validator", nodes.plan_rule_validator)
@@ -213,11 +207,6 @@ def build_workflow_graph():
         "candidate_ranking",
         edges.route_after_candidate_ranking,
         RANKING_PATH_MAP,
-    )
-    graph.add_conditional_edges(
-        "issue_router_gate",
-        edges.route_after_issue_router_gate,
-        ISSUE_ROUTER_PATH_MAP,
     )
     graph.add_edge("wait_user_plan_input", END)
     graph.add_conditional_edges(

@@ -420,6 +420,27 @@ def test_workflow_waits_for_user_mix_intent_before_suggestions() -> None:
     assert len(result["suggestion_payload"]["issues"]) >= 1
 
 
+def test_workflow_waits_for_user_even_when_active_issue_id_differs_from_ranked_region() -> None:
+    waiting = run_workflow_graph(
+        {
+            "job_id": 100011,
+            "project_id": 200011,
+            "project_snapshot": build_project_snapshot(track_ids=[12, 18]),
+            "issue_types": ["band_overlap", "sibilance"],
+        }
+    )
+
+    ranked_region_id = waiting["ranked_candidate_ids"][0]
+    waiting["suggestion_payload"]["activeIssueId"] = f"{waiting['job_id']}-issue-auto-1"
+
+    resumed_waiting = run_workflow_graph(waiting)
+
+    assert ranked_region_id == resumed_waiting["ranked_candidate_ids"][0]
+    assert resumed_waiting["current_node"] == "wait_user_plan_input"
+    assert resumed_waiting["phase"] == "waiting_for_user_plan_input"
+    assert resumed_waiting["runtime_status"] == "waiting_for_user"
+
+
 def test_workflow_finalize_without_user_action_when_no_suggestions_exist() -> None:
     result = run_workflow_graph(
         {

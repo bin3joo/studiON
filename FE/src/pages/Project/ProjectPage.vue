@@ -26,6 +26,7 @@ import ExportModal from './components/ExportModal.vue';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
 import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
+import DefaultTrackDropGuide from '@/pages/Project/components/DefaultTrackDropGuide.vue'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -35,6 +36,27 @@ const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
 const authStore = useAuthStore(); // Auth 스토어 사용 준비
 const commentStore = useCommentStore(); // 코멘트 전역 상태 사용
+
+const shouldShowDefaultTrackGuide = computed(() => {
+  const tracks = trackStore.trackList
+
+  const hasOnlyDefaultTrack = tracks.length === 1
+  if (!hasOnlyDefaultTrack) return false
+
+  const defaultTrack = tracks[0]
+  const hasNoClips = !defaultTrack.clips || defaultTrack.clips.length === 0
+
+  return hasNoClips
+})
+
+function handleDefaultTrackBrowse() {
+  const defaultTrack = trackStore.trackList[0]
+
+  if (!defaultTrack) return
+
+  trackStore.selectedTrackId = defaultTrack.trackId
+  toolbarFileInputRef.value?.click()
+}
 
 // 현재 내 정보 (토큰에서 추출)
 const currentUserId = computed(() => {
@@ -1067,6 +1089,11 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     @delete-comment="handleDeleteComment"
   />
 </div>
+  <DefaultTrackDropGuide
+    v-if="shouldShowDefaultTrackGuide"
+    @browse="handleDefaultTrackBrowse"
+  />
+
   <div
   ref="masterTrackWrapperRef"
   class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"

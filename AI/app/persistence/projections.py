@@ -56,6 +56,9 @@ class AnalysisRegionProjection(BaseModel):
     center_hz: int | None = None
     band_confidence: float | None = None
     detector_score: float | None = None
+    estimated_gain_reduction_db: float | None = None
+    current_true_peak_dbtp: float | None = None
+    target_ceiling_dbtp: float | None = None
     involved_track_ids: list[int] = Field(default_factory=list)
     # 프론트 잠금은 트랙 단위가 아니라 실제로 겹치는 clip id 집합 기준으로 판단한다.
     affected_clip_ids: list[int] = Field(default_factory=list)
@@ -295,6 +298,9 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
             center_hz=region.get("center_hz"),
             band_confidence=region.get("band_confidence"),
             detector_score=region.get("score"),
+            estimated_gain_reduction_db=region.get("recommended_reduction_db"),
+            current_true_peak_dbtp=region.get("current_true_peak_dbtp"),
+            target_ceiling_dbtp=region.get("target_ceiling_dbtp"),
             involved_track_ids=[
                 int(track_id) for track_id in region.get("involved_track_ids", [])
             ],

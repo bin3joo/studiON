@@ -1158,6 +1158,18 @@ def test_workflow_response_contains_unified_projections() -> None:
     )
     assert response["projections"]["analysis_regions"][0]["measure_start"] == 1
     assert response["projections"]["analysis_regions"][0]["affected_clip_ids"]
+    clipping_projection = next(
+        (
+            region
+            for region in response["projections"]["analysis_regions"]
+            if region["issue_type"] in {"TRACK_CLIPPING", "MASTER_CLIPPING"}
+        ),
+        None,
+    )
+    assert clipping_projection is not None
+    assert clipping_projection["estimated_gain_reduction_db"] is not None
+    assert clipping_projection["current_true_peak_dbtp"] is not None
+    assert clipping_projection["target_ceiling_dbtp"] == -1.0
 
 
 def test_persist_analysis_result_marks_auto_preview_without_user_action() -> None:
@@ -1336,6 +1348,9 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert _clip_id(31, 1) in overlap["affected_clip_ids"]
     assert clipping is not None
     assert clipping["requires_user_action"] is False
+    assert clipping["recommended_reduction_db"] is not None
+    assert clipping["current_true_peak_dbtp"] is not None
+    assert clipping["target_ceiling_dbtp"] == -1.0
     assert sibilance["track_id"] == 30
     assert sibilance["requires_user_action"] is False
     assert result["ranking_scores"][overlap["id"]] > 0

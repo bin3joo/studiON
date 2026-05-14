@@ -256,7 +256,7 @@ def build_workflow_initial_state(
         "critic_mode": "PASS",
         "critic_result": None,
         "revise_count": 0,
-        "max_revise_count": 1,
+        "max_revise_count": 5,
         "latest_artifact_id": None,
         "mongo_artifact_ids": [],
         "failure_code": None,

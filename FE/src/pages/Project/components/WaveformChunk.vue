@@ -8,7 +8,7 @@ const props = defineProps<{
   clip: ClipUIState;
   chunkLeft: number;
   chunkWidth: number;
-  audioData: { channelData: Float32Array; sampleRate: number };
+  audioData: { channels: Float32Array[]; sampleRate: number };
 }>();
 
 const trackStore = useTrackStore();
@@ -32,8 +32,8 @@ const visualTransformX = computed(() => {
 });
 
 
-// 현재 진행 중인 렌더 요청 ID (줌/스크롤 변경 시 이전 요청을 취소하기 위함)
-let currentRequestId: number | null = null;
+// 현재 진행 중인 렌더 요청 ID들 (채널별, 이전 요청을 취소하기 위함)
+let currentRequestIds: number[] = [];
 let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const requestRenderDebounced = () => {
@@ -59,41 +59,52 @@ const renderWaveform = async () => {
   
   const startSampleOffset = (baseOffsetSec + chunkOffsetSec) * props.audioData.sampleRate;
 
-  const totalSamples = props.audioData.channelData.length;
+  const numChannels = props.audioData.channels.length;
+  if (numChannels === 0) return;
+
+  const totalSamples = props.audioData.channels[0].length;
   if (startSampleOffset >= totalSamples) {
     return; // 이 청크는 그릴 데이터가 없음
   }
 
   // 이전 요청이 진행 중이면 취소
-  if (currentRequestId !== null) {
-    waveformRendererPool.cancelRequest(currentRequestId);
-    currentRequestId = null;
+  if (currentRequestIds.length > 0) {
+    currentRequestIds.forEach(id => waveformRendererPool.cancelRequest(id));
+    currentRequestIds = [];
   }
 
-  // Worker Pool에 렌더 요청 (Zero-Copy)
-  const { promise, requestId } = waveformRendererPool.requestRender({
-    audioKey: props.clip.audio?.cdnUrl || 'unknown',
-    color: '#D4CED2',
-    width: props.chunkWidth,
-    height: 100,
-    samplesPerPixel,
-    startSampleOffset,
+  // Worker Pool에 채널별로 렌더 요청 (Zero-Copy)
+  const channelHeight = Math.floor(100 / numChannels);
+  
+  const requests = props.audioData.channels.map((_, index) => {
+    return waveformRendererPool.requestRender({
+      audioKey: props.clip.audio?.cdnUrl || 'unknown',
+      color: '#D4CED2',
+      width: props.chunkWidth,
+      height: channelHeight,
+      samplesPerPixel,
+      startSampleOffset,
+      channelIndex: index,
+    });
   });
 
-  currentRequestId = requestId;
+  currentRequestIds = requests.map(r => r.requestId);
 
-  const result = await promise;
+  const results = await Promise.all(requests.map(r => r.promise));
 
-  // 요청이 취소되었거나 결과가 없거나 컴포넌트가 언마운트된 경우
-  if (!result || !result.bitmap || !canvasRef.value) return;
+  // 요청이 취소되었거나 컴포넌트가 언마운트된 경우
+  if (!canvasRef.value) return;
 
-  // 요청 ID가 변경된 경우 (줌 변경 등으로 더 최신 요청이 들어온 경우) 결과 무시
-  if (currentRequestId !== requestId) {
-    if (result.bitmap) result.bitmap.close(); // ImageBitmap 메모리 해제
+  // 최신 요청과 ID가 일치하는지 확인
+  const isMatch = currentRequestIds.every((id, idx) => id === requests[idx].requestId);
+  if (!isMatch) {
+    results.forEach(res => {
+      if (res && res.bitmap) res.bitmap.close();
+    });
     return;
   }
 
-  currentRequestId = null;
+  currentRequestIds = [];
 
   // 일반 canvas에 ImageBitmap 그리기
   const canvas = canvasRef.value;
@@ -106,12 +117,15 @@ const renderWaveform = async () => {
   renderedAudioStartMs.value = props.clip.audioStartMs;
 
   const ctx = canvas.getContext('2d');
-  if (ctx && result.bitmap) {
+  if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(result.bitmap, 0, 0);
+    results.forEach((res, index) => {
+      if (res && res.bitmap) {
+        ctx.drawImage(res.bitmap, 0, index * channelHeight);
+        res.bitmap.close(); // ImageBitmap 메모리 해제
+      }
+    });
   }
-  // ImageBitmap 메모리 해제
-  if (result.bitmap) result.bitmap.close();
 };
 
 const handleVisibilityChange = () => {
@@ -142,9 +156,9 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   // 진행 중인 렌더 요청 취소
-  if (currentRequestId !== null) {
-    waveformRendererPool.cancelRequest(currentRequestId);
-    currentRequestId = null;
+  if (currentRequestIds.length > 0) {
+    currentRequestIds.forEach(id => waveformRendererPool.cancelRequest(id));
+    currentRequestIds = [];
   }
 });
 </script>

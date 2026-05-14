@@ -108,6 +108,7 @@ const emit = defineEmits<{
             : 'text-muted-foreground hover:bg-white/10 hover:text-white'
         ]"
         title="코멘트 모드 (C)" 
+        data-guide="comment"
         @click="trackStore.toggleCommentMode()"
       >
         <MessageSquarePlus class="h-4 w-4" />
@@ -148,6 +149,7 @@ const emit = defineEmits<{
   aria-label="AI 믹스 분석 실행"
   :disabled="props.aiAnalyzing"
   class="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-transparent px-3.5 text-[10px] font-medium uppercase tracking-[0.2em] text-white transition hover:border-white/30 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+  data-guide="ai-analysis"
   @click="emit('run-ai-analysis')"
 >
   <Sparkles

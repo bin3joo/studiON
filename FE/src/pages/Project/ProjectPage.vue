@@ -25,6 +25,7 @@ import { useCommentStore } from './store/useCommentStore'
 import ExportModal from './components/ExportModal.vue';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
+import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -319,6 +320,15 @@ if(timelineContainerRef.value) {
   //사용자가 화면을 클릭 혹은 키를누르는 순간 오디오 제한 해제
   window.addEventListener('pointerdown', unlockAudioEngine, {capture: true});
   window.addEventListener('keydown', unlockAudioEngine, {capture: true});
+
+await nextTick()
+
+const hasSeenGuide =
+  localStorage.getItem(PROJECT_GUIDE_STORAGE_KEY) === 'true'
+
+if (FORCE_SHOW_PROJECT_GUIDE || !hasSeenGuide) {
+  isProjectGuideOpen.value = true
+}
 
 })
 
@@ -908,6 +918,39 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
 
   return getAiBubblePosition(aiConflict.value)
 })
+
+const PROJECT_GUIDE_STORAGE_KEY = 'studion-project-guide-seen'
+
+const FORCE_SHOW_PROJECT_GUIDE =
+  import.meta.env.VITE_FORCE_PROJECT_GUIDE === 'true'
+
+const isProjectGuideOpen = ref(false)
+
+const projectGuideSteps = [
+  {
+    selector: '[data-guide="version-save"]',
+    title: '버전 저장',
+    description: '현재 작업 상태를 새 버전으로 저장해 변경 이력을 관리할 수 있어요.',
+  },
+  {
+    selector: '[data-guide="comment"]',
+    title: '코멘트',
+    description: '프로젝트에 남겨진 코멘트를 확인하고 팀원과 피드백을 주고받을 수 있어요.',
+  },
+  {
+    selector: '[data-guide="ai-analysis"]',
+    title: 'AI 분석',
+    description: 'AI가 오디오를 분석해 충돌 구간과 개선 포인트를 알려줘요.',
+  },
+]
+
+function closeProjectGuide(doNotShowAgain: boolean) {
+  if (doNotShowAgain) {
+    localStorage.setItem(PROJECT_GUIDE_STORAGE_KEY, 'true')
+  }
+
+  isProjectGuideOpen.value = false
+}
 </script>
 
 <template>
@@ -1056,6 +1099,12 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
       </div>
     </div>
   </div>
+
+  <ProjectGuideOverlay
+  :steps="projectGuideSteps"
+  :open="isProjectGuideOpen"
+  @close="closeProjectGuide"
+/>
 </template>
 
 <style scoped>

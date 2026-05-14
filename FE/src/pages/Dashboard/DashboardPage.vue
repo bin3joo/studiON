@@ -197,22 +197,44 @@ onMounted(() => {
             path: `/project/${project.projectId}`,
             query: { name: project.projectName },
           }"
-          class="group relative grid grid-cols-1 gap-4 overflow-hidden rounded-xl border border-border bg-card px-6 py-6 transition hover:border-primary hover:shadow-neon md:grid-cols-[auto_minmax(0,1.4fr)_auto_minmax(0,1fr)_auto] md:items-center md:gap-8 md:px-8 md:py-7"
+          class="group relative flex flex-col md:flex-row md:items-center justify-between gap-4 overflow-hidden rounded-xl border border-border bg-card px-6 py-6 transition hover:border-primary hover:shadow-neon md:gap-8 md:px-8 md:py-7"
         >
-          <!-- 카드 왼쪽: 순번, 아이콘, 프로젝트명, 마디 수/재생 시간 -->
-          <div class="flex min-w-0 items-center gap-5">
-            <span class="font-mono-tight text-[10px] uppercase tracking-widest text-muted-foreground">
+          <!-- 카드 왼쪽: 순번, 아이콘, 트랙/길이/용량(새 위치), 프로젝트명 -->
+          <div class="flex min-w-0 items-center gap-5 md:gap-6">
+            <span class="shrink-0 font-mono-tight text-[10px] uppercase tracking-widest text-muted-foreground">
               {{ String(idx + 1).padStart(2, '0') }}
             </span>
 
-            <div class="grid h-12 w-12 place-items-center rounded-lg bg-secondary text-primary transition group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-neon">
+            <div class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-secondary text-primary transition group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-neon">
               <component
                 :is="getProjectIcon(idx)"
                 class="h-5 w-5"
               />
             </div>
 
-            <div class="min-w-0">
+            <!-- Tracks, Length, Size (제목 앞) -->
+            <div class="hidden items-center gap-6 border-r border-border pr-6 md:flex shrink-0">
+
+              <div class="flex flex-col">
+                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
+                  Length
+                </span>
+                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
+                  {{ formatPlayTime(project.totalPlayTime) }}
+                </span>
+              </div>
+              <div class="flex flex-col">
+                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
+                  Size
+                </span>
+                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
+                  {{ formatAudioSize(project.totalAudioSize) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 프로젝트 명 -->
+            <div class="min-w-0 flex-1">
               <h3 class="truncate font-display text-xl leading-tight tracking-wide text-foreground md:text-2xl">
                 {{ project.projectName }}
               </h3>
@@ -225,41 +247,8 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 데스크톱 레이아웃 구분선 -->
-          <div class="hidden h-12 w-px bg-border md:block" />
-
-          <!-- 카드 중앙: 트랙 수, 길이, 용량 -->
-          <div class="hidden items-center gap-8 md:flex">
-            <div class="flex flex-col">
-              <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
-                Tracks
-              </span>
-              <span class="mt-1 font-display text-lg leading-none text-foreground">
-                -
-              </span>
-            </div>
-
-            <div class="flex flex-col">
-              <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
-                Length
-              </span>
-              <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
-                {{ formatPlayTime(project.totalPlayTime) }}
-              </span>
-            </div>
-
-            <div class="flex flex-col">
-              <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground">
-                Size
-              </span>
-              <span class="mt-1 font-mono-tight text-lg leading-none text-foreground">
-                {{ formatAudioSize(project.totalAudioSize) }}
-              </span>
-            </div>
-          </div>
-
           <!-- 카드 오른쪽: 참여 멤버 프로필, 수정 시간, 입장 아이콘 -->
-          <div class="flex items-center justify-self-end gap-5">
+          <div class="flex shrink-0 items-center justify-self-end gap-5">
             <div class="flex -space-x-2">
               <img
                 v-for="member in project.members.slice(0, 3)"
@@ -288,10 +277,10 @@ onMounted(() => {
         <div>© 2026 스튜디오 연어</div>
 
         <div class="flex items-center gap-6">
-          <a href="#" class="transition hover:text-primary">Privacy</a>
-          <a href="#" class="transition hover:text-primary">Terms</a>
-          <a href="#" class="transition hover:text-primary">API Docs</a>
-          <a href="#" class="transition hover:text-primary">Community</a>
+          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">Studion</a>
+          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">테스트중</a>
+          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">A205</a>
+          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">문의와 오류 신고 감사합니다.</a>
         </div>
       </div>
     </footer>

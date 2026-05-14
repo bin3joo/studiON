@@ -8,6 +8,7 @@ import pytest
 import soundfile as sf
 from fastapi.testclient import TestClient
 
+from app.persistence.projections import build_workflow_projections
 from app.graph.state import build_workflow_initial_state
 from app.main import create_app
 from app.services.clap_inference import CLAPTrackPrediction
@@ -391,6 +392,85 @@ def test_worker_start_dispatch_restores_durable_state(monkeypatch: pytest.Monkey
     assert stored is not None
     assert stored.phase == "waiting_for_user_plan_input"
     assert stored.status == "WAITING_USER"
+
+
+def test_job_status_projection_keeps_active_issue_metadata_out_of_routing() -> None:
+    state = build_workflow_initial_state(
+        job_id=200010,
+        project_id=300010,
+        phase="waiting_for_user_plan_input",
+        current_node="wait_user_plan_input",
+        runtime_status="waiting_for_user",
+        durable_status="WAITING_USER",
+        ranked_candidate_ids=[101],
+        analysis_regions=[
+            {
+                "id": 101,
+                "issue_type": "band_overlap",
+                "requires_user_action": True,
+                "track_id": 11,
+                "secondary_track_id": 12,
+                "start_ms": 500,
+                "end_ms": 1700,
+                "measure_start": 1,
+                "measure_end": 2,
+                "affected_clip_ids": [11001, 12001],
+            },
+            {
+                "id": 202,
+                "issue_type": "sibilance",
+                "requires_user_action": False,
+                "track_id": 11,
+                "start_ms": 800,
+                "end_ms": 1200,
+                "measure_start": 1,
+                "measure_end": 1,
+                "affected_clip_ids": [11001],
+            },
+        ],
+        suggestion_payload={
+            "activeIssueId": "200010-issue-202",
+            "navigationOrder": ["200010-issue-202", "200010-issue-101"],
+            "issues": [
+                {
+                    "issueId": "200010-issue-202",
+                    "issueType": "sibilance",
+                    "startMs": 800,
+                    "endMs": 1200,
+                    "trackId": 11,
+                    "bubbleTarget": "track",
+                    "uiMode": "eq_ai",
+                    "summary": "Sibilance",
+                    "explanation": "Auto fix",
+                    "previewBands": [],
+                    "actions": [],
+                    "markers": [],
+                },
+                {
+                    "issueId": "200010-issue-101",
+                    "issueType": "band_overlap",
+                    "startMs": 500,
+                    "endMs": 1700,
+                    "trackId": 11,
+                    "bubbleTarget": "track",
+                    "uiMode": "eq_ai",
+                    "summary": "Band overlap",
+                    "explanation": "Needs plan input",
+                    "previewBands": [],
+                    "actions": [],
+                    "markers": [],
+                },
+            ],
+            "suggestions": [],
+        },
+    )
+
+    projections = build_workflow_projections(state).model_dump(mode="json")
+
+    assert projections["runtime_status"]["current_node"] == "wait_user_plan_input"
+    assert projections["suggestion_group"]["region_id"] == 202
+    assert projections["plan_state"] is None
+    assert state["ranked_candidate_ids"] == [101]
 
 
 def test_start_workflow_job_persists_track_eq_map_in_timeline_snapshot(

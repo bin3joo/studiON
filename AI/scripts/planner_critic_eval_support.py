@@ -35,6 +35,10 @@ class EvalCaseResult:
     validator_expected: str | None
     critic_expected: str | None
     planner_match_expected: bool | None
+    action_type_match: bool | None
+    target_track_match: bool | None
+    time_range_match: bool | None
+    band_range_match: bool | None
     actual_action_type: str | None
     expected_action_type: str | None
     actual_target_track_id: int | None
@@ -52,6 +56,14 @@ class EvalSummary:
     expected_plan_critic_passes: int
     expected_plan_full_passes: int
     expected_plan_planner_matches: int
+    expected_plan_action_type_matches: int
+    expected_plan_target_track_matches: int
+    expected_plan_time_range_matches: int
+    expected_plan_band_range_matches: int
+    expected_plan_dynamic_eq_cases: int
+    expected_plan_dynamic_eq_matches: int
+    expected_plan_eq_cut_cases: int
+    expected_plan_eq_cut_matches: int
     seed_bad_plan_cases: int
     seed_bad_plan_validator_rejects: int
     seed_bad_plan_critic_rejects: int
@@ -72,6 +84,30 @@ class EvalSummary:
     @property
     def planner_match_rate(self) -> float:
         return 0.0 if self.expected_plan_cases == 0 else self.expected_plan_planner_matches / self.expected_plan_cases
+
+    @property
+    def action_type_match_rate(self) -> float:
+        return 0.0 if self.expected_plan_cases == 0 else self.expected_plan_action_type_matches / self.expected_plan_cases
+
+    @property
+    def target_track_match_rate(self) -> float:
+        return 0.0 if self.expected_plan_cases == 0 else self.expected_plan_target_track_matches / self.expected_plan_cases
+
+    @property
+    def time_range_match_rate(self) -> float:
+        return 0.0 if self.expected_plan_cases == 0 else self.expected_plan_time_range_matches / self.expected_plan_cases
+
+    @property
+    def band_range_match_rate(self) -> float:
+        return 0.0 if self.expected_plan_cases == 0 else self.expected_plan_band_range_matches / self.expected_plan_cases
+
+    @property
+    def dynamic_eq_match_rate(self) -> float:
+        return 0.0 if self.expected_plan_dynamic_eq_cases == 0 else self.expected_plan_dynamic_eq_matches / self.expected_plan_dynamic_eq_cases
+
+    @property
+    def eq_cut_match_rate(self) -> float:
+        return 0.0 if self.expected_plan_eq_cut_cases == 0 else self.expected_plan_eq_cut_matches / self.expected_plan_eq_cut_cases
 
     @property
     def bad_plan_validator_recall(self) -> float:
@@ -164,6 +200,22 @@ def summarize_results(*, dataset_id: str, results: list[EvalCaseResult]) -> Eval
             if result.validator_result == "PASS" and result.critic_result == "PASS"
         ),
         expected_plan_planner_matches=sum(1 for result in expected_results if result.planner_match_expected is True),
+        expected_plan_action_type_matches=sum(1 for result in expected_results if result.action_type_match is True),
+        expected_plan_target_track_matches=sum(1 for result in expected_results if result.target_track_match is True),
+        expected_plan_time_range_matches=sum(1 for result in expected_results if result.time_range_match is True),
+        expected_plan_band_range_matches=sum(1 for result in expected_results if result.band_range_match is True),
+        expected_plan_dynamic_eq_cases=sum(1 for result in expected_results if result.expected_action_type == "DYNAMIC_EQ"),
+        expected_plan_dynamic_eq_matches=sum(
+            1
+            for result in expected_results
+            if result.expected_action_type == "DYNAMIC_EQ" and result.action_type_match is True
+        ),
+        expected_plan_eq_cut_cases=sum(1 for result in expected_results if result.expected_action_type == "EQ_CUT"),
+        expected_plan_eq_cut_matches=sum(
+            1
+            for result in expected_results
+            if result.expected_action_type == "EQ_CUT" and result.action_type_match is True
+        ),
         seed_bad_plan_cases=len(bad_plan_results),
         seed_bad_plan_validator_rejects=sum(1 for result in bad_plan_results if result.validator_result == "REJECT"),
         seed_bad_plan_critic_rejects=sum(1 for result in bad_plan_results if result.critic_result == "REJECT"),
@@ -198,6 +250,10 @@ def replay_non_plan_case(
         validator_expected=None,
         critic_expected=None,
         planner_match_expected=None,
+        action_type_match=None,
+        target_track_match=None,
+        time_range_match=None,
+        band_range_match=None,
         actual_action_type=None,
         expected_action_type=None,
         actual_target_track_id=None,
@@ -232,12 +288,28 @@ def replay_case_with_plan(
     expected_review = case["expected_seed_review"] if mode == "seed_bad_plan" else case["expected_review"]
     action = ((plan_payload.get("candidate") or {}).get("action") or {})
     expected_plan = case.get("expected_plan") or {}
+    action_type_match = None
+    target_track_match = None
+    time_range_match = None
+    band_range_match = None
     planner_match_expected = None
     if mode == "expected_plan":
+        action_type_match = str(action.get("actionType")) == str(expected_plan["action_type"])
+        target_track_match = int(action.get("targetTrackId") or 0) == int(expected_plan["target_track_id"])
+        time_range_match = _matches_time_range_rule(
+            action=action,
+            region=_find_region(context.state),
+            rule=str(expected_plan["time_range_rule"]),
+        )
+        band_range_match = _matches_band_rule(
+            action=action,
+            region=_find_region(context.state),
+            rule=str(expected_plan["band_rule"]),
+        )
         planner_match_expected = (
-            str(action.get("actionType")) == str(expected_plan["action_type"])
+            action_type_match
             and str(action.get("targetScope")) == "TRACK"
-            and int(action.get("targetTrackId") or 0) == int(expected_plan["target_track_id"])
+            and target_track_match
             and action.get("targetClipId") == expected_plan["target_clip_id"]
         )
 
@@ -255,6 +327,10 @@ def replay_case_with_plan(
         validator_expected=str(expected_review["validator"]),
         critic_expected=str(expected_review["critic"]),
         planner_match_expected=planner_match_expected,
+        action_type_match=action_type_match,
+        target_track_match=target_track_match,
+        time_range_match=time_range_match,
+        band_range_match=band_range_match,
         actual_action_type=str(action.get("actionType")) if action.get("actionType") is not None else None,
         expected_action_type=str(expected_plan.get("action_type")) if mode == "expected_plan" else None,
         actual_target_track_id=int(action.get("targetTrackId")) if action.get("targetTrackId") is not None else None,
@@ -350,7 +426,42 @@ def _resolve_band_range(region: dict[str, Any], expected: dict[str, Any]) -> tup
     if band_rule == "inside_region_band" and high_hz - low_hz > 120:
         low_hz += 20
         high_hz -= 20
+    if band_rule == "tight_static_overlap":
+        center = (low_hz + high_hz) // 2
+        half_width = max(min((high_hz - low_hz) // 6, 120), 60)
+        return center - half_width, center + half_width
     return low_hz, high_hz
+
+
+def _matches_time_range_rule(*, action: dict[str, Any], region: dict[str, Any], rule: str) -> bool:
+    start_ms = action.get("startMs")
+    end_ms = action.get("endMs")
+    if not isinstance(start_ms, int) or not isinstance(end_ms, int):
+        return False
+    region_start_ms = int(region["start_ms"])
+    region_end_ms = int(region["end_ms"])
+    if start_ms < region_start_ms or end_ms > region_end_ms:
+        return False
+    if rule == "inside_region":
+        return True
+    if rule == "tighter_inside_region":
+        return start_ms > region_start_ms and end_ms < region_end_ms
+    return False
+
+
+def _matches_band_rule(*, action: dict[str, Any], region: dict[str, Any], rule: str) -> bool:
+    actual_low = action.get("bandLowHz")
+    actual_high = action.get("bandHighHz")
+    expected_low, expected_high = _resolve_band_range(region, {"band_rule": rule})
+    if expected_low is None or expected_high is None:
+        return actual_low is None and actual_high is None
+    if not isinstance(actual_low, int) or not isinstance(actual_high, int):
+        return False
+    if rule in {"track_clipping_high", "track_clipping_low_mid", "tight_static_overlap"}:
+        return actual_low == expected_low and actual_high == expected_high
+    if rule == "inside_region_band":
+        return actual_low >= expected_low and actual_high <= expected_high
+    return actual_low == expected_low and actual_high == expected_high
 
 
 def _build_expected_plan_payload(state: dict[str, Any], case: dict[str, Any]) -> dict[str, Any] | None:
@@ -450,6 +561,10 @@ def _offline_critic_decision(
             band_hints = _collect_track_clipping_band_hints(region)
             if "high" not in band_hints and "low_mid" not in band_hints:
                 violations.append("track_clipping case has no supported EQ hint")
+        elif rule.startswith("forbid_action_type_"):
+            forbidden_action_type = rule.removeprefix("forbid_action_type_")
+            if str(action.get("actionType") or "") == forbidden_action_type:
+                violations.append(f"plan uses forbidden action type {forbidden_action_type}")
         elif rule.startswith("target_track_id_"):
             forbidden_track_id = int(rule.rsplit("_", maxsplit=1)[-1])
             if int(action.get("targetTrackId") or 0) == forbidden_track_id:

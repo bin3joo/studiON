@@ -47,7 +47,7 @@ def artifact_id(state: WorkflowState, label: str) -> str:
 def decide_validation_result(state: WorkflowState, *, mode_key: str) -> str:
     mode = state.get(mode_key, "PASS")
     revise_count = state.get("revise_count", 0)
-    max_revise_count = state.get("max_revise_count", 1)
+    max_revise_count = state.get("max_revise_count", 5)
     if mode == "REJECT":
         return "REJECT"
     if mode == "REVISE_ONCE" and revise_count < max_revise_count:

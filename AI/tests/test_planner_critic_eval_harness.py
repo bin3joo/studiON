@@ -11,7 +11,7 @@ from scripts.planner_critic_eval_support import evaluate_dataset, summarize_resu
         ("p1_dual_vocal_bed", 6, 1, 0),
         ("p2_three_track_instrumental", 5, 1, 0),
         ("p3_dense_edit", 5, 1, 0),
-        ("p4_eq_only_mixed", 3, 1, 2),
+        ("p5_band_overlap_eq_cut", 5, 1, 0),
     ],
 )
 def test_eval_harness_expected_plans_pass_without_db(
@@ -44,7 +44,7 @@ def test_eval_harness_expected_plans_pass_without_db(
         "p1_dual_vocal_bed",
         "p2_three_track_instrumental",
         "p3_dense_edit",
-        "p4_eq_only_mixed",
+        "p5_band_overlap_eq_cut",
     ],
 )
 def test_eval_harness_seed_bad_plan_matches_fixture_review_without_db(dataset_id: str) -> None:
@@ -66,6 +66,14 @@ def test_eval_harness_summarizes_fixture_scores_without_db() -> None:
     assert summary.expected_plan_critic_passes == 6
     assert summary.expected_plan_full_passes == 6
     assert summary.expected_plan_planner_matches == 6
+    assert summary.expected_plan_action_type_matches == 6
+    assert summary.expected_plan_target_track_matches == 6
+    assert summary.expected_plan_time_range_matches == 6
+    assert summary.expected_plan_band_range_matches == 6
+    assert summary.expected_plan_dynamic_eq_cases == 6
+    assert summary.expected_plan_dynamic_eq_matches == 6
+    assert summary.expected_plan_eq_cut_cases == 0
+    assert summary.expected_plan_eq_cut_matches == 0
     assert summary.seed_bad_plan_cases == 1
     assert summary.seed_bad_plan_validator_rejects == 1
     assert summary.seed_bad_plan_critic_rejects == 1
@@ -81,14 +89,42 @@ def test_eval_harness_eq_only_policy_dataset_tracks_warning_only_modes() -> None
 
     assert summary.expected_plan_cases == 3
     assert summary.expected_plan_planner_matches == 3
+    assert summary.expected_plan_action_type_matches == 3
+    assert summary.expected_plan_target_track_matches == 3
+    assert summary.expected_plan_time_range_matches == 3
+    assert summary.expected_plan_band_range_matches == 3
     assert summary.seed_bad_plan_cases == 1
-    assert summary.seed_bad_plan_validator_rejects == 0
+    assert summary.expected_plan_validator_passes == 0
+    assert summary.expected_plan_critic_passes == 0
+    assert summary.seed_bad_plan_validator_rejects == 1
     assert summary.seed_bad_plan_critic_rejects == 1
-    assert summary.seed_bad_plan_full_rejects == 0
+    assert summary.seed_bad_plan_full_rejects == 1
     assert len(warning_only) == 1
     assert warning_only[0].passed is True
     assert len(no_plan) == 1
     assert no_plan[0].passed is True
     assert len(seeded_bad) == 1
-    assert seeded_bad[0].validator_result == "PASS"
+    assert seeded_bad[0].validator_result == "REJECT"
     assert seeded_bad[0].critic_result == "REJECT"
+
+
+def test_eval_harness_band_overlap_eq_cut_dataset_tracks_action_metrics() -> None:
+    _results, summary = evaluate_dataset("p5_band_overlap_eq_cut")
+
+    assert summary.expected_plan_cases == 5
+    assert summary.expected_plan_validator_passes == 5
+    assert summary.expected_plan_critic_passes == 5
+    assert summary.expected_plan_full_passes == 5
+    assert summary.expected_plan_planner_matches == 5
+    assert summary.expected_plan_action_type_matches == 5
+    assert summary.expected_plan_target_track_matches == 5
+    assert summary.expected_plan_time_range_matches == 5
+    assert summary.expected_plan_band_range_matches == 5
+    assert summary.expected_plan_dynamic_eq_cases == 1
+    assert summary.expected_plan_dynamic_eq_matches == 1
+    assert summary.expected_plan_eq_cut_cases == 4
+    assert summary.expected_plan_eq_cut_matches == 4
+    assert summary.seed_bad_plan_cases == 1
+    assert summary.seed_bad_plan_validator_rejects == 0
+    assert summary.seed_bad_plan_critic_rejects == 1
+    assert summary.seed_bad_plan_full_rejects == 0

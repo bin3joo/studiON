@@ -42,7 +42,7 @@ try {
       Tone.getTransport().seconds = exactTime;
     }
   } catch (e) {
-    console.warn("오디오 엔진 시간 동기화 중 에러 방어:", e);
+   // console.warn("오디오 엔진 시간 동기화 중 에러 방어:", e);
   }
 
 }
@@ -109,7 +109,7 @@ const onPointerUp = (e:PointerEvent) => {
     //마우스 캡처 해제
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
   }catch(error){
-    console.error(error);
+   // console.error(error);
   }
 };
 

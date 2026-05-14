@@ -13,6 +13,10 @@ import {
   type AiSuggestionPayload,
   type ProjectSnapshotRequest,
 } from '../api/projectAi.api'
+import {
+  getMasterLimiter,
+  saveMasterLimiterDraft,
+} from '../api/projectLimiter.api'
 
 const TIMELINE_TRACK_HEADER_WIDTH = 266
 
@@ -101,15 +105,15 @@ export function useProjectAiWorkflow(projectId: number) {
     const phase = result.job.phase?.toLowerCase()
     const hasSuggestionIssues = Boolean(suggestionPayload?.issues?.length)
 
-    console.log('[AI poll]', {
-      try: i + 1,
-      status: result.job.status,
-      phase: result.job.phase,
-      progress: result.job.progress,
-      regionsLength: regions.length,
-      hasSuggestionIssues,
-      projectionKeys: Object.keys(result.projections ?? {}),
-    })
+   // console.log('[AI poll]', {
+    //   try: i + 1,
+    //   status: result.job.status,
+    //   phase: result.job.phase,
+    //   progress: result.job.progress,
+    //   regionsLength: regions.length,
+    //   hasSuggestionIssues,
+    //   projectionKeys: Object.keys(result.projections ?? {}),
+    // })
 
     if (status === 'failed') {
       throw new Error(result.job.error_message ?? 'AI 분석에 실패했습니다.')
@@ -146,14 +150,14 @@ async function pollAiFeedbackResult(jobId: number) {
     const hasSuggestion = hasAiEqSuggestion(result)
 
     if (import.meta.env.DEV) {
-      console.debug('[AI feedback poll]', {
-        try: i + 1,
-        status: result.job.status,
-        phase: result.job.phase,
-        progress: result.job.progress,
-        hasSuggestion,
-        projectionKeys: Object.keys(result.projections ?? {}),
-      })
+      // console.debug('[AI feedback poll]', {
+      //   try: i + 1,
+      //   status: result.job.status,
+      //   phase: result.job.phase,
+      //   progress: result.job.progress,
+      //   hasSuggestion,
+      //   projectionKeys: Object.keys(result.projections ?? {}),
+      // })
     }
 
     if (status === 'failed') {
@@ -161,13 +165,13 @@ async function pollAiFeedbackResult(jobId: number) {
         (result.projections as any)?.plan_state?.revision_notes
 
       if (import.meta.env.DEV) {
-        console.error('[AI feedback failed]', {
-          jobId,
-          job: result.job,
-          planState: (result.projections as any)?.plan_state,
-          revisionNotes,
-          projections: result.projections,
-        })
+        // console.error('[AI feedback failed]', {
+        //   jobId,
+        //   job: result.job,
+        //   planState: (result.projections as any)?.plan_state,
+        //   revisionNotes,
+        //   projections: result.projections,
+        // })
       }
 
       throw new Error('AI 수정안 생성에 실패했습니다.')
@@ -356,6 +360,29 @@ async function pollAiFeedbackResult(jobId: number) {
         ? 'marker_only'
         : 'eq_ai'
 
+    const bullets =
+    kind === 'CLIPPING'
+      ? [
+          region.track_id
+            ? `클리핑 감지 트랙: ${region.track_id}`
+            : '클리핑 감지 트랙 정보를 확인 중입니다.',
+          region.affected_clip_ids?.length
+            ? `영향을 받은 클립: ${region.affected_clip_ids.join(', ')}`
+            : '영향을 받은 클립 정보를 확인 중입니다.',
+          region.contributing_track_ids?.length
+            ? `기여 트랙: ${region.contributing_track_ids.join(', ')}`
+            : '기여 트랙 정보를 확인 중입니다.',
+        ]
+      : [
+          region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
+          region.band_low_hz && region.band_high_hz
+            ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 문제가 감지됐어요.`
+            : '주파수 대역 정보가 없습니다.',
+          involvedTrackIds.length > 0
+            ? `관련 트랙: ${involvedTrackIds.join(', ')}`
+            : '관련 트랙 정보를 확인 중입니다.',
+        ]
+
   return {
     id: regionId,
     issueType: region.issue_type ?? '',
@@ -376,17 +403,7 @@ async function pollAiFeedbackResult(jobId: number) {
     title: `${titlePrefix} · ${barStart}마디에서 ${barEnd}마디 사이`,
     summary: region.analysis_summary ?? 'AI가 문제가 발생한 구간을 감지했어요.',
     explanation: null,
-    bullets: [
-      region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
-      region.band_low_hz && region.band_high_hz
-        ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 문제가 감지됐어요.`
-        : '주파수 대역 정보가 없습니다.',
-      involvedTrackIds.length > 0
-        ? `관련 트랙: ${involvedTrackIds.join(', ')}`
-        : kind === 'CLIPPING'
-          ? '마스터 트랙에서 확인이 필요합니다.'
-          : '관련 트랙 정보를 확인 중입니다.',
-    ],
+    bullets,
 
     bandLowHz: region.band_low_hz,
     bandHighHz: region.band_high_hz,
@@ -500,6 +517,118 @@ function mapBandOverlapIssueToAnalysisItem(
     actions: issue.actions ?? [],
     markers: issue.markers ?? [],
   }
+}
+
+function mapSuggestionIssueToAnalysisItem(
+  issue: AiSuggestionIssue,
+  durationMs: number,
+): AiAnalysisItem {
+  const startMs = issue.startMs ?? 0
+  const endMs = issue.endMs ?? startMs + 1
+  const msPerBar = getMsPerBar()
+
+  const barStart = Math.floor(startMs / msPerBar) + 1
+  const barEnd = Math.max(barStart, Math.ceil(endMs / msPerBar))
+
+  const startBarFloat = startMs / msPerBar
+  const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
+
+  const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
+  const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
+
+  const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
+  const endPercent = Math.max(
+    startPercent + 0.5,
+    Math.min(100, (endMs / durationMs) * 100),
+  )
+
+  const kind = mapIssueTypeToKind(issue.issueType)
+  const trimAction = issue.actions?.find(action =>
+    action.type === 'apply_master_gain_trim'
+  )
+
+  const targetType: AiIssueTargetType =
+    issue.uiMode === 'master_trim'
+      ? 'MASTER_TRACK'
+      : issue.trackId
+        ? 'TRACK'
+        : 'TIMELINE'
+
+  const targetTrackId =
+    targetType === 'MASTER_TRACK'
+      ? null
+      : issue.trackId ?? null
+
+  return {
+    id: issue.issueId,
+    issueType: issue.issueType,
+    kind,
+    uiMode: issue.uiMode,
+
+    targetType,
+    targetTrackId,
+
+    startPercent,
+    endPercent,
+    startPx,
+    endPx,
+
+    barStart,
+    barEnd,
+
+    title:
+      kind === 'CLIPPING'
+        ? `클리핑 · ${barStart}마디에서 ${barEnd}마디 사이`
+        : `AI 분석 · ${barStart}마디에서 ${barEnd}마디 사이`,
+    summary: issue.summary ?? 'AI가 문제가 발생한 구간을 감지했어요.',
+    explanation: issue.explanation ?? null,
+    bullets:
+      kind === 'CLIPPING'
+        ? [
+            trimAction?.recommendedReductionDb != null
+              ? `권장 감소량: ${trimAction.recommendedReductionDb}dB`
+              : '권장 감소량 정보를 확인 중입니다.',
+            trimAction?.currentTruePeakDbtp != null
+              ? `현재 True Peak: ${trimAction.currentTruePeakDbtp} dBTP`
+              : '현재 True Peak 정보를 확인 중입니다.',
+            trimAction?.targetCeilingDbtp != null
+              ? `목표 Ceiling: ${trimAction.targetCeilingDbtp} dBTP`
+              : '목표 Ceiling 정보를 확인 중입니다.',
+          ]
+        : [
+            `문제 유형: ${issue.issueType}`,
+          ],
+
+    bandLowHz: null,
+    bandHighHz: null,
+
+    recommendedGainReductionDb:
+      trimAction?.recommendedReductionDb ?? null,
+
+    previewBands: mapPreviewBandsToEqBands(issue.previewBands),
+    actions: issue.actions ?? [],
+    markers: issue.markers ?? [],
+  }
+}
+
+function mapSuggestionPayloadToAnalysisItems(
+  payload: AiSuggestionPayload,
+  durationMs: number,
+): AiAnalysisItem[] {
+  const issueMap = new Map(
+    payload.issues.map(issue => [issue.issueId, issue]),
+  )
+
+  const orderedIssues =
+    payload.navigationOrder?.length
+      ? payload.navigationOrder
+          .map(issueId => issueMap.get(issueId))
+          .filter((issue): issue is AiSuggestionIssue => Boolean(issue))
+      : payload.issues
+
+  return orderedIssues.map(issue =>
+    mapSuggestionIssueToAnalysisItem(issue, durationMs),
+  )
 }
 
 function mapBandOverlapPayloadToAnalysisItems(
@@ -643,22 +772,24 @@ function hasAiEqSuggestion(statusResult: any) {
     currentAiJobId.value = startResult.job.job_id
 
 const statusResult = await pollAiWorkflow(startResult.job.job_id)
-const suggestionPayload = getSuggestionPayload(statusResult.projections)
-const regions = statusResult.projections.analysis_regions ?? []
+    const suggestionPayload = getSuggestionPayload(statusResult.projections)
+    const regions = statusResult.projections.analysis_regions ?? []
 
-const bandOverlapItems = suggestionPayload
-  ? mapBandOverlapPayloadToAnalysisItems(
+    const regionItems = regions.map(region =>
+      mapRegionToAnalysisItem(region, snapshot.duration_ms),
+    )
+
+    const suggestionItems = suggestionPayload
+  ? mapSuggestionPayloadToAnalysisItems(
       suggestionPayload,
       snapshot.duration_ms,
     )
   : []
 
-if (bandOverlapItems.length > 0) {
-  aiAnalysisItems.value = bandOverlapItems
-} else if (regions.length > 0) {
-  aiAnalysisItems.value = regions.map(region =>
-    mapRegionToAnalysisItem(region, snapshot.duration_ms),
-  )
+if (suggestionItems.length > 0) {
+  aiAnalysisItems.value = suggestionItems
+} else if (regionItems.length > 0) {
+  aiAnalysisItems.value = regionItems
 } else {
   alert('AI가 감지한 문제 구간이 없습니다.')
   return
@@ -670,7 +801,7 @@ syncSelectedRegionIdFromActiveItem()
 applyActiveAiAnalysisSelection()
 syncAiPreviewBandsFromActiveItem()
   } catch (error) {
-    console.error(error)
+   // console.error(error)
 
     if (
       error instanceof Error &&
@@ -687,7 +818,7 @@ syncAiPreviewBandsFromActiveItem()
 }
 
   function handleApplyAiEq() {
-    console.log('AI EQ 적용')
+   // console.log('AI EQ 적용')
   }
 
 function handleCancelAiEq() {
@@ -697,6 +828,72 @@ function handleCancelAiEq() {
   currentAiJobId.value = null
   aiBeforeBands.value = []
   aiAfterBands.value = []
+}
+
+function getActiveClippingTrimAction() {
+  const item = activeAiAnalysis.value
+
+  if (!item || item.kind !== 'CLIPPING') return null
+
+  return item.actions.find(action =>
+    action.type === 'apply_master_gain_trim'
+  ) ?? null
+}
+
+async function handleApplyClippingIssue() {
+  const item = activeAiAnalysis.value
+
+  if (!item || item.kind !== 'CLIPPING') return
+
+  const action = getActiveClippingTrimAction()
+  const recommendedReductionDb = action?.recommendedReductionDb
+
+  if (recommendedReductionDb == null) {
+    alert('클리핑 적용값이 없습니다.')
+    return
+  }
+
+  try {
+    aiAnalyzing.value = true
+
+    const currentLimiter = await getMasterLimiter(projectId)
+
+    await saveMasterLimiterDraft(projectId, {
+      isEnabled: true,
+      thresholdDb: currentLimiter.thresholdDb,
+      ceilingDbfs: action.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
+      attackMs: currentLimiter.attackMs,
+      releaseMs: currentLimiter.releaseMs,
+
+      // 핵심: 마스터 입력 게인을 권장 감소량만큼 낮춤
+      inputGainDb: currentLimiter.inputGainDb - Math.abs(recommendedReductionDb),
+
+      // makeup은 기존값 유지
+      makeupGainDb: currentLimiter.makeupGainDb,
+
+      jobId: currentAiJobId.value,
+      suggestionActionId: null,
+      appliedSuggestionId: null,
+      sourceType: 'AI_SUGGESTION',
+    })
+
+    goNextAiAnalysis()
+  } catch (error) {
+   // console.error('[AI clipping apply failed]', error)
+    alert('클리핑 적용 중 오류가 발생했습니다.')
+  } finally {
+    aiAnalyzing.value = false
+  }
+}
+
+function handleDismissClippingIssue() {
+  const item = activeAiAnalysis.value
+
+  if (import.meta.env.DEV) {
+   // console.debug('[AI clipping dismiss]', item)
+  }
+
+  goNextAiAnalysis()
 }
 
 function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
@@ -776,7 +973,7 @@ await sendAiWorkflowFeedback(currentAiJobId.value, {
     const statusResult = await pollAiFeedbackResult(currentAiJobId.value)
 
 if (import.meta.env.DEV) {
-  console.debug('[AI feedback result]', statusResult)
+ // console.debug('[AI feedback result]', statusResult)
 }
 
 const nextBands = mapAiSuggestionToEqBands(statusResult)
@@ -788,7 +985,7 @@ if (nextBands.length === 0) {
 
 aiAfterBands.value = nextBands
   } catch (error) {
-    console.error(error)
+   // console.error(error)
     alert(error instanceof Error ? error.message : 'AI 수정 요청 중 오류가 발생했습니다.')
   } finally {
     aiAnalyzing.value = false
@@ -877,6 +1074,8 @@ const shouldShowAiEqRevisionPanel = computed(() => {
     handleApplyAiEq,
     handleCancelAiEq,
     handleRequestAiEqRevision,
+    handleApplyClippingIssue,
+    handleDismissClippingIssue,
     aiAnalysisItems,
     activeAiAnalysis,
     activeAiAnalysisCurrentIndex,

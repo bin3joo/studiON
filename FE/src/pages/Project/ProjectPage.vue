@@ -493,7 +493,7 @@ function handleSocketError(error: {
   code: number
   message: string
 }) {
-  console.error('[댓글 웹소켓 에러]', error)
+ // console.error('[댓글 웹소켓 에러]', error)
 }
 
 function handleResolveComment(payload: {
@@ -530,15 +530,15 @@ function handleExport() {
 }
 
 function handleSaveVersion() {
-  console.log('버전 저장')
+ // console.log('버전 저장')
 }
 
 function handleUndo() {
-  console.log('undo')
+ // console.log('undo')
 }
 
 function handleRedo() {
-  console.log('redo')
+ // console.log('redo')
 }
 
 function handleOpenInvite() {
@@ -581,12 +581,12 @@ function handleSubmitInlineComment(payload: {
 
   const trackId = parseTrackId(payload.trackId)
 
-  console.log('[댓글 등록 직전]', {
-    originalTrackId: payload.trackId,
-    parsedTrackId: trackId,
-    trackName: payload.trackName,
-    measure: payload.measure,
-  })
+  // console.log('[댓글 등록 직전]', {
+  //   originalTrackId: payload.trackId,
+  //   parsedTrackId: trackId,
+  //   trackName: payload.trackName,
+  //   measure: payload.measure,
+  // })
 
   socketService.publish('COMMENT_ADD', {
     trackId,
@@ -629,6 +629,8 @@ const {
   handleApplyAiEq,
   handleCancelAiEq,
   handleRequestAiEqRevision,
+  handleApplyClippingIssue,
+  handleDismissClippingIssue,
   goNextAiAnalysis,
   goPrevAiAnalysis,
 } = useProjectAiWorkflow(Number(projectId))
@@ -673,7 +675,7 @@ function handleRemoveEqBand(payload: {
 const unlockAudioEngine = async () => {
   if(Tone.getContext().state !== 'running') {
     await Tone.start();
-    console.log('브라우저 오디오 제한 해제 완료')
+   // console.log('브라우저 오디오 제한 해제 완료')
   }
 
   //한번 풀렸으면 더 이상 이벤트 감지 필요 없으므로 리스너 삭제
@@ -902,7 +904,7 @@ function scrollToAiConflict(conflict: any) {
   ) as HTMLElement | null
 
   if (!targetEl) {
-    console.warn('[AI scroll] target track element not found', conflict.targetTrackId)
+   // console.warn('[AI scroll] target track element not found', conflict.targetTrackId)
     return
   }
 
@@ -1049,6 +1051,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
           :total-count="aiAnalysisTotalCount"
           @next="handleNextAiAnalysis"
           @prev="handlePrevAiAnalysis"
+          @apply-clipping="handleApplyClippingIssue"
+          @dismiss-clipping="handleDismissClippingIssue"
         />
      
         <!--  [세로 스크롤] -->

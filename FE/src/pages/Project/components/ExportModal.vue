@@ -58,7 +58,7 @@ async function handleExport() {
       emit('close')
     }
   } catch (error: any) {
-    console.error('Export Failed:', error)
+   // console.error('Export Failed:', error)
     errorMessage.value = error.message || '오디오 내보내기에 실패했습니다.'
   } finally {
     isExporting.value = false

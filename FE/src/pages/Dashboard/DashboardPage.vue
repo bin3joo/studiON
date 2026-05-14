@@ -143,11 +143,21 @@ onMounted(() => {
       <div class="pointer-events-none absolute -left-24 top-0 -z-10 h-[40vh] w-[40vh] rounded-full bg-primary/20 blur-[120px]" />
       <div class="absolute inset-0 -z-10 bg-grain opacity-30" />
 
-      <div class="flex flex-col items-start gap-4">
-        <h1 class="font-display text-[clamp(3rem,9vw,6rem)] leading-none text-foreground">
-          <span class="text-neon-magenta">내 프로젝트</span>
-        </h1>
-      </div>
+      <div class="flex items-end gap-4">
+  <h1 class="font-display text-[clamp(3rem,9vw,6rem)] leading-none text-foreground">
+    <span class="text-neon-magenta">내 프로젝트</span>
+  </h1>
+
+  <a
+    href="https://docs.google.com/forms/d/e/1FAIpQLSd8j0DchO_6TY9FC7Ya_LCfH-mxJQUTAqcV4Gu-UXptyRPsuA/viewform?usp=publish-editor"
+    target="_blank"
+    rel="noopener noreferrer"
+    class="mb-2 inline-flex h-10 shrink-0 items-center rounded-full bg-white px-5 text-sm font-medium text-neutral-800 transition hover:bg-neutral-200"
+  >
+    피드백 남기기
+  </a>
+</div>
+
     </section>
 
     <!-- 프로젝트 목록 영역 -->

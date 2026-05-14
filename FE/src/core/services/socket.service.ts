@@ -18,7 +18,7 @@ class SocketService {
   (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) &&
   this.currentProjectId === projectId
 ) {
-  console.log(`[Socket] 이미 프로젝트 ${projectId}에 연결 또는 연결 시도 중`)
+  //console.log(`[Socket] 이미 프로젝트 ${projectId}에 연결 또는 연결 시도 중`)
   return
 }
 
@@ -30,7 +30,7 @@ class SocketService {
     //console.log("[Socket] 현재 가져온 토큰:", token);
 
     if (!token) {
-      console.error("[Socket 🚨] 토큰이 없습니다! 소켓 연결을 중단합니다. (로그인 상태 확인 필요)");
+      //console.error("[Socket 🚨] 토큰이 없습니다! 소켓 연결을 중단합니다. (로그인 상태 확인 필요)");
       return; // 토큰이 없으면 아예 연결 시도를 하지 않고 함수 종료
     }
 
@@ -46,7 +46,7 @@ class SocketService {
 
     // 연결 성공 시
     this.ws.onopen = () => {
-      console.log(`[Socket] 🟢 프로젝트 ${projectId} 순수 웹소켓 연결 성공!`);
+      //console.log(`[Socket] 🟢 프로젝트 ${projectId} 순수 웹소켓 연결 성공!`);
       this.publish('PROJECT_JOIN', { projectId });
     };
 
@@ -60,7 +60,7 @@ class SocketService {
         // payload 껍데기가 있으면 알맹이만 꺼내고, 없으면 전체를 payload로 씀
         const payload = receivedData.payload ? receivedData.payload : receivedData;
 
-        console.log(`[Socket 📥] 수신 [${eventType}]:`, payload);
+        //console.log(`[Socket 📥] 수신 [${eventType}]:`, payload);
 
         if (eventType) {
           // 1. 임시 리스너 실행
@@ -75,18 +75,18 @@ class SocketService {
           }
         }
       } catch (e) {
-        console.error(`[Socket 🚨] 메시지 파싱 에러:`, e);
+        //console.error(`[Socket 🚨] 메시지 파싱 에러:`, e);
       }
     };
 
     // 에러 발생 시
     this.ws.onerror = (error) => {
-      console.error('[Socket 🚨] 웹소켓 에러 발생:', error);
+      //console.error('[Socket 🚨] 웹소켓 에러 발생:', error);
     };
 
     // 연결 종료 시
     this.ws.onclose = () => {
-  console.log('[Socket] 🔴 웹소켓 연결 해제됨')
+  //console.log('[Socket] 🔴 웹소켓 연결 해제됨')
   this.ws = null
   this.currentProjectId = null
 }
@@ -123,14 +123,14 @@ class SocketService {
     };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`[Socket 📤] 발신 [${eventType}]:`, payload);
+    //console.log(`[Socket 📤] 발신 [${eventType}]:`, payload);
   }
 
 disconnect() {
-  console.log('[Socket] disconnect 호출됨')
+  //console.log('[Socket] disconnect 호출됨')
 
   if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-    console.log('[Socket] PROJECT_LEFT 전송 시도')
+    //console.log('[Socket] PROJECT_LEFT 전송 시도')
     this.publish('PROJECT_LEFT', {})
 
     setTimeout(() => {
@@ -138,13 +138,13 @@ disconnect() {
       this.ws = null
       this.listeners.clear()
       this.currentProjectId = null
-      console.log('[Socket] 🔴 웹소켓 수동 연결 해제 완료')
+      //console.log('[Socket] 🔴 웹소켓 수동 연결 해제 완료')
     }, 100)
 
     return
   }
 
-  console.log('[Socket] OPEN 상태가 아니라 PROJECT_LEFT 전송 안 함', this.ws?.readyState)
+  //console.log('[Socket] OPEN 상태가 아니라 PROJECT_LEFT 전송 안 함', this.ws?.readyState)
 
   this.ws = null
   this.listeners.clear()

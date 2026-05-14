@@ -33,7 +33,7 @@ onMounted(async () => {
 
     router.replace('/dashboard')
   } catch (error) {
-    console.error(error)
+    //console.error(error)
     errorMessage.value = '로그인 처리 중 오류가 발생했습니다.'
   } finally {
     isLoading.value = false

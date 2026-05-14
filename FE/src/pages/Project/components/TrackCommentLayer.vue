@@ -221,7 +221,7 @@ function requestDeleteComment(commentId: string | number) {
   const parsedCommentId = Number(commentId)
 
   if (!Number.isInteger(parsedCommentId)) {
-    console.error('[댓글 삭제 실패] 유효하지 않은 commentId:', commentId)
+   // console.error('[댓글 삭제 실패] 유효하지 않은 commentId:', commentId)
     return
   }
 

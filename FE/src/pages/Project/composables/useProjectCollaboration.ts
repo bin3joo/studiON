@@ -39,7 +39,7 @@ export function useProjectCollaboration(projectId: number) {
     })
 
     socketService.subscribe('USER_LEFT_PROJECT', (payload) => {
-      console.log('[ProjectPage] USER_LEFT_PROJECT 수신:', payload)
+     // console.log('[ProjectPage] USER_LEFT_PROJECT 수신:', payload)
 
       onlineUsers.value = onlineUsers.value.filter(
         user => user.userId !== payload.userId,

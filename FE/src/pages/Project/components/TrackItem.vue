@@ -252,7 +252,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
   // 결과 처리: 겹쳤다면 원상복구, 아니면 이동 확정
   if (isOverlapping) {
-    console.log("클립이 다른 클립과 겹쳐서 원래 자리로 돌아갑니다.");
+   // console.log("클립이 다른 클립과 겹쳐서 원래 자리로 돌아갑니다.");
     
     // 1. 위치 롤백 (드래그 시작 지점으로)
     activeClip.value.start = startClipBar.value; 
@@ -282,10 +282,10 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   // Move/롤백 통신 이후에 Unlock을 보내야 백엔드가 정상적으로 처리함
   trackStore.unlockClip(currentClipId, props.track.trackId);
 
-  console.log(`\n========================================`);
-  console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
-  console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
-  console.log(`========================================`);
+  // console.log(`\n========================================`);
+  // console.log(`[UI 드래그 종료] 클립 ID: ${activeClip.value.clipId}`);
+  // console.log(`[UI 드래그 종료] 드롭된 마디 위치: ${activeClip.value.start}m`);
+  // console.log(`========================================`);
 
   activeClip.value.isDragging = false; // 드래그 끝
   activeClip.value = null; // 클립 해제
@@ -294,7 +294,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   try {
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
   } catch (err) {
-    console.warn("releasePointerCapture 오류 발생", err);
+   // console.warn("releasePointerCapture 오류 발생", err);
   }
 
   // 드래그가 끝나면 이벤트 리스너 해제
@@ -617,7 +617,7 @@ const handleFileUpload = (event: Event) => {
       return;
     }
 
-    console.log(`[디버그 - 2번 케이스: 탐색기 파일 선택] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
+   // console.log(`[디버그 - 2번 케이스: 탐색기 파일 선택] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
     // 우클릭했던 트랙 ID와 타임라인의 마디(Bar) 위치를 이용해 업로드 액션 실행
     trackStore.uploadAndAddAudioClip(file, menuState.value.targetTrackId, menuState.value.targetBar);
     
@@ -672,11 +672,11 @@ const onDrop = (e: DragEvent) => {
   if (!files || files.length === 0) return;
 
   const file = files[0];
-  console.log(`[디버그 - 1번 케이스: 드래그 앤 드롭] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
+ // console.log(`[디버그 - 1번 케이스: 드래그 앤 드롭] 파일명: ${file.name}, MIME 타입(file.type): '${file.type}'`);
 
   // 2. 오디오 파일인지 검증 (mp3, wav 등)
   if (!file.type.startsWith('audio/')) {
-    console.warn(`[디버그 - 드래그 앤 드롭 차단됨] file.type이 'audio/'로 시작하지 않습니다. (현재: '${file.type}')`);
+   // console.warn(`[디버그 - 드래그 앤 드롭 차단됨] file.type이 'audio/'로 시작하지 않습니다. (현재: '${file.type}')`);
     alert('오디오 파일(mp3, wav 등)만 추가할 수 있습니다.');
     return;
   }

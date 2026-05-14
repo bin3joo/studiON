@@ -3,6 +3,7 @@ package com.salmon.studion.domain.track.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.domain.comment.service.CommentService;
 import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
@@ -280,6 +281,9 @@ public class TrackService {
 
         // 삭제된 트랙의 클립을 Redis에서 삭제
         clipService.deleteClipStatesByTrack(request.getProjectId(), request.getTrackId());
+
+        // 삭제된 트랙의 코멘트도 Redis working set에서 삭제 마킹
+        commentService.deleteCommentsByTrack(request.getProjectId(), request.getTrackId());
 
         Long sequenceNo = redisTemplate.opsForValue()
                 .increment(String.format(EVENT_SEQ_KEY, request.getProjectId()));
@@ -610,11 +614,14 @@ public class TrackService {
     }
 
     /*
-        Redis에서 Track을 삭제한다.
+        Track을 Redis hash에서 삭제한 후, deleted_tracks에 남긴다.
      */
     private void removeTrackToRedis(Integer projectId, TrackState track) {
         String key = String.format(TRACKS_KEY, projectId);
+        String deletedKey = String.format(DELETED_TRACKS_KEY, projectId);
+
         redisTemplate.opsForHash().delete(key, String.valueOf(track.getTrackId()));
+        redisTemplate.opsForSet().add(deletedKey, String.valueOf(track.getTrackId()));
     }
 
     /*

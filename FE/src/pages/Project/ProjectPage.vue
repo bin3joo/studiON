@@ -750,6 +750,25 @@ const onGlobalDrop = (e: DragEvent) => {
   }
 };
 
+// 스크롤바 클릭 시 트랙 선택 취소(deselect) 방지 로직
+function handleBackgroundPointerDown(e: PointerEvent) {
+  const target = e.currentTarget as HTMLElement;
+  
+  if (e.target === target) {
+    const rect = target.getBoundingClientRect();
+    // 스크롤바 영역(컨텐츠 너비/높이를 넘어선 부분) 클릭인지 판별
+    const isScrollbarClick = 
+      e.clientX >= rect.left + target.clientWidth ||
+      e.clientY >= rect.top + target.clientHeight;
+      
+    if (isScrollbarClick) {
+      return; // 스크롤바를 누른 경우 선택 해제 무시
+    }
+  }
+  
+  trackStore.deselectAll();
+}
+
 type AiBubblePosition =
   | {
       mode: 'absolute'
@@ -929,7 +948,7 @@ const aiBubblePosition = computed<AiBubblePosition>(() => {
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
-        @pointerdown.stop="trackStore.deselectAll()"
+        @pointerdown.stop="handleBackgroundPointerDown"
         @scroll="handleHorizontalScroll"
       >
         <!-- 눈금자 -->

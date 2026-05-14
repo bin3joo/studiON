@@ -52,14 +52,23 @@ def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
 
 
 def issue_router_gate(state: WorkflowState) -> WorkflowState:
+    selected_region_id = state.get("selected_region_id") or next(
+        iter(state.get("ranked_candidate_ids", [])),
+        None,
+    )
+    suggestion_payload = deepcopy(state.get("suggestion_payload") or {})
+    if selected_region_id is not None:
+        selected_issue_id = f"{state['job_id']}-issue-{int(selected_region_id)}"
+        if selected_issue_id in suggestion_payload.get("navigationOrder", []):
+            suggestion_payload["activeIssueId"] = selected_issue_id
     return workflow_update(
         state,
         node="issue_router_gate",
         phase="issue_router_checked",
         progress=61,
         extra={
-            "selected_region_id": state.get("selected_region_id")
-            or next(iter(state.get("ranked_candidate_ids", [])), None)
+            "selected_region_id": selected_region_id,
+            "suggestion_payload": suggestion_payload,
         },
     )
 

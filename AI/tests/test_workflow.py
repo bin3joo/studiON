@@ -753,6 +753,89 @@ def test_workflow_fails_when_validator_rejects() -> None:
     assert result["current_node"] == "fail_workflow"
     assert result["runtime_status"] == "failed"
     assert result["durable_status"] == "FAILED"
+    assert result["revise_count"] == 5
+
+
+def test_workflow_retries_once_when_critic_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner_call_count = 0
+
+    class _PlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            nonlocal planner_call_count
+            planner_call_count += 1
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "retryable reject",
+                    "strategySummary": "retryable reject summary",
+                    "summary": "retryable reject summary",
+                    "explanation": "retryable reject explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": "DYNAMIC_EQ",
+                            "targetScope": "TRACK",
+                            "targetTrackId": 2,
+                            "targetClipId": None,
+                            "startMs": 1000,
+                            "endMs": 2200,
+                            "bandLowHz": 250,
+                            "bandHighHz": 1200,
+                            "gainDeltaDb": -2.4,
+                            "params": {"threshold": -19, "ratio": 2.0},
+                        }
+                    },
+                }
+            )
+
+    class _CriticClient:
+        def review_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            region: dict[str, object],
+            plan_payload: dict[str, object],
+            revision_notes: list[str],
+        ) -> PlanCriticLLMResponse:
+            return PlanCriticLLMResponse(result="REJECT", note="retry with a narrower plan")
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _PlanningClient(),
+    )
+    monkeypatch.setattr(
+        "app.graph.nodes.review.get_plan_critic_llm_client",
+        lambda: _CriticClient(),
+    )
+
+    waiting = run_workflow_graph(
+        {
+            "job_id": 10036,
+            "project_id": 20036,
+            "project_snapshot": build_project_snapshot(track_ids=[1, 2]),
+            "issue_types": ["band_overlap"],
+        }
+    )
+
+    result = run_workflow_graph({**waiting, **build_plan_input(waiting)})
+
+    assert result["current_node"] == "fail_workflow"
+    assert result["runtime_status"] == "failed"
+    assert result["durable_status"] == "FAILED"
+    assert result["revise_count"] == 5
+    assert planner_call_count == 6
+    assert any("retry with a narrower plan" in note for note in result["plan_revision_notes"])
 
 
 def test_workflow_materializes_sibilance_without_planner_loop() -> None:

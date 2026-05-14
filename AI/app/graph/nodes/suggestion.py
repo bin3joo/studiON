@@ -12,7 +12,7 @@ from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workfl
 
 def planning_agent(state: WorkflowState) -> WorkflowState:
     revise_count = state.get("revise_count", 0)
-    if state.get("validator_result") == "REVISE" or state.get("critic_result") == "REVISE":
+    if state.get("validator_result") in {"REVISE", "REJECT"} or state.get("critic_result") in {"REVISE", "REJECT"}:
         revise_count += 1
 
     selected_region = _resolve_selected_region(state)

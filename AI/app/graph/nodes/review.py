@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from app.graph.nodes.common import artifact_id, decide_validation_result, workflow_update
 from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
@@ -7,6 +9,8 @@ from app.services.plan_critic_llm import (
     PlanCriticLLMError,
     get_plan_critic_llm_client,
 )
+
+logger = logging.getLogger(__name__)
 
 ISSUE_ALLOWED_ACTIONS = {
     "band_overlap": {"DYNAMIC_EQ", "EQ_CUT"},
@@ -17,6 +21,12 @@ def plan_rule_validator(state: WorkflowState) -> WorkflowState:
     plan_payload = state.get("plan_payload") or {}
     validation_error = _validate_plan_payload(state, plan_payload)
     if validation_error is not None:
+        logger.warning(
+            "plan validator rejected | job_id=%s selected_region_id=%s reason=%s",
+            state.get("job_id"),
+            state.get("selected_region_id"),
+            validation_error,
+        )
         return workflow_update(
             state,
             node="plan_rule_validator",
@@ -34,6 +44,14 @@ def plan_rule_validator(state: WorkflowState) -> WorkflowState:
         revision_notes.append("Rule validator requested a plan revision.")
     if result == "REJECT":
         revision_notes.append("Rule validator rejected the plan.")
+    if result != "PASS":
+        logger.warning(
+            "plan validator result | job_id=%s selected_region_id=%s result=%s note=%s",
+            state.get("job_id"),
+            state.get("selected_region_id"),
+            result,
+            revision_notes[-1] if revision_notes else "",
+        )
     return workflow_update(
         state,
         node="plan_rule_validator",
@@ -90,6 +108,14 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
         revision_notes.append("Plan critic requested a semantic revision.")
     if result == "REJECT" and critic_response.note == "":
         revision_notes.append("Plan critic rejected the strategy.")
+    if result != "PASS":
+        logger.warning(
+            "plan critic result | job_id=%s selected_region_id=%s result=%s note=%s",
+            state.get("job_id"),
+            state.get("selected_region_id"),
+            result,
+            revision_notes[-1] if revision_notes else "",
+        )
 
     return workflow_update(
         state,

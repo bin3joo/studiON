@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { X, Loader2, Download } from 'lucide-vue-next'
 import { useAudioExport } from '../composables/useAudioExport'
+import { useTrackStore } from '../store/useTrackStore'
 
 const props = defineProps<{
   isOpen: boolean
@@ -12,22 +13,51 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
+const isMono = ref(false)
 const isExporting = ref(false)
 const errorMessage = ref('')
 const { exportMasterAudio } = useAudioExport()
+const trackStore = useTrackStore()
+
+const expectedSizeMB = computed(() => {
+  const tracks = trackStore.trackList
+
+  let maxDurationBar = 0
+  tracks.forEach((track) => {
+    track.clips.forEach((clip) => {
+      const end = clip.start + clip.duration
+      if (end > maxDurationBar) maxDurationBar = end
+    })
+  })
+
+  if (maxDurationBar === 0) return '0.00'
+
+  const secondsPerBar = trackStore.secondsPerBar
+  // 여유 공간(Reverb/Delay Tail 등) 1초 반영
+  const renderDurationSec = maxDurationBar * secondsPerBar + 1.0
+  const sampleRate = 48000
+  const channels = isMono.value ? 1 : 2
+  const bytesPerSample = 3 // 24-bit
+
+  const dataSize = renderDurationSec * sampleRate * channels * bytesPerSample
+  const totalSize = 44 + dataSize // WAV 헤더 44바이트
+
+  return (totalSize / (1024 * 1024)).toFixed(2)
+})
 
 async function handleExport() {
   isExporting.value = true
   errorMessage.value = ''
   
   try {
-    const blob = await exportMasterAudio()
+    const blob = await exportMasterAudio(isMono.value)
+    const suggestedFilename = `${props.projectName || 'project'}_master${isMono.value ? '_mono' : ''}.wav`
     
     // File System Access API
     if ('showSaveFilePicker' in window) {
       try {
         const handle = await (window as any).showSaveFilePicker({
-          suggestedName: `${props.projectName || 'project'}_master.wav`,
+          suggestedName: suggestedFilename,
           types: [{
             description: 'WAV Audio File',
             accept: { 'audio/wav': ['.wav'] },
@@ -49,7 +79,7 @@ async function handleExport() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${props.projectName || 'project'}_master.wav`
+      a.download = suggestedFilename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -96,12 +126,33 @@ async function handleExport() {
         
         <div class="rounded-xl border border-white/5 bg-black/40 p-4">
           <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-            출력 설정 (스튜디오 표준)
+            출력 설정
           </h3>
           <div class="space-y-3">
             <div class="flex items-center justify-between">
               <span class="text-sm text-zinc-400">포맷</span>
               <span class="text-sm font-medium text-white">WAV</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-zinc-400">채널 모드</span>
+              <div class="flex gap-2">
+                <button 
+                  type="button" 
+                  class="rounded px-2.5 py-1 text-xs font-medium transition-colors border"
+                  :class="!isMono ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-transparent text-zinc-500 border-white/10 hover:text-zinc-300'"
+                  @click="isMono = false"
+                >
+                  스테레오
+                </button>
+                <button 
+                  type="button" 
+                  class="rounded px-2.5 py-1 text-xs font-medium transition-colors border"
+                  :class="isMono ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-transparent text-zinc-500 border-white/10 hover:text-zinc-300'"
+                  @click="isMono = true"
+                >
+                  모노
+                </button>
+              </div>
             </div>
             <div class="flex items-center justify-between">
               <span class="text-sm text-zinc-400">샘플레이트</span>
@@ -110,6 +161,10 @@ async function handleExport() {
             <div class="flex items-center justify-between">
               <span class="text-sm text-zinc-400">비트뎁스</span>
               <span class="text-sm font-medium text-white">24 bit</span>
+            </div>
+            <div class="flex items-center justify-between mt-2 pt-3 border-t border-white/10">
+              <span class="text-sm font-medium text-zinc-300">용량</span>
+              <span class="text-sm font-bold text-indigo-400">{{ expectedSizeMB }} MB</span>
             </div>
           </div>
         </div>

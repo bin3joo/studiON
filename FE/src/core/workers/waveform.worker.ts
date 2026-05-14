@@ -19,7 +19,7 @@ interface InitMessage {
 interface CacheMessage {
   type: 'cache';
   audioKey: string;
-  channelData: Float32Array;
+  channels: Float32Array[];
 }
 
 interface RenderMessage {
@@ -31,13 +31,14 @@ interface RenderMessage {
   height: number;
   samplesPerPixel: number;
   startSampleOffset: number;
+  channelIndex: number;
 }
 
 type WorkerMessage = InitMessage | CacheMessage | RenderMessage;
 
 let offscreenCanvas: OffscreenCanvas | null = null;
 let ctx: OffscreenCanvasRenderingContext2D | null = null;
-const audioCache = new Map<string, Float32Array>();
+const audioCache = new Map<string, Float32Array[]>();
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
@@ -52,15 +53,16 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
 
   // 데이터 캐싱
   if (msg.type === 'cache') {
-    audioCache.set(msg.audioKey, msg.channelData);
+    audioCache.set(msg.audioKey, msg.channels);
     return;
   }
 
   // 렌더 요청
   if (msg.type === 'render') {
-    const { requestId, audioKey, color, width, height, samplesPerPixel, startSampleOffset } = msg;
+    const { requestId, audioKey, color, width, height, samplesPerPixel, startSampleOffset, channelIndex } = msg;
 
-    const channelData = audioCache.get(audioKey);
+    const channels = audioCache.get(audioKey);
+    const channelData = channels ? channels[channelIndex] : undefined;
     if (!channelData) {
       // 캐시된 데이터가 없으면 렌더링 중단
       (self as unknown as Worker).postMessage({ requestId, bitmap: null });

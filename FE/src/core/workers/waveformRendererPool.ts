@@ -21,6 +21,7 @@ export interface WaveformRenderRequest {
   height: number;
   samplesPerPixel: number;
   startSampleOffset: number;
+  channelIndex: number;
 }
 
 // 렌더 결과 타입
@@ -102,13 +103,13 @@ class WaveformRendererPool {
    * 오디오 데이터 전체를 워커 풀의 모든 워커에게 한 번 전송하여 캐싱합니다.
    * 메인 스레드 블로킹을 막는 Zero-Copy 렌더링을 위한 핵심입니다.
    */
-  broadcastCacheAudio(audioKey: string, channelData: Float32Array) {
+  broadcastCacheAudio(audioKey: string, channels: Float32Array[]) {
     this.ensureInitialized();
     for (const pw of this.workers) {
       pw.worker.postMessage({
         type: 'cache',
         audioKey,
-        channelData,
+        channels,
       });
     }
   }
@@ -175,6 +176,7 @@ class WaveformRendererPool {
         height: item.request.height,
         samplesPerPixel: item.request.samplesPerPixel,
         startSampleOffset: item.request.startSampleOffset,
+        channelIndex: item.request.channelIndex,
       });
     }
   }

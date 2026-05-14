@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload } from 'lucide-vue-next';
 import * as Tone from 'tone';
+import { trackEvent } from '@/shared/utils/analytics'
 
 const trackStore = useTrackStore();
 
@@ -43,6 +44,7 @@ const handleStop = () => {
 // 4. ai 분석 버튼 상태 전달
 const props = defineProps<{
   aiAnalyzing: boolean
+  projectId: number | string
 }>()
 
 const emit = defineEmits<{
@@ -56,6 +58,14 @@ const emit = defineEmits<{
   (e: 'action-add-track'): void
   (e: 'action-upload'): void
 }>()
+
+function handleRunAiAnalysisClick() {
+  trackEvent('ai_analysis_clicked', {
+    project_id: Number(props.projectId),
+  })
+
+  emit('run-ai-analysis')
+}
 
 const hasSelectedTrack = computed(() => trackStore.selectedTrackId !== null);
 const hasSelectedClip = computed(() => trackStore.selectedClip !== null);
@@ -201,7 +211,7 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
     :disabled="props.aiAnalyzing"
     data-guide="ai-analysis"
     class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full p-[1px] transition-all duration-300 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
-    @click="emit('run-ai-analysis')"
+    @click="handleRunAiAnalysisClick"
   >
     <!-- gradient border -->
     <span

@@ -9,6 +9,7 @@ import type { CreateProjectResponse, ProjectId } from '@/pages/Project/types/pro
 import InviteCodeInputButton from './InviteCodeInputButton.vue'
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
+import { trackEvent } from '@/shared/utils/analytics'
 
 const router = useRouter()
 const isCreating = ref(false)
@@ -45,6 +46,10 @@ async function handleCreateProjectClick() {
     if (!projectId) {
       throw new Error('생성된 프로젝트 ID를 확인할 수 없습니다.')
     }
+
+    trackEvent('project_created', {
+      project_id: projectId,
+    })
 
     //라우팅 전 강제로 스냅샷 저장 호출
     //백엔드의 Redis 캐시에만 존재하는 디폴트 트랙을 DB로 넣음

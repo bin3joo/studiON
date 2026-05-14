@@ -959,7 +959,7 @@ def _build_auto_preview_issue(
     issue_id = f"{state['job_id']}-issue-auto-{rank}"
     if issue_type in {"track_clipping", "master_clipping"}:
         bubble_target = "master"
-        ui_mode = "master_trim"
+        ui_mode = "master_limiter"
     elif issue_type == "high_band_harshness":
         bubble_target = "track"
         ui_mode = "marker_only"
@@ -1000,13 +1000,11 @@ def _build_auto_preview_issue(
             )
 
     if issue_type in {"track_clipping", "master_clipping"} and actions:
-        gain_delta_db = float(actions[0].get("gainDeltaDb") or 0.0)
         actions = [
-            {
-                "type": "apply_master_gain_trim",
-                "recommendedReductionDb": round(abs(gain_delta_db), 3),
-                "sourceActionType": actions[0].get("type"),
-            }
+            _build_master_limiter_issue_action(
+                action=actions[0],
+                source_track_id=track_ids[0] if track_ids else None,
+            )
         ]
 
     return {
@@ -1082,11 +1080,18 @@ def _build_preview_expiry(state: WorkflowState) -> str:
 def _build_auto_preview_summary(group: dict[str, object]) -> str:
     issue_type = str(group.get("issueType") or "eq_issue")
     region_count = int(group.get("regionCount") or 0)
+    if issue_type in {"track_clipping", "master_clipping"}:
+        return f"Auto limiter preview for {issue_type} ({region_count} region(s))"
     return f"Auto EQ preview for {issue_type} ({region_count} region(s))"
 
 
 def _build_auto_preview_explanation(group: dict[str, object]) -> str:
     track_count = len(group.get("trackIds") or [])
+    if str(group.get("issueType") or "") in {"track_clipping", "master_clipping"}:
+        return (
+            f"Deterministic master limiter preview derived from clipping analysis "
+            f"across {track_count} contributing track(s)."
+        )
     return (
         f"Deterministic EQ preview derived from non-user issue recipes "
         f"across {track_count} track(s)."
@@ -1107,51 +1112,54 @@ def _load_auto_fix_recipe_groups(state: WorkflowState) -> list[dict[str, object]
 
 
 def _build_track_clipping_fix_recipe(region: dict[str, object]) -> dict[str, object] | None:
-    score = float(region.get("score", 0.0))
-    resolved_band = _resolve_track_clipping_recipe_band(region)
-    if resolved_band is None:
-        return None
-    band_low_hz, band_high_hz, action_type = resolved_band
-    if action_type == "DYNAMIC_EQ":
-        gain_delta_db = -round(min(max(1.0 + (score * 2.2), 1.5), 3.0), 2)
-        params: dict[str, object] = {"threshold": -20, "ratio": 2.0}
-    else:
-        gain_delta_db = -round(min(max(0.8 + (score * 1.6), 1.2), 2.8), 2)
-        params = {"q": 1.1}
+    reduction_db = _resolve_clipping_limiter_reduction_db(region)
     return {
         "regionId": region.get("id"),
-        "actionType": action_type,
-        "targetScope": "TRACK",
-        "targetTrackId": int(region.get("track_id") or 0),
+        "actionType": "TRUE_PEAK_LIMITER",
+        "targetScope": "MASTER",
         "startMs": int(region.get("start_ms") or 0),
         "endMs": int(region.get("end_ms") or 0),
-        "bandLowHz": band_low_hz,
-        "bandHighHz": band_high_hz,
-        "gainDeltaDb": gain_delta_db,
-        "params": params,
+        "params": {
+            "ceilingDbfs": float(region.get("target_ceiling_dbtp") or -1.0),
+            "estimatedGainReductionDb": reduction_db,
+            "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
+        },
         "origin": region.get("auto_fix_source", "direct_detection"),
         "sourceMasterCandidateId": region.get("source_master_candidate_id"),
+        "sourceTrackId": region.get("track_id"),
     }
 
 
-def _resolve_track_clipping_recipe_band(
-    region: dict[str, object],
-) -> tuple[int, int, str] | None:
-    band_low_hz = region.get("band_low_hz")
-    band_high_hz = region.get("band_high_hz")
-    if isinstance(band_low_hz, int) and isinstance(band_high_hz, int):
-        band_hints = _collect_track_clipping_band_hints(region)
-        if "high" in band_hints and band_low_hz >= 1500:
-            return band_low_hz, band_high_hz, "DYNAMIC_EQ"
-        return band_low_hz, band_high_hz, "EQ_CUT"
-    if str(region.get("broadband_classification")) == "broadband":
-        return None
-    band_hints = _collect_track_clipping_band_hints(region)
-    if "high" in band_hints:
-        return 4500, 9000, "DYNAMIC_EQ"
-    if "low_mid" in band_hints:
-        return 180, 1200, "EQ_CUT"
-    return None
+def _resolve_clipping_limiter_reduction_db(region: dict[str, object]) -> float:
+    explicit = region.get("recommended_reduction_db")
+    if isinstance(explicit, int | float):
+        return round(float(explicit), 3)
+    current_true_peak = region.get("current_true_peak_dbtp")
+    target_ceiling = region.get("target_ceiling_dbtp")
+    if isinstance(current_true_peak, int | float):
+        ceiling = float(target_ceiling) if isinstance(target_ceiling, int | float) else -1.0
+        return round(max(float(current_true_peak) - ceiling, 0.5), 3)
+    score = float(region.get("score") or region.get("detector_score") or 0.0)
+    return round(min(max(0.8 + (score * 6.0), 1.0), 4.0), 3)
+
+
+def _build_master_limiter_issue_action(
+    *,
+    action: dict[str, object],
+    source_track_id: int | None,
+) -> dict[str, object]:
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    issue_action: dict[str, object] = {
+        "type": "apply_master_limiter",
+        "targetScope": "MASTER",
+        "estimatedGainReductionDb": params.get("estimatedGainReductionDb"),
+        "currentTruePeakDbtp": params.get("currentTruePeakDbtp"),
+        "targetCeilingDbtp": params.get("ceilingDbfs") or -1.0,
+        "sourceActionType": action.get("type"),
+    }
+    if source_track_id is not None:
+        issue_action["sourceTrackId"] = source_track_id
+    return issue_action
 
 
 def _build_high_band_harshness_fix_recipe(region: dict[str, object]) -> dict[str, object]:

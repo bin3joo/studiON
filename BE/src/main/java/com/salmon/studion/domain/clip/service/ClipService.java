@@ -14,6 +14,7 @@ import com.salmon.studion.domain.clip.repository.ClipEventRepository;
 import com.salmon.studion.domain.clip.repository.ClipRepository;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectService;
+import com.salmon.studion.domain.track.entity.Track;
 import com.salmon.studion.domain.track.repository.TrackRepository;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
@@ -64,6 +65,70 @@ public class ClipService {
         }
 
         return clipRepository.findAllWithAudioMetadataByTrackIds(trackIds);
+    }
+
+    public boolean hasClipWorkingSet(Integer projectId) {
+        return redisTemplate.hasKey(String.format(CLIP_STATE_KEY, projectId)) || redisTemplate.hasKey(String.format(DELETED_CLIPS_KEY, projectId));
+    }
+
+    public List<Clip> getClipsForProjectDetail(Integer projectId, List<Track> workingTracks) {
+        List<Clip> persistedClips = clipRepository.findAllWithAudioMetadataByProjectId(projectId);
+
+        Map<Integer, Clip> merged = persistedClips.stream()
+                .map(this::copyClip)
+                .collect(Collectors.toMap(
+                        Clip::getId,
+                        clip -> clip,
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new
+                ));
+
+        Map<Integer, Track> tracksById = workingTracks.stream()
+                .collect(Collectors.toMap(Track::getId, track -> track));
+
+        Map<Integer, AudioMetadata> audioById = persistedClips.stream()
+                .map(Clip::getAudioMetadata)
+                .collect(Collectors.toMap(AudioMetadata::getId, audio -> audio, (left, right) -> left));
+
+        Map<Object, Object> redisEntries = redisTemplate.opsForHash().entries(String.format(CLIP_STATE_KEY, projectId));
+        if (!redisEntries.isEmpty()) {
+            java.util.Set<Integer> missingAudioIds = redisEntries.values().stream()
+                    .map(value -> parseClipState((String) value).getAudioMetadataId())
+                    .filter(audioId -> !audioById.containsKey(audioId))
+                    .collect(Collectors.toSet());
+
+            if (!missingAudioIds.isEmpty()) {
+                audioMetadataRepository.findAllById(missingAudioIds)
+                        .forEach(audio -> audioById.put(audio.getId(), audio));
+            }
+
+            for (Object value : redisEntries.values()) {
+                ClipState state = parseClipState((String) value);
+
+                merged.put(
+                        state.getClipId(),
+                        Clip.create(
+                                state.getClipId(),
+                                tracksById.get(state.getTrackId()),
+                                audioById.get(state.getAudioMetadataId()),
+                                state.getColor(),
+                                state.getStart(),
+                                state.getDuration(),
+                                state.getAudioStartMs(),
+                                state.getAudioDurationMs()
+                        )
+                );
+            }
+        }
+
+        Set<String> deletedIds = redisTemplate.opsForSet().members(String.format(DELETED_CLIPS_KEY, projectId));
+        if (deletedIds != null) {
+            deletedIds.stream()
+                    .map(Integer::parseInt)
+                    .forEach(merged::remove);
+        }
+
+        return merged.values().stream().toList();
     }
 
     /*
@@ -188,7 +253,7 @@ public class ClipService {
 
         Project project = projectService.getProjectOrThrow(request.getProjectId());
 
-        validateTrackInProject(request.getTrackId(), request.getProjectId());
+        validateTrackInProjectWorkingSet(request.getTrackId(), request.getProjectId());
 
         AudioMetadata audioMetadata = audioService.createAudioMetadata(
                 AudioMetadataCreateRequest.builder()
@@ -265,7 +330,7 @@ public class ClipService {
 
         projectService.getProjectOrThrow(request.getProjectId());
 
-        validateTrackInProject(request.getTargetTrackId(), request.getProjectId());
+        validateTrackInProjectWorkingSet(request.getTargetTrackId(), request.getProjectId());
 
         String lockKey = String.format(CLIP_LOCK_KEY, request.getProjectId(), request.getClipId());
         String currentLocker = redisTemplate.opsForValue().get(lockKey);
@@ -638,7 +703,7 @@ public class ClipService {
 
         projectService.getProjectOrThrow(request.getProjectId());
 
-        validateTrackInProject(request.getTargetTrackId(), request.getProjectId());
+        validateTrackInProjectWorkingSet(request.getTargetTrackId(), request.getProjectId());
 
         String clipboardKey = String.format(CLIP_CLIPBOARD_KEY, request.getProjectId(), userId);
         String clipboardJson = redisTemplate.opsForValue().get(clipboardKey);
@@ -919,9 +984,40 @@ public class ClipService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
     }
 
+    private void validateTrackInProjectWorkingSet(Integer trackId, Integer projectId) {
+        String trackKey = String.format("project:%d:tracks", projectId);
+        String deletedKey = String.format("project:%d:deleted_tracks", projectId);
+
+        Object redisTrack = redisTemplate.opsForHash().get(trackKey, String.valueOf(trackId));
+        if (redisTrack != null) {
+            return;
+        }
+
+        Boolean isDeleted = redisTemplate.opsForSet().isMember(deletedKey, String.valueOf(trackId));
+        if (Boolean.TRUE.equals(isDeleted)) {
+            throw new BusinessException(ErrorCode.TRACK_NOT_FOUND);
+        }
+
+        trackRepository.findByIdAndProject_Id(trackId, projectId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_NOT_FOUND));
+    }
+
     private void validateBarLimit(double startBar, double duration) {
         if (startBar + duration > MAX_BAR_COUNT) {
             throw new BusinessException(ErrorCode.CLIP_BAR_LIMIT_EXCEEDED);
         }
+    }
+
+    private Clip copyClip(Clip clip) {
+        return Clip.create(
+                clip.getId(),
+                clip.getTrack(),
+                clip.getAudioMetadata(),
+                clip.getColor(),
+                clip.getStart(),
+                clip.getDuration(),
+                clip.getAudioStartMs(),
+                clip.getAudioDurationMs()
+        );
     }
 }

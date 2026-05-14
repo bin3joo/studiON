@@ -29,6 +29,7 @@ class PlanCriticLLMClient(Protocol):
         selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
+        selection_context: dict[str, object],
         region: dict[str, object],
         plan_payload: dict[str, object],
         revision_notes: list[str],
@@ -60,6 +61,7 @@ class HTTPPlanCriticLLMClient:
         selected_region_id: int,
         preserve_clip_id: int,
         user_feedback_message: str | None,
+        selection_context: dict[str, object],
         region: dict[str, object],
         plan_payload: dict[str, object],
         revision_notes: list[str],
@@ -75,6 +77,7 @@ class HTTPPlanCriticLLMClient:
                             "selectedRegionId": selected_region_id,
                             "preserveClipId": preserve_clip_id,
                             "userFeedbackMessage": user_feedback_message,
+                            "selectionContext": selection_context,
                             "revisionNotes": revision_notes,
                             "region": region,
                             "planPayload": plan_payload,
@@ -172,6 +175,9 @@ def _critic_system_prompt() -> str:
         'Use the schema {"result":"PASS|REVISE|REJECT","note":"string"}. '
         "Reject plans that violate preserve-track safety, selected-region boundaries, "
         "the stated user feedback intent, the band_overlap planner output policy, or TRACK-only scope. "
+        "If selectionContext.selectedTrackId equals selectionContext.preserveTrackId, "
+        "interpret that selected track as the protected reference track, not an instruction to modify it. "
+        "In that case, a plan that modifies a non-preserve overlapping track does not conflict with user intent. "
         "Reject DE_ESSER, GAIN_TRIM, TRUE_PEAK_LIMITER, and MASTER scope. "
         "When revision is needed, write a short, actionable note that the planner can directly apply."
     )

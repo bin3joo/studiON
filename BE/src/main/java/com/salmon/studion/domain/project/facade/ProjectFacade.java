@@ -5,6 +5,8 @@ import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.service.ClipService;
+import com.salmon.studion.domain.comment.dto.response.CommentsGetResponse;
+import com.salmon.studion.domain.comment.facade.CommentFacade;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;
@@ -40,35 +42,36 @@ public class ProjectFacade {
     private final UserService userService;
     private final TrackService trackService;
     private final ClipService clipService;
+    private final CommentFacade commentFacade;
     private final CdnUrlService cdnUrlService;
 
     @Transactional(readOnly = true)
     public ProjectDetailResponse getProjectDetail(Integer projectId, Integer userId) {
-        /*
-            1. 프로젝트 정보 조회 (+존재 여부 확인)
-            2. 프로젝트 멤버 검증
-            3. 프로젝트 상세 정보 조회
-                3-1. 마스터 트랙 조회
-                3-2. 트랙 일괄 조회
-                3-3. (트랙이 있는 경우에만) 클립 + 오디오 메타데이터 일괄 조회
-            4. DTO 조립
-         */
         Project project = projectService.getProjectOrThrow(projectId);
 
         projectMemberService.validateProjectMember(projectId, userId);
 
         MasterTrack masterTrack = masterTrackService.getMasterTrackOrThrow(projectId);
 
-        List<Track> tracks = trackService.getTracksByProjectId(projectId);
+        boolean useWorkingSet = hasProjectWorkingSet(projectId);
+
+        List<Track> tracks = useWorkingSet
+                ? trackService.getTracksForProjectDetail(projectId)
+                : trackService.getTracksByProjectId(projectId);
 
         List<Clip> clips = List.of();
-
         if (!tracks.isEmpty()) {
-            List<Integer> trackIds = tracks.stream().map(Track::getId).toList();
-            clips = clipService.getClipsWithAudioMetadataByTrackIds(trackIds);
+            clips = useWorkingSet
+                    ? clipService.getClipsForProjectDetail(projectId, tracks)
+                    : clipService.getClipsWithAudioMetadataByTrackIds(
+                    tracks.stream().map(Track::getId).toList()
+            );
         }
 
-        return toProjectDetailResponse(project, masterTrack, tracks, clips);
+        List<CommentsGetResponse.CommentDto> comments =
+                commentFacade.getCommentsForProjectDetail(projectId, userId);
+
+        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments);
     }
 
     @Transactional(readOnly = true)
@@ -157,11 +160,23 @@ public class ProjectFacade {
                 .build();
     }
 
+    public ProjectSnapshotSaveResponse saveProjectSnapshot(Integer projectId, Integer userId) {
+        projectMemberService.validateProjectMember(projectId, userId);
+        return projectSaveService.saveManually(projectId);
+    }
+
+    private boolean hasProjectWorkingSet(Integer projectId) {
+        return trackService.hasTrackWorkingSet(projectId)
+                || clipService.hasClipWorkingSet(projectId)
+                || commentFacade.hasCommentWorkingSet(projectId);
+    }
+
     private ProjectDetailResponse toProjectDetailResponse(
             Project project,
             MasterTrack masterTrack,
             List<Track> tracks,
-            List<Clip> clips
+            List<Clip> clips,
+            List<CommentsGetResponse.CommentDto> comments
     ) {
         Map<Integer, List<Clip>> clipsByTrackId = clips.stream()
                 .collect(Collectors.groupingBy(clip -> clip.getTrack().getId()));
@@ -169,10 +184,10 @@ public class ProjectFacade {
         ProjectDetailResponse.MasterTrackResponse masterTrackResponse = toMasterTrackResponse(masterTrack);
 
         List<ProjectDetailResponse.TrackResponse> trackResponses = tracks.stream()
-                .map(track -> toTrackResponse(track, clipsByTrackId.getOrDefault(track.getId(), List.of())
-                ))
+                .map(track -> toTrackResponse(track, clipsByTrackId.getOrDefault(track.getId(), List.of())))
                 .toList();
-        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses);
+
+        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments);
     }
 
     private ProjectDetailResponse.MasterTrackResponse toMasterTrackResponse(MasterTrack masterTrack) {
@@ -226,8 +241,4 @@ public class ProjectFacade {
         );
     }
 
-    public ProjectSnapshotSaveResponse saveProjectSnapshot(Integer projectId, Integer userId) {
-        projectMemberService.validateProjectMember(projectId, userId);
-        return projectSaveService.saveManually(projectId);
-    }
 }

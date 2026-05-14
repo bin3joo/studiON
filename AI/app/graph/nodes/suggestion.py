@@ -49,6 +49,7 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             selected_region_id=selected_region_id,
             preserve_clip_id=int(preserve_clip_id),
             user_feedback_message=state.get("user_feedback_message"),
+            selection_context=_build_selection_context(state, selected_region, int(preserve_clip_id)),
             region=deepcopy(selected_region),
             clip_context=_build_clip_context(state, selected_region, int(preserve_clip_id)),
             revision_notes=[*state.get("plan_revision_notes", [])],
@@ -348,6 +349,28 @@ def _build_clip_context(
     return clip_context
 
 
+def _build_selection_context(
+    state: WorkflowState,
+    region: dict[str, object],
+    preserve_clip_id: int,
+) -> dict[str, object]:
+    preserve_track_id = _resolve_clip_track_id(state, preserve_clip_id)
+    involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
+    non_preserve_track_ids = [
+        track_id
+        for track_id in involved_track_ids
+        if preserve_track_id is None or track_id != preserve_track_id
+    ]
+    return {
+        "selectedTrackId": preserve_track_id,
+        "preserveTrackId": preserve_track_id,
+        "selectedTrackIsProtected": preserve_track_id is not None,
+        "selectedClipId": preserve_clip_id,
+        "preserveClipId": preserve_clip_id,
+        "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
+    }
+
+
 def _normalize_plan_payload(
     state: WorkflowState,
     *,
@@ -448,18 +471,11 @@ def _build_non_llm_issue(
             "endMs": int(region.get("end_ms") or 0),
             "trackId": region.get("track_id"),
             "bubbleTarget": "master",
-            "uiMode": "master_trim",
+            "uiMode": "master_limiter",
             "summary": region.get("summary") or "Track clipping detected",
-            "explanation": "Use a conservative master trim to create headroom for the detected clipping region.",
+            "explanation": "Apply a conservative true-peak limiter on the master bus to control clipping without editing individual track EQ.",
             "previewBands": [],
-            "actions": [
-                {
-                    "type": "apply_master_gain_trim",
-                    "recommendedReductionDb": _resolve_recommended_reduction_db(region),
-                    "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
-                    "targetCeilingDbtp": region.get("target_ceiling_dbtp") or -1.0,
-                }
-            ],
+            "actions": [_build_master_limiter_action(region)],
             "markers": [],
         }
     if issue_type == "master_clipping":
@@ -470,18 +486,11 @@ def _build_non_llm_issue(
             "endMs": int(region.get("end_ms") or 0),
             "trackId": None,
             "bubbleTarget": "master",
-            "uiMode": "master_trim",
+            "uiMode": "master_limiter",
             "summary": region.get("summary") or "Master clipping detected",
-            "explanation": "Normalize the user-facing action to a single master trim recommendation.",
+            "explanation": "Apply a conservative true-peak limiter on the master bus to control the detected clipping region.",
             "previewBands": [],
-            "actions": [
-                {
-                    "type": "apply_master_gain_trim",
-                    "recommendedReductionDb": _resolve_recommended_reduction_db(region),
-                    "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
-                    "targetCeilingDbtp": region.get("target_ceiling_dbtp") or -1.0,
-                }
-            ],
+            "actions": [_build_master_limiter_action(region)],
             "markers": [],
         }
     if issue_type == "high_band_harshness":
@@ -609,6 +618,25 @@ def _resolve_recommended_reduction_db(region: dict[str, object]) -> float:
         return round(max(float(current_true_peak) - ceiling, 0.5), 3)
     score = float(region.get("score") or 0.0)
     return round(min(max(0.8 + (score * 6.0), 1.0), 4.0), 3)
+
+
+def _build_master_limiter_action(
+    region: dict[str, object],
+    *,
+    source_action_type: str | None = None,
+) -> dict[str, object]:
+    action: dict[str, object] = {
+        "type": "apply_master_limiter",
+        "targetScope": "MASTER",
+        "estimatedGainReductionDb": _resolve_recommended_reduction_db(region),
+        "currentTruePeakDbtp": region.get("current_true_peak_dbtp"),
+        "targetCeilingDbtp": region.get("target_ceiling_dbtp") or -1.0,
+    }
+    if region.get("track_id") is not None:
+        action["sourceTrackId"] = region.get("track_id")
+    if source_action_type:
+        action["sourceActionType"] = source_action_type
+    return action
 
 
 def _build_region_action(

@@ -5,6 +5,7 @@ import { Check, KeyRound, X } from 'lucide-vue-next'
 import { Button } from '@/shared/ui/button'
 import { acceptProjectInviteCode } from '@/pages/Project/api/project.api'
 import type { AcceptInviteCodeResponse, ProjectId } from '@/pages/Project/types/project.types'
+import { trackEvent } from '@/shared/utils/analytics'
 
 const router = useRouter()
 const isInputMode = ref(false)
@@ -42,6 +43,8 @@ async function confirmInviteCode() {
     return
   }
 
+  trackEvent('invite_code_submitted')
+
   isLoading.value = true
 
   try {
@@ -52,10 +55,18 @@ async function confirmInviteCode() {
       throw new Error('참여할 프로젝트 정보를 찾을 수 없습니다.')
     }
 
+    trackEvent('invite_code_joined', {
+      project_id: projectId,
+    })
+
     resetState()
     await router.push(`/project/${projectId}`)
   }
   catch (error) {
+
+    trackEvent('invite_code_failed', {
+      reason: 'invalid_or_expired',
+    })
     errorMessage.value = error instanceof Error
       ? error.message
       : '초대코드 확인 중 오류가 발생했습니다.'

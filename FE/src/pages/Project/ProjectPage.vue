@@ -27,6 +27,7 @@ import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
 import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
 import DefaultTrackDropGuide from '@/pages/Project/components/DefaultTrackDropGuide.vue'
+import { trackEvent } from '@/shared/utils/analytics'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | null
 
@@ -320,7 +321,12 @@ onMounted(async () => {
 
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
+    const numericProjectId = Number(projectId)
     await trackStore.fetchProject(Number(projectId))
+
+    trackEvent('project_opened', {
+    project_id: numericProjectId,
+  })
 
     syncProjectNameFromStore()
     registerProjectSocketHandlers()
@@ -617,6 +623,12 @@ function handleSubmitInlineComment(payload: {
     location: payload.measure,
     mentionedUserIds: [],
   })
+
+  trackEvent('comment_created', {
+    project_id: Number(projectId),
+    track_id: trackId,
+    comment_length: trimmed.length,
+  })
 }
 
 function handlePanelResolveComment(commentId: number) {
@@ -725,16 +737,31 @@ function handleActionUpload() {
   }
 }
 
-function handleToolbarFileUpload(event: Event) {
-  const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
-  if (!file) return;
+async function handleToolbarFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
 
-  if (trackStore.selectedTrackId) {
-    trackStore.uploadAndAddAudioClip(file, trackStore.selectedTrackId, trackStore.playheadPosition);
+  const selectedTrackId = trackStore.selectedTrackId
+  if (!selectedTrackId) return
+
+  try {
+    await trackStore.uploadAndAddAudioClip(
+      file,
+      selectedTrackId,
+      trackStore.playheadPosition,
+    )
+
+    trackEvent('audio_uploaded', {
+      project_id: Number(projectId),
+      track_id: selectedTrackId,
+      file_type: file.type,
+      file_size_mb: Number((file.size / 1024 / 1024).toFixed(1)),
+    })
   }
-
-  target.value = '';
+  finally {
+    target.value = ''
+  }
 }
 
 function handleActionPaste() {
@@ -1031,6 +1058,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <!-- 재생 컨트롤러 컴포넌트 추가 -->
     <PlayController
       :ai-analyzing="aiAnalyzing"
+      :project-id="Number(projectId)"
       @run-ai-analysis="runAiAnalysis"
       @action-upload="handleActionUpload"
       @action-copy="handleActionCopy"

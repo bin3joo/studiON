@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Check, Copy, KeyRound, RefreshCw, X } from 'lucide-vue-next'
 import { createProjectInviteCode } from '@/pages/Project/api/project.api'
+import { trackEvent } from '@/shared/utils/analytics'
 
 interface Props {
   open: boolean
@@ -71,6 +72,10 @@ async function generateInviteCode() {
     }
 
     inviteCode.value = nextInviteCode
+
+    trackEvent('invite_code_created', {
+      project_id: projectId,
+    })
   }
   catch (error) {
     errorMessage.value = error instanceof Error

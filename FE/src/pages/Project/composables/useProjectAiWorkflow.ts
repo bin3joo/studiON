@@ -17,6 +17,7 @@ import {
   getMasterLimiter,
   saveMasterLimiterDraft,
 } from '../api/projectLimiter.api'
+import { trackEvent } from '@/shared/utils/analytics'
 
 const TIMELINE_TRACK_HEADER_WIDTH = 266
 
@@ -800,8 +801,18 @@ activeAiAnalysisIndex.value = 0
 syncSelectedRegionIdFromActiveItem()
 applyActiveAiAnalysisSelection()
 syncAiPreviewBandsFromActiveItem()
+
+trackEvent('ai_analysis_completed', {
+      project_id: projectId,
+      issue_count: aiAnalysisItems.value.length,
+    })
   } catch (error) {
    // console.error(error)
+
+   trackEvent('ai_analysis_failed', {
+    project_id: projectId,
+    reason: 'server_error',
+  })
 
     if (
       error instanceof Error &&

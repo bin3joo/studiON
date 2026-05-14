@@ -856,11 +856,6 @@ const onWorkAreaMouseLeave = () => {
       track.clips.some(c => c.isDragging) ? 'relative z-50' :
       (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
     ]"
-    :style="{
-      contentVisibility: (track.clips.some(c => c.isDragging) || isCommentExpanded) ? 'visible' : 'auto',
-      containIntrinsicSize: '100px',
-      contain: (track.clips.some(c => c.isDragging) || isCommentExpanded) ? 'none' : 'layout paint style'
-    }"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
@@ -1121,7 +1116,7 @@ const onWorkAreaMouseLeave = () => {
           class="clip-container absolute inset-y-1 z-10 rounded-md"
           :class="[
             isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
-            clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl z-50!' : '',
+            clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl !z-50' : '',
             clip.isSelected && !clip.isDragging && !isMaster ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
           ]"
           :style="{ 

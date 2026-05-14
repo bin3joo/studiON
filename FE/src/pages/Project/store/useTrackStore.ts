@@ -65,7 +65,7 @@ export const useTrackStore = defineStore('track', () => {
             const arrayBuffer = await response.arrayBuffer();
             const audioCtx = Tone.getContext().rawContext as AudioContext;
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
+
             // [최적화] Web Audio API 버퍼 할당 병목(JIT Compile Freeze) 사전 제거
             // 거대한 AudioBuffer가 처음 할당될 때 브라우저가 멈추는 현상을 막기 위해
             // 오디오 다운로드 직후 백그라운드에서 한 번 빈 재생을 강제하여 캐싱을 유도합니다.
@@ -76,20 +76,20 @@ export const useTrackStore = defineStore('track', () => {
                 dummyGain.gain.value = 0; // 무음 처리
                 warmupSource.connect(dummyGain);
                 dummyGain.connect(audioCtx.destination);
-                
+
                 warmupSource.start(0, 0, 0.001);
-                
+
                 // 웜업 노드가 JIT 컴파일을 충분히 완료할 수 있도록 메모리 해제를 늦춥니다
                 setTimeout(() => {
                     try {
                         warmupSource.disconnect();
                         dummyGain.disconnect();
-                    } catch(e) { /* ignore */ }
+                    } catch (e) { /* ignore */ }
                 }, 5000);
             } catch (e) {
                 // 무시
             }
-            
+
             audioBufferCache.set(url, audioBuffer);
             audioBufferPending.delete(url);
             return audioBuffer;
@@ -168,9 +168,9 @@ export const useTrackStore = defineStore('track', () => {
     })
 
     type SelectedTarget =
-    | { type: 'TRACK'; trackId: number }
-    | { type: 'MASTER' }
-    | null
+        | { type: 'TRACK'; trackId: number }
+        | { type: 'MASTER' }
+        | null
     const selectedTarget = ref<SelectedTarget>(null)
     // 현재 선택된 클립과 해당 트랙 ID
     const selectedClip = ref<ClipUIState | null>(null);
@@ -178,83 +178,83 @@ export const useTrackStore = defineStore('track', () => {
 
 
     function selectMasterTrack() {
-    if (selectedClip.value) {
-        selectedClip.value.isSelected = false
-        selectedClip.value = null
+        if (selectedClip.value) {
+            selectedClip.value.isSelected = false
+            selectedClip.value = null
+        }
+
+        selectedTrackId.value = null
+        selectedTarget.value = {
+            type: 'MASTER',
+        }
+
+        trackList.value.forEach(t => {
+            t.isSelected = false
+        })
+
+        masterTrack.value.isSelected = true
     }
-
-    selectedTrackId.value = null
-    selectedTarget.value = {
-        type: 'MASTER',
-    }
-
-    trackList.value.forEach(t => {
-        t.isSelected = false
-    })
-
-    masterTrack.value.isSelected = true
-}
 
     // 클립 선택 함수
     const selectClip = (clip: ClipUIState, trackId: number) => {
-    if (selectedClip.value) {
-        selectedClip.value.isSelected = false
+        if (selectedClip.value) {
+            selectedClip.value.isSelected = false
+        }
+
+        clip.isSelected = true
+        selectedClip.value = clip
+        selectedTrackId.value = trackId
+        selectedTarget.value = {
+            type: 'TRACK',
+            trackId,
+        }
+
+        trackList.value.forEach(t => {
+            t.isSelected = false
+        })
+
+        masterTrack.value.isSelected = false
     }
-
-    clip.isSelected = true
-    selectedClip.value = clip
-    selectedTrackId.value = trackId
-    selectedTarget.value = {
-        type: 'TRACK',
-        trackId,
-    }
-
-    trackList.value.forEach(t => {
-        t.isSelected = false
-    })
-
-    masterTrack.value.isSelected = false
-}
 
     // 트랙 선택 함수 (클립 선택은 해제됨)
     const selectTrack = (trackId: number) => {
-    if (trackId === 999999) {
-        selectMasterTrack()
-        return
+        if (trackId === 999999) {
+            selectMasterTrack()
+            return
+        }
+
+        if (selectedClip.value) {
+            selectedClip.value.isSelected = false
+            selectedClip.value = null
+        }
+
+        selectedTrackId.value = trackId
+        selectedTarget.value = {
+            type: 'TRACK',
+            trackId,
+        }
+
+        trackList.value.forEach(t => {
+            t.isSelected = t.trackId === trackId
+        })
+
+        masterTrack.value.isSelected = false
     }
-
-    if (selectedClip.value) {
-        selectedClip.value.isSelected = false
-        selectedClip.value = null
-    }
-
-    selectedTrackId.value = trackId
-    selectedTarget.value = {
-        type: 'TRACK',
-        trackId,
-    }
-
-    trackList.value.forEach(t => {
-        t.isSelected = t.trackId === trackId
-    })
-
-    masterTrack.value.isSelected = false
-}
 
     //  빈 공간 클릭 시 선택 해제 함수
     const deselectAll = () => {
-    if (selectedClip.value) selectedClip.value.isSelected = false
+        if (selectedClip.value) selectedClip.value.isSelected = false
 
-    selectedClip.value = null
-    selectedTrackId.value = null
-    selectedTarget.value = null
+        selectedClip.value = null
+        selectedTrackId.value = null
+        selectedTarget.value = null
 
-    trackList.value.forEach(t => {
-        t.isSelected = false
-    })
+        trackList.value.forEach(t => {
+            t.isSelected = false
+        })
 
-    masterTrack.value.isSelected = false
-}
+        masterTrack.value.isSelected = false
+    }
     //1마디당 걸리는 시간 계산
     const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
@@ -691,51 +691,51 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     socketService.subscribePersistent('CLIP_MOVE', (data) => {
-    let targetClip: ClipUIState | null = null;
-    let sourceTrack: TrackUIState | null = null;
+        let targetClip: ClipUIState | null = null;
+        let sourceTrack: TrackUIState | null = null;
 
-    for (const track of trackList.value) {
-        const clip = track.clips.find(c => c.clipId === data.clipId);
-        if (clip) {
-            targetClip = clip;
-            sourceTrack = track;
-            break;
-        }
-    }
-
-    if (!targetClip || !sourceTrack) return;
-
-    if (
-        targetClip.start === data.after.startBar &&
-        sourceTrack.trackId === data.after.trackId
-    ) {
-        return;
-    }
-
-    if (sourceTrack.trackId !== data.after.trackId) {
-        const targetTrack = trackList.value.find(t => t.trackId === data.after.trackId);
-        if (!targetTrack) return;
-
-        const clipIndex = sourceTrack.clips.findIndex(c => c.clipId === data.clipId);
-        if (clipIndex !== -1) {
-            sourceTrack.clips.splice(clipIndex, 1);
+        for (const track of trackList.value) {
+            const clip = track.clips.find(c => c.clipId === data.clipId);
+            if (clip) {
+                targetClip = clip;
+                sourceTrack = track;
+                break;
+            }
         }
 
-        targetTrack.clips.push(targetClip);
+        if (!targetClip || !sourceTrack) return;
 
-        const player = clipPlayers.get(data.clipId);
-
-        if (player) {
-            connectPlayerToTrack(
-                player,
-                data.after.trackId,
-            );
+        if (
+            targetClip.start === data.after.startBar &&
+            sourceTrack.trackId === data.after.trackId
+        ) {
+            return;
         }
-    }
 
-    targetClip.start = data.after.startBar;
-    resyncClip(targetClip.clipId, targetClip.start);
-});
+        if (sourceTrack.trackId !== data.after.trackId) {
+            const targetTrack = trackList.value.find(t => t.trackId === data.after.trackId);
+            if (!targetTrack) return;
+
+            const clipIndex = sourceTrack.clips.findIndex(c => c.clipId === data.clipId);
+            if (clipIndex !== -1) {
+                sourceTrack.clips.splice(clipIndex, 1);
+            }
+
+            targetTrack.clips.push(targetClip);
+
+            const player = clipPlayers.get(data.clipId);
+
+            if (player) {
+                connectPlayerToTrack(
+                    player,
+                    data.after.trackId,
+                );
+            }
+        }
+
+        targetClip.start = data.after.startBar;
+        resyncClip(targetClip.clipId, targetClip.start);
+    });
 
     socketService.subscribePersistent('CLIP_RESIZE', (data) => {
         for (const t of trackList.value) {
@@ -947,7 +947,7 @@ export const useTrackStore = defineStore('track', () => {
         pendingSplitOriginalClipIds.delete(data.clipId);
 
         if (!originalClip || !targetTrack) return;
-        
+
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
         const wasPlaying = isPlaying.value;
         let pausedAtSeconds = 0;
@@ -1197,7 +1197,7 @@ export const useTrackStore = defineStore('track', () => {
             console.warn("분할 요청이 너무 빠릅니다. (연속 입력 방지)");
             return;
         }
-        
+
         if (pendingSplitOriginalClipIds.has(clipId)) {
             console.warn("이전 분할 요청이 처리 중입니다. (네트워크 대기)");
             return;
@@ -1585,7 +1585,7 @@ export const useTrackStore = defineStore('track', () => {
         if (!isPlaying.value) {
             const px = newBar * pixelPerBar.value;
             document.documentElement.style.setProperty('--playhead-px', `${px}px`);
-            
+
             // updatePlayheadLoop나 stopPlay에서 인라인 transform을 덮어씌웠기 때문에
             // 여기서도 직접 .playhead-line의 transform을 갱신해 주어야 합니다.
             const playheadEls = document.querySelectorAll('.playhead-line') as NodeListOf<HTMLElement>;
@@ -1651,7 +1651,7 @@ export const useTrackStore = defineStore('track', () => {
         // 프레임 드랍 감지 (30ms 이상 지연되면 멈칫거림으로 간주)
         if (timeSinceLastFrame > 30 && loopFrameCount > 10) {
             console.warn(`🚨 [프레임 드랍 감지] 루프 지연 시간: ${timeSinceLastFrame.toFixed(2)}ms`);
-            
+
             // Long Task API를 통해 직전에 메인 스레드를 막은 원인을 분석
             if (longTasks.length > 0) {
                 const lastTask = longTasks[longTasks.length - 1];
@@ -1659,7 +1659,7 @@ export const useTrackStore = defineStore('track', () => {
 - 소요 시간: ${lastTask.duration.toFixed(2)}ms
 - 원인(name): ${lastTask.name}
 - 발생 시점: ${lastTask.startTime.toFixed(2)}
-- 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a:any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
+- 기여 요인:`, lastTask.attribution ? lastTask.attribution.map((a: any) => a.name + ' (' + a.containerType + ')').join(', ') : '없음');
             }
         }
 
@@ -1672,7 +1672,7 @@ export const useTrackStore = defineStore('track', () => {
         for (let i = 0; i < playheadEls.length; i++) {
             playheadEls[i].style.transform = `translate3d(calc(${px}px - 50%), 0, 0)`;
         }
-        
+
         const clipEls = document.getElementsByClassName('clip-container') as HTMLCollectionOf<HTMLElement>;
         for (let i = 0; i < clipEls.length; i++) {
             clipEls[i].style.setProperty('--playhead-px', `${px}px`);
@@ -1681,7 +1681,7 @@ export const useTrackStore = defineStore('track', () => {
         // 1-1. 스크롤 위치 계산만 수행 (DOM 쓰기는 scrollAnimationLoop에서 분리 처리)
         if (cachedClientWidth > 0) {
             const relativeX = px - cachedScrollLeft;
-            const threshold = cachedClientWidth * 0.5;
+            const threshold = cachedClientWidth * 0.7;
             if (relativeX > threshold) {
                 const targetScrollLeft = px - threshold;
                 const lerpFactor = 0.12;
@@ -1700,12 +1700,12 @@ export const useTrackStore = defineStore('track', () => {
             const barTextEl = document.getElementById('playhead-bar-text');
             const beatTextEl = document.getElementById('playhead-beat-text');
             const displayEl = document.getElementById('playhead-position-display');
-            
+
             if (barTextEl && beatTextEl && projectInfo.value) {
                 const numerator = projectInfo.value.timeSigNumerator || 4;
-                const bar = Math.floor(currentPositionBar) + 1; 
+                const bar = Math.floor(currentPositionBar) + 1;
                 const beat = Math.floor((currentPositionBar % 1) * numerator) + 1;
-                
+
                 barTextEl.textContent = String(bar).padStart(2, '0');
                 beatTextEl.textContent = String(beat);
 
@@ -1771,22 +1771,22 @@ export const useTrackStore = defineStore('track', () => {
         console.log("========== [Audio Engine Setup Start] ==========");
 
         for (const track of tracks) {
-    if (!trackVolumes.has(track.trackId)) {
-        const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
-        const vol = new Tone.Volume(track.volume).connect(panner);
+            if (!trackVolumes.has(track.trackId)) {
+                const panner = new Tone.Panner(track.pan / 100).connect(masterVolume);
+                const vol = new Tone.Volume(track.volume).connect(panner);
 
-        panner.channelCount = 2;
-        panner.channelCountMode = "explicit";
-        vol.channelCount = 2;
-        vol.channelCountMode = "explicit";
+                panner.channelCount = 2;
+                panner.channelCountMode = "explicit";
+                vol.channelCount = 2;
+                vol.channelCountMode = "explicit";
 
-        trackVolumes.set(track.trackId, vol);
-        trackPanners.set(track.trackId, panner);
-        console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
-    }
+                trackVolumes.set(track.trackId, vol);
+                trackPanners.set(track.trackId, panner);
+                console.log(`[Setup] 트랙 ${track.trackId} ('${track.name}') 믹서 노드 생성 완료. vol:`, vol, "panner:", panner);
+            }
 
-    rebuildTrackEqChain(track.trackId);
-}
+            rebuildTrackEqChain(track.trackId);
+        }
 
         for (const track of tracks) {
             const vol = trackVolumes.get(track.trackId);
@@ -1796,12 +1796,12 @@ export const useTrackStore = defineStore('track', () => {
                 if (!clip.audio?.cdnUrl) {
                     console.warn(`[Setup ⚠️] 클립 ${clip.clipId}에 오디오 URL이 없어 로딩 건너뜀.`);
                     continue;
-                } 
+                }
                 console.log(`[Setup] 클립 ${clip.clipId} 오디오 로딩 시도 중...`);
                 try {
                     // [최적화] 캐시에서 AudioBuffer를 가져오거나 한 번만 fetch+decode
                     const audioBuffer = await fetchAndCacheAudioBuffer(clip.audio.cdnUrl);
-                    
+
                     // 버퍼를 사용해 Player 생성 (네트워크 다운로드 X)
                     const player = new Tone.Player(audioBuffer);
 
@@ -1899,130 +1899,130 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     const addTrackEqBand = (
-    trackId: number,
-    payload: {
-        frequencyHz: number
-        gainDeltaDb: number
-    },
-) => {
-    const track = trackList.value.find(track => track.trackId === trackId)
-    if (!track) return
+        trackId: number,
+        payload: {
+            frequencyHz: number
+            gainDeltaDb: number
+        },
+    ) => {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track) return
 
-    const currentBands = track.eq?.bands ?? []
+        const currentBands = track.eq?.bands ?? []
 
-    if (currentBands.length >= MAX_EQ_BANDS) {
-        console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
-        return
-    }
-
-    const nextBandOrder =
-        currentBands.length > 0
-            ? Math.max(...currentBands.map(band => band.bandOrder)) + 1
-            : 1
-
-    const nextBand: TrackEqBandState = {
-        bandOrder: nextBandOrder,
-        eqTypeCode: 1,
-        frequencyHz: clampFrequency(payload.frequencyHz),
-        q: 1,
-        gainDeltaDb: clampGain(payload.gainDeltaDb),
-        sourceTypeCode: 2,
-        jobId: null,
-        suggestionActionId: null,
-        appliedSuggestionId: null,
-    }
-
-    track.eq = {
-        bands: [
-            ...currentBands,
-            nextBand,
-        ],
-    }
-
-    rebuildTrackEqChain(trackId)
-}
-
-const updateTrackEqBand = (
-    trackId: number,
-    bandOrder: number,
-    patch: Partial<TrackEqBandState>,
-) => {
-    const track = trackList.value.find(track => track.trackId === trackId)
-    if (!track?.eq) return
-
-    const nextBands = track.eq.bands.map((band): TrackEqBandState => {
-        if (band.bandOrder !== bandOrder) return band
-
-        return {
-            ...band,
-            ...patch,
-            frequencyHz: patch.frequencyHz !== undefined
-                ? clampFrequency(patch.frequencyHz)
-                : band.frequencyHz,
-            gainDeltaDb: patch.gainDeltaDb !== undefined
-                ? clampGain(patch.gainDeltaDb)
-                : band.gainDeltaDb,
-            q: patch.q !== undefined
-                ? clampQ(patch.q)
-                : band.q,
+        if (currentBands.length >= MAX_EQ_BANDS) {
+            console.warn('EQ 밴드는 최대 5개까지만 추가할 수 있습니다.')
+            return
         }
-    })
 
-    const updatedBand = nextBands.find(band => band.bandOrder === bandOrder)
+        const nextBandOrder =
+            currentBands.length > 0
+                ? Math.max(...currentBands.map(band => band.bandOrder)) + 1
+                : 1
 
-    if (!updatedBand) return
+        const nextBand: TrackEqBandState = {
+            bandOrder: nextBandOrder,
+            eqTypeCode: 1,
+            frequencyHz: clampFrequency(payload.frequencyHz),
+            q: 1,
+            gainDeltaDb: clampGain(payload.gainDeltaDb),
+            sourceTypeCode: 2,
+            jobId: null,
+            suggestionActionId: null,
+            appliedSuggestionId: null,
+        }
 
-    track.eq = {
-        bands: nextBands,
-    }
+        track.eq = {
+            bands: [
+                ...currentBands,
+                nextBand,
+            ],
+        }
 
-    const nodes = trackEqNodes.get(trackId)
-    const targetNode = nodes?.find(node => node.bandOrder === bandOrder)
-
-    if (targetNode) {
-        targetNode.filter.frequency.rampTo(updatedBand.frequencyHz, 0.03)
-        targetNode.filter.gain.rampTo(updatedBand.gainDeltaDb, 0.03)
-        targetNode.filter.Q.value = updatedBand.q
-    }
-    else {
         rebuildTrackEqChain(trackId)
     }
-}
 
-const removeTrackEqBand = (
-    trackId: number,
-    bandOrder: number,
-) => {
-    const track = trackList.value.find(track => track.trackId === trackId)
-    if (!track?.eq) return
+    const updateTrackEqBand = (
+        trackId: number,
+        bandOrder: number,
+        patch: Partial<TrackEqBandState>,
+    ) => {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track?.eq) return
 
-    const nextBands = track.eq.bands
-        .filter(band => band.bandOrder !== bandOrder)
-        .map((band, index) => ({
-            ...band,
-            bandOrder: index + 1,
-        }))
+        const nextBands = track.eq.bands.map((band): TrackEqBandState => {
+            if (band.bandOrder !== bandOrder) return band
 
-    track.eq = {
-        bands: nextBands,
+            return {
+                ...band,
+                ...patch,
+                frequencyHz: patch.frequencyHz !== undefined
+                    ? clampFrequency(patch.frequencyHz)
+                    : band.frequencyHz,
+                gainDeltaDb: patch.gainDeltaDb !== undefined
+                    ? clampGain(patch.gainDeltaDb)
+                    : band.gainDeltaDb,
+                q: patch.q !== undefined
+                    ? clampQ(patch.q)
+                    : band.q,
+            }
+        })
+
+        const updatedBand = nextBands.find(band => band.bandOrder === bandOrder)
+
+        if (!updatedBand) return
+
+        track.eq = {
+            bands: nextBands,
+        }
+
+        const nodes = trackEqNodes.get(trackId)
+        const targetNode = nodes?.find(node => node.bandOrder === bandOrder)
+
+        if (targetNode) {
+            targetNode.filter.frequency.rampTo(updatedBand.frequencyHz, 0.03)
+            targetNode.filter.gain.rampTo(updatedBand.gainDeltaDb, 0.03)
+            targetNode.filter.Q.value = updatedBand.q
+        }
+        else {
+            rebuildTrackEqChain(trackId)
+        }
     }
 
-    rebuildTrackEqChain(trackId)
-}
+    const removeTrackEqBand = (
+        trackId: number,
+        bandOrder: number,
+    ) => {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track?.eq) return
 
-const getTrackSpectrum = (trackId: number): number[] => {
-    const analyzer = trackAnalyzers.get(trackId)
+        const nextBands = track.eq.bands
+            .filter(band => band.bandOrder !== bandOrder)
+            .map((band, index) => ({
+                ...band,
+                bandOrder: index + 1,
+            }))
 
-    if (!analyzer) return []
+        track.eq = {
+            bands: nextBands,
+        }
 
-    const values = analyzer.getValue()
+        rebuildTrackEqChain(trackId)
+    }
 
-    return Array.from(values).map(value => {
-        if (typeof value !== 'number') return -100
-        if (!Number.isFinite(value)) return -100
-        return value
-    })
-}
+    const getTrackSpectrum = (trackId: number): number[] => {
+        const analyzer = trackAnalyzers.get(trackId)
+
+        if (!analyzer) return []
+
+        const values = analyzer.getValue()
+
+        return Array.from(values).map(value => {
+            if (typeof value !== 'number') return -100
+            if (!Number.isFinite(value)) return -100
+            return value
+        })
+    }
 
     // 비동기 함수를 선언 ref 반응형
     const fetchProject = async (projectId: number) => {

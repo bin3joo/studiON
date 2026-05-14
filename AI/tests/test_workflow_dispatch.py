@@ -1645,6 +1645,11 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
             "plan_payload": {"summary": "summary"},
             "suggestion_payload": {"suggestions": [{"rank": 1, "actions": []}]},
             "plan_revision_notes": ["validator note"],
+            "track_frames": {1: [{"start_ms": 0, "end_ms": 96, "window_energy": 0.2}]},
+            "mix_frames": [{"start_ms": 0, "end_ms": 96, "clip_ratio": 0.01}],
+            "track_power_spectra": {1: [[0.1, 0.2, 0.3]]},
+            "mix_power_spectra": [[0.2, 0.3, 0.4]],
+            "frequency_bins_hz": [100.0, 200.0, 300.0],
         }
     )
 
@@ -1652,12 +1657,22 @@ def test_job_record_spills_large_state_into_artifact_store() -> None:
 
     assert "analysis_regions" not in record.state_snapshot
     assert "plan_payload" not in record.state_snapshot
+    assert "track_frames" not in record.state_snapshot
+    assert "mix_frames" not in record.state_snapshot
+    assert "track_power_spectra" not in record.state_snapshot
+    assert "mix_power_spectra" not in record.state_snapshot
+    assert "frequency_bins_hz" not in record.state_snapshot
     assert record.state_artifact_id == "20014:durable-state"
 
     artifact = get_workflow_artifact_store().get_artifact(record.state_artifact_id)
     assert artifact is not None
     assert artifact.payload["state_fields"]["analysis_regions"][0]["id"] == 1
     assert artifact.payload["state_fields"]["plan_revision_notes"] == ["validator note"]
+    assert "track_frames" not in artifact.payload["state_fields"]
+    assert "mix_frames" not in artifact.payload["state_fields"]
+    assert "track_power_spectra" not in artifact.payload["state_fields"]
+    assert "mix_power_spectra" not in artifact.payload["state_fields"]
+    assert "frequency_bins_hz" not in artifact.payload["state_fields"]
 
     restored = _row_to_record(
         {

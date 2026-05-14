@@ -6,6 +6,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from typing_extensions import TypedDict
 
+RAW_DSP_STATE_DEFAULTS = {
+    "track_frames": {},
+    "mix_frames": [],
+    "track_power_spectra": {},
+    "mix_power_spectra": [],
+    "frequency_bins_hz": [],
+}
+
 IssueType = Literal[
     "band_overlap",
     "track_clipping",
@@ -89,6 +97,11 @@ class WorkflowState(TypedDict, total=False):
     user_feedback_recorded_at: str | None
     clip_feature_artifact_id: str | None
     dsp_scan_summary: dict[str, object]
+    track_frames: dict[int, list[dict[str, object]]]
+    mix_frames: list[dict[str, object]]
+    track_power_spectra: dict[int, list[list[float]]]
+    mix_power_spectra: list[list[float]]
+    frequency_bins_hz: list[float]
     vocal_detected: bool
     clap_required: bool
     clap_artifact_id: str | None
@@ -206,6 +219,7 @@ def build_workflow_initial_state(
         "user_feedback_recorded_at": None,
         "clip_feature_artifact_id": None,
         "dsp_scan_summary": {},
+        **RAW_DSP_STATE_DEFAULTS,
         "vocal_detected": False,
         "clap_required": False,
         "clap_artifact_id": None,

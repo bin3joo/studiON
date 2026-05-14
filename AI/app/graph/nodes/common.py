@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from app.graph.state import WorkflowState, utc_now
+from copy import deepcopy
+
+from app.graph.state import RAW_DSP_STATE_DEFAULTS, WorkflowState, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,12 @@ def build_action(
         "targetScope": target_scope,
         "actionId": f"{state['job_id']}-action-{index}",
     }
+
+
+def clear_raw_dsp_state() -> dict[str, object]:
+    payload = {key: deepcopy(value) for key, value in RAW_DSP_STATE_DEFAULTS.items()}
+    payload["clip_feature_artifact_id"] = None
+    return payload
 
 
 def _log_workflow_update(previous: WorkflowState, current: WorkflowState) -> None:

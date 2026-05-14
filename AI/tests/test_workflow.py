@@ -1724,7 +1724,19 @@ def test_workflow_uses_full_stft_summary_when_audio_paths_exist(tmp_path) -> Non
 
     assert result["dsp_scan_summary"]["analysis_source"] == "full_stft"
     assert result["dsp_scan_summary"]["track_windows_preview"]["10"][0]["spectral_centroid_hz"] > 0
-    assert result["clip_feature_artifact_id"] is not None
+    assert result["clip_feature_artifact_id"] is None
+    assert result["track_frames"] == {}
+    assert result["mix_frames"] == []
+    assert result["track_power_spectra"] == {}
+    assert result["mix_power_spectra"] == []
+    assert result["frequency_bins_hz"] == []
+    assert all(
+        (
+            artifact := get_workflow_artifact_store().get_artifact(artifact_id)
+        ) is None
+        or artifact.artifact_type != "full_stft_frame_summary"
+        for artifact_id in result["mongo_artifact_ids"]
+    )
     assert result["sampled_clip_ids"] == [_clip_id(10, 1), _clip_id(20, 1)]
     assert result["track_representative_specs"] == [
         {
@@ -1817,38 +1829,26 @@ def test_select_role_candidates_uses_high_band_issue_tracks() -> None:
 
 
 def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() -> None:
-    artifact_store = get_workflow_artifact_store()
-    artifact_store.reset()
-    artifact_store.upsert_artifact(
-        WorkflowArtifactDocument(
-            id="artifact-role-candidates",
-            job_id=10012,
-            artifact_type="full_stft_frame_summary",
-            payload={
-                "track_frames": {
-                    "2": [
-                        {
-                            "high_band_ratio": 0.36,
-                            "presence_energy": 0.08,
-                            "spectral_centroid_hz": 3600,
-                        }
-                    ],
-                    "7": [
-                        {
-                            "high_band_ratio": 0.2,
-                            "presence_energy": 0.04,
-                            "spectral_centroid_hz": 2500,
-                        }
-                    ],
-                }
-            },
-        )
-    )
     state = build_workflow_initial_state(
         job_id=10012,
         project_id=20012,
         issue_types=["sibilance"],
-        clip_feature_artifact_id="artifact-role-candidates",
+        track_frames={
+            2: [
+                {
+                    "high_band_ratio": 0.36,
+                    "presence_energy": 0.08,
+                    "spectral_centroid_hz": 3600,
+                }
+            ],
+            7: [
+                {
+                    "high_band_ratio": 0.2,
+                    "presence_energy": 0.04,
+                    "spectral_centroid_hz": 2500,
+                }
+            ],
+        },
     )
 
     result = analysis_nodes.select_role_candidates(state)

@@ -195,21 +195,48 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
     </div>
 
     <div class="flex items-center gap-2">
-      <button 
-  type="button"
-  aria-label="AI 믹스 분석 실행"
-  :disabled="props.aiAnalyzing"
-  class="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-transparent px-3.5 text-[10px] font-medium uppercase tracking-[0.2em] text-white transition hover:border-white/30 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
-  data-guide="ai-analysis"
-  @click="emit('run-ai-analysis')"
->
-  <Sparkles
-    class="h-3.5 w-3.5"
-    :class="props.aiAnalyzing ? 'animate-pulse' : ''"
-    aria-hidden="true"
-  />
-  <span>{{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}</span>
-</button>
+  <button
+    type="button"
+    aria-label="AI 믹스 분석 실행"
+    :disabled="props.aiAnalyzing"
+    data-guide="ai-analysis"
+    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full p-[1px] transition-all duration-300 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
+    @click="emit('run-ai-analysis')"
+  >
+    <!-- gradient border -->
+    <span
+      class="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#8B5CF6,#3B82F6,#06B6D4,#22C55E,#F59E0B,#EC4899)] opacity-80 transition duration-300 group-hover:opacity-100 group-hover:blur-[0.5px]"
+    />
+
+    <!-- hover glow -->
+    <span
+      class="absolute -inset-3 rounded-full bg-[radial-gradient(circle,#8B5CF655,transparent_62%)] opacity-0 blur-xl transition duration-300 group-hover:opacity-100"
+    />
+
+    <!-- inner button -->
+    <span
+      class="relative z-10 inline-flex h-full items-center gap-2 rounded-full bg-[#171717]/95 px-4 text-[11px] font-semibold tracking-[0.18em] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] transition duration-300 group-hover:bg-[#202020]/95"
+    >
+      <span
+        class="grid h-5 w-5 place-items-center rounded-full bg-[conic-gradient(from_180deg,#8B5CF6,#38BDF8,#22C55E,#F59E0B,#EC4899,#8B5CF6)]"
+      >
+        <span class="absolute h-4 w-4 rounded-full bg-[#171717]" />
+
+        <Sparkles
+          class="relative z-10 h-3 w-3 text-white"
+          :class="props.aiAnalyzing ? 'animate-pulse' : ''"
+          aria-hidden="true"
+        />
+      </span>
+
+      <span
+        class="bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent"
+      >
+        {{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}
+      </span>
+    </span>
+  </button>
+
 
       <div 
         :aria-label="`현재 템포: ${trackStore.projectInfo.tempo.toFixed(2)} BPM`"

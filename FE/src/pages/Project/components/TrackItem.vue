@@ -1223,6 +1223,7 @@ const onWorkAreaMouseLeave = () => {
         </div>
 
     <TrackCommentLayer
+      v-if="!isMaster"
   :track-id="String(track.trackId)"
   :track-name="track.name"
   :total-bar-count="trackStore.projectInfo.totalBarCount"

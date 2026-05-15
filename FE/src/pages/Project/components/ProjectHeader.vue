@@ -197,9 +197,9 @@ const projectLengthFormatted = computed(() => {
 
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
         data-guide="version-save" 
-        disabled
+        @click="emit('save-version')"
       >
         <Camera class="h-4 w-4" />
         <span>버전 저장</span>

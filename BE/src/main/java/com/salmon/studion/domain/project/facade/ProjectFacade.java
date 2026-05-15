@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.project.facade;
 
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
+import com.salmon.studion.domain.audio.service.AudioService;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.clip.entity.Clip;
@@ -45,6 +46,7 @@ public class ProjectFacade {
     private final TrackService trackService;
     private final ClipService clipService;
     private final CommentFacade commentFacade;
+    private final AudioService audioService;
     private final CdnUrlService cdnUrlService;
 
     @Transactional(readOnly = true)
@@ -73,7 +75,9 @@ public class ProjectFacade {
         List<CommentsGetResponse.CommentDto> comments =
                 commentFacade.getCommentsForProjectDetail(projectId, userId);
 
-        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments);
+        long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
+
+        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments, currentTotalSizeBytes);
     }
 
     @Transactional(readOnly = true)
@@ -116,7 +120,9 @@ public class ProjectFacade {
                 })
                 .toList();
 
-        return new ProjectListResponse(projectSummaries);
+        long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
+
+        return new ProjectListResponse(projectSummaries, currentTotalSizeBytes);
     }
 
     @Transactional
@@ -179,7 +185,8 @@ public class ProjectFacade {
             MasterTrack masterTrack,
             List<Track> tracks,
             List<Clip> clips,
-            List<CommentsGetResponse.CommentDto> comments
+            List<CommentsGetResponse.CommentDto> comments,
+            Long currentTotalSizeBytes
     ) {
         Map<Integer, List<Clip>> clipsByTrackId = clips.stream()
                 .collect(Collectors.groupingBy(clip -> clip.getTrack().getId()));
@@ -190,7 +197,7 @@ public class ProjectFacade {
                 .map(track -> toTrackResponse(track, clipsByTrackId.getOrDefault(track.getId(), List.of())))
                 .toList();
 
-        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments);
+        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments, currentTotalSizeBytes);
     }
 
     private ProjectDetailResponse.MasterTrackResponse toMasterTrackResponse(MasterTrack masterTrack) {

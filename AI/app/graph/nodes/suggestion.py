@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta
+import json
 
 from app.graph.nodes.common import artifact_id, build_action, workflow_update
 from app.graph.nodes.runtime import fail_workflow
@@ -63,11 +64,26 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             }
         )
 
+    raw_plan_text = llm_response.raw_text or _dump_json_text(llm_response.plan_payload)
     plan_payload = _normalize_plan_payload(
         state,
         region=selected_region,
         preserve_clip_id=int(preserve_clip_id),
         raw_plan_payload=llm_response.plan_payload,
+    )
+    current_artifact_id = artifact_id(state, "planner-output")
+    get_workflow_artifact_store().upsert_artifact(
+        WorkflowArtifactDocument(
+            id=current_artifact_id,
+            job_id=state["job_id"],
+            artifact_type="planner_output",
+            payload={
+                "selectedRegionId": selected_region_id,
+                "preserveClipId": int(preserve_clip_id),
+                "rawText": raw_plan_text,
+                "planPayload": deepcopy(plan_payload),
+            },
+        )
     )
     return workflow_update(
         state,
@@ -76,10 +92,14 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
         progress=74,
         extra={
             "plan_payload": plan_payload,
+            "planner_raw_text": raw_plan_text,
+            "planner_artifact_id": current_artifact_id,
             "plan_status": "DRAFT",
             "validator_result": None,
             "critic_result": None,
             "revise_count": revise_count,
+            "mongo_artifact_ids": [*state.get("mongo_artifact_ids", []), current_artifact_id],
+            "latest_artifact_id": current_artifact_id,
         },
     )
 
@@ -639,6 +659,10 @@ def _merge_issue_payload(
 
 def _issue_id(state: WorkflowState, region_id: int) -> str:
     return f"{state['job_id']}-issue-{region_id}"
+
+
+def _dump_json_text(payload: dict[str, object]) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def _resolve_recommended_reduction_db(region: dict[str, object]) -> float:

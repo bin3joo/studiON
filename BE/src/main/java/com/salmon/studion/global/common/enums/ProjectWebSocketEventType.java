@@ -12,6 +12,15 @@ public enum ProjectWebSocketEventType {
 
     PROJECT_RENAME,         // 프로젝트 이름 수정 요청
     PROJECT_RENAMED,        // 프로젝트 이름 수정 브로드캐스트
+
+    PROJECT_TIME_SIGNATURE,             // 프로젝트 박자 수정 요청
+    MODIFIED_PROJECT_TIME_SIGNATURE,    // 프로젝트 박자 수정 브로드캐스트
+
+    PROJECT_KEY,            // 프로젝트 조성 수정 요청
+    MODIFIED_PROJECT_KEY,   // 프로젝트 조성 수정 브로드캐스트
+
+    PROJECT_BPM,            // 프로젝트 빠르기 수정 요청
+    MODIFIED_PROJECT_BPM,   // 프로젝트 빠르기 수정 브로드캐스트
     ;
 
     public static ProjectWebSocketEventType from(String event) {

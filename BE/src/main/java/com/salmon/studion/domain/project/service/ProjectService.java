@@ -3,6 +3,8 @@ package com.salmon.studion.domain.project.service;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.repository.ProjectRepository;
+import com.salmon.studion.global.common.enums.ProjectMode;
+import com.salmon.studion.global.common.enums.RootNote;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -48,5 +50,29 @@ public class ProjectService {
         project.rename(name);
         Project savedProject = projectRepository.save(project);
         return savedProject.getName();
+    }
+
+    @Transactional
+    public Double changeTempo(Integer projectId, Double tempo) {
+        if (tempo == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Project project = getProjectOrThrow(projectId);
+        project.changeTempo(tempo);
+        return projectRepository.save(project).getTempo();
+    }
+
+    @Transactional
+    public Project changeKey(Integer projectId, RootNote rootNote, ProjectMode mode) {
+        if (rootNote == null || mode == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Project project = getProjectOrThrow(projectId);
+        project.changeKey(rootNote, mode);
+        return projectRepository.save(project);
+    }
+
+    @Transactional
+    public Project changeTimeSignature(Integer projectId, Integer timeSigNumerator, Integer timeSigDenominator) {
+        if (timeSigNumerator == null || timeSigDenominator == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Project project = getProjectOrThrow(projectId);
+        project.changeTimeSignature(timeSigNumerator, timeSigDenominator);
+        return projectRepository.save(project);
     }
 }

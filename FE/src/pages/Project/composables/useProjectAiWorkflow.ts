@@ -116,16 +116,6 @@ export function useProjectAiWorkflow(projectId: number) {
     const phase = result.job.phase?.toLowerCase()
     const hasSuggestionIssues = Boolean(suggestionPayload?.issues?.length)
 
-   // console.log('[AI poll]', {
-    //   try: i + 1,
-    //   status: result.job.status,
-    //   phase: result.job.phase,
-    //   progress: result.job.progress,
-    //   regionsLength: regions.length,
-    //   hasSuggestionIssues,
-    //   projectionKeys: Object.keys(result.projections ?? {}),
-    // })
-
     if (status === 'failed') {
       throw new Error(result.job.error_message ?? 'AI 분석에 실패했습니다.')
     }
@@ -160,30 +150,9 @@ async function pollAiFeedbackResult(jobId: number) {
     const phase = result.job.phase?.toLowerCase()
     const hasSuggestion = hasAiEqSuggestion(result)
 
-    if (import.meta.env.DEV) {
-      // console.debug('[AI feedback poll]', {
-      //   try: i + 1,
-      //   status: result.job.status,
-      //   phase: result.job.phase,
-      //   progress: result.job.progress,
-      //   hasSuggestion,
-      //   projectionKeys: Object.keys(result.projections ?? {}),
-      // })
-    }
-
     if (status === 'failed') {
       const revisionNotes =
         (result.projections as any)?.plan_state?.revision_notes
-
-      if (import.meta.env.DEV) {
-        // console.error('[AI feedback failed]', {
-        //   jobId,
-        //   job: result.job,
-        //   planState: (result.projections as any)?.plan_state,
-        //   revisionNotes,
-        //   projections: result.projections,
-        // })
-      }
 
       throw new Error('AI 수정안 생성에 실패했습니다.')
     }
@@ -442,6 +411,16 @@ async function pollAiFeedbackResult(jobId: number) {
         } as AiSuggestionAction)
       : null
 
+      const regionMarkers =
+  kind === 'HARSHNESS'
+    ? [{
+        trackId: targetTrackId,
+        centerHz: region.center_hz ?? null,
+        bandLowHz: region.band_low_hz ?? null,
+        bandHighHz: region.band_high_hz ?? null,
+      }]
+    : []
+
   return {
     id: regionId,
     issueType: region.issue_type ?? '',
@@ -472,7 +451,7 @@ async function pollAiFeedbackResult(jobId: number) {
 
     previewBands: [],
     actions: clippingAction ? [clippingAction] : [],
-    markers: [],
+    markers: regionMarkers,
   }
 }
 
@@ -488,10 +467,6 @@ function getSuggestionPayload(projections: any): AiSuggestionPayload | null {
   )
 }
 
-function isBandOverlapIssue(issue: AiSuggestionIssue) {
-  return issue.issueType === 'band_overlap' && issue.uiMode === 'eq_ai'
-}
-
 function mapPreviewBandsToEqBands(previewBands: any[] = []): TrackEqBandState[] {
   return previewBands.map((band, index) => ({
     bandOrder: band.band_order ?? band.bandOrder ?? index + 1,
@@ -500,83 +475,6 @@ function mapPreviewBandsToEqBands(previewBands: any[] = []): TrackEqBandState[] 
     q: band.q ?? 1,
     eqTypeCode: band.eq_type_code ?? band.eqTypeCode ?? 1,
   })) as TrackEqBandState[]
-}
-
-function mapBandOverlapIssueToAnalysisItem(
-  issue: AiSuggestionIssue,
-  durationMs: number,
-): AiAnalysisItem {
-  const startMs = issue.startMs ?? 0
-  const endMs = issue.endMs ?? startMs + 1
-
-  const msPerBar = getMsPerBar()
-
-  const barStart = Math.floor(startMs / msPerBar) + 1
-  const barEnd = Math.max(barStart, Math.ceil(endMs / msPerBar))
-
-  const startBarFloat = startMs / msPerBar
-  const endBarFloat = Math.max(endMs / msPerBar, startBarFloat + 0.25)
-
-  const startPx = TIMELINE_TRACK_HEADER_WIDTH + startBarFloat * trackStore.pixelPerBar
-  const endPx = TIMELINE_TRACK_HEADER_WIDTH + endBarFloat * trackStore.pixelPerBar
-
-  const startPercent = Math.max(0, Math.min(100, (startMs / durationMs) * 100))
-  const endPercent = Math.max(
-    startPercent + 0.5,
-    Math.min(100, (endMs / durationMs) * 100),
-  )
-
-  const firstAction = issue.actions?.[0]
-
-  const bandLowHz = firstAction?.bandLowHz ?? null
-  const bandHighHz = firstAction?.bandHighHz ?? null
-
-  const targetTrackId =
-    issue.trackId ??
-    firstAction?.targetTrackId ??
-    null
-
-  const previewBands = mapPreviewBandsToEqBands(issue.previewBands)
-
-  return {
-    id: issue.issueId,
-    issueType: issue.issueType,
-    kind: 'BAND_OVERLAP',
-    uiMode: issue.uiMode,
-
-    targetType: targetTrackId ? 'TRACK' : 'TIMELINE',
-    targetTrackId,
-
-    startPercent,
-    endPercent,
-    startPx,
-    endPx,
-
-    barStart,
-    barEnd,
-
-    title: `대역 중복 · ${barStart}마디에서 ${barEnd}마디 사이`,
-    summary: issue.summary ?? 'AI가 대역 중복 가능성이 있는 구간을 감지했어요.',
-    explanation: issue.explanation ?? null,
-    bullets: [
-      '문제 유형: band_overlap',
-      bandLowHz && bandHighHz
-        ? `${bandLowHz}Hz~${bandHighHz}Hz 대역에서 충돌이 감지됐어요.`
-        : '주파수 대역 정보가 없습니다.',
-      targetTrackId
-        ? `관련 트랙: ${targetTrackId}`
-        : '관련 트랙 정보를 확인 중입니다.',
-    ],
-
-    bandLowHz,
-    bandHighHz,
-
-    recommendedGainReductionDb: null,
-
-    previewBands,
-    actions: issue.actions ?? [],
-    markers: issue.markers ?? [],
-  }
 }
 
 function mapSuggestionIssueToAnalysisItem(
@@ -603,29 +501,36 @@ function mapSuggestionIssueToAnalysisItem(
   )
 
   const kind = mapIssueTypeToKind(issue.issueType)
+
   const existingTrimAction = issue.actions?.find(action =>
-  action.type === 'apply_master_gain_trim'
-)
-
-const issueTrimValues = getClippingTrimValues(issue)
-
-const trimAction =
-  existingTrimAction ??
-  (
-    kind === 'CLIPPING' &&
-    issueTrimValues.recommendedReductionDb != null
-      ? ({
-          type: 'apply_master_gain_trim',
-          targetScope: 'MASTER',
-          targetTrackId: null,
-          startMs,
-          endMs,
-          recommendedReductionDb: issueTrimValues.recommendedReductionDb,
-          currentTruePeakDbtp: issueTrimValues.currentTruePeakDbtp,
-          targetCeilingDbtp: issueTrimValues.targetCeilingDbtp ?? -1,
-        } as AiSuggestionAction)
-      : null
+    action.type === 'apply_master_gain_trim'
   )
+
+  const issueTrimValues = getClippingTrimValues(issue)
+
+  const trimAction =
+    existingTrimAction ??
+    (
+      kind === 'CLIPPING' &&
+      issueTrimValues.recommendedReductionDb != null
+        ? ({
+            type: 'apply_master_gain_trim',
+            targetScope: 'MASTER',
+            targetTrackId: null,
+            startMs,
+            endMs,
+            recommendedReductionDb: issueTrimValues.recommendedReductionDb,
+            currentTruePeakDbtp: issueTrimValues.currentTruePeakDbtp,
+            targetCeilingDbtp: issueTrimValues.targetCeilingDbtp ?? -1,
+          } as AiSuggestionAction)
+        : null
+    )
+
+  const firstMarker = issue.markers?.[0] ?? null
+
+  const markerBandLowHz = firstMarker?.bandLowHz ?? null
+  const markerBandHighHz = firstMarker?.bandHighHz ?? null
+  const markerCenterHz = firstMarker?.centerHz ?? null
 
   const targetType: AiIssueTargetType =
     issue.uiMode === 'master_trim'
@@ -638,6 +543,33 @@ const trimAction =
     targetType === 'MASTER_TRACK'
       ? null
       : issue.trackId ?? null
+
+  const bullets =
+    kind === 'HARSHNESS'
+      ? [
+          `문제 유형: ${issue.issueType}`,
+          markerCenterHz != null
+            ? `중심 주파수: ${markerCenterHz}Hz`
+            : '중심 주파수 정보가 없습니다.',
+          markerBandLowHz != null && markerBandHighHz != null
+            ? `감지 대역: ${markerBandLowHz}Hz~${markerBandHighHz}Hz`
+            : '감지 대역 정보가 없습니다.',
+        ]
+      : kind === 'CLIPPING'
+        ? [
+            trimAction?.recommendedReductionDb != null
+              ? `권장 감소량: ${trimAction.recommendedReductionDb}dB`
+              : '권장 감소량 정보를 확인 중입니다.',
+            trimAction?.currentTruePeakDbtp != null
+              ? `현재 True Peak: ${trimAction.currentTruePeakDbtp} dBTP`
+              : '현재 True Peak 정보를 확인 중입니다.',
+            trimAction?.targetCeilingDbtp != null
+              ? `목표 Ceiling: ${trimAction.targetCeilingDbtp} dBTP`
+              : '목표 Ceiling 정보를 확인 중입니다.',
+          ]
+        : [
+            `문제 유형: ${issue.issueType}`,
+          ]
 
   return {
     id: issue.issueId,
@@ -659,41 +591,30 @@ const trimAction =
     title:
       kind === 'CLIPPING'
         ? `클리핑 · ${barStart}마디에서 ${barEnd}마디 사이`
-        : `AI 분석 · ${barStart}마디에서 ${barEnd}마디 사이`,
+        : kind === 'HARSHNESS'
+          ? `하쉬니스 · ${barStart}마디에서 ${barEnd}마디 사이`
+          : `AI 분석 · ${barStart}마디에서 ${barEnd}마디 사이`,
+
     summary: issue.summary ?? 'AI가 문제가 발생한 구간을 감지했어요.',
     explanation: issue.explanation ?? null,
-    bullets:
-      kind === 'CLIPPING'
-        ? [
-            trimAction?.recommendedReductionDb != null
-              ? `권장 감소량: ${trimAction.recommendedReductionDb}dB`
-              : '권장 감소량 정보를 확인 중입니다.',
-            trimAction?.currentTruePeakDbtp != null
-              ? `현재 True Peak: ${trimAction.currentTruePeakDbtp} dBTP`
-              : '현재 True Peak 정보를 확인 중입니다.',
-            trimAction?.targetCeilingDbtp != null
-              ? `목표 Ceiling: ${trimAction.targetCeilingDbtp} dBTP`
-              : '목표 Ceiling 정보를 확인 중입니다.',
-          ]
-        : [
-            `문제 유형: ${issue.issueType}`,
-          ],
+    bullets,
 
-    bandLowHz: null,
-    bandHighHz: null,
+    bandLowHz: markerBandLowHz,
+    bandHighHz: markerBandHighHz,
 
-        recommendedGainReductionDb:
+    recommendedGainReductionDb:
       trimAction?.recommendedReductionDb ?? null,
 
     previewBands: mapPreviewBandsToEqBands(issue.previewBands),
     actions: trimAction
       ? [
-          ...issue.actions.filter(action =>
+          ...(issue.actions ?? []).filter(action =>
             action.type !== 'apply_master_gain_trim'
           ),
           trimAction,
         ]
       : issue.actions ?? [],
+
     markers: issue.markers ?? [],
   }
 }
@@ -716,26 +637,6 @@ function mapSuggestionPayloadToAnalysisItems(
   return orderedIssues.map(issue =>
     mapSuggestionIssueToAnalysisItem(issue, durationMs),
   )
-}
-
-function mapBandOverlapPayloadToAnalysisItems(
-  payload: AiSuggestionPayload,
-  durationMs: number,
-): AiAnalysisItem[] {
-  const issueMap = new Map(
-    payload.issues.map(issue => [issue.issueId, issue]),
-  )
-
-  const orderedIssues =
-    payload.navigationOrder?.length
-      ? payload.navigationOrder
-          .map(issueId => issueMap.get(issueId))
-          .filter((issue): issue is AiSuggestionIssue => Boolean(issue))
-      : payload.issues
-
-  return orderedIssues
-    .filter(isBandOverlapIssue)
-    .map(issue => mapBandOverlapIssueToAnalysisItem(issue, durationMs))
 }
 
 function syncAiPreviewBandsFromActiveItem() {
@@ -1241,7 +1142,11 @@ const aiAnalysisTotalCount = computed(() => {
 })
 
 const shouldShowAiEqRevisionPanel = computed(() => {
-  return activeAiAnalysis.value?.uiMode === 'eq_ai'
+  const item = activeAiAnalysis.value
+
+  if (!item) return false
+
+  return item.uiMode === 'eq_ai' || item.markers.length > 0
 })
 
 const activeClippingAppliedInfo = computed(() => {
@@ -1260,7 +1165,20 @@ const isActiveClippingApplied = computed(() => {
   return appliedClippingIssueIds.value.has(item.id)
 })
 
+const activeAiMarkers = computed(() => {
+  return activeAiAnalysis.value?.markers ?? []
+})
+
+const activeAiUiMode = computed(() => {
+  return activeAiAnalysis.value?.uiMode ?? null
+})
+
+const isActiveAiMarkerOnly = computed(() => {
+  return activeAiAnalysis.value?.uiMode === 'marker_only'
+})
+
   return {
+    activeAiMarkers,
     aiAnalyzing,
     aiConflict,
     aiBeforeBands,
@@ -1281,6 +1199,8 @@ const isActiveClippingApplied = computed(() => {
     goPrevAiAnalysis,
     isActiveClippingApplied,
     activeClippingAppliedInfo,
+    activeAiUiMode,
+    isActiveAiMarkerOnly,
   }
 }
 

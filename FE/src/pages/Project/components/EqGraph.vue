@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   interactive?: boolean
   after?: boolean
   loading?: boolean
+  aiMarkers?: EqMarker[]
 }>(), {
   title: '',
   freqLabels: () => ['20', '50', '100', '200', '500', '1K', '2K', '5K', '10K', '20K'],
@@ -19,6 +20,13 @@ const props = withDefaults(defineProps<{
   after: false,
   loading: false,
 })
+
+type EqMarker = {
+  trackId: number | null
+  centerHz?: number | null
+  bandLowHz?: number | null
+  bandHighHz?: number | null
+}
 
 const emit = defineEmits<{
   'add-band': [payload: { frequencyHz: number; gainDeltaDb: number }]
@@ -69,6 +77,15 @@ const orderedBands = computed(() =>
 const activeBand = computed(() => {
   if (activeBandOrder.value == null) return null
   return orderedBands.value.find(band => band.bandOrder === activeBandOrder.value) ?? null
+})
+
+const validAiMarkers = computed(() => {
+  return (props.aiMarkers ?? []).filter(marker => {
+    return (
+      marker.centerHz != null ||
+      (marker.bandLowHz != null && marker.bandHighHz != null)
+    )
+  })
 })
 
 watch(
@@ -565,6 +582,49 @@ const zeroDbY = computed(() => gainToY(0))
         vector-effect="non-scaling-stroke"
         pointer-events="none"
       />
+
+      <!-- AI 하쉬니스 마커 -->
+<g pointer-events="none">
+  <g
+    v-for="marker in validAiMarkers"
+    :key="`${marker.trackId}-${marker.centerHz}-${marker.bandLowHz}-${marker.bandHighHz}`"
+  >
+    <rect
+      v-if="marker.bandLowHz != null && marker.bandHighHz != null"
+      :x="freqToX(marker.bandLowHz)"
+      :y="PADDING.top"
+      :width="Math.max(2, freqToX(marker.bandHighHz) - freqToX(marker.bandLowHz))"
+      :height="plotHeight"
+      fill="rgba(255, 143, 26, 0.12)"
+      stroke="rgba(255, 143, 26, 0.35)"
+      stroke-width="1"
+    />
+
+    <line
+      v-if="marker.centerHz != null"
+      :x1="freqToX(marker.centerHz)"
+      :x2="freqToX(marker.centerHz)"
+      :y1="PADDING.top"
+      :y2="PADDING.top + plotHeight"
+      stroke="rgba(255, 143, 26, 0.95)"
+      stroke-width="2"
+      stroke-dasharray="8 6"
+      vector-effect="non-scaling-stroke"
+    />
+
+    <text
+      v-if="marker.centerHz != null"
+      :x="freqToX(marker.centerHz)"
+      :y="PADDING.top + 22"
+      text-anchor="middle"
+      font-size="15"
+      font-weight="700"
+      fill="#FF8F1A"
+    >
+      HARSH
+    </text>
+  </g>
+</g>
 
       <!-- 밴드 포인트 -->
       <g v-for="band in orderedBands" :key="band.bandOrder">

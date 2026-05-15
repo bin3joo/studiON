@@ -658,6 +658,8 @@ const {
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
+  activeAiMarkers,
+  activeAiUiMode,
   selectedEqTrack,
   runAiAnalysis,
   handleApplyAiEq,
@@ -668,7 +670,7 @@ const {
   goNextAiAnalysis,
   goPrevAiAnalysis,
   isActiveClippingApplied,
-activeClippingAppliedInfo,
+  activeClippingAppliedInfo,
 } = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
@@ -1152,6 +1154,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         :ai-analyzed="shouldShowAiEqRevisionPanel"
         :ai-before-bands="aiBeforeBands"
         :ai-after-bands="aiAfterBands"
+        :ai-markers="activeAiMarkers"
+        :active-ai-ui-mode="activeAiUiMode"
         @apply-ai-eq="handleApplyAiEq"
         @cancel-ai-eq="handleCancelAiEq"
         @request-ai-eq-revision="handleRequestAiEqRevision"
@@ -1159,7 +1163,6 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         @update-eq-band="handleUpdateEqBand"
         @remove-eq-band="handleRemoveEqBand"
       />
-    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
     
     <ProjectSidePanel
       class="z-50"

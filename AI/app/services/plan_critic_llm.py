@@ -20,6 +20,7 @@ class PlanCriticLLMError(RuntimeError):
 class PlanCriticLLMResponse:
     result: str
     note: str
+    raw_text: str | None = None
 
 
 class PlanCriticLLMClient(Protocol):
@@ -138,6 +139,7 @@ class HTTPPlanCriticLLMClient:
         return PlanCriticLLMResponse(
             result=result,
             note=_require_string(response_payload, "note"),
+            raw_text=message_content,
         )
 
 

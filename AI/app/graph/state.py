@@ -113,8 +113,12 @@ class WorkflowState(TypedDict, total=False):
     auto_fix_log_artifact_id: str | None
     auto_fix_recipe_artifact_id: str | None
     plan_payload: dict
+    planner_raw_text: str | None
+    planner_artifact_id: str | None
     plan_status: str | None
     plan_revision_notes: list[str]
+    critic_raw_text: str | None
+    critic_artifact_id: str | None
     suggestion_payload: dict
     suggestion_group_id: str | None
     preview_id: str | None
@@ -231,8 +235,12 @@ def build_workflow_initial_state(
         "auto_fix_log_artifact_id": None,
         "auto_fix_recipe_artifact_id": None,
         "plan_payload": {},
+        "planner_raw_text": None,
+        "planner_artifact_id": None,
         "plan_status": None,
         "plan_revision_notes": [],
+        "critic_raw_text": None,
+        "critic_artifact_id": None,
         "suggestion_payload": {},
         "suggestion_group_id": None,
         "preview_id": None,

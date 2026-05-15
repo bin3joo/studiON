@@ -97,6 +97,8 @@ COMPACT_STATE_KEYS = {
     "auto_fix_log_artifact_id",
     "auto_fix_recipe_artifact_id",
     "plan_status",
+    "planner_artifact_id",
+    "critic_artifact_id",
     "suggestion_group_id",
     "preview_id",
     "preview_status",
@@ -143,7 +145,9 @@ SPILLOVER_STATE_KEYS = {
     "dsp_scan_summary",
     "rule_candidate_payload",
     "plan_payload",
+    "planner_raw_text",
     "plan_revision_notes",
+    "critic_raw_text",
     "suggestion_payload",
 }
 

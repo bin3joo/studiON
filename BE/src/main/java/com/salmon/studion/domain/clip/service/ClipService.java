@@ -786,6 +786,24 @@ public class ClipService {
 
         validateBarLimit(targetStartBar, original.getDuration());
 
+        String clipHashKey = String.format(CLIP_STATE_KEY, request.getProjectId());
+        List<Object> allClipValues = redisTemplate.opsForHash().values(clipHashKey);
+        for (Object val : allClipValues) {
+            try {
+                ClipState other = objectMapper.readValue((String) val, ClipState.class);
+                if (!other.getClipId().equals(request.getClipId())
+                        && other.getTrackId().equals(targetTrackId)) {
+                    boolean overlaps = targetStartBar < other.getStart() + other.getDuration()
+                            && other.getStart() < targetStartBar + original.getDuration();
+                    if (overlaps) {
+                        throw new BusinessException(ErrorCode.CLIP_OVERLAP);
+                    }
+                }
+            } catch (JsonProcessingException e) {
+                throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+            }
+        }
+
         Integer newClipId = redisTemplate.opsForValue()
                 .increment(CLIP_ID_SEQ_KEY).intValue();
 

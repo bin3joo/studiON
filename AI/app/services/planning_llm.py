@@ -24,6 +24,7 @@ class PlanningLLMError(RuntimeError):
 @dataclass(frozen=True)
 class PlanningLLMResponse:
     plan_payload: dict[str, object]
+    raw_text: str | None = None
 
 
 class PlanningLLMClient(Protocol):
@@ -134,7 +135,7 @@ class HTTPPlanningLLMClient:
         message_content = _extract_openai_message_content(payload)
         response_payload = _parse_json_object(message_content)
         _validate_plan_payload_shape(response_payload)
-        return PlanningLLMResponse(plan_payload=response_payload)
+        return PlanningLLMResponse(plan_payload=response_payload, raw_text=message_content)
 
 
 def get_planning_llm_client() -> PlanningLLMClient:

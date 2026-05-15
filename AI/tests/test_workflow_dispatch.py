@@ -1587,6 +1587,53 @@ def test_preview_compare_api_returns_visual_compare_payload(
     assert len(body["prompt_feedback_hints"]) >= 2
 
 
+def test_inspection_report_api_returns_planner_critic_and_preview_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.workflow_orchestration.enqueue_workflow_dispatch",
+        lambda message: None,
+    )
+    start_workflow_job(
+        WorkflowStartPayload(
+            job_id=200231,
+            project_id=300231,
+            project_snapshot=build_project_snapshot(track_ids=[11, 12]),
+            issue_types=["band_overlap"],
+        )
+    )
+    waiting = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=200231,
+            project_id=300231,
+            dispatch_type="start",
+        )
+    )
+    run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=200231,
+            project_id=300231,
+            dispatch_type="resume_plan_input",
+            **build_plan_input(waiting),
+        )
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/api/v1/internal/workflow/jobs/200231/inspection-report")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job"]["id"] == 200231
+    assert body["snapshot"]["tracks"]
+    assert body["analysis"]["regions"]
+    assert body["planner"]["raw_text"]
+    assert body["planner"]["plan_payload"]["candidate"]["action"]["actionType"] == "DYNAMIC_EQ"
+    assert body["critic"]["raw_text"]
+    assert body["preview"]["compare"]["issue_overlay"]["kind"] == "band_overlap"
+    assert body["preview"]["audio"]["before_excerpt_wav_uri"].startswith("data:audio/wav;base64,")
+    assert body["preview"]["audio"]["after_excerpt_wav_uri"].startswith("data:audio/wav;base64,")
+
+
 def test_preview_compare_api_rejects_non_ready_preview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

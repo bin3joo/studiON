@@ -207,10 +207,15 @@ export interface AiAnalysisRegion {
   secondary_track_id: number | null
   band_low_hz: number | null
   band_high_hz: number | null
+
+  center_hz?: number | null
+  band_confidence?: number | null
+  estimated_gain_reduction_db?: number | null
+  current_true_peak_dbtp?: number | null
+  target_ceiling_dbtp?: number | null
+
   involved_track_ids: number[]
   affected_clip_ids: number[]
-
-  requires_user_action?: boolean
   contributing_track_ids?: number[]
   track_contribution_scores?: Record<string, number>
   contributor_band_hints?: Record<string, string[]>

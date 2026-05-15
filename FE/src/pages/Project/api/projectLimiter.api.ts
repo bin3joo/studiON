@@ -69,3 +69,24 @@ export async function saveMasterLimiterDraft(
 
   return response.data.data
 }
+
+export interface LockMasterLimiterResponse {
+  masterLimiterId: number
+  isLocked: boolean
+  userId: number
+}
+
+export async function lockMasterLimiter(
+  projectId: number,
+  isLocked: boolean,
+) {
+  const response = await axiosInstance.post<ApiResponse<LockMasterLimiterResponse>>(
+    `/api/v1/limiter/projects/${projectId}/lock`,
+    { isLocked },
+    {
+      timeout: 30000,
+    },
+  )
+
+  return response.data.data
+}

@@ -16,6 +16,7 @@ import {
 import {
   getMasterLimiter,
   saveMasterLimiterDraft,
+  lockMasterLimiter,
 } from '../api/projectLimiter.api'
 import { trackEvent } from '@/shared/utils/analytics'
 
@@ -75,6 +76,15 @@ export function useProjectAiWorkflow(projectId: number) {
   const aiAfterBands = ref<TrackEqBandState[]>([])
   const currentAiJobId = ref<number | null>(null)
   const selectedAiRegionId = ref<number | null>(null)
+
+  const appliedClippingIssueIds = ref<Set<string | number>>(new Set())
+  const appliedClippingInfoMap = ref<
+  Map<string | number, {
+    reductionDb: number
+    inputGainDb: number
+    ceilingDbfs: number
+  }>
+>(new Map())
 
   const selectedEqTrack = computed(() => {
   if (trackStore.selectedTarget?.type === 'MASTER') {
@@ -285,6 +295,34 @@ async function pollAiFeedbackResult(jobId: number) {
     }
   }
 
+  function getClippingTrimValues(source: any) {
+  const recommendedReductionDb =
+    source.estimated_gain_reduction_db ??
+    source.estimatedGainReductionDb ??
+    source.recommended_reduction_db ??
+    source.recommendedReductionDb ??
+    null
+
+  const currentTruePeakDbtp =
+    source.current_true_peak_dbtp ??
+    source.currentTruePeakDbtp ??
+    null
+
+  const targetCeilingDbtp =
+    source.target_ceiling_dbtp ??
+    source.targetCeilingDbtp ??
+    null
+
+  return {
+    recommendedReductionDb:
+      recommendedReductionDb == null ? null : Number(recommendedReductionDb),
+    currentTruePeakDbtp:
+      currentTruePeakDbtp == null ? null : Number(currentTruePeakDbtp),
+    targetCeilingDbtp:
+      targetCeilingDbtp == null ? null : Number(targetCeilingDbtp),
+  }
+}
+
   function mapRegionToAnalysisItem(
   region: AiAnalysisRegion,
   durationMs: number,
@@ -361,18 +399,21 @@ async function pollAiFeedbackResult(jobId: number) {
         ? 'marker_only'
         : 'eq_ai'
 
-    const bullets =
+      const bullets =
     kind === 'CLIPPING'
       ? [
           region.track_id
             ? `클리핑 감지 트랙: ${region.track_id}`
             : '클리핑 감지 트랙 정보를 확인 중입니다.',
-          region.affected_clip_ids?.length
-            ? `영향을 받은 클립: ${region.affected_clip_ids.join(', ')}`
-            : '영향을 받은 클립 정보를 확인 중입니다.',
-          region.contributing_track_ids?.length
-            ? `기여 트랙: ${region.contributing_track_ids.join(', ')}`
-            : '기여 트랙 정보를 확인 중입니다.',
+          region.estimated_gain_reduction_db != null
+            ? `권장 감소량: ${region.estimated_gain_reduction_db.toFixed(2)}dB`
+            : '권장 감소량 정보를 확인 중입니다.',
+          region.current_true_peak_dbtp != null
+            ? `현재 True Peak: ${region.current_true_peak_dbtp.toFixed(2)} dBTP`
+            : '현재 True Peak 정보를 확인 중입니다.',
+          region.target_ceiling_dbtp != null
+            ? `목표 Ceiling: ${region.target_ceiling_dbtp.toFixed(1)} dBTP`
+            : '목표 Ceiling 정보를 확인 중입니다.',
         ]
       : [
           region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
@@ -383,6 +424,23 @@ async function pollAiFeedbackResult(jobId: number) {
             ? `관련 트랙: ${involvedTrackIds.join(', ')}`
             : '관련 트랙 정보를 확인 중입니다.',
         ]
+
+      const clippingTrimValues = getClippingTrimValues(region)
+
+  const clippingAction =
+    kind === 'CLIPPING' &&
+    clippingTrimValues.recommendedReductionDb != null
+      ? ({
+          type: 'apply_master_gain_trim',
+          targetScope: 'MASTER',
+          targetTrackId: null,
+          startMs,
+          endMs,
+          recommendedReductionDb: clippingTrimValues.recommendedReductionDb,
+          currentTruePeakDbtp: clippingTrimValues.currentTruePeakDbtp,
+          targetCeilingDbtp: clippingTrimValues.targetCeilingDbtp ?? -1,
+        } as AiSuggestionAction)
+      : null
 
   return {
     id: regionId,
@@ -409,10 +467,11 @@ async function pollAiFeedbackResult(jobId: number) {
     bandLowHz: region.band_low_hz,
     bandHighHz: region.band_high_hz,
 
-    recommendedGainReductionDb: kind === 'CLIPPING' ? -3 : null,
+    recommendedGainReductionDb:
+      clippingAction?.recommendedReductionDb ?? null,
 
     previewBands: [],
-    actions: [],
+    actions: clippingAction ? [clippingAction] : [],
     markers: [],
   }
 }
@@ -544,8 +603,28 @@ function mapSuggestionIssueToAnalysisItem(
   )
 
   const kind = mapIssueTypeToKind(issue.issueType)
-  const trimAction = issue.actions?.find(action =>
-    action.type === 'apply_master_gain_trim'
+  const existingTrimAction = issue.actions?.find(action =>
+  action.type === 'apply_master_gain_trim'
+)
+
+const issueTrimValues = getClippingTrimValues(issue)
+
+const trimAction =
+  existingTrimAction ??
+  (
+    kind === 'CLIPPING' &&
+    issueTrimValues.recommendedReductionDb != null
+      ? ({
+          type: 'apply_master_gain_trim',
+          targetScope: 'MASTER',
+          targetTrackId: null,
+          startMs,
+          endMs,
+          recommendedReductionDb: issueTrimValues.recommendedReductionDb,
+          currentTruePeakDbtp: issueTrimValues.currentTruePeakDbtp,
+          targetCeilingDbtp: issueTrimValues.targetCeilingDbtp ?? -1,
+        } as AiSuggestionAction)
+      : null
   )
 
   const targetType: AiIssueTargetType =
@@ -603,11 +682,18 @@ function mapSuggestionIssueToAnalysisItem(
     bandLowHz: null,
     bandHighHz: null,
 
-    recommendedGainReductionDb:
+        recommendedGainReductionDb:
       trimAction?.recommendedReductionDb ?? null,
 
     previewBands: mapPreviewBandsToEqBands(issue.previewBands),
-    actions: issue.actions ?? [],
+    actions: trimAction
+      ? [
+          ...issue.actions.filter(action =>
+            action.type !== 'apply_master_gain_trim'
+          ),
+          trimAction,
+        ]
+      : issue.actions ?? [],
     markers: issue.markers ?? [],
   }
 }
@@ -737,6 +823,8 @@ function hasAiEqSuggestion(statusResult: any) {
     aiAfterBands.value = []
     currentAiJobId.value = null
     selectedAiRegionId.value = null
+    appliedClippingIssueIds.value = new Set()
+    appliedClippingInfoMap.value = new Map()
 
     const selectedTrack = selectedEqTrack.value
 
@@ -777,20 +865,39 @@ const statusResult = await pollAiWorkflow(startResult.job.job_id)
     const regions = statusResult.projections.analysis_regions ?? []
 
     const regionItems = regions.map(region =>
-      mapRegionToAnalysisItem(region, snapshot.duration_ms),
-    )
+  mapRegionToAnalysisItem(region, snapshot.duration_ms),
+)
 
-    const suggestionItems = suggestionPayload
+const suggestionItems = suggestionPayload
   ? mapSuggestionPayloadToAnalysisItems(
       suggestionPayload,
       snapshot.duration_ms,
     )
   : []
 
-if (suggestionItems.length > 0) {
-  aiAnalysisItems.value = suggestionItems
-} else if (regionItems.length > 0) {
-  aiAnalysisItems.value = regionItems
+const suggestionNonClippingItems = suggestionItems.filter(item =>
+  item.kind !== 'CLIPPING'
+)
+
+const actionableSuggestionClippingItems = suggestionItems.filter(item =>
+  isActionableClippingItem(item)
+)
+
+const actionableRegionClippingItems = regionItems.filter(item =>
+  isActionableClippingItem(item)
+)
+
+const mergedItems =
+  suggestionItems.length > 0
+    ? [
+        ...suggestionNonClippingItems,
+        ...actionableSuggestionClippingItems,
+        ...actionableRegionClippingItems,
+      ]
+    : regionItems
+
+if (mergedItems.length > 0) {
+  aiAnalysisItems.value = mergedItems
 } else {
   alert('AI가 감지한 문제 구간이 없습니다.')
   return
@@ -841,64 +948,120 @@ function handleCancelAiEq() {
   aiAfterBands.value = []
 }
 
-function getActiveClippingTrimAction() {
+function isActionableClippingItem(item: AiAnalysisItem) {
+  if (item.kind !== 'CLIPPING') return false
+
+  return (
+    item.recommendedGainReductionDb != null ||
+    item.actions.some(action =>
+      action.type === 'apply_master_gain_trim' &&
+      action.recommendedReductionDb != null
+    )
+  )
+}
+
+function getActiveClippingTrimAction(): AiSuggestionAction | null {
   const item = activeAiAnalysis.value
 
   if (!item || item.kind !== 'CLIPPING') return null
 
-  return item.actions.find(action =>
+  const action = item.actions.find(action =>
     action.type === 'apply_master_gain_trim'
-  ) ?? null
+  )
+
+  if (action) return action
+
+  if (item.recommendedGainReductionDb == null) return null
+
+  return {
+    type: 'apply_master_gain_trim',
+    targetScope: 'MASTER',
+    targetTrackId: null,
+    recommendedReductionDb: item.recommendedGainReductionDb,
+    targetCeilingDbtp: -1,
+  }
 }
 
 async function handleApplyClippingIssue() {
+  if (aiAnalyzing.value) return
   const item = activeAiAnalysis.value
 
   if (!item || item.kind !== 'CLIPPING') return
 
+  if (appliedClippingIssueIds.value.has(item.id)) {
+    alert('이미 적용된 클리핑 이슈입니다.')
+    return
+  }
+
   const action = getActiveClippingTrimAction()
 
-if (!action || action.recommendedReductionDb == null) {
-  alert('클리핑 적용값이 없습니다.')
-  return
-}
-const clippingAction = action
-  const recommendedReductionDb = action?.recommendedReductionDb
-
-  if (recommendedReductionDb == null) {
+  if (!action || action.recommendedReductionDb == null) {
     alert('클리핑 적용값이 없습니다.')
     return
   }
 
+  const clippingAction = action
+  const recommendedReductionDb = Number(clippingAction.recommendedReductionDb)
+
+  let locked = false
+
   try {
     aiAnalyzing.value = true
 
+    await lockMasterLimiter(projectId, true)
+    locked = true
+
     const currentLimiter = await getMasterLimiter(projectId)
 
-    await saveMasterLimiterDraft(projectId, {
-      isEnabled: true,
-      thresholdDb: currentLimiter.thresholdDb,
-      ceilingDbfs: clippingAction.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
-      attackMs: currentLimiter.attackMs,
-      releaseMs: currentLimiter.releaseMs,
+    const savedLimiter = await saveMasterLimiterDraft(projectId, {
+  isEnabled: true,
+  thresholdDb: currentLimiter.thresholdDb,
+  ceilingDbfs: clippingAction.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
+  attackMs: currentLimiter.attackMs,
+  releaseMs: currentLimiter.releaseMs,
+  inputGainDb: currentLimiter.inputGainDb - Math.abs(recommendedReductionDb),
+  makeupGainDb: currentLimiter.makeupGainDb,
+  jobId: currentAiJobId.value,
+  suggestionActionId: null,
+  appliedSuggestionId: null,
+  sourceType: 'AI_SUGGESTION',
+})
 
-      // 핵심: 마스터 입력 게인을 권장 감소량만큼 낮춤
-      inputGainDb: currentLimiter.inputGainDb - Math.abs(recommendedReductionDb),
+    appliedClippingIssueIds.value = new Set([
+      ...appliedClippingIssueIds.value,
+      item.id,
+    ])
 
-      // makeup은 기존값 유지
-      makeupGainDb: currentLimiter.makeupGainDb,
+    appliedClippingInfoMap.value = new Map([
+  ...appliedClippingInfoMap.value,
+  [
+    item.id,
+    {
+      reductionDb: Math.abs(recommendedReductionDb),
+      inputGainDb: savedLimiter.inputGainDb,
+      ceilingDbfs: savedLimiter.ceilingDbfs,
+    },
+  ],
+])
 
-      jobId: currentAiJobId.value,
-      suggestionActionId: null,
-      appliedSuggestionId: null,
-      sourceType: 'AI_SUGGESTION',
+   // goNextAiAnalysis()
+  } catch (error: any) {
+    console.error('[AI clipping apply failed]', {
+      status: error?.response?.status,
+      data: error?.response?.data,
+      error,
     })
 
-    goNextAiAnalysis()
-  } catch (error) {
-   // console.error('[AI clipping apply failed]', error)
-    alert('클리핑 적용 중 오류가 발생했습니다.')
+    alert(error?.response?.data?.message ?? '클리핑 적용 중 오류가 발생했습니다.')
   } finally {
+    if (locked) {
+      try {
+        await lockMasterLimiter(projectId, false)
+      } catch (unlockError) {
+        console.error('[AI clipping unlock failed]', unlockError)
+      }
+    }
+
     aiAnalyzing.value = false
   }
 }
@@ -1081,6 +1244,22 @@ const shouldShowAiEqRevisionPanel = computed(() => {
   return activeAiAnalysis.value?.uiMode === 'eq_ai'
 })
 
+const activeClippingAppliedInfo = computed(() => {
+  const item = activeAiAnalysis.value
+
+  if (!item || item.kind !== 'CLIPPING') return null
+
+  return appliedClippingInfoMap.value.get(item.id) ?? null
+})
+
+const isActiveClippingApplied = computed(() => {
+  const item = activeAiAnalysis.value
+
+  if (!item || item.kind !== 'CLIPPING') return false
+
+  return appliedClippingIssueIds.value.has(item.id)
+})
+
   return {
     aiAnalyzing,
     aiConflict,
@@ -1100,6 +1279,8 @@ const shouldShowAiEqRevisionPanel = computed(() => {
     shouldShowAiEqRevisionPanel,
     goNextAiAnalysis,
     goPrevAiAnalysis,
+    isActiveClippingApplied,
+    activeClippingAppliedInfo,
   }
 }
 

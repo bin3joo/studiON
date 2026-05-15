@@ -33,8 +33,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -52,7 +52,10 @@ public class TrackEqService {
         projectService.getProjectOrThrow(projectId);
         projectMemberService.validateProjectMember(projectId, userId);
 
-        List<TrackEq> trackEqs = trackEqRepository.findByProjectId(projectId);
+        Set<Integer> deletedTrackIds = getDeletedTrackIds(projectId);
+        List<TrackEq> trackEqs = trackEqRepository.findByProjectId(projectId).stream()
+                .filter(trackEq -> !deletedTrackIds.contains(trackEq.getTrackId()))
+                .toList();
 
         return TrackEqListResponse.builder()
                 .trackEqs(trackEqs.stream()
@@ -189,6 +192,9 @@ public class TrackEqService {
     }
     
     public void createIfAbsent(Integer trackId, Integer projectId) {
+        if (isTrackEqDeleted(projectId, trackId)) {
+            return;
+        }
         if (trackEqRepository.existsByTrackId(trackId)) {
             return;
         }
@@ -200,27 +206,37 @@ public class TrackEqService {
 
     @Transactional
     public void deleteByTrackIdIfExists(Integer trackId) {
-        trackEqRepository.findByTrackId(trackId).ifPresent(trackEq -> {
-            trackEqBandRepository.deleteAllByTrackEq_Id(trackEq.getId());
-            redisTemplate.delete(TrackEqRedisKeys.lockKey(trackEq.getProjectId(), trackEq.getId()));
-            redisTemplate.delete(TrackEqRedisKeys.draftKey(trackEq.getProjectId(), trackEq.getId()));
-            redisTemplate.delete(TrackEqRedisKeys.currentKey(trackEq.getProjectId(), trackEq.getTrackId()));
-            trackEqRepository.delete(trackEq);
-        });
+        trackEqRepository.findByTrackId(trackId).ifPresent(this::markDeletedTrackEq);
     }
 
 
     @Transactional
     public void synchronizeWithTrackIds(Integer projectId, List<Integer> activeTrackIds) {
         List<TrackEq> currentTrackEqs = trackEqRepository.findByProjectId(projectId);
+        Set<Integer> deletedTrackIds = getDeletedTrackIds(projectId);
+        Set<Integer> activeTrackIdSet = new HashSet<>(activeTrackIds);
 
-        Set<Integer> activeTrackIdSet = Set.copyOf(activeTrackIds);
-        Set<Integer> currentTrackIdSet = currentTrackEqs.stream()
+        List<TrackEq> toDelete = currentTrackEqs.stream()
+                .filter(trackEq -> deletedTrackIds.contains(trackEq.getTrackId()) || !activeTrackIdSet.contains(trackEq.getTrackId()))
+                .toList();
+
+        if (!toDelete.isEmpty()) {
+            List<Integer> deleteTrackEqIds = toDelete.stream()
+                    .map(TrackEq::getId)
+                    .toList();
+            trackEqBandRepository.deleteAllByTrackEq_IdIn(deleteTrackEqIds);
+            toDelete.forEach(this::clearWorkingSet);
+            trackEqRepository.deleteAllByIdInBatch(deleteTrackEqIds);
+        }
+
+        Set<Integer> persistedTrackIds = currentTrackEqs.stream()
+                .filter(trackEq -> !deletedTrackIds.contains(trackEq.getTrackId()) && activeTrackIdSet.contains(trackEq.getTrackId()))
                 .map(TrackEq::getTrackId)
                 .collect(Collectors.toSet());
 
         List<TrackEq> toCreate = activeTrackIds.stream()
-                .filter(trackId -> !currentTrackIdSet.contains(trackId))
+                .filter(trackId -> !deletedTrackIds.contains(trackId))
+                .filter(trackId -> !persistedTrackIds.contains(trackId))
                 .map(trackId -> TrackEq.create(trackId, projectId))
                 .toList();
 
@@ -228,21 +244,7 @@ public class TrackEqService {
             List<TrackEq> created = trackEqRepository.saveAll(toCreate);
             created.forEach(trackEq -> saveCurrentState(buildCommittedCurrentState(trackEq, List.of())));
         }
-
-        List<Integer> orphanTrackEqIds = currentTrackEqs.stream()
-                .filter(trackEq -> !activeTrackIdSet.contains(trackEq.getTrackId()))
-                .map(TrackEq::getId)
-                .toList();
-
-        if (!orphanTrackEqIds.isEmpty()) {
-            trackEqBandRepository.deleteAllByTrackEq_IdIn(orphanTrackEqIds);
-            currentTrackEqs.stream()
-                    .filter(trackEq -> orphanTrackEqIds.contains(trackEq.getId()))
-                    .forEach(trackEq -> redisTemplate.delete(
-                            TrackEqRedisKeys.currentKey(trackEq.getProjectId(), trackEq.getTrackId())
-                    ));
-            trackEqRepository.deleteAllByIdInBatch(orphanTrackEqIds);
-        }
+        clearDeletedTrackIds(projectId);
     }
 
     @Transactional
@@ -254,6 +256,9 @@ public class TrackEqService {
         List<ProjectTrackEqRequest> results = new ArrayList<>();
         for (Integer trackId : trackIds) {
             if (trackId == null) {
+                continue;
+            }
+            if (isTrackEqDeleted(projectId, trackId)) {
                 continue;
             }
             TrackEqCurrentState currentState = getOrHydrateCurrentState(projectId, trackId);
@@ -346,6 +351,11 @@ public class TrackEqService {
     }
 
     private TrackEqCurrentState getOrHydrateCurrentState(Integer projectId, Integer trackId) {
+        if (isTrackEqDeleted(projectId, trackId)) {
+            redisTemplate.delete(TrackEqRedisKeys.currentKey(projectId, trackId));
+            return null;
+        }
+
         String currentKey = TrackEqRedisKeys.currentKey(projectId, trackId);
         String cached = redisTemplate.opsForValue().get(currentKey);
         if (cached != null && !cached.isBlank()) {
@@ -356,6 +366,10 @@ public class TrackEqService {
     }
 
     private TrackEqCurrentState hydrateCurrentState(Integer projectId, Integer trackId) {
+        if (isTrackEqDeleted(projectId, trackId)) {
+            return null;
+        }
+
         TrackEq trackEq = trackEqRepository.findByTrackId(trackId)
                 .filter(item -> item.getProjectId().equals(projectId))
                 .orElse(null);
@@ -624,9 +638,47 @@ public class TrackEqService {
         if (!trackEq.getProjectId().equals(projectId)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
+        if (isTrackEqDeleted(projectId, trackEq.getTrackId())) {
+            throw new BusinessException(ErrorCode.TRACK_EQ_NOT_FOUND);
+        }
 
         projectMemberService.validateProjectMember(projectId, userId);
         return trackEq;
+    }
+
+    private void markDeletedTrackEq(TrackEq trackEq) {
+        clearWorkingSet(trackEq);
+        redisTemplate.opsForSet().add(
+                TrackEqRedisKeys.deletedTrackEqsKey(trackEq.getProjectId()),
+                String.valueOf(trackEq.getTrackId())
+        );
+    }
+
+    private void clearWorkingSet(TrackEq trackEq) {
+        redisTemplate.delete(TrackEqRedisKeys.lockKey(trackEq.getProjectId(), trackEq.getId()));
+        redisTemplate.delete(TrackEqRedisKeys.draftKey(trackEq.getProjectId(), trackEq.getId()));
+        redisTemplate.delete(TrackEqRedisKeys.currentKey(trackEq.getProjectId(), trackEq.getTrackId()));
+    }
+
+    private boolean isTrackEqDeleted(Integer projectId, Integer trackId) {
+        return Boolean.TRUE.equals(redisTemplate.opsForSet().isMember(
+                TrackEqRedisKeys.deletedTrackEqsKey(projectId),
+                String.valueOf(trackId)
+        ));
+    }
+
+    private Set<Integer> getDeletedTrackIds(Integer projectId) {
+        Set<String> deletedTrackIdValues = redisTemplate.opsForSet().members(TrackEqRedisKeys.deletedTrackEqsKey(projectId));
+        if (deletedTrackIdValues == null || deletedTrackIdValues.isEmpty()) {
+            return Set.of();
+        }
+        return deletedTrackIdValues.stream()
+                .map(Integer::parseInt)
+                .collect(Collectors.toSet());
+    }
+
+    private void clearDeletedTrackIds(Integer projectId) {
+        redisTemplate.delete(TrackEqRedisKeys.deletedTrackEqsKey(projectId));
     }
 
 }

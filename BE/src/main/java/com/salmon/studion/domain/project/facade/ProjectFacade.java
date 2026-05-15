@@ -7,6 +7,7 @@ import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.service.ClipService;
 import com.salmon.studion.domain.comment.dto.response.CommentsGetResponse;
 import com.salmon.studion.domain.comment.facade.CommentFacade;
+import com.salmon.studion.domain.limiter.service.MasterLimiterService;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;
@@ -39,6 +40,7 @@ public class ProjectFacade {
     private final ProjectMemberService projectMemberService;
     private final ProjectSaveService projectSaveService;
     private final MasterTrackService masterTrackService;
+    private final MasterLimiterService masterLimiterService;
     private final UserService userService;
     private final TrackService trackService;
     private final ClipService clipService;
@@ -121,6 +123,7 @@ public class ProjectFacade {
     public ProjectCreateResponse createProject(ProjectCreateRequest projectCreateRequest, Integer userId) {
         Project project = projectService.createProject(projectCreateRequest);
         MasterTrack masterTrack = masterTrackService.createMasterTrack(project);
+        masterLimiterService.createIfAbsent(project.getId());
 
         User user = userService.getUserByUserId(userId);
         projectMemberService.createProjectMember(project, user);

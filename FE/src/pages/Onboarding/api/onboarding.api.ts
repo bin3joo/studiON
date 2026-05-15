@@ -53,3 +53,15 @@ export async function reissueAccessToken(): Promise<TokenExchangeResponse> {
 
   return data
 }
+
+export async function requestLogout(): Promise<ApiResponse<null>> {
+  const { data } = await axiosInstance.post<ApiResponse<null>>(
+    '/api/v1/auth/logout',
+    undefined,
+    {
+      withCredentials: true,
+    },
+  )
+
+  return data
+}

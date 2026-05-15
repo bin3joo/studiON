@@ -1,302 +1,396 @@
 <script setup lang="ts">
-// Vue Composition API에서 필요한 기능 import
-// ref: 반응형 상태값
-// computed: 기존 상태를 기반으로 계산되는 값
-// onMounted: 컴포넌트가 화면에 붙은 직후 실행되는 생명주기 훅
-import { computed, onMounted, ref } from 'vue'
-
-// Vue Router의 링크 컴포넌트
-// 클릭 시 페이지 새로고침 없이 라우팅 이동
-import { RouterLink } from 'vue-router'
-
-// 프로젝트 카드에 사용할 아이콘들
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { AudioLines, Disc3, Mic, Play } from 'lucide-vue-next'
-
-// 대시보드 상단 헤더 컴포넌트
-// 프로젝트 생성 버튼 등이 들어있는 영역으로 보임
 import DashboardHeader from './components/DashboardHeader.vue'
-
-// 프로젝트 목록 조회 API 함수
 import { fetchProjects } from '@/pages/Project/api/project.api'
+import { buildCreateProjectPayload, createProject, projectApi } from '@/pages/Project/api/project.api'
+import type { ProjectListItem, CreateProjectResponse, ProjectId } from '@/pages/Project/types/project.types'
+import { trackEvent } from '@/shared/utils/analytics'
 
-// 프로젝트 목록 아이템 타입
-import type { ProjectListItem } from '@/pages/Project/types/project.types'
-
-// 서버에서 받아온 프로젝트 목록을 저장하는 상태
+const router = useRouter()
 const projects = ref<ProjectListItem[]>([])
-
-// 프로젝트 목록 API 요청 중인지 표시하는 상태
 const isLoading = ref(false)
-
-// API 실패 시 화면에 보여줄 에러 메시지
 const errorMessage = ref('')
+const isCreating = ref(false)
+const showFeedbackModal = ref(false)
+const neverShowAgain = ref(false)
+const searchQuery = ref('')
 
-// 기존 프로젝트 이름 목록
-// DashboardHeader에서 새 프로젝트 기본 이름을 만들 때 중복 방지용으로 사용
+// Slider State
+const currentSlide = ref(0)
+const slideInterval = ref<number | undefined>(undefined)
+
+const slides = [
+  { id: 1, image: '/banner.png', title: '피드백 참여하기', desc: 'StudiON에서 피드백을 남기고 커피쿠폰 받자!' },
+  { id: 2, image: '/Open.png', title: 'StudiON 전격 오픈!', desc: 'AI 기반의 충돌 분석과 실시간 협업을 경험해 보세요!' },
+  { id: 3, image: '/SSAFY16.png', title: 'SSAFY 16기', desc: '싸피 16기 여러분들의 뜨거운 열정과 도전을 응원합니다!', bg: 'bg-gradient-to-br from-[#ffb1c4]/20 to-[#65002e]/80' },
+]
+
+function nextSlide() {
+  currentSlide.value = (currentSlide.value + 1) % slides.length
+}
+
+function prevSlide() {
+  currentSlide.value = (currentSlide.value - 1 + slides.length) % slides.length
+}
+
+function setSlide(index: number) {
+  currentSlide.value = index
+}
+
+function handleSlideClick(id: number) {
+  if (id === 1) {
+    showFeedbackModal.value = true
+  } else if (id === 2) {
+    window.location.reload()
+  } else if (id === 3) {
+    window.open('https://www.ssafy.com/ksp/servlet/swp.content.controller.SwpContentServlet?p_process=select-content-view&p_menu_cd=M0307&p_content_cd=C0307', '_blank')
+  }
+}
+
+const filteredProjects = computed(() => {
+  if (!searchQuery.value) return projects.value
+  const query = searchQuery.value.toLowerCase()
+  return projects.value.filter(project => 
+    project.projectName.toLowerCase().includes(query)
+  )
+})
+
 const existingProjectNames = computed(() =>
   projects.value.map(project => project.projectName),
 )
 
-// 프로젝트 카드마다 순서에 따라 다른 아이콘을 보여주기 위한 함수
 function getProjectIcon(index: number) {
   const icons = [Disc3, AudioLines, Mic]
   return icons[index % icons.length]
 }
 
-// 밀리초 단위의 재생 시간을 mm:ss 형식으로 변환
-function formatPlayTime(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) {
-    return '0:00'
+function hideFeedbackModal(neverShowAgain: boolean) {
+  if (neverShowAgain) {
+    localStorage.setItem('hideFeedbackModal', 'true')
   }
+  showFeedbackModal.value = false
+}
 
+function formatPlayTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0:00'
   const totalSeconds = Math.floor(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-// 바이트 단위의 오디오 파일 크기를 MB 또는 GB 단위 문자열로 변환
 function formatAudioSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 MB'
-  }
-
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
   const mb = bytes / (1024 * 1024)
-
-  if (mb >= 1024) {
-    return `${(mb / 1024).toFixed(1)} GB`
-  }
-
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
   return `${Math.round(mb)} MB`
 }
 
-// 프로젝트 마지막 수정 시간을 "EDITED 5M AGO" 같은 문구로 변환
 function formatEditedText(lastUpdateAt: string): string {
   const updatedAt = new Date(lastUpdateAt)
-
-  // 날짜 파싱이 실패하면 기본 문구 반환
-  if (Number.isNaN(updatedAt.getTime())) {
-    return 'UPDATED RECENTLY'
-  }
-
+  if (Number.isNaN(updatedAt.getTime())) return '최근 수정'
   const diffMs = Date.now() - updatedAt.getTime()
   const diffMinutes = Math.floor(diffMs / (1000 * 60))
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
-  if (diffMinutes < 60) {
-    return `EDITED ${Math.max(diffMinutes, 1)}M AGO`
-  }
-
-  if (diffHours < 24) {
-    return `EDITED ${diffHours}H AGO`
-  }
-
-  return `EDITED ${diffDays}D AGO`
+  if (diffMinutes < 60) return `${Math.max(diffMinutes, 1)}분 전 수정`
+  if (diffHours < 24) return `${diffHours}시간 전 수정`
+  return `${diffDays}일 전 수정`
 }
 
-// 프로젝트 목록을 서버에서 불러오는 함수
-async function loadProjects() {
-  // 로딩 시작
-  isLoading.value = true
+function extractProjectId(response: CreateProjectResponse): ProjectId | null {
+  return response.data.project.projectId ?? null
+}
 
-  // 이전 에러 메시지 초기화
+function extractProjectName(response: CreateProjectResponse): string {
+  return response.data?.project?.name ?? '새 프로젝트'
+}
+
+async function handleCreateProjectClick() {
+  isCreating.value = true
   errorMessage.value = ''
 
   try {
-    // GET /api/v1/projects 호출
-    const response = await fetchProjects()
+    const payload = buildCreateProjectPayload(existingProjectNames.value)
+    const response = await createProject(payload)
+    const projectId = extractProjectId(response)
+    const projectName = extractProjectName(response)
 
-    // 응답 data 안의 projects 배열을 화면 상태에 저장
-    // 응답이 비어 있으면 빈 배열로 처리해서 화면이 터지지 않게 함
+    if (!projectId) {
+      throw new Error('생성된 프로젝트 ID를 확인할 수 없습니다.')
+    }
+
+    trackEvent('project_created', { project_id: projectId })
+    await projectApi.saveProjectSnapshot(projectId)
+
+    await router.push({
+      path: `/project/${projectId}`,
+      query: { name: projectName },
+    })
+  }
+  catch (error) {
+    errorMessage.value = error instanceof Error
+      ? error.message
+      : '프로젝트 생성 중 오류가 발생했습니다.'
+  }
+  finally {
+    isCreating.value = false
+  }
+}
+
+async function loadProjects() {
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    const response = await fetchProjects()
     projects.value = response.data?.projects ?? []
   }
   catch (error) {
-    // API 실패 시 화면에 보여줄 에러 메시지 설정
     errorMessage.value = error instanceof Error
       ? error.message
       : '프로젝트 목록을 불러오는 중 오류가 발생했습니다.'
   }
   finally {
-    // 성공/실패와 관계없이 로딩 종료
     isLoading.value = false
   }
 }
 
-// 대시보드 페이지가 처음 렌더링되면 프로젝트 목록을 불러옴
+
+
+// ...
 onMounted(() => {
   void loadProjects()
+  if (localStorage.getItem('hideFeedbackModal') !== 'true') {
+    showFeedbackModal.value = true
+  }
+  slideInterval.value = window.setInterval(nextSlide, 5000)
+})
+
+onUnmounted(() => {
+  if (slideInterval.value) {
+    clearInterval(slideInterval.value)
+  }
 })
 </script>
 
 <template>
-  <!-- 대시보드 전체 화면 -->
-  <main class="min-h-screen bg-background text-foreground font-grotesk">
-    <!-- 상단 헤더 -->
-    <!-- 기존 프로젝트명을 넘겨서 새 프로젝트 생성 시 중복 이름을 피할 수 있게 함 -->
-    <DashboardHeader :existing-project-names="existingProjectNames" />
+  <main class="min-h-screen bg-[#131313] text-[#e5e2e1] flex flex-col font-body-md text-body-md" style="zoom: 0.8;">
+    <DashboardHeader :existing-project-names="existingProjectNames" @openFeedback="showFeedbackModal = true" />
 
-    <!-- 페이지 타이틀 영역 -->
-    <section class="relative overflow-hidden px-6 py-12 md:px-10 md:py-16">
-      <!-- 배경 효과용 장식 요소 -->
-      <div class="pointer-events-none absolute -left-24 top-0 -z-10 h-[40vh] w-[40vh] rounded-full bg-primary/20 blur-[120px]" />
-      <div class="absolute inset-0 -z-10 bg-grain opacity-30" />
+    <div class="flex-1 flex flex-col p-6 md:p-10 mx-auto w-[95%] lg:w-[80%] max-w-[1600px] gap-8">
+      
+      <!-- Top Banner: Carousel -->
+      <div class="w-full h-[240px] md:h-[360px] lg:h-[440px] rounded-3xl overflow-hidden relative shadow-[0_0_30px_rgba(255,177,196,0.05)] border border-white/5 bg-[#131313] group">
+        <!-- Slides Container -->
+        <div 
+          class="flex transition-transform duration-700 ease-[cubic-bezier(0.25,1,0.5,1)] h-full w-full"
+          :style="`transform: translateX(-${currentSlide * 100}%)`"
+        >
+          <div v-for="slide in slides" :key="slide.id" @click="handleSlideClick(slide.id)" class="w-full h-full shrink-0 relative flex-none cursor-pointer">
+            <img v-if="slide.image" :src="slide.image" :alt="slide.title" class="w-full h-full object-fill opacity-80 transition-opacity hover:opacity-100" />
+            <div v-else :class="slide.bg" class="w-full h-full flex items-center justify-center">
+              <span class="material-symbols-outlined text-6xl text-white/50" style="font-variation-settings: 'FILL' 1;">music_note</span>
+            </div>
+            <div class="absolute inset-0 bg-gradient-to-t from-[#131313] via-[#131313]/30 to-transparent"></div>
+            <div class="absolute bottom-0 left-0 w-full p-8 md:px-12">
+              <h3 class="text-2xl md:text-3xl font-bold text-[#e5e2e1] mb-2 drop-shadow-md">{{ slide.title }}</h3>
+              <p class="text-[#e5bcc5] text-[15px] md:text-[16px] leading-relaxed drop-shadow-md">{{ slide.desc }}</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Dots -->
+        <div class="absolute bottom-6 left-0 w-full flex justify-center gap-2 z-10">
+          <button 
+            v-for="(_, idx) in slides" 
+            :key="idx"
+            @click.stop="setSlide(idx)"
+            class="w-2 h-2 rounded-full transition-all duration-300"
+            :class="currentSlide === idx ? 'w-6 bg-[#ffb1c4]' : 'bg-white/30 hover:bg-white/50'"
+          ></button>
+        </div>
 
-      <div class="flex items-end gap-4">
-  <h1 class="font-display text-[clamp(3rem,9vw,6rem)] leading-none text-foreground">
-    <span class="text-neon-magenta">내 프로젝트</span>
-  </h1>
+        <!-- Left/Right Controls -->
+        <button 
+          @click.stop="prevSlide" 
+          class="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 hover:bg-[#ffb1c4] flex items-center justify-center text-white transition-all z-20 group opacity-0 group-hover:opacity-100 focus:opacity-100"
+        >
+          <span class="material-symbols-outlined group-hover:text-[#65002e]">chevron_left</span>
+        </button>
+        <button 
+          @click.stop="nextSlide" 
+          class="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 hover:bg-[#ffb1c4] flex items-center justify-center text-white transition-all z-20 group opacity-0 group-hover:opacity-100 focus:opacity-100"
+        >
+          <span class="material-symbols-outlined group-hover:text-[#65002e]">chevron_right</span>
+        </button>
+      </div>
 
-  <a
-    href="https://docs.google.com/forms/d/e/1FAIpQLSd8j0DchO_6TY9FC7Ya_LCfH-mxJQUTAqcV4Gu-UXptyRPsuA/viewform?usp=publish-editor"
-    target="_blank"
-    rel="noopener noreferrer"
-    class="mb-2 inline-flex h-10 shrink-0 items-center rounded-full bg-white px-5 text-sm font-medium text-neutral-800 transition hover:bg-neutral-200"
-  >
-    피드백 남기기
-  </a>
-</div>
+      <!-- Main: Projects -->
+      <section class="flex flex-col gap-6 md:gap-8 mt-4">
+        <!-- Header & Actions -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 pb-6 border-b border-white/10">
+          <div>
+            <h1 class="font-headline-md text-[28px] md:text-[32px] font-bold text-[#e5e2e1] flex items-center gap-3">
+              내 프로젝트
+              <span class="text-[18px] font-normal text-[#e5bcc5]/80 bg-[#2a2a2a] px-3 py-0.5 rounded-full">{{ projects.length }}</span>
+            </h1>
+            <p class="font-body-lg text-[16px] text-[#e5bcc5] mt-2 opacity-80">최근 작업 중인 트랙들을 확인하고 관리하세요.</p>
+          </div>
 
-    </section>
+          <div class="flex flex-col sm:flex-row justify-end items-center gap-4 w-full md:w-auto">
+            <div class="relative w-full sm:w-64">
+              <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#e5bcc5]" style="font-variation-settings: 'FILL' 0;">search</span>
+              <input v-model="searchQuery" class="w-full bg-[#1c1b1b] border border-white/10 rounded-full focus:border-[#ffb1c4] text-[#e5e2e1] text-[14px] pl-10 pr-4 py-2.5 outline-none transition-colors placeholder:text-[#e5bcc5]/50" placeholder="프로젝트 검색..." type="text" />
+            </div>
+            <button
+              @click="handleCreateProjectClick"
+              :disabled="isCreating"
+              class="bg-[#ffb1c4] text-[#65002e] text-[15px] font-bold px-6 py-2.5 rounded-full hover:shadow-[0_0_15px_rgba(255,177,196,0.4)] hover:bg-[#ff4a8d] transition-all flex items-center justify-center gap-2 w-full sm:w-auto whitespace-nowrap disabled:opacity-50">
+              <span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">add</span>
+              {{ isCreating ? '생성 중...' : '새 프로젝트 생성' }}
+            </button>
+          </div>
+        </div>
 
-    <!-- 프로젝트 목록 영역 -->
-    <section class="px-6 pb-20 md:px-10 md:pb-28">
-      <!-- 활성 프로젝트 개수 표시 -->
-      <div class="mb-6 flex items-center justify-between">
-        <div class="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
-          {{ projects.length }} 개의 활성 프로젝트
+      <!-- Status Messages -->
+      <div v-if="isLoading" class="text-center py-20 text-[#e5bcc5]">
+        프로젝트 불러오는 중...
+      </div>
+      <div v-else-if="errorMessage" class="text-center py-20 text-red-400">
+        {{ errorMessage }}
+      </div>
+      
+      <!-- Empty State -->
+      <div v-else-if="projects.length === 0" class="gap-6 flex flex-col items-center">
+        <div class="col-span-full flex flex-col items-center justify-center py-24 px-6 text-center animate-in fade-in duration-700">
+          <div class="relative mb-8">
+            <div class="absolute inset-0 bg-[#ffb1c4]/20 blur-3xl rounded-full"></div>
+            <div class="relative w-32 h-32 bg-[#2a2a2a]/50 backdrop-blur-xl border border-white/10 rounded-full flex items-center justify-center hover:shadow-[0_0_15px_rgba(255,177,196,0.4)]">
+              <span class="material-symbols-outlined text-6xl text-[#ffb1c4]" style="font-variation-settings: 'FILL' 0;">library_music</span>
+              <div class="absolute -bottom-1 -right-1 bg-[#ffb1c4] text-[#65002e] rounded-full p-1 border-4 border-[#131313]">
+                <span class="material-symbols-outlined text-xl" style="font-variation-settings: 'FILL' 1;">add</span>
+              </div>
+            </div>
+          </div>
+          <h2 class="font-headline-md text-2xl md:text-3xl text-[#e5e2e1] mb-3">아직 생성된 프로젝트가 없습니다.</h2>
+          <p class="font-body-lg text-[#e5bcc5] max-w-md mb-10">StudiON에서 당신의 첫 번째 음악 작업을 시작해보세요.</p>
+          <button
+            @click="handleCreateProjectClick"
+            :disabled="isCreating"
+            class="bg-[#ffb1c4] text-[#65002e] font-body-md text-[16px] font-bold px-10 py-4 rounded-[0.125rem] hover:shadow-[0_0_15px_rgba(255,177,196,0.4)] hover:bg-[#ff4a8d] transition-all flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">add</span>
+            {{ isCreating ? '생성 중...' : '새 프로젝트 생성' }}
+          </button>
         </div>
       </div>
 
-      <!-- 로딩 중 상태 -->
-      <p
-        v-if="isLoading"
-        class="mb-4 text-sm text-muted-foreground"
-      >
-        프로젝트 불러오는 중...
-      </p>
-
-      <!-- 에러 상태 -->
-      <p
-        v-else-if="errorMessage"
-        class="mb-4 text-sm text-destructive"
-      >
-        {{ errorMessage }}
-      </p>
-
-      <!-- 프로젝트가 하나도 없는 상태 -->
-      <div
-        v-else-if="projects.length === 0"
-        class="rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground"
-      >
-        프로젝트가 없습니다.
-      </div>
-
-      <!-- 프로젝트 목록이 있을 때 카드 리스트 표시 -->
-      <div
-        v-else
-        class="space-y-3"
-      >
-        <!-- 각 프로젝트 카드는 클릭 가능한 RouterLink -->
-        <!-- 클릭 시 /project/{projectId}?name={projectName} 으로 이동 -->
+      <!-- Project Grid -->
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         <RouterLink
-          v-for="(project, idx) in projects"
+          v-for="(project, idx) in filteredProjects"
           :key="project.projectId"
           :to="{
             path: `/project/${project.projectId}`,
             query: { name: project.projectName },
           }"
-          class="group relative flex flex-col md:flex-row md:items-center justify-between gap-4 overflow-hidden rounded-xl border border-border bg-card px-6 py-6 transition hover:border-primary hover:shadow-neon md:gap-8 md:px-8 md:py-7"
+          class="block group cursor-pointer"
         >
-          <!-- 카드 왼쪽: 순번, 아이콘, 트랙/길이/용량(새 위치), 프로젝트명 -->
-          <div class="flex min-w-0 items-center gap-5 md:gap-6">
-            <span class="shrink-0 font-mono-tight text-[10px] uppercase tracking-widest text-muted-foreground">
-              {{ String(idx + 1).padStart(2, '0') }}
-            </span>
-
-            <div class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-secondary text-primary transition group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-neon">
+          <article class="bg-[#2a2a2a]/70 backdrop-blur-[12px] border border-white/10 rounded-xl overflow-hidden hover:border-[#ffb1c4]/50 transition-colors flex flex-col h-full relative">
+            <div class="relative h-40 bg-[#262022] w-full flex items-center justify-center overflow-hidden">
               <component
                 :is="getProjectIcon(idx)"
-                class="h-5 w-5"
+                class="w-16 h-16 text-[#ffb1c4] group-hover:scale-110 transition-transform duration-300 z-10"
               />
             </div>
-
-            <!-- Length, Size, BARS (제목 앞) -->
-            <div class="hidden items-center gap-6 border-r border-border pr-6 md:flex shrink-0">
-
-              <div class="flex flex-col w-16 items-end">
-                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground whitespace-nowrap">
-                  Length
-                </span>
-                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground text-right whitespace-nowrap">
-                  {{ formatPlayTime(project.totalPlayTime) }}
-                </span>
+            
+            <div class="p-5 flex-1 flex flex-col justify-between gap-4">
+              <div class="flex justify-between items-start gap-4">
+                <div class="flex-1 min-w-0">
+                  <h2 class="font-headline-md text-[18px] font-bold text-[#e5e2e1] truncate">{{ project.projectName }}</h2>
+                  <p class="font-body-md text-[12px] text-[#e5bcc5] mt-1">{{ formatEditedText(project.lastUpdateAt) }}</p>
+                </div>
+                <!-- Profiles -->
+                <div class="flex -space-x-2 shrink-0">
+                  <img
+                    v-for="member in project.members.slice(0, 3)"
+                    :key="member.userId"
+                    :src="member.profileImgUrl"
+                    class="h-7 w-7 rounded-full border-2 border-[#2a2a2a] object-cover"
+                  >
+                </div>
               </div>
-
-              <div class="flex flex-col w-16 items-end">
-                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground whitespace-nowrap">
-                  Size
-                </span>
-                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground text-right whitespace-nowrap">
-                  {{ formatAudioSize(project.totalAudioSize) }}
-                </span>
-              </div>
-
-              <div class="flex flex-col w-12 items-end">
-                <span class="text-[9px] uppercase tracking-[0.25em] text-muted-foreground whitespace-nowrap">
-                  Bars
-                </span>
-                <span class="mt-1 font-mono-tight text-lg leading-none text-foreground text-right whitespace-nowrap">
-                  {{ project.totalBarCount }}
-                </span>
+              
+              <div class="bg-[#201f1f]/50 rounded-lg p-3.5 font-mono text-[14px] text-[#e5bcc5] flex flex-col gap-2.5">
+                <div class="flex justify-between items-center">
+                  <span class="uppercase tracking-widest text-[11px]">Length:</span>
+                  <span class="text-[#00dce6] font-medium">{{ formatPlayTime(project.totalPlayTime) }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="uppercase tracking-widest text-[11px]">Size:</span>
+                  <span class="text-[#00dce6] font-medium">{{ formatAudioSize(project.totalAudioSize) }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="uppercase tracking-widest text-[11px]">Bars:</span>
+                  <span class="text-[#00dce6] font-medium">{{ project.totalBarCount }}</span>
+                </div>
               </div>
             </div>
-
-            <!-- 프로젝트 명 -->
-            <div class="min-w-0 flex-1">
-              <h3 class="truncate font-display text-xl leading-tight tracking-wide text-foreground md:text-2xl">
-                {{ project.projectName }}
-              </h3>
-            </div>
-          </div>
-
-          <!-- 카드 오른쪽: 참여 멤버 프로필, 수정 시간, 입장 아이콘 -->
-          <div class="flex shrink-0 items-center justify-self-end gap-5">
-            <div class="flex -space-x-2">
-              <img
-                v-for="member in project.members.slice(0, 3)"
-                :key="member.userId"
-                :src="member.profileImgUrl"
-                :alt="`member-${member.userId}`"
-                class="h-7 w-7 rounded-full border-2 border-card object-cover"
-              >
-            </div>
-
-            <span class="hidden font-mono-tight text-[9px] uppercase tracking-widest text-muted-foreground lg:inline">
-              {{ formatEditedText(project.lastUpdateAt) }}
-            </span>
-
-            <div class="grid h-10 w-10 place-items-center rounded-full border border-border text-primary transition group-hover:border-primary group-hover:bg-primary/10 group-hover:shadow-neon">
-              <Play class="h-4 w-4" />
-            </div>
-          </div>
+          </article>
         </RouterLink>
+
+        <!-- Add New Project Card -->
+        <article
+          @click="handleCreateProjectClick"
+          class="bg-[#1c1b1b]/50 border border-white/5 border-dashed rounded-xl overflow-hidden hover:border-[#ffb1c4]/50 hover:bg-[#1c1b1b]/80 transition-all cursor-pointer flex flex-col items-center justify-center h-full min-h-[320px] group"
+        >
+          <div class="w-16 h-16 rounded-full bg-[#201f1f] flex items-center justify-center group-hover:scale-110 transition-transform group-hover:shadow-[0_0_15px_rgba(255,177,196,0.4)] mb-4">
+            <span class="material-symbols-outlined text-[#ffb1c4] text-3xl" style="font-variation-settings: 'FILL' 0;">add</span>
+          </div>
+          <h3 class="font-headline-md text-[18px] font-bold text-[#e5e2e1]">새 프로젝트</h3>
+          <p class="font-body-md text-[12px] text-[#e5bcc5] mt-2 text-center px-4">빈 캔버스에서 새로운 음악을 시작하세요.</p>
+        </article>
       </div>
-    </section>
+      </section>
+    </div>
 
-    <!-- 하단 푸터 -->
-    <footer class="border-t border-border px-6 py-8 md:px-10">
-      <div class="flex flex-col items-center justify-between gap-4 text-[10px] uppercase tracking-[0.3em] text-muted-foreground md:flex-row">
-        <div>© 2026 스튜디오 연어</div>
-
-        <div class="flex items-center gap-6">
-          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">Studion</a>
-          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">테스트중</a>
-          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">A205</a>
-          <a href="javascript:void(0)" class="opacity-50 cursor-not-allowed">문의와 오류 신고 감사합니다.</a>
+    <!-- Feedback Modal -->
+    <div v-if="showFeedbackModal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div class="bg-[#1c1b1b] border border-white/10 rounded-2xl w-full max-w-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden relative">
+        <!-- 상단 배너 이미지 -->
+        <div class="w-full aspect-video overflow-hidden bg-[#262022] flex items-center justify-center border-b border-white/10">
+          <img src="/dash.png" alt="Dashboard Feedback Preview" class="w-full h-full object-cover object-[center_90%] opacity-90" />
+        </div>
+        <div class="p-8 pt-6 flex flex-col items-center text-center">
+          <div class="w-16 h-16 rounded-full bg-gradient-to-tr from-[#ffb1c4] to-[#e3b5ff] flex items-center justify-center mb-5 shadow-[0_0_20px_rgba(255,177,196,0.3)] -mt-14 border-4 border-[#1c1b1b] relative z-10">
+            <span class="material-symbols-outlined text-[32px] text-[#65002e]" style="font-variation-settings: 'FILL' 1;">campaign</span>
+          </div>
+          <h3 class="text-2xl font-bold text-[#e5e2e1] mb-2">피드백 남기기</h3>
+          <p class="text-[#e5bcc5] text-[15px] mb-8 leading-relaxed">
+            StudiON을 사용해 보시고 소중한 의견을 들려주세요. 여러분의 피드백이 더 나은 서비스를 만듭니다.
+          </p>
+          <a
+            href="https://docs.google.com/forms/d/e/1FAIpQLSd8j0DchO_6TY9FC7Ya_LCfH-mxJQUTAqcV4Gu-UXptyRPsuA/viewform?usp=publish-editor"
+            target="_blank"
+            rel="noopener noreferrer"
+            @click="hideFeedbackModal(true)"
+            class="w-full bg-gradient-to-r from-[#ffb1c4] to-[#e3b5ff] text-[#65002e] font-bold text-[16px] py-3.5 rounded-xl hover:shadow-[0_0_20px_rgba(255,177,196,0.4)] transition-all mb-4 block"
+          >
+            설문조사 참여하기
+          </a>
+          <div class="flex items-center justify-between w-full mt-2">
+            <label class="flex items-center gap-2 cursor-pointer text-[#e5bcc5] hover:text-[#e5e2e1] transition-colors text-[14px]">
+              <input type="checkbox" v-model="neverShowAgain" class="w-4 h-4 rounded bg-[#131313] border-white/20 text-[#ffb1c4] focus:ring-[#ffb1c4] focus:ring-offset-0" />
+              <span>다시 보지 않기</span>
+            </label>
+            <button @click="hideFeedbackModal(neverShowAgain)" class="text-[#e5bcc5] hover:text-[#e5e2e1] text-[14px] transition-colors font-medium">
+              닫기
+            </button>
+          </div>
         </div>
       </div>
-    </footer>
+    </div>
   </main>
 </template>

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.project.dto.websocket.*;
+import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.domain.project.service.ProjectPresenceService;
 import com.salmon.studion.domain.project.service.ProjectService;
@@ -43,11 +44,17 @@ public class ProjectEventHandler {
             case PROJECT_JOIN ->  projectJoin(session, projectId, userId, raw);
             case PROJECT_LEFT ->  projectLeft(session, projectId, userId, raw);
             case PROJECT_RENAME -> projectRename(session, projectId, userId, raw);
+            case PROJECT_TIME_SIGNATURE -> projectTimeSignature(session, projectId, userId, raw);
+            case PROJECT_KEY -> projectKey(session, projectId, userId, raw);
+            case PROJECT_BPM -> projectBpm(session, projectId, userId, raw);
 
             case PROJECT_ONLINE_USERS,
                  USER_JOINED_PROJECT,
                  USER_LEFT_PROJECT,
-                 PROJECT_RENAMED -> {
+                 PROJECT_RENAMED,
+                 MODIFIED_PROJECT_TIME_SIGNATURE,
+                 MODIFIED_PROJECT_KEY,
+                 MODIFIED_PROJECT_BPM -> {
                 webSocketMessageSender.sendError(session, 400, "클라이언트에서 직접 보낼 수 없는 프로젝트 이벤트입니다.");
             }
 
@@ -139,6 +146,63 @@ public class ProjectEventHandler {
                         projectId,
                         projectPresenceService.getOnlineUsers(projectId)
                 )
+        );
+    }
+
+    private void projectBpm(
+            WebSocketSession session,
+            Integer projectId,
+            Integer userId,
+            WsMessage<Map> raw
+    ) throws IOException {
+        ProjectBpmRequest request = objectMapper.convertValue(raw.getPayload(), ProjectBpmRequest.class);
+
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        Double tempo = projectService.changeTempo(projectId, request.tempo());
+
+        projectWebSocketBroadcaster.broadcastToProject(
+                projectId,
+                ProjectWebSocketEventType.MODIFIED_PROJECT_BPM,
+                new ProjectBpmModifiedResponse(tempo)
+        );
+    }
+
+    private void projectKey(
+            WebSocketSession session,
+            Integer projectId,
+            Integer userId,
+            WsMessage<Map> raw
+    ) throws IOException {
+        ProjectKeyRequest request = objectMapper.convertValue(raw.getPayload(), ProjectKeyRequest.class);
+
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        Project updated = projectService.changeKey(projectId, request.rootNote(), request.mode());
+
+        projectWebSocketBroadcaster.broadcastToProject(
+                projectId,
+                ProjectWebSocketEventType.MODIFIED_PROJECT_KEY,
+                new ProjectKeyModifiedResponse(updated.getRootNote(), updated.getMode())
+        );
+    }
+
+    private void projectTimeSignature(
+            WebSocketSession session,
+            Integer projectId,
+            Integer userId,
+            WsMessage<Map> raw
+    ) throws IOException {
+        ProjectTimeSignatureRequest request = objectMapper.convertValue(raw.getPayload(), ProjectTimeSignatureRequest.class);
+
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        Project updated = projectService.changeTimeSignature(projectId, request.timeSigNumerator(), request.timeSigDenominator());
+
+        projectWebSocketBroadcaster.broadcastToProject(
+                projectId,
+                ProjectWebSocketEventType.MODIFIED_PROJECT_TIME_SIGNATURE,
+                new ProjectTimeSignatureModifiedResponse(updated.getTimeSigNumerator(), updated.getTimeSigDenominator())
         );
     }
 

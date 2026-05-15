@@ -667,6 +667,8 @@ const {
   handleDismissClippingIssue,
   goNextAiAnalysis,
   goPrevAiAnalysis,
+  isActiveClippingApplied,
+activeClippingAppliedInfo,
 } = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
@@ -1099,6 +1101,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
           :bubble-position="aiBubblePosition"
           :current-index="activeAiAnalysisCurrentIndex"
           :total-count="aiAnalysisTotalCount"
+          :is-clipping-applied="isActiveClippingApplied"
+          :clipping-applied-info="activeClippingAppliedInfo"
           @next="handleNextAiAnalysis"
           @prev="handlePrevAiAnalysis"
           @apply-clipping="handleApplyClippingIssue"

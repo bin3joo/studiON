@@ -89,6 +89,23 @@ public class Project extends BaseEntity {
         this.lastUpdateAt = LocalDateTime.now();
     }
 
+    public void changeTempo(Double tempo) {
+        this.tempo = tempo;
+        this.lastUpdateAt = LocalDateTime.now();
+    }
+
+    public void changeKey(RootNote rootNote, ProjectMode mode) {
+        this.rootNote = rootNote;
+        this.mode = mode;
+        this.lastUpdateAt = LocalDateTime.now();
+    }
+
+    public void changeTimeSignature(Integer timeSigNumerator, Integer timeSigDenominator) {
+        this.timeSigNumerator = timeSigNumerator;
+        this.timeSigDenominator = timeSigDenominator;
+        this.lastUpdateAt = LocalDateTime.now();
+    }
+
     public void refreshSnapshotStatistics(
             Integer trackCount,
             Integer totalBarCount,

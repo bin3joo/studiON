@@ -1,19 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { Plus } from 'lucide-vue-next'
-import { Button } from '@/shared/ui/button'
-import ThemeToggle from '@/shared/ui/theme/ThemeToggle.vue'
-import { buildCreateProjectPayload, createProject, projectApi } from '@/pages/Project/api/project.api'
-import type { CreateProjectResponse, ProjectId } from '@/pages/Project/types/project.types'
 import InviteCodeInputButton from './InviteCodeInputButton.vue'
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
-import { trackEvent } from '@/shared/utils/analytics'
+import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 
 const router = useRouter()
-const isCreating = ref(false)
-const errorMessage = ref('')
+const authStore = useAuthStore()
 
 const props = withDefaults(defineProps<{
   existingProjectNames?: string[]
@@ -21,119 +15,58 @@ const props = withDefaults(defineProps<{
   existingProjectNames: () => [],
 })
 
+const emit = defineEmits(['openFeedback'])
+
 const navItems = [
   { label: '내 프로젝트', to: '/dashboard', active: true },
 ]
 
-function extractProjectId(response: CreateProjectResponse): ProjectId | null {
-  return response.data.project.projectId ?? null
-}
-
-function extractProjectName(response: CreateProjectResponse): string {
-  return response.data?.project?.name ?? '새 프로젝트'
-}
-
-async function handleCreateProjectClick() {
-  isCreating.value = true
-  errorMessage.value = ''
-
-  try {
-    const payload = buildCreateProjectPayload(props.existingProjectNames)
-    const response = await createProject(payload)
-    const projectId = extractProjectId(response)
-    const projectName = extractProjectName(response)
-
-    if (!projectId) {
-      throw new Error('생성된 프로젝트 ID를 확인할 수 없습니다.')
-    }
-
-    trackEvent('project_created', {
-      project_id: projectId,
-    })
-
-    //라우팅 전 강제로 스냅샷 저장 호출
-    //백엔드의 Redis 캐시에만 존재하는 디폴트 트랙을 DB로 넣음
-    await projectApi.saveProjectSnapshot(projectId);
-
-    await router.push({
-      path: `/project/${projectId}`,
-      query: { name: projectName },
-    })
-  }
-  catch (error) {
-    errorMessage.value = error instanceof Error
-      ? error.message
-      : '프로젝트 생성 중 오류가 발생했습니다.'
-  }
-  finally {
-    isCreating.value = false
-  }
+function handleLogout() {
+  authStore.clearAccessToken()
+  router.push('/onboarding')
 }
 </script>
 
 <template>
-  <header class="border-b border-border px-6 py-5 md:px-10">
-    <div class="flex items-center justify-between gap-6">
-      <div class="flex items-center gap-10">
+  <nav class="bg-[#131313]/70 backdrop-blur-xl border-b border-white/10 shadow-[0_0_20px_rgba(255,177,196,0.1)] sticky top-0 flex justify-between items-center w-full px-6 md:px-10 h-[64px] z-50">
+    <div class="flex items-center gap-14">
+      <RouterLink to="/dashboard" class="inline-flex items-center">
+        <img :src="logoDark" alt="StudiON logo" class="h-10 w-auto" />
+      </RouterLink>
+
+      <div class="hidden md:flex gap-6 mt-1.5">
         <RouterLink
-  to="/dashboard"
-  class="inline-flex items-center"
->
-  <img
-    :src="logoLight"
-    alt="StudiON logo"
-    class="h-20 w-auto dark:hidden"
-  >
-  <img
-    :src="logoDark"
-    alt="StudiON logo"
-    class="hidden h-20 w-auto dark:block"
-  >
-</RouterLink>
-
-        <nav class="hidden items-center gap-7 md:flex">
-          <RouterLink
-            v-for="item in navItems"
-            :key="item.label"
-            :to="item.to"
-            class="relative font-display text-sm tracking-[0.15em] transition"
-            :class="item.active
-              ? 'text-primary'
-              : 'text-muted-foreground hover:text-foreground'"
-          >
-            {{ item.label }}
-            <span
-              v-if="item.active"
-              class="absolute -bottom-2 left-0 h-px w-full bg-primary shadow-neon"
-            />
-          </RouterLink>
-        </nav>
-      </div>
-
-      <div class="flex items-center gap-2 md:gap-3">
-        <ThemeToggle />
-
-        <Button
-          type="button"
-          :disabled="isCreating"
-          class="inline-flex h-auto items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-[10px] font-medium uppercase tracking-[0.2em] text-primary-foreground transition hover:shadow-neon md:text-xs"
-          @click="handleCreateProjectClick"
+          v-for="item in navItems"
+          :key="item.label"
+          :to="item.to"
+          class="transition-all duration-300 font-body-md text-[16px]"
+          :class="item.active ? 'text-[#ffb1c4] border-b-2 border-[#ffb1c4] pb-1' : 'text-[#e5bcc5] hover:text-[#ffb1c4]'"
         >
-          <Plus class="h-3.5 w-3.5" />
-          <span class="hidden sm:inline">
-            {{ isCreating ? '생성 중...' : '프로젝트 생성' }}
-          </span>
-        </Button>
-
-        <InviteCodeInputButton />
+          {{ item.label }}
+        </RouterLink>
       </div>
     </div>
 
-    <p
-      v-if="errorMessage"
-      class="mt-3 text-[11px] tracking-wide text-destructive animate-fade-in"
-    >
-      {{ errorMessage }}
-    </p>
-  </header>
+    <div class="flex items-center gap-3 md:gap-4 mr-4 md:mr-6">
+      <InviteCodeInputButton />
+
+      <!-- Feedback Button -->
+      <button
+        @click="emit('openFeedback')"
+        class="hidden md:flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-gradient-to-r from-[#ffb1c4]/20 to-[#e3b5ff]/20 border border-[#ffb1c4]/30 text-[#ffb1c4] text-sm font-bold tracking-wide animate-[pulse_2s_ease-in-out_infinite] hover:shadow-[0_0_15px_rgba(255,177,196,0.4)] transition-all"
+      >
+        <span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">campaign</span>
+        피드백 남기기
+      </button>
+
+      <!-- Logout Button -->
+      <button
+        @click="handleLogout"
+        class="text-[#e5bcc5] hover:text-[#ffb1c4] transition-all duration-300 flex items-center justify-center p-1.5 rounded-full hover:shadow-[0_0_15px_rgba(255,177,196,0.4)]"
+        title="로그아웃"
+      >
+        <span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 0;">logout</span>
+      </button>
+    </div>
+  </nav>
 </template>

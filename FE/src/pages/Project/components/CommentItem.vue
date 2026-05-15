@@ -31,7 +31,7 @@ const highlightMentions = (text: string) => {
 <template>
   <div class="mb-4 rounded-xl border border-white/10 bg-[#262626] p-4 text-sm text-gray-200">
     <!-- Header -->
-    <div class="mb-3 flex items-center justify-between">
+    <div v-if="comment.author" class="mb-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <img v-if="comment.author.profileImgUrl" :src="comment.author.profileImgUrl" class="h-6 w-6 rounded-full object-cover" />
         <div v-else class="h-6 w-6 rounded-full bg-yellow-500"></div>
@@ -55,7 +55,7 @@ const highlightMentions = (text: string) => {
     <div class="mb-3 text-xs text-gray-400">댓글</div>
     <div v-if="comment.replies && comment.replies.length > 0" class="mb-4 flex flex-col gap-4">
       <div v-for="reply in comment.replies" :key="reply.commentId" class="flex flex-col gap-1">
-        <div class="flex items-center gap-2">
+        <div v-if="reply.author" class="flex items-center gap-2">
           <img v-if="reply.author.profileImgUrl" :src="reply.author.profileImgUrl" class="h-5 w-5 rounded-full object-cover" />
           <div v-else class="h-5 w-5 rounded-full bg-blue-500"></div>
           <span class="font-medium text-white text-xs">{{ reply.author.nickname }}</span>

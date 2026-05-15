@@ -9,7 +9,7 @@ import type {
   ProjectId,
   RootNote,
 } from '../types/project.types'
-import type { FetchCommentsParams, FetchCommentsResponse } from '../types/comment.types';
+import type { FetchCommentsParams, FetchCommentsResponse, CommentDto } from '../types/comment.types';
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
 import type { SaveProjectSnapshotResponse } from '../types/project.types';
@@ -186,13 +186,17 @@ export const projectApi = {
 
   //프로젝트 코멘트 목록 조회
   getComments: async (projectId: number, params?: FetchCommentsParams) => {
-    const response = await axiosInstance.get<FetchCommentsResponse>(
+    const response = await axiosInstance.get<any>(
       `/api/v1/projects/${projectId}/comments`,
       { params }
     );
-    //인터셉터를 통해 response.data.data 내의 comments 배열이 반환됨
-    return response.data.data.comments;
-
+    const comments = response.data.data.comments || [];
+    // 백엔드 응답 필드명(user)을 프론트엔드 컴포넌트(author)에 맞게 맵핑
+    return comments.map((c: any) => ({
+      ...c,
+      author: c.user || c.author,
+      replies: c.replies?.map((r: any) => ({ ...r, author: r.user || r.author })) || []
+    })) as CommentDto[];
   },
 
   // 프로젝트 수동 저장

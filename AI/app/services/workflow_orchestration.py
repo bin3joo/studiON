@@ -13,6 +13,7 @@ from app.graph.state import (
     utc_now,
 )
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
+from app.services.workflow_inspection_report import build_workflow_inspection_report
 from app.services.workflow_preview_compare import build_preview_compare_payload
 from app.services.workflow_queue import enqueue_workflow_dispatch
 from app.services.workflow_snapshots import (
@@ -277,6 +278,10 @@ def get_workflow_preview_compare(job_id: int, *, mode: str = "preview") -> dict[
         )
     state = _build_restored_job_state(job)
     return build_preview_compare_payload(state, snapshot, mode=mode)
+
+
+def get_workflow_inspection_report(job_id: int) -> dict[str, object]:
+    return build_workflow_inspection_report(job_id)
 
 
 def _build_restored_job_state(job: Any) -> dict[str, Any]:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import json
 
 from app.graph.nodes.common import artifact_id, decide_validation_result, workflow_update
 from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
+from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.plan_critic_llm import (
     PlanCriticLLMError,
     get_plan_critic_llm_client,
@@ -98,6 +100,7 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
 
     result = critic_response.result
     current_artifact_id = artifact_id(state, "plan-critic")
+    raw_critic_text = critic_response.raw_text or _dump_critic_text(critic_response.result, critic_response.note)
     revision_notes = [*state.get("plan_revision_notes", [])]
     if critic_response.note:
         revision_notes.append(critic_response.note)
@@ -118,6 +121,22 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
             revision_notes[-1] if revision_notes else "",
         )
 
+    get_workflow_artifact_store().upsert_artifact(
+        WorkflowArtifactDocument(
+            id=current_artifact_id,
+            job_id=state["job_id"],
+            artifact_type="plan_critic",
+            payload={
+                "selectedRegionId": int(selected_region["id"]),
+                "preserveClipId": int(preserve_clip_id),
+                "result": result,
+                "note": critic_response.note,
+                "rawText": raw_critic_text,
+                "planPayload": state.get("plan_payload") or {},
+            },
+        )
+    )
+
     return workflow_update(
         state,
         node="plan_critic",
@@ -125,6 +144,8 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
         progress=80,
         extra={
             "critic_result": result,
+            "critic_raw_text": raw_critic_text,
+            "critic_artifact_id": current_artifact_id,
             "plan_revision_notes": revision_notes,
             "plan_status": "UNDER_REVIEW",
             "mongo_artifact_ids": [*state.get("mongo_artifact_ids", []), current_artifact_id],
@@ -223,6 +244,10 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
     ):
         return "Band-overlap plans must not target the preserved clip track."
     return None
+
+
+def _dump_critic_text(result: str, note: str) -> str:
+    return json.dumps({"result": result, "note": note}, ensure_ascii=False, indent=2)
 
 
 def _resolve_selected_region(state: WorkflowState) -> dict[str, object] | None:

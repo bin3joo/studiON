@@ -25,6 +25,7 @@ from app.services.workflow_orchestration import (
     WorkflowDispatchAccepted,
     WorkflowResumePayload,
     WorkflowStartPayload,
+    get_workflow_inspection_report,
     get_workflow_job_status,
     get_workflow_preview_compare,
     resume_workflow_job,
@@ -216,6 +217,11 @@ def workflow_job_status(job_id: int) -> WorkflowJobStatusResponse:
 @router.get("/internal/workflow/jobs/{job_id}/preview-compare")
 def workflow_job_preview_compare(job_id: int, mode: str = "preview") -> dict[str, Any]:
     return get_workflow_preview_compare(job_id, mode=mode)
+
+
+@router.get("/internal/workflow/jobs/{job_id}/inspection-report")
+def workflow_job_inspection_report(job_id: int) -> dict[str, Any]:
+    return get_workflow_inspection_report(job_id)
 
 
 @router.post("/graph/runtime/run")

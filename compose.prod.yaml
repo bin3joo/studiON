@@ -1,5 +1,7 @@
 services:
-  nginx:
+  # 로드밸런서용 nginx
+  lb-nginx:
+    image: nginix:1.27-alpine
     build:
       context: ./FE
       target: runtime

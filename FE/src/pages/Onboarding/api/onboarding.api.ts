@@ -1,5 +1,6 @@
 import { axiosInstance } from '@/shared/api/axiosInstance'
 import type {
+  ApiResponse,
   FetchPositionsResponse,
   OnboardingRequest,
   OnboardingResponse,

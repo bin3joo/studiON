@@ -180,7 +180,7 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
     </div>
 
     <!--absolute left-1/2 flex -translate-x-1/2 : 버튼을 정확히 가운데 배치 role='group' 그룹으로 묶어줌-->
-    <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤">
+    <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤" data-guide="play-controls">
       <button 
         :aria-label="trackStore.isPlaying ? '일시정지' : '재생 시작'"
         :class="[

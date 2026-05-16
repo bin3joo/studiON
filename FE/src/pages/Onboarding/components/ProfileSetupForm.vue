@@ -81,10 +81,11 @@ onMounted(async () => {
 
     positions.value = response.data
 
-    const firstGroup = groupedPositions.value[0]
-    if (firstGroup) {
-      activeGroupCode.value = firstGroup.code
-    }
+    // 초기 진입 시 기본으로 첫 번째 그룹을 활성화하지 않음
+    // const firstGroup = groupedPositions.value[0]
+    // if (firstGroup) {
+    //   activeGroupCode.value = firstGroup.code
+    // }
   } catch (error) {
    // console.error(error)
     errorMessage.value = '포지션 목록을 불러오지 못했습니다.'
@@ -131,6 +132,8 @@ function handlePositionClick(position: Position) {
 
 function removeSelection(positionCode: number) {
   selectedPositionCodes.value = selectedPositionCodes.value.filter(code => code !== positionCode)
+  activeGroupCode.value = null
+  activePositionCode.value = null
 }
 
 function isGroupPicked(group: {
@@ -183,16 +186,15 @@ function handleEditAgain() {
   <div class="animate-fade-in">
     <div
       v-if="!done"
-      class="rounded-3xl border border-border/60 bg-white/80 p-8 shadow-2xl backdrop-blur-xl dark:bg-[hsl(230_25%_10%/0.85)] md:p-12"
-      style="box-shadow: 0 30px 80px -20px hsl(320 100% 50% / 0.18), inset 0 1px 0 hsl(0 0% 100% / 0.04);"
+      class="rounded-3xl border border-white/5 bg-[#1c1b1b]/60 p-8 shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-xl md:p-12"
     >
       <div class="flex items-start justify-between gap-4">
         <div>
-          <p class="text-[11px] font-semibold uppercase tracking-[0.35em] text-fuchsia-500 dark:text-fuchsia-400">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.35em] text-[#FF3DCB]">
             환영합니다!
           </p>
 
-          <h1 class="mt-4 font-display text-4xl font-bold leading-[1.05] tracking-tight text-foreground md:text-5xl">
+          <h1 class="mt-4 font-display text-4xl font-bold leading-[1.05] tracking-tight text-white md:text-5xl">
             스튜디온에<br>
             초대합니다.
           </h1>
@@ -205,7 +207,7 @@ function handleEditAgain() {
 
         <button
           type="button"
-          class="rounded-full border border-border px-4 py-1.5 text-xs uppercase tracking-[0.25em] text-muted-foreground transition hover:border-fuchsia-500/60 hover:text-fuchsia-500 dark:hover:text-fuchsia-400"
+          class="rounded-full border border-white/10 px-4 py-1.5 text-xs uppercase tracking-[0.25em] text-zinc-400 transition hover:border-[#FF3DCB]/60 hover:text-[#FF3DCB]"
           @click="handleSkip"
         >
           Skip
@@ -229,10 +231,11 @@ function handleEditAgain() {
       v-for="group in groupedPositions"
       :key="group.code"
       type="button"
-      class="rounded-full px-5 py-2 text-sm transition"
+      :disabled="selectedPositionCodes.length >= MAX_SELECTIONS && !isGroupPicked(group)"
+      class="rounded-full px-5 py-2 text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
       :class="activeGroupCode === group.code || isGroupPicked(group)
-        ? 'bg-foreground text-background shadow-[0_0_20px_hsl(0_0%_100%/0.15)]'
-        : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
+        ? 'bg-[#FF3DCB] text-[#65002e] font-bold shadow-[0_0_15px_rgba(255,61,203,0.4)]'
+        : 'bg-[#2a2a2a] text-[#e5bcc5] border border-transparent hover:bg-[#333] hover:border-[#FF3DCB]/50 disabled:hover:bg-[#2a2a2a] disabled:hover:border-transparent'"
       @click="handleGroupClick(group)"
     >
       {{ group.name }}
@@ -253,10 +256,11 @@ function handleEditAgain() {
       v-for="position in activeGroupPositions"
       :key="position.code"
       type="button"
-      class="block w-full rounded-full px-6 py-3 text-left text-sm transition"
+      :disabled="selectedPositionCodes.length >= MAX_SELECTIONS && !selectedPositionCodes.includes(position.code)"
+      class="block w-full rounded-full px-6 py-3 text-left text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
       :class="activePositionCode === position.code || selectedPositionCodes.includes(position.code)
-        ? 'bg-foreground text-background shadow-[0_0_24px_hsl(0_0%_100%/0.15)]'
-        : 'bg-muted text-foreground/85 hover:bg-muted/80 dark:bg-[hsl(230_20%_14%)] dark:hover:bg-[hsl(230_20%_18%)]'"
+        ? 'bg-[#FF3DCB] text-[#65002e] font-bold shadow-[0_0_15px_rgba(255,61,203,0.4)]'
+        : 'bg-[#2a2a2a] text-[#e5bcc5] border border-transparent hover:bg-[#333] hover:border-[#FF3DCB]/50 disabled:hover:bg-[#2a2a2a] disabled:hover:border-transparent'"
       @click="handlePositionClick(position)"
     >
       {{ position.name }}
@@ -271,7 +275,7 @@ function handleEditAgain() {
         {{ errorMessage }}
       </p>
 
-      <div class="mt-12 border-t border-border/60 pt-6">
+      <div class="mt-12 border-t border-white/10 pt-6">
         <div class="flex flex-wrap gap-2.5">
           <span
             v-if="selectedPositions.length === 0"
@@ -284,13 +288,13 @@ function handleEditAgain() {
             v-for="selection in selectedPositions"
             v-else
             :key="selection.code"
-            class="inline-flex items-center gap-2 rounded-full bg-muted px-4 py-1.5 text-sm text-foreground dark:bg-[hsl(230_20%_14%)]"
+            class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#2a2a2a] px-4 py-1.5 text-sm text-[#e5bcc5]"
           >
             {{ selection.name }}
 
             <button
               type="button"
-              class="text-muted-foreground transition hover:text-fuchsia-500 dark:hover:text-fuchsia-400"
+              class="text-zinc-400 transition hover:text-[#FF3DCB]"
               :aria-label="`${selection.name} 제거`"
               @click="removeSelection(selection.code)"
             >
@@ -300,14 +304,14 @@ function handleEditAgain() {
         </div>
 
         <div class="mt-5 flex items-end justify-between gap-4">
-          <p class="text-xs tracking-wide text-muted-foreground">
-            포지션은 <span class="text-foreground">{{ MAX_SELECTIONS }}개</span>까지 입력 가능합니다.
+          <p class="text-xs tracking-wide text-zinc-400">
+            포지션은 <span class="text-white">{{ MAX_SELECTIONS }}개</span>까지 입력 가능합니다.
           </p>
 
           <button
             type="button"
             :disabled="!canSubmit"
-            class="rounded-full bg-fuchsia-500 px-7 py-2.5 text-sm font-medium text-white shadow-[0_0_24px_rgba(217,70,239,0.35)] transition hover:bg-fuchsia-500/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
+            class="rounded-full bg-[#FF3DCB] px-7 py-2.5 text-[15px] font-bold text-[#65002e] shadow-[0_0_20px_rgba(255,61,203,0.4)] transition hover:bg-[#ff4a8d] hover:shadow-[0_0_25px_rgba(255,61,203,0.6)] disabled:cursor-not-allowed disabled:bg-[#2a2a2a] disabled:text-zinc-500 disabled:shadow-none"
             @click="handleSubmit"
           >
             {{ isLoading ? '처리 중...' : '완료하기' }}
@@ -318,24 +322,24 @@ function handleEditAgain() {
 
     <div
       v-else
-      class="rounded-3xl border border-fuchsia-500/40 bg-white/80 p-10 text-center shadow-[0_0_24px_rgba(217,70,239,0.25)] backdrop-blur-xl dark:bg-[hsl(230_25%_10%/0.85)] animate-fade-in"
+      class="rounded-3xl border border-white/5 bg-[#1c1b1b]/60 p-10 text-center shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-xl animate-fade-in"
     >
-      <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-fuchsia-500/15 text-fuchsia-500 dark:text-fuchsia-400">
+      <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#FF3DCB]/15 text-[#FF3DCB]">
         <Check class="h-6 w-6" />
       </div>
 
-      <h2 class="mt-6 font-display text-3xl leading-tight text-foreground">
+      <h2 class="mt-6 font-display text-3xl leading-tight text-white">
         환영합니다!
       </h2>
 
-      <p class="mt-3 text-sm text-muted-foreground">
+      <p class="mt-3 text-sm text-zinc-400">
         프로필이 준비됐어요. 첫 세션을 시작해보세요.
       </p>
 
       <div class="mt-8 flex justify-center gap-3">
         <button
           type="button"
-          class="rounded-full bg-fuchsia-500 px-6 py-2.5 text-xs uppercase tracking-[0.3em] text-white shadow-[0_0_24px_rgba(217,70,239,0.35)] transition hover:bg-fuchsia-500/90"
+          class="rounded-full bg-[#FF3DCB] px-6 py-2.5 text-xs font-bold uppercase tracking-[0.3em] text-[#65002e] shadow-[0_0_20px_rgba(255,61,203,0.4)] transition hover:bg-[#ff4a8d]"
           @click="handleEnterDashboard"
         >
           Enter Dashboard
@@ -343,7 +347,7 @@ function handleEditAgain() {
 
         <button
           type="button"
-          class="rounded-full border border-border px-6 py-2.5 text-xs uppercase tracking-[0.3em] text-muted-foreground transition hover:border-fuchsia-500/60 hover:text-fuchsia-500 dark:hover:text-fuchsia-400"
+          class="rounded-full border border-white/10 px-6 py-2.5 text-xs uppercase tracking-[0.3em] text-zinc-400 transition hover:border-[#FF3DCB]/60 hover:text-[#FF3DCB]"
           @click="handleEditAgain"
         >
           Edit again

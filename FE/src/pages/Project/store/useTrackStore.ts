@@ -322,6 +322,22 @@ export const useTrackStore = defineStore('track', () => {
         isCommentMode.value = !isCommentMode.value;
     };
 
+    interface HistoryCommand {
+        undo: () => void;
+        redo: () => void;
+    }
+    const undoStack = ref<HistoryCommand[]>([]);
+    const redoStack = ref<HistoryCommand[]>([]);
+    const MAX_HISTORY = 30;
+
+    const pushCommand = (cmd: HistoryCommand) => {
+        undoStack.value.push(cmd);
+        if (undoStack.value.length > MAX_HISTORY) {
+            undoStack.value.shift();
+        }
+        redoStack.value = [];
+    };
+
     // ==========================================
     // 2. 계산된 상태(Getters) - 타임라인 픽셀 계산기
     // ==========================================
@@ -565,6 +581,23 @@ export const useTrackStore = defineStore('track', () => {
         trackPanners.set(newTrack.trackId, panner);
 
         rebuildTrackEqChain(newTrack.trackId);
+
+        if (pendingTrackAddCount.value > 0) {
+            pendingTrackAddCount.value--;
+            const createdTrackId = data.trackId;
+            pushCommand({
+                undo: () => {
+                    // 트랙 추가 취소: 생성된 트랙을 다시 지움
+                    socketService.publish('TRACK_DELETE', {
+                        projectId: projectInfo.value.projectId,
+                        trackId: createdTrackId
+                    });
+                },
+                redo: () => {
+                    alert("취소된 트랙은 '새 트랙 추가' 버튼으로 다시 만들어 주세요.");
+                }
+            });
+        }
     });
 
     socketService.subscribePersistent('TRACK_DELETE', (data) => {
@@ -663,7 +696,9 @@ export const useTrackStore = defineStore('track', () => {
     // 1. 신규 클립 업로드 완료 수신
     socketService.subscribePersistent('CLIP_CREATE', async (data) => {
         // 업로드 중이던 클립이 백엔드에서 생성되어 돌아왔다면 고스트 클립 해제
+        let isInitiator = false;
         if (uploadingTrackId.value === data.trackId) {
+            isInitiator = true;
             uploadingTrackId.value = null;
             uploadingBar.value = null;
         }
@@ -721,8 +756,29 @@ export const useTrackStore = defineStore('track', () => {
                // console.log(`[CLIP_CREATE] 백그라운드 오디오 로딩 예약 완료 (ID: ${reactiveClip.clipId})`);
 
                 // 겹침 방지 (업로드한 당사자만 서버에 반영)
-                const isInitiator = uploadingTrackId.value === track.trackId;
                 resolveClipOverlap(reactiveClip, track, isInitiator);
+
+                if (isInitiator) {
+                    const newClipId = data.clipId;
+                    const targetTrackId = data.trackId;
+                    pushCommand({
+                        undo: () => {
+                            // 오디오 업로드 취소: 방금 생성된 클립 삭제
+                            lockClip(newClipId, targetTrackId);
+                            setTimeout(() => {
+                                socketService.publish('CLIP_DELETE', {
+                                    projectId: projectInfo.value.projectId,
+                                    clipId: newClipId
+                                });
+                                setTimeout(() => unlockClip(newClipId, targetTrackId), 100);
+                            }, 100);
+                        },
+                        redo: () => {
+                            // 오디오 업로드 리두는 지원하지 않음 (파일 재업로드 필요하므로)
+                            alert("업로드 취소한 클립은 다시 복구할 수 없습니다.");
+                        }
+                    });
+                }
             }
         } catch (error) {
            // console.error(`[CLIP_CREATE] 오디오 상세 정보(URL) 조회 실패:`, error);
@@ -932,6 +988,28 @@ export const useTrackStore = defineStore('track', () => {
             clipboardClip.value = null;
             isCutAction.value = false;
         }
+
+        if (isInitiator) {
+            const newClipId = data.clipId;
+            const targetTrackId = data.targetTrackId;
+            pushCommand({
+                undo: () => {
+                    // 붙여넣기 취소: 방금 붙여넣은 클립 삭제
+                    lockClip(newClipId, targetTrackId);
+                    setTimeout(() => {
+                        socketService.publish('CLIP_DELETE', {
+                            projectId: projectInfo.value.projectId,
+                            clipId: newClipId
+                        });
+                        setTimeout(() => unlockClip(newClipId, targetTrackId), 100);
+                    }, 100);
+                },
+                redo: () => {
+                    // 붙여넣기 리두: 원래 붙여넣기 로직 재실행 (편의상 알림 제공)
+                    alert("되돌린 클립은 클립보드에서 다시 붙여넣기(Ctrl+V) 해주세요.");
+                }
+            });
+        }
     });
 
     // 내가 복제/붙여넣기 요청한 건인지 확인하기 위한 로컬 상태
@@ -971,6 +1049,26 @@ export const useTrackStore = defineStore('track', () => {
                 clipId: data.newClipId,
                 isLocked: false
             });
+
+            const newClipId = data.newClipId;
+            const targetTrackId = data.targetTrackId;
+            pushCommand({
+                undo: () => {
+                    // 복제 취소: 방금 복제된 클립 삭제
+                    lockClip(newClipId, targetTrackId);
+                    setTimeout(() => {
+                        socketService.publish('CLIP_DELETE', {
+                            projectId: projectInfo.value.projectId,
+                            clipId: newClipId
+                        });
+                        setTimeout(() => unlockClip(newClipId, targetTrackId), 100);
+                    }, 100);
+                },
+                redo: () => {
+                    // 복제 리두는 지원하지 않음
+                    alert("되돌린 클립은 다시 복제(Alt+Drag) 해주세요.");
+                }
+            });
         }
 
         // 겹침 방지: 생성된 클립이 기존 클립과 겹치면 끝나는 위치 바로 뒤로 밀어냅니다.
@@ -986,10 +1084,16 @@ export const useTrackStore = defineStore('track', () => {
             if (found) { originalClip = found; targetTrack = t; break; }
         }
 
+        const isInitiator = pendingSplitOriginalClipIds.has(data.clipId);
+        
         // 분할 응답이 왔으므로 대기 목록에서 제거
         pendingSplitOriginalClipIds.delete(data.clipId);
 
         if (!originalClip || !targetTrack) return;
+        
+        // 원본 클립의 분할 전 상태 백업 (언두용)
+        const origDuration = originalClip.duration;
+        const origAudioDurationMs = originalClip.audioDurationMs;
 
         // 재생 중이었다면 멈추고 안전하게 쪼개기 진행
         const wasPlaying = isPlaying.value;
@@ -1034,6 +1138,57 @@ export const useTrackStore = defineStore('track', () => {
             isPlaying.value = true;
             updatePlayheadLoop();
             scrollAnimationLoop();
+        }
+
+        // 내가 요청한 분할인 경우에만 언두 스택에 등록
+        if (isInitiator) {
+            const origClipId = originalClip.clipId;
+            const newClipId = data.newClipId;
+            const trackId = targetTrack.trackId;
+            
+            pushCommand({
+                undo: () => {
+                    // 새로 생긴 조각(오른쪽) 삭제
+                    lockClip(newClipId, trackId);
+                    setTimeout(() => {
+                        socketService.publish('CLIP_DELETE', {
+                            projectId: projectInfo.value.projectId,
+                            clipId: newClipId
+                        });
+                        setTimeout(() => unlockClip(newClipId, trackId), 100);
+                    }, 100);
+
+                    // 원본 클립(왼쪽) 길이 원복 (리사이즈)
+                    lockClip(origClipId, trackId);
+                    const clipToRestore = targetTrack?.clips.find(c => c.clipId === origClipId);
+                    if (clipToRestore) {
+                        clipToRestore.duration = origDuration;
+                        clipToRestore.audioDurationMs = origAudioDurationMs;
+                        resyncClip(origClipId, clipToRestore.start);
+                        setTimeout(() => {
+                            socketService.publish('CLIP_RESIZE', {
+                                projectId: projectInfo.value.projectId,
+                                clipId: origClipId,
+                                startBar: clipToRestore.start,
+                                length: origDuration
+                            });
+                            setTimeout(() => unlockClip(origClipId, trackId), 100);
+                        }, 100);
+                    }
+                },
+                redo: () => {
+                    // 다시 분할 실행 (단, 새 ID가 부여될 것이므로 완벽한 리두는 아님. 현재는 편의상 호출)
+                    lockClip(origClipId, trackId);
+                    setTimeout(() => {
+                        socketService.publish('CLIP_SPLIT', {
+                            projectId: projectInfo.value.projectId,
+                            clipId: origClipId,
+                            splitBar: data.splitBar
+                        });
+                        setTimeout(() => unlockClip(origClipId, trackId), 100);
+                    }, 100);
+                }
+            });
         }
     });
     // 5. 클립 복사 및 잘라내기 응답 
@@ -1132,11 +1287,22 @@ export const useTrackStore = defineStore('track', () => {
         isCutAction.value = true;
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clip.clipId, trackId);
-        socketService.publish('CLIP_CUT', {
-            projectId: projectInfo.value.projectId,
-            clipId: clip.clipId
+        setTimeout(() => {
+            socketService.publish('CLIP_CUT', {
+                projectId: projectInfo.value.projectId,
+                clipId: clip.clipId
+            });
+            setTimeout(() => unlockClip(clip.clipId, trackId), 100);
+        }, 100);
+
+        pushCommand({
+            undo: () => {
+                alert("잘라낸 클립은 되돌릴 수 없습니다.");
+            },
+            redo: () => {
+                // do nothing
+            }
         });
-        unlockClip(clip.clipId, trackId);
     };
 
 
@@ -1217,11 +1383,22 @@ export const useTrackStore = defineStore('track', () => {
        // console.log(`[통신] 백엔드에 클립 삭제(CLIP_DELETE) 요청 전송`);
         // Lock → 액션 → Unlock (백엔드가 Lock 소유를 검증함)
         lockClip(clipId, trackId);
-        socketService.publish('CLIP_DELETE', {
-            projectId: projectInfo.value.projectId,
-            clipId: clipId
+        setTimeout(() => {
+            socketService.publish('CLIP_DELETE', {
+                projectId: projectInfo.value.projectId,
+                clipId: clipId
+            });
+            setTimeout(() => unlockClip(clipId, trackId), 100);
+        }, 100);
+
+        pushCommand({
+            undo: () => {
+                alert("삭제한 클립은 되돌릴 수 없습니다.");
+            },
+            redo: () => {
+                // do nothing
+            }
         });
-        unlockClip(clipId, trackId);
     };
 
     // 4. 클립 복제 (Duplicate)
@@ -1283,7 +1460,7 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // 6. 클립 길이 조절 (Resize / Trim)
-    const resizeClip = (clipId: number, trackId: number, newStart: number, newDuration: number, trimLeftBars: number) => {
+    const resizeClip = (clipId: number, trackId: number, newStart: number, newDuration: number, trimLeftBars: number, origStart?: number, origDuration?: number, origAudioStartMs?: number) => {
        // console.log(`[통신] 클립 리사이즈(CLIP_RESIZE) 요청 전송`);
         socketService.publish('CLIP_RESIZE', {
             projectId: projectInfo.value.projectId,
@@ -1291,6 +1468,53 @@ export const useTrackStore = defineStore('track', () => {
             startBar: newStart,
             length: newDuration
         });
+
+        if (origStart !== undefined && origDuration !== undefined && origAudioStartMs !== undefined) {
+            pushCommand({
+                undo: () => {
+                    const track = trackList.value.find(t => t.trackId === trackId);
+                    const clip = track?.clips.find(c => c.clipId === clipId);
+                    if (clip) {
+                        lockClip(clipId, trackId);
+                        clip.start = origStart;
+                        clip.duration = origDuration;
+                        clip.audioStartMs = origAudioStartMs;
+                        clip.audioDurationMs = origDuration * secondsPerBar.value * 1000;
+                        resyncClip(clipId, origStart);
+                        setTimeout(() => {
+                            socketService.publish('CLIP_RESIZE', {
+                                projectId: projectInfo.value.projectId,
+                                clipId: clipId,
+                                startBar: origStart,
+                                length: origDuration
+                            });
+                            setTimeout(() => unlockClip(clipId, trackId), 100);
+                        }, 100);
+                    }
+                },
+                redo: () => {
+                    const track = trackList.value.find(t => t.trackId === trackId);
+                    const clip = track?.clips.find(c => c.clipId === clipId);
+                    if (clip) {
+                        lockClip(clipId, trackId);
+                        clip.start = newStart;
+                        clip.duration = newDuration;
+                        clip.audioStartMs = origAudioStartMs + trimLeftBars * secondsPerBar.value * 1000;
+                        clip.audioDurationMs = newDuration * secondsPerBar.value * 1000;
+                        resyncClip(clipId, newStart);
+                        setTimeout(() => {
+                            socketService.publish('CLIP_RESIZE', {
+                                projectId: projectInfo.value.projectId,
+                                clipId: clipId,
+                                startBar: newStart,
+                                length: newDuration
+                            });
+                            setTimeout(() => unlockClip(clipId, trackId), 100);
+                        }, 100);
+                    }
+                }
+            });
+        }
     };
 
     // ==========================================
@@ -1339,11 +1563,15 @@ export const useTrackStore = defineStore('track', () => {
         masterTrack.value.clips = mergedClips;
     }, { deep: true, immediate: true });
 
+    // 트랙 추가 요청 로컬 상태
+    const pendingTrackAddCount = ref(0);
+
     //새로운 트랙 추가 액션
     const addTrack = () => {
         const newTrackName = `트랙 ${trackList.value.length + 1}`;
       //  console.log(`[통신] 트랙 추가(TRACK_ADD) 요청 전송`);
 
+        pendingTrackAddCount.value++;
         socketService.publish('TRACK_ADD', {
             projectId: projectInfo.value.projectId,
             name: newTrackName,
@@ -1502,6 +1730,13 @@ export const useTrackStore = defineStore('track', () => {
             projectId: projectInfo.value.projectId,
             trackId: trackId
         });
+
+        pushCommand({
+            undo: () => {
+                alert("트랙 삭제는 되돌릴 수 없습니다.");
+            },
+            redo: () => {}
+        });
     };
 
     // 트랙 이름 변경 로직
@@ -1547,7 +1782,7 @@ export const useTrackStore = defineStore('track', () => {
     // ==========================================
 
     // 드래그 앤 드롭 종료 시 서버 확정 통신
-    const confirmMoveClip = (clipId: number, targetTrackId: number, targetStartBar: number) => {
+    const confirmMoveClip = (clipId: number, targetTrackId: number, targetStartBar: number, origTrackId?: number, origStartBar?: number) => {
        // console.log(`[통신] 백엔드에 클립 이동(CLIP_MOVE) 요청 전송`);
 
         socketService.publish('CLIP_MOVE', {
@@ -1556,6 +1791,51 @@ export const useTrackStore = defineStore('track', () => {
             targetTrackId: targetTrackId,
             targetStartBar: targetStartBar
         });
+
+        if (origTrackId !== undefined && origStartBar !== undefined) {
+            pushCommand({
+                undo: () => {
+                    const targetTrack = trackList.value.find(t => t.trackId === targetTrackId);
+                    if (!targetTrack) return;
+                    const clip = targetTrack.clips.find(c => c.clipId === clipId);
+                    if (clip) {
+                        lockClip(clipId, origTrackId);
+                        moveClipToTrack(clipId, targetTrackId, origTrackId);
+                        clip.start = origStartBar;
+                        resyncClip(clipId, origStartBar);
+                        setTimeout(() => {
+                            socketService.publish('CLIP_MOVE', {
+                                projectId: projectInfo.value.projectId,
+                                clipId: clipId,
+                                targetTrackId: origTrackId,
+                                targetStartBar: origStartBar
+                            });
+                            setTimeout(() => unlockClip(clipId, origTrackId), 100);
+                        }, 100);
+                    }
+                },
+                redo: () => {
+                    const origTrack = trackList.value.find(t => t.trackId === origTrackId);
+                    if (!origTrack) return;
+                    const clip = origTrack.clips.find(c => c.clipId === clipId);
+                    if (clip) {
+                        lockClip(clipId, targetTrackId);
+                        moveClipToTrack(clipId, origTrackId, targetTrackId);
+                        clip.start = targetStartBar;
+                        resyncClip(clipId, targetStartBar);
+                        setTimeout(() => {
+                            socketService.publish('CLIP_MOVE', {
+                                projectId: projectInfo.value.projectId,
+                                clipId: clipId,
+                                targetTrackId: targetTrackId,
+                                targetStartBar: targetStartBar
+                            });
+                            setTimeout(() => unlockClip(clipId, targetTrackId), 100);
+                        }, 100);
+                    }
+                }
+            });
+        }
     };
 
     //클립을 다른 트랙으로 이동시키는 함수 (프론트 렌더링 지움, 순수 통신 트리거로 활용 가능)
@@ -2180,10 +2460,33 @@ export const useTrackStore = defineStore('track', () => {
         });
     };
 
+    const undo = () => {
+        const cmd = undoStack.value.pop();
+        if (cmd) {
+            if (isPlaying.value) { togglePlay(); }
+            cmd.undo();
+            redoStack.value.push(cmd);
+        }
+    };
+
+    const redo = () => {
+        const cmd = redoStack.value.pop();
+        if (cmd) {
+            if (isPlaying.value) { togglePlay(); }
+            cmd.redo();
+            undoStack.value.push(cmd);
+        }
+    };
+
     // ==========================================
     // 3. 내보내기 (Return)
     // ==========================================
     return {
+        undoStack,
+        redoStack,
+        pushCommand,
+        undo,
+        redo,
         // State
         trackList,
         projectInfo,

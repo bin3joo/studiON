@@ -54,6 +54,7 @@ const dragoffsetY = ref(0); //클립을 잡고 움직이기 시작한 지점으�
 const startScrollLeft = ref(0); //드래그 시작 시점의 스크롤 위치
 let scrollContainer: HTMLElement | null = null; //스크롤되는 부모 요소
 let currentClientX = 0; //현재 마우스 X 좌표 (루프에서 감시용)
+let currentClientY = 0; //현재 마우스 Y 좌표 (수직 오토스크롤 감시용)
 let autoScrollRafId: number | null = null; // 오토스크롤 애니메이션 ID
 
 //클립 위치 계산 함수(마우스 이동 + 스크롤 이동 동시 반영)
@@ -104,6 +105,18 @@ function autoScrollLoop() {
     scrolled = true;
   }
 
+  //3. 아래화면 끝 도달 (마스터 트랙 부근 도달 시 스크롤 되도록 200px 여유)
+  if(currentClientY > window.innerHeight - 200){
+    (scrollContainer as HTMLElement).scrollTop += SCROLL_SPEED;
+    scrolled = true;
+  }
+
+  //4. 위화면 끝 도달 (상단 헤더 높이 등을 고려해 여유공간 120px)
+  if(currentClientY < 120 + EDGE_THRESHOLD){
+    (scrollContainer as HTMLElement).scrollTop -= SCROLL_SPEED;
+    scrolled = true;
+  }
+
   // 스크롤이 발생했다면, 마우스가 가만히 있어도 클립 위치를 갱신해야 함
   if (scrolled) {
     if (activeClip.value) {
@@ -147,6 +160,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
   currentClientX = e.clientX; // 좌표 초기화
+  currentClientY = e.clientY;
 
   // 오토 스크롤 엔진 가동
   if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
@@ -162,6 +176,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
     //1. 엔진이 알 수 있게 마우스 좌표 최신화
     currentClientX = e.clientX;
+    currentClientY = e.clientY;
     dragoffsetY.value = e.clientY - startMouseY.value; //2. 세로 이동값 계산
 
 
@@ -241,7 +256,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     activeClip.value.start = safeStart; // 로컬 상태도 안전한 값으로 보정
     
     // 서버에 통신을 보내서 이동 확정
-    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, safeStart);
+    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, safeStart, props.track.trackId, startClipBar.value);
     // 이동한 당사자의 오디오도 새 위치에 맞춰 재동기화 (브로드캐스트는 위치 동일 시 건너뜀)
     trackStore.resyncClip(activeClip.value.clipId, safeStart);
   }
@@ -308,6 +323,7 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
   scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
   currentClientX = e.clientX; // 좌표 초기화
+  currentClientY = e.clientY;
 
   // 오토 스크롤 엔진 가동
   if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
@@ -397,6 +413,7 @@ const onResizePointerMove = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
   
   currentClientX = e.clientX; // 엔진이 알 수 있게 마우스 좌표 최신화
+  currentClientY = e.clientY;
   updateResizePosition();
 };
 
@@ -436,7 +453,10 @@ const onResizePointerUp = (e: PointerEvent) => {
       props.track.trackId, 
       safeStart, 
       safeDuration,
-      safeTrimLeft
+      safeTrimLeft,
+      state.origStart,
+      state.origDuration,
+      state.origAudioStartMs
   );
 
   // 리사이즈 후 오디오 플레이어를 새 범위에 맞게 재동기화
@@ -843,6 +863,8 @@ const onWorkAreaMouseLeave = () => {
   emit('hover-measure', { trackId: null, measure: null });
 };
 
+const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23FF3DCB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") 12 12, auto`;
+
 </script>
 
 <template>
@@ -860,10 +882,10 @@ const onWorkAreaMouseLeave = () => {
     class="flex border-b border-border group w-max min-w-full" 
     :data-track-id="track.trackId" 
     :class="[
-      isCommentExpanded ? 'relative z-100' :
       track.clips.some(c => c.isDragging) ? 'relative z-50' :
-      (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
+      (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : 'relative'
     ]"
+    :style="{ zIndex: isCommentExpanded ? 100 : '' }"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
@@ -1052,7 +1074,8 @@ const onWorkAreaMouseLeave = () => {
       aria-label="오디오 클립 작업 영역" 
       class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
       :class="[
-        isDragOver ? 'bg-primary/20 ring-2 ring-inset ring-primary' : 'bg-transparent'
+        isDragOver ? 'bg-primary/20 ring-2 ring-inset ring-primary' : 'bg-transparent',
+        trackStore.isCommentMode ? 'comment-mode-active' : ''
       ]"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       @wheel.ctrl.prevent="trackStore.updateZoom($event.deltaY)"
@@ -1364,5 +1387,12 @@ const onWorkAreaMouseLeave = () => {
     @close="isFileSizeWarningOpen = false"
   />
 </template>
+<style>
+/* 코멘트 모드일 때 작업 영역 내의 모든 요소(클립 포함)의 커서를 강제로 코멘트 아이콘으로 변경 */
+.comment-mode-active,
+.comment-mode-active * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23FF3DCB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") 12 12, auto !important;
+}
+</style>
 <style scoped>
 </style>

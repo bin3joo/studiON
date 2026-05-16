@@ -161,4 +161,33 @@ public class UserController {
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
+
+    // 로그아웃: 서버에 저장된 refresh token을 제거하고 브라우저 쿠키도 만료시킨다.
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @CookieValue(value = "REFRESH_TOKEN", required = false) String refreshToken,
+            HttpServletResponse servletResponse
+    ) {
+        if(refreshToken != null && !refreshToken.isBlank()) {
+            try {
+                jwtTokenProvider.validateTokenType(refreshToken, "REFRESH");
+                Integer userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
+                redisTemplate.delete("refresh:" + userId);
+            } catch (Exception ignored) {
+                // 쿠키가 유효하지 않아도 클라이언트 쿠키는 제거해서 로그아웃 상태로 만든다.
+            }
+        }
+
+        ResponseCookie deleteRefreshCookie = ResponseCookie.from("REFRESH_TOKEN", "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/api/v1/auth")
+                .maxAge(0)
+                .build();
+
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, deleteRefreshCookie.toString());
+
+        return ResponseEntity.ok(ApiResponse.success());
+    }
 }

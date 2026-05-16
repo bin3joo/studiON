@@ -7,10 +7,12 @@ import com.salmon.studion.domain.eq.entity.TrackEq;
 import com.salmon.studion.domain.eq.entity.TrackEqBand;
 import com.salmon.studion.domain.eq.repository.TrackEqBandRepository;
 import com.salmon.studion.domain.eq.repository.TrackEqRepository;
+import com.salmon.studion.domain.eq.support.TrackEqRedisKeys;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +25,7 @@ public class TrackEqBandService {
     private final TrackEqBandRepository trackEqBandRepository;
     private final TrackEqRepository trackEqRepository;
     private final ProjectMemberService projectMemberService;
+    private final RedisTemplate<String, String> redisTemplate;
 
     public TrackEqBandListResponse getTrackEqBandList(Integer trackEqId, Integer userId) {
 
@@ -92,6 +95,12 @@ public class TrackEqBandService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TRACK_EQ_NOT_FOUND));
 
         projectMemberService.validateProjectMember(trackEq.getProjectId(), userId);
+        if (Boolean.TRUE.equals(redisTemplate.opsForSet().isMember(
+                TrackEqRedisKeys.deletedTrackEqsKey(trackEq.getProjectId()),
+                String.valueOf(trackEq.getTrackId())
+        ))) {
+            throw new BusinessException(ErrorCode.TRACK_EQ_NOT_FOUND);
+        }
 
         return trackEq;
     }

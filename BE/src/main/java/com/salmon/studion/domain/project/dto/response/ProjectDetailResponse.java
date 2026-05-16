@@ -28,6 +28,7 @@ public class ProjectDetailResponse {
     private MasterTrackResponse masterTrack;
     private List<TrackResponse> tracks;
     private List<CommentsGetResponse.CommentDto> comments;
+    private Long currentTotalSizeBytes;
 
     public record MasterTrackResponse (
             Integer masterTrackId,
@@ -71,7 +72,8 @@ public class ProjectDetailResponse {
             Project project,
             MasterTrackResponse masterTrack,
             List<TrackResponse> tracks,
-            List<CommentsGetResponse.CommentDto> comments
+            List<CommentsGetResponse.CommentDto> comments,
+            Long currentTotalSizeBytes
     ) {
         return new ProjectDetailResponse(
                 project.getId(),
@@ -85,7 +87,8 @@ public class ProjectDetailResponse {
                 project.getTotalPlayTimeMs(),
                 masterTrack,
                 tracks,
-                comments
+                comments,
+                currentTotalSizeBytes
         );
     }
 }

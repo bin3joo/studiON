@@ -7,6 +7,7 @@ import com.salmon.studion.domain.eq.service.TrackEqBandService;
 import com.salmon.studion.domain.eq.service.TrackEqService;
 import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.common.response.ApiResponse;
+import com.salmon.studion.global.common.response.SuccessCode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -72,7 +73,7 @@ public class TrackEqController {
             @Valid @RequestBody TrackEqBandSaveRequest request
     ) {
         trackEqBandService.replaceTrackEqBands(trackEqId, user.getUserId(), request.getBands());
-        return ResponseEntity.ok(ApiResponse.success(null));
+        return ResponseEntity.ok(ApiResponse.success(SuccessCode.EQ_UPDATED));
     }
 
     @DeleteMapping("/track-eqs/{trackEqId}/bands")
@@ -81,6 +82,6 @@ public class TrackEqController {
             @AuthenticationPrincipal CustomOAuth2User user
     ) {
         trackEqBandService.deleteTrackEqBands(trackEqId, user.getUserId());
-        return ResponseEntity.ok(ApiResponse.success(null));
+        return ResponseEntity.ok(ApiResponse.success(SuccessCode.EQ_UPDATED));
     }
 }

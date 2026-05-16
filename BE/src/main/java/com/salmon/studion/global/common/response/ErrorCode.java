@@ -53,6 +53,7 @@ public enum ErrorCode {
     AUDIO_INVALID_PROJECT_SCOPE(HttpStatus.BAD_REQUEST, "A_011", "오디오 파일의 프로젝트 정보가 올바르지 않습니다."),
     AUDIO_OBJECT_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "A_012", "오디오 파일 참조 정보가 올바르지 않습니다."),
     AUDIO_METADATA_NOT_FOUND(HttpStatus.NOT_FOUND, "A_013", "오디오 메타데이터를 찾을 수 없습니다."),
+    AUDIO_VERSION_NOT_FOUND(HttpStatus.NOT_FOUND, "A_014", "해당 오디오 버전 정보를 찾을 수 없습니다."),
 
     // 코멘트 C_000
     COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "C_001", "댓글을 찾을 수 없습니다."),

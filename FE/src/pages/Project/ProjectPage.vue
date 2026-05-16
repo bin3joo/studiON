@@ -186,6 +186,21 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
 
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
+    if (e.code === 'KeyZ') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        trackStore.redo();
+      } else {
+        trackStore.undo();
+      }
+      return;
+    }
+    if (e.code === 'KeyY') {
+      e.preventDefault();
+      trackStore.redo();
+      return;
+    }
+
     switch (e.code) {
       case 'KeyS': // 저장
         e.preventDefault();
@@ -607,11 +622,11 @@ function handleSaveVersion() {
 }
 
 function handleUndo() {
- // console.log('undo')
+  trackStore.undo()
 }
 
 function handleRedo() {
- // console.log('redo')
+  trackStore.redo()
 }
 
 function handleOpenInvite() {
@@ -1094,6 +1109,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   :project-name="projectName"
   :online-users="onlineUsers"
   :last-saved-at="lastSavedTime"
+  :can-undo="trackStore.undoStack.length > 0"
+  :can-redo="trackStore.redoStack.length > 0"
   @rename="handleRename"
   @export="handleExport"
   @save-version="handleSaveVersion"

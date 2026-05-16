@@ -241,7 +241,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     activeClip.value.start = safeStart; // 로컬 상태도 안전한 값으로 보정
     
     // 서버에 통신을 보내서 이동 확정
-    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, safeStart);
+    trackStore.confirmMoveClip(activeClip.value.clipId, finalTrackId, safeStart, props.track.trackId, startClipBar.value);
     // 이동한 당사자의 오디오도 새 위치에 맞춰 재동기화 (브로드캐스트는 위치 동일 시 건너뜀)
     trackStore.resyncClip(activeClip.value.clipId, safeStart);
   }
@@ -436,7 +436,10 @@ const onResizePointerUp = (e: PointerEvent) => {
       props.track.trackId, 
       safeStart, 
       safeDuration,
-      safeTrimLeft
+      safeTrimLeft,
+      state.origStart,
+      state.origDuration,
+      state.origAudioStartMs
   );
 
   // 리사이즈 후 오디오 플레이어를 새 범위에 맞게 재동기화

@@ -9,6 +9,7 @@ import type { TrackUIState, ClipUIState, TrackEqState, TrackEqBandState, } from 
 import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
 import { projectApi } from '../api/project.api'
+import type { TrackEqBandSummary } from '../api/project.api'
 import axios from 'axios'
 
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
@@ -42,6 +43,47 @@ export const useTrackStore = defineStore('track', () => {
     const createDefaultTrackEq = (): TrackEqState => ({
         bands: [],
     })
+
+    function mapEqTypeToCode(eqType: TrackEqBandSummary['eqType']) {
+        switch (eqType) {
+            case 'LOW_SHELF':
+                return 2
+            case 'HIGH_SHELF':
+                return 3
+            case 'BELL':
+            default:
+                return 1
+        }
+    }
+
+    function mapSourceTypeToCode(sourceType: TrackEqBandSummary['sourceType']) {
+        switch (sourceType) {
+            case 'SYSTEM':
+                return 2
+            case 'AI_CONFIRM':
+                return 3
+            case 'AI_APPLIED':
+                return 4
+            case 'USER_MANUAL':
+            default:
+                return 1
+        }
+    }
+
+    function mapTrackEqBandSummaryToState(band: TrackEqBandSummary): TrackEqBandState {
+        return {
+            id: band.trackEqBandId,
+            bandOrder: band.bandOrder,
+            eqTypeCode: mapEqTypeToCode(band.eqType),
+            frequencyHz: band.frequencyHz,
+            q: band.q,
+            gainDeltaDb: band.gainDeltaDb,
+            sourceTypeCode: mapSourceTypeToCode(band.sourceType),
+            jobId: band.jobId,
+            suggestionActionId: band.suggestionActionId,
+            appliedSuggestionId: band.appliedSuggestionId,
+        }
+    }
 
     // [최적화] 전역 AudioBuffer 캐시: URL 당 한 번만 fetch+decode 하여 재생기(Tone.Player)와 파형(WaveformWebGL) 모두 공유
     // 키: cdnUrl 문자열, 값: 디코딩 완료된 AudioBuffer
@@ -2064,9 +2106,32 @@ export const useTrackStore = defineStore('track', () => {
                 }
                 bpm.value = data.tempo;
 
+                const eqBandsByTrackId = new Map<number, TrackEqBandState[]>()
+
+                try {
+                    const trackEqs = await projectApi.getProjectTrackEqs(projectId)
+
+                    await Promise.all(
+                        trackEqs.map(async (trackEq) => {
+                            const bands = await projectApi.getTrackEqBands(trackEq.trackEqId)
+
+                            eqBandsByTrackId.set(
+                                Number(trackEq.trackId),
+                                [...bands]
+                                    .sort((a, b) => a.bandOrder - b.bandOrder)
+                                    .map(mapTrackEqBandSummaryToState),
+                            )
+                        }),
+                    )
+                } catch (eqError) {
+                    console.error('[EQ bands fetch failed]', eqError)
+                }
+
                 trackList.value = data.tracks.map((track): TrackUIState => ({
                     ...track,
-                    eq: createDefaultTrackEq(),
+                    eq: {
+                        bands: eqBandsByTrackId.get(Number(track.trackId)) ?? [],
+                    },
                     height: 100,
                     isSelected: false,
                     clips: track.clips.map((clip): ClipUIState => ({

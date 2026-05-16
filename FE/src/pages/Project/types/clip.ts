@@ -31,10 +31,11 @@ export type EqTypeCode = 1 | 2 | 3
 // 2 = LOW_SHELF
 // 3 = HIGH_SHELF
 
-export type EqSourceTypeCode = 1 | 2 | 3
-// 1 = AI_CONFIRM
-// 2 = USER_MANUAL
-// 3 = SYSTEM
+export type EqSourceTypeCode = 1 | 2 | 3 | 4
+// 1 = USER_MANUAL
+// 2 = SYSTEM
+// 3 = AI_CONFIRM
+// 4 = AI_APPLIED
 
 export interface TrackEqBandState {
   id?: number
@@ -53,4 +54,4 @@ export interface TrackEqBandState {
 export interface TrackEqState {
   bands: TrackEqBandState[]
 }
-
+

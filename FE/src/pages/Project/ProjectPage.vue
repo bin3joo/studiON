@@ -392,6 +392,8 @@ onUnmounted(()=>{
   disconnectProjectSocket()
   // 프로젝트 페이지를 벗어날 때 오디오 재생 즉시 중지
   trackStore.stopPlay();
+  // 프로젝트를 나갈 때 코멘트 모드 상태 초기화
+  trackStore.isCommentMode = false;
 })
 
 
@@ -1067,19 +1069,34 @@ const isProjectGuideOpen = ref(false)
 
 const projectGuideSteps = [
   {
+    selector: '[data-guide="timeline"]',
+    title: '작업 영역 (타임라인)',
+    description: '타임라인 빈 공간에 오디오 파일(.mp3, .wav)을 드래그 앤 드롭하여 새 트랙을 추가해 보세요.',
+  },
+  {
+    selector: '[data-guide="play-controls"]',
+    title: '재생 및 제어',
+    description: '스페이스바를 누르거나 재생 버튼을 클릭해 음악을 들어보세요.',
+  },
+  {
     selector: '[data-guide="version-save"]',
     title: '버전 저장',
-    description: '현재 작업 상태를 새 버전으로 저장해 변경 이력을 관리할 수 있어요.',
+    description: '현재 작업 상태를 버전으로 저장하세요. 버전기록된 음원을 항상 다운 받을 수 있습니다.',
   },
   {
     selector: '[data-guide="comment"]',
-    title: '코멘트',
-    description: '프로젝트에 남겨진 코멘트를 확인하고 팀원과 피드백을 주고받을 수 있어요.',
+    title: '코멘트 모드',
+    description: '단축키 \'C\'를 누르거나 이 버튼을 눌러 코멘트 모드를 켜세요. 특정 트랙과 마디에 피드백을 남길 수 있습니다.',
   },
   {
     selector: '[data-guide="ai-analysis"]',
-    title: 'AI 분석',
-    description: 'AI가 오디오를 분석해 충돌 구간과 개선 포인트를 알려줘요.',
+    title: 'AI 오디오 분석',
+    description: 'AI가 오디오를 분석해 주파수 충돌(Frequency Masking), 위상 캔슬링(Phase Cancellation), 볼륨 불균형 등 믹싱 에러를 시각적으로 짚어주고 해결책을 제시합니다.',
+  },
+  {
+    selector: '[data-guide="export"]',
+    title: '음원 추출',
+    description: '작업이 모두 끝났다면 프로젝트를 오디오 파일로 내보내기(Export) 해보세요!',
   },
 ]
 
@@ -1151,9 +1168,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
-        @pointerdown.stop="handleBackgroundPointerDown"
-        @scroll="handleHorizontalScroll"
-      >
+          data-guide="timeline"
+          @pointerdown.stop="handleBackgroundPointerDown"
+          @scroll="handleHorizontalScroll"
+        >
         <!-- 눈금자 -->
         <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
           <TimelineRuler />

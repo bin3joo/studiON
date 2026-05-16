@@ -8,7 +8,7 @@ function handleLoginClick() {
 </script>
 
 <template>
-  <main class="onboarding-page min-h-screen flex flex-col overflow-x-hidden font-body-md text-body-md bg-[#131313] text-[#e5e2e1] selection:bg-[#ffb1c4]/30">
+  <main class="onboarding-page min-h-screen flex flex-col overflow-x-hidden font-body-md text-body-md bg-[#131313] text-[#e5e2e1] selection:bg-[#FF3DCB]/30">
     <!-- Minimal Header for Landing Page -->
     <header class="fixed top-0 left-0 w-full z-50 bg-[#131313]/70 backdrop-blur-xl border-b border-white/10 px-4 md:px-10 h-[64px] flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -33,7 +33,7 @@ function handleLoginClick() {
       <div class="relative min-h-[870px] w-full flex flex-col items-center justify-start pt-6 md:pt-8 px-4 md:px-10 overflow-hidden pb-32">
         <div class="relative z-10 max-w-4xl mx-auto flex flex-col items-center text-center space-y-8">
           <!-- Eyebrow -->
-          <div class="inline-flex items-center px-3 py-1 rounded-full border border-[#ffb1c4]/30 bg-[#ffb1c4]/10 font-label-sm text-[#ffb1c4] tracking-widest backdrop-blur-md">
+          <div class="inline-flex items-center px-3 py-1 rounded-full border border-[#FF3DCB]/30 bg-[#FF3DCB]/10 font-label-sm text-[#FF3DCB] tracking-widest backdrop-blur-md">
             <span class="material-symbols-outlined text-[14px] mr-2" style="font-variation-settings: 'FILL' 1;">graphic_eq</span>
             NEXT-GEN WEB DAW
           </div>
@@ -41,7 +41,7 @@ function handleLoginClick() {
           <!-- Main Headlines -->
           <h1 class="font-display-lg text-[#e5e2e1] drop-shadow-2xl md:text-[64px]">
             브라우저에서 만나는<br/>
-            <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#ffb1c4] to-[#e3b5ff]">무한한 음악의 세계</span>
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#FF3DCB] to-[#e3b5ff]">무한한 음악의 세계</span>
           </h1>
 
           <h2 class="font-headline-md text-[#e5bcc5] max-w-2xl">
@@ -88,10 +88,10 @@ function handleLoginClick() {
         <div class="w-full max-w-[1200px] mx-auto pt-8 pb-12 md:pt-16 md:pb-16 relative z-10">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <!-- Feature 1 -->
-            <div class="group relative bg-[#1c1b1b]/60 backdrop-blur-xl border border-white/5 rounded-[1.5rem] p-8 overflow-hidden hover:bg-[#2a2a2a]/80 hover:border-[#ffb1c4]/30 transition-all duration-500 ease-out flex flex-col items-start min-h-[320px]">
-              <div class="absolute -inset-1 bg-gradient-to-br from-[#ffb1c4]/10 to-transparent opacity-0 group-hover:opacity-100 blur-2xl transition-opacity duration-500 rounded-[1.5rem] pointer-events-none"></div>
-              <div class="relative z-10 w-14 h-14 rounded-2xl bg-[#131313] border border-white/10 flex items-center justify-center mb-8 shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:border-[#ffb1c4]/50 group-hover:shadow-[0_0_20px_rgba(255,177,196,0.2)] transition-all duration-300">
-                <span class="material-symbols-outlined text-[28px] text-[#ffb1c4]" style="font-variation-settings: 'FILL' 1;">groups</span>
+            <div class="group relative bg-[#1c1b1b]/60 backdrop-blur-xl border border-white/5 rounded-[1.5rem] p-8 overflow-hidden hover:bg-[#2a2a2a]/80 hover:border-[#FF3DCB]/30 transition-all duration-500 ease-out flex flex-col items-start min-h-[320px]">
+              <div class="absolute -inset-1 bg-gradient-to-br from-[#FF3DCB]/10 to-transparent opacity-0 group-hover:opacity-100 blur-2xl transition-opacity duration-500 rounded-[1.5rem] pointer-events-none"></div>
+              <div class="relative z-10 w-14 h-14 rounded-2xl bg-[#131313] border border-white/10 flex items-center justify-center mb-8 shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:border-[#FF3DCB]/50 group-hover:shadow-[0_0_20px_rgba(255,61,203,0.2)] transition-all duration-300">
+                <span class="material-symbols-outlined text-[28px] text-[#FF3DCB]" style="font-variation-settings: 'FILL' 1;">groups</span>
               </div>
               <div class="relative z-10 flex-1">
                 <h3 class="font-headline-md text-[20px] text-[#e5e2e1] mb-3">실시간 동시 편집</h3>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronRight, Sparkles, X } from 'lucide-vue-next'
+import { ChevronRight, Compass, X } from 'lucide-vue-next'
 
 interface GuideStep {
   selector: string
@@ -25,8 +25,8 @@ const emit = defineEmits<{
 }>()
 
 const PADDING = 10
-const TOOLTIP_WIDTH = 320
-const TOOLTIP_HEIGHT = 180
+const TOOLTIP_WIDTH = 420
+const TOOLTIP_HEIGHT = 220
 
 const currentIndex = ref(0)
 const targetRect = ref<Rect | null>(null)
@@ -204,7 +204,7 @@ onBeforeUnmount(() => {
       <!-- Highlight ring -->
       <div
         v-if="targetRect"
-        class="pointer-events-none absolute rounded-xl ring-2 ring-violet-400 shadow-[0_0_30px_-2px_rgba(167,139,250,0.9)] transition-all duration-300"
+        class="pointer-events-none absolute rounded-xl ring-2 ring-[#FF3DCB] shadow-[0_0_30px_-2px_rgba(255,61,203,0.9)] transition-all duration-300"
         :style="{
           top: `${targetRect.top}px`,
           left: `${targetRect.left}px`,
@@ -215,35 +215,35 @@ onBeforeUnmount(() => {
 
       <!-- Tooltip -->
       <div
-        class="absolute w-[320px] rounded-xl border border-violet-400/40 bg-zinc-950/95 p-4 text-white shadow-[0_10px_40px_-10px_rgba(167,139,250,0.9)] backdrop-blur-md transition-all duration-300"
+        class="absolute w-[420px] rounded-2xl border border-[#FF3DCB]/40 bg-gradient-to-br from-zinc-950/95 to-zinc-900/95 p-6 text-white shadow-[0_15px_50px_-10px_rgba(255,61,203,0.6)] backdrop-blur-xl transition-all duration-300"
         :style="tooltipStyle"
       >
-        <div class="mb-2 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="grid h-6 w-6 place-items-center rounded-full bg-violet-400/15 text-violet-300">
-              <Sparkles class="h-3.5 w-3.5" />
+        <div class="mb-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="grid h-8 w-8 place-items-center rounded-full bg-[#FF3DCB]/20 text-[#FF3DCB] ring-1 ring-[#FF3DCB]/50">
+              <Compass class="h-4 w-4" />
             </span>
 
-            <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-zinc-400">
-              {{ currentIndex + 1 }} / {{ steps.length }}
+            <span class="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#FF3DCB]/80">
+              STEP {{ currentIndex + 1 }} OF {{ steps.length }}
             </span>
           </div>
 
           <button
             type="button"
             aria-label="가이드 닫기"
-            class="grid h-6 w-6 place-items-center rounded-md text-zinc-400 transition hover:text-white"
+            class="grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition hover:bg-white/10 hover:text-white"
             @click="closeGuide"
           >
-            <X class="h-3.5 w-3.5" />
+            <X class="h-4 w-4" />
           </button>
         </div>
 
-        <h3 class="mb-1 text-base font-semibold text-white">
+        <h3 class="mb-2 text-lg font-bold tracking-tight text-white">
           {{ currentStep.title }}
         </h3>
 
-        <p class="mb-4 text-sm leading-relaxed text-zinc-400">
+        <p class="mb-6 text-[15px] leading-relaxed text-zinc-300">
           {{ currentStep.description }}
         </p>
 
@@ -251,7 +251,7 @@ onBeforeUnmount(() => {
             <input
                 v-model="doNotShowAgain"
                 type="checkbox"
-                class="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-violet-400"
+                class="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-[#FF3DCB]"
             />
             <span>다시 보지 않기</span>
             </label>
@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
               class="h-1.5 rounded-full transition-all"
               :class="
                 index === currentIndex
-                  ? 'w-6 bg-violet-400'
+                  ? 'w-6 bg-[#FF3DCB]'
                   : 'w-1.5 bg-zinc-700'
               "
             />
@@ -280,7 +280,7 @@ onBeforeUnmount(() => {
 
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-300 transition hover:bg-violet-400/20"
+            class="inline-flex items-center gap-1 rounded-full border border-[#FF3DCB]/50 bg-[#FF3DCB]/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#FF3DCB] transition hover:bg-[#FF3DCB]/20"
             @click="goNext"
           >
             {{ isLastStep ? '시작하기' : '다음' }}

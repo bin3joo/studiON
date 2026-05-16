@@ -179,6 +179,7 @@ const projectLengthFormatted = computed(() => {
       <button
         type="button"
         class="ml-2 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        data-guide="export"
         @click="emit('export')"
       >
         <Download class="h-4 w-4" />

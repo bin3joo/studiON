@@ -101,14 +101,14 @@ function handleKeydown(event: KeyboardEvent) {
           'h-10 w-[280px] px-4 md:w-[340px] bg-[#1c1b1b]',
           errorMessage
             ? 'border-red-400 animate-shake'
-            : 'border-[#ffb1c4]/40',
+            : 'border-[#FF3DCB]/40',
         ]
-        : 'w-auto bg-[#131313] border-white/10 hover:border-[#ffb1c4]/40 hover:bg-[#1c1b1b]'"
+        : 'w-auto bg-[#131313] border-white/10 hover:border-[#FF3DCB]/40 hover:bg-[#1c1b1b]'"
     >
       <button
         v-if="!isInputMode"
         type="button"
-        class="inline-flex h-10 items-center gap-1.5 px-4 text-[10px] font-medium uppercase tracking-[0.2em] text-[#e5bcc5] hover:text-[#ffb1c4] transition-colors md:text-xs"
+        class="inline-flex h-10 items-center gap-1.5 px-4 text-[10px] font-medium uppercase tracking-[0.2em] text-[#e5bcc5] hover:text-[#FF3DCB] transition-colors md:text-xs"
         @click="openInputMode"
       >
         <KeyRound class="h-3.5 w-3.5" />
@@ -121,7 +121,7 @@ function handleKeydown(event: KeyboardEvent) {
       >
         <KeyRound
           class="h-3.5 w-3.5 shrink-0"
-          :class="errorMessage ? 'text-red-400' : 'text-[#ffb1c4]'"
+          :class="errorMessage ? 'text-red-400' : 'text-[#FF3DCB]'"
         />
 
         <input
@@ -140,7 +140,7 @@ function handleKeydown(event: KeyboardEvent) {
         <Button
           type="button"
           :disabled="isLoading"
-          class="rounded-full border border-white/20 bg-[#2a2a2a] px-2.5 py-0.5 text-[9px] uppercase tracking-[0.2em] text-[#e5bcc5] transition hover:border-[#ffb1c4]/60 hover:text-[#ffb1c4] disabled:opacity-40"
+          class="rounded-full border border-white/20 bg-[#2a2a2a] px-2.5 py-0.5 text-[9px] uppercase tracking-[0.2em] text-[#e5bcc5] transition hover:border-[#FF3DCB]/60 hover:text-[#FF3DCB] disabled:opacity-40"
           @click="confirmInviteCode"
         >
           <template v-if="isLoading">
@@ -155,7 +155,7 @@ function handleKeydown(event: KeyboardEvent) {
           type="button"
           variant="ghost"
           :disabled="isLoading"
-          class="grid h-5 w-5 place-items-center rounded-full p-0 text-[#e5bcc5] transition hover:text-[#ffb1c4]"
+          class="grid h-5 w-5 place-items-center rounded-full p-0 text-[#e5bcc5] transition hover:text-[#FF3DCB]"
           @click="cancelInputMode"
         >
           <X class="h-3 w-3" />

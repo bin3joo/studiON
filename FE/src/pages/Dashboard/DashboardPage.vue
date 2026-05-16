@@ -177,7 +177,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="min-h-screen bg-[#131313] text-[#e5e2e1] flex flex-col font-body-md text-body-md" style="zoom: 0.8;">
+  <main class="min-h-[125vh] bg-[#131313] text-[#e5e2e1] flex flex-col font-body-md text-body-md" style="zoom: 0.8;">
     <DashboardHeader :existing-project-names="existingProjectNames" @openFeedback="showFeedbackModal = true" />
 
     <div class="flex-1 flex flex-col p-6 md:p-10 mx-auto w-[95%] lg:w-[80%] max-w-[1600px] gap-8">

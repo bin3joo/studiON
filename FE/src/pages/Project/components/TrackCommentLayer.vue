@@ -392,10 +392,10 @@ function parseMentions(content: string) {
 
     <!-- [성능 최적화] 투명 오버레이 1개로 수만 개의 셀 div를 대체 -->
     <div
-      class="absolute top-0 left-0 h-full pointer-events-none"
-      :class="trackStore.isCommentMode ? 'z-20' : 'z-auto'"
+      class="absolute top-0 left-0 h-full"
+      :class="trackStore.isCommentMode ? 'pointer-events-auto' : 'pointer-events-none z-auto'"
+      :style="{ width: `${props.timelineWidth}px`, zIndex: (expandedMeasure !== null || activeCellLocation !== null) ? 120 : (trackStore.isCommentMode ? 20 : 'auto') }"
       :data-track-id="props.trackId"
-      :style="{ width: `${props.timelineWidth}px` }"
       @pointerdown.stop="emit('track-pointerdown', $event)"
       @contextmenu.prevent.stop="emit('track-contextmenu', $event)"
     >
@@ -444,7 +444,7 @@ function parseMentions(content: string) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="expandedMeasure !== null"
-        class="pointer-events-auto absolute z-120 w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-3"
+        class="pointer-events-auto absolute z-[120] w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-3"
         :class="expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]'"
         :style="{ left: `calc(${expandedCellLeft}px + 13px)` }"
         @mousedown.stop

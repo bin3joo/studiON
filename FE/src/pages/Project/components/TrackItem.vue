@@ -863,6 +863,8 @@ const onWorkAreaMouseLeave = () => {
   emit('hover-measure', { trackId: null, measure: null });
 };
 
+const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23FF3DCB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") 12 12, auto`;
+
 </script>
 
 <template>
@@ -880,10 +882,10 @@ const onWorkAreaMouseLeave = () => {
     class="flex border-b border-border group w-max min-w-full" 
     :data-track-id="track.trackId" 
     :class="[
-      isCommentExpanded ? 'relative z-100' :
       track.clips.some(c => c.isDragging) ? 'relative z-50' :
-      (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : ''
+      (props.hoveredTrackId === String(track.trackId)) ? 'relative z-40' : 'relative'
     ]"
+    :style="{ zIndex: isCommentExpanded ? 100 : '' }"
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
@@ -1072,7 +1074,8 @@ const onWorkAreaMouseLeave = () => {
       aria-label="오디오 클립 작업 영역" 
       class="relative shrink-0 select-none bg-transparent py-1.5 touch-none"
       :class="[
-        isDragOver ? 'bg-primary/20 ring-2 ring-inset ring-primary' : 'bg-transparent'
+        isDragOver ? 'bg-primary/20 ring-2 ring-inset ring-primary' : 'bg-transparent',
+        trackStore.isCommentMode ? 'comment-mode-active' : ''
       ]"
       :style="{ width: `${trackStore.totalTimelineWidth}px` }"
       @wheel.ctrl.prevent="trackStore.updateZoom($event.deltaY)"
@@ -1384,5 +1387,12 @@ const onWorkAreaMouseLeave = () => {
     @close="isFileSizeWarningOpen = false"
   />
 </template>
+<style>
+/* 코멘트 모드일 때 작업 영역 내의 모든 요소(클립 포함)의 커서를 강제로 코멘트 아이콘으로 변경 */
+.comment-mode-active,
+.comment-mode-active * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23FF3DCB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") 12 12, auto !important;
+}
+</style>
 <style scoped>
 </style>

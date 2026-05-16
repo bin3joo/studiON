@@ -54,6 +54,7 @@ const dragoffsetY = ref(0); //클립을 잡고 움직이기 시작한 지점으�
 const startScrollLeft = ref(0); //드래그 시작 시점의 스크롤 위치
 let scrollContainer: HTMLElement | null = null; //스크롤되는 부모 요소
 let currentClientX = 0; //현재 마우스 X 좌표 (루프에서 감시용)
+let currentClientY = 0; //현재 마우스 Y 좌표 (수직 오토스크롤 감시용)
 let autoScrollRafId: number | null = null; // 오토스크롤 애니메이션 ID
 
 //클립 위치 계산 함수(마우스 이동 + 스크롤 이동 동시 반영)
@@ -104,6 +105,18 @@ function autoScrollLoop() {
     scrolled = true;
   }
 
+  //3. 아래화면 끝 도달 (마스터 트랙 부근 도달 시 스크롤 되도록 200px 여유)
+  if(currentClientY > window.innerHeight - 200){
+    (scrollContainer as HTMLElement).scrollTop += SCROLL_SPEED;
+    scrolled = true;
+  }
+
+  //4. 위화면 끝 도달 (상단 헤더 높이 등을 고려해 여유공간 120px)
+  if(currentClientY < 120 + EDGE_THRESHOLD){
+    (scrollContainer as HTMLElement).scrollTop -= SCROLL_SPEED;
+    scrolled = true;
+  }
+
   // 스크롤이 발생했다면, 마우스가 가만히 있어도 클립 위치를 갱신해야 함
   if (scrolled) {
     if (activeClip.value) {
@@ -147,6 +160,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
   currentClientX = e.clientX; // 좌표 초기화
+  currentClientY = e.clientY;
 
   // 오토 스크롤 엔진 가동
   if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
@@ -162,6 +176,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
 
     //1. 엔진이 알 수 있게 마우스 좌표 최신화
     currentClientX = e.clientX;
+    currentClientY = e.clientY;
     dragoffsetY.value = e.clientY - startMouseY.value; //2. 세로 이동값 계산
 
 
@@ -308,6 +323,7 @@ const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 
   scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
   currentClientX = e.clientX; // 좌표 초기화
+  currentClientY = e.clientY;
 
   // 오토 스크롤 엔진 가동
   if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
@@ -397,6 +413,7 @@ const onResizePointerMove = (e: PointerEvent) => {
   if (!resizeState.value.isResizing || !resizeState.value.clip) return;
   
   currentClientX = e.clientX; // 엔진이 알 수 있게 마우스 좌표 최신화
+  currentClientY = e.clientY;
   updateResizePosition();
 };
 

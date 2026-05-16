@@ -581,6 +581,23 @@ export const useTrackStore = defineStore('track', () => {
         trackPanners.set(newTrack.trackId, panner);
 
         rebuildTrackEqChain(newTrack.trackId);
+
+        if (pendingTrackAddCount.value > 0) {
+            pendingTrackAddCount.value--;
+            const createdTrackId = data.trackId;
+            pushCommand({
+                undo: () => {
+                    // 트랙 추가 취소: 생성된 트랙을 다시 지움
+                    socketService.publish('TRACK_DELETE', {
+                        projectId: projectInfo.value.projectId,
+                        trackId: createdTrackId
+                    });
+                },
+                redo: () => {
+                    alert("취소된 트랙은 '새 트랙 추가' 버튼으로 다시 만들어 주세요.");
+                }
+            });
+        }
     });
 
     socketService.subscribePersistent('TRACK_DELETE', (data) => {
@@ -1546,11 +1563,15 @@ export const useTrackStore = defineStore('track', () => {
         masterTrack.value.clips = mergedClips;
     }, { deep: true, immediate: true });
 
+    // 트랙 추가 요청 로컬 상태
+    const pendingTrackAddCount = ref(0);
+
     //새로운 트랙 추가 액션
     const addTrack = () => {
         const newTrackName = `트랙 ${trackList.value.length + 1}`;
       //  console.log(`[통신] 트랙 추가(TRACK_ADD) 요청 전송`);
 
+        pendingTrackAddCount.value++;
         socketService.publish('TRACK_ADD', {
             projectId: projectInfo.value.projectId,
             name: newTrackName,
@@ -1708,6 +1729,13 @@ export const useTrackStore = defineStore('track', () => {
         socketService.publish('TRACK_DELETE', {
             projectId: projectInfo.value.projectId,
             trackId: trackId
+        });
+
+        pushCommand({
+            undo: () => {
+                alert("트랙 삭제는 되돌릴 수 없습니다.");
+            },
+            redo: () => {}
         });
     };
 

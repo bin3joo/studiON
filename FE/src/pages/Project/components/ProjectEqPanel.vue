@@ -5,13 +5,27 @@ import type { TrackUIState, TrackEqBandState } from '../types'
 import EqGraph from './EqGraph.vue'
 import { useTrackStore } from '../store/useTrackStore'
 
-const props = defineProps<{
+type AiUiMode = 'eq_ai' | 'master_trim' | 'marker_only' | null
+
+const props = withDefaults(defineProps<{
   selectedTrack: TrackUIState | null
   aiAnalyzing: boolean
   aiAnalyzed: boolean
   aiBeforeBands: TrackEqBandState[]
   aiAfterBands: TrackEqBandState[]
-}>()
+  aiMarkers?: EqMarker[]
+  activeAiUiMode?: AiUiMode
+}>(), {
+  aiMarkers: () => [],
+  activeAiUiMode: null,
+})
+
+type EqMarker = {
+  trackId: number | null
+  centerHz?: number | null
+  bandLowHz?: number | null
+  bandHighHz?: number | null
+}
 
 const trackStore = useTrackStore()
 const spectrumData = ref<number[]>([])
@@ -52,7 +66,27 @@ const afterBands = computed(() => {
 })
 
 const hasAiSuggestion = computed(() => {
+  return props.aiAfterBands.length > 0 || props.aiMarkers.length > 0
+})
+
+const isMarkerOnlyMode = computed(() => {
+  return props.activeAiUiMode === 'marker_only'
+})
+
+const hasAiEqBands = computed(() => {
   return props.aiAfterBands.length > 0
+})
+
+const shouldShowSingleEqGraph = computed(() => {
+  return !props.aiAnalyzed || isMarkerOnlyMode.value
+})
+
+const shouldShowRevisionRequest = computed(() => {
+  return props.activeAiUiMode === 'eq_ai' && !hasAiEqBands.value
+})
+
+const shouldShowCompareEqGraph = computed(() => {
+  return props.activeAiUiMode === 'eq_ai' && hasAiEqBands.value
 })
 
 const selectedRevisionTrackIds = ref<number[]>([])
@@ -169,13 +203,15 @@ watch(
     </div>
 
     <!-- 트랙 선택 + AI 분석 전: 단일 EQ -->
-    <div v-else-if="!aiAnalyzed" class="h-[260px]">
+    <!-- 트랙 선택 + 일반 EQ / 하쉬니스 마커 표시 -->
+    <div v-else-if="shouldShowSingleEqGraph" class="h-[260px]">
       <EqGraph
-        title="현재"
+        :title="isMarkerOnlyMode ? '하쉬니스 감지' : '현재'"
         :freq-labels="freqLabels"
         :db-labels="dbLabels"
         :bands="currentBands"
         :spectrum-data="spectrumData"
+        :ai-markers="isMarkerOnlyMode ? aiMarkers : []"
         :interactive="!!selectedTrack"
         @add-band="emit('add-eq-band', $event)"
         @update-band="emit('update-eq-band', $event)"
@@ -202,7 +238,13 @@ watch(
     <!-- 오른쪽: 요청 전/후 헤더 -->
     <div class="flex h-11 items-center gap-3 px-5">
       <span class="text-xs font-bold tracking-[0.28em] text-gray-400">
-        {{ hasAiSuggestion ? '이후' : 'AI 수정 요청' }}
+        {{
+          isMarkerOnlyMode
+            ? '하쉬니스 감지'
+            : hasAiEqBands
+              ? '이후'
+              : 'AI 수정 요청'
+        }}
       </span>
 
       <button
@@ -215,7 +257,7 @@ watch(
       <div class="ml-auto flex items-center gap-2">
         <button
           class="inline-flex items-center gap-1.5 rounded-full bg-[#FF8F1A] px-3 py-1.5 text-[11px] font-bold text-black transition hover:brightness-110 disabled:opacity-40"
-          :disabled="aiAnalyzing || !hasAiSuggestion"
+          :disabled="aiAnalyzing || !hasAiEqBands"
           @click="emit('apply-ai-eq')"
         >
           <Wand2 class="h-3.5 w-3.5" />
@@ -245,7 +287,7 @@ watch(
 
     <!-- 오른쪽: AI 요청 UI -->
     <div
-      v-if="!hasAiSuggestion"
+      v-if="shouldShowRevisionRequest"
       class="flex h-full flex-col justify-center bg-[#242424] px-8"
     >
       <div>
@@ -317,19 +359,20 @@ watch(
 
     <!-- 오른쪽: AI 수정안 After EQ -->
     <EqGraph
-      v-else
-      title="After"
-      :freq-labels="freqLabels"
-      :db-labels="dbLabels"
-      :bands="afterBands"
-      :spectrum-data="spectrumData"
-      :after="true"
-      :loading="aiAnalyzing"
-      :interactive="!!selectedTrack"
-      @add-band="emit('add-eq-band', $event)"
-      @update-band="emit('update-eq-band', $event)"
-      @remove-band="emit('remove-eq-band', $event)"
-    />
+  v-else-if="shouldShowCompareEqGraph"
+  title="After"
+  :freq-labels="freqLabels"
+  :db-labels="dbLabels"
+  :bands="afterBands"
+  :spectrum-data="spectrumData"
+  :ai-markers="aiMarkers"
+  :after="true"
+  :loading="aiAnalyzing"
+  :interactive="!!selectedTrack"
+  @add-band="emit('add-eq-band', $event)"
+  @update-band="emit('update-eq-band', $event)"
+  @remove-band="emit('remove-eq-band', $event)"
+/>
   </div>
 </div>
   </section>

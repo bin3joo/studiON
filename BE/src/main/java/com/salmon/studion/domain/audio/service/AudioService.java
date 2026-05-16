@@ -78,6 +78,10 @@ public class AudioService {
         return clips;
     }
 
+    public long sumSizeBytesByCreatedBy(Integer userId) {
+        return audioMetadataRepository.sumSizeBytesByCreatedBy(userId);
+    }
+
     private void validateAllClipsFound(List<Integer> requestClipIds, List<Clip> foundClips) {
         Set<Integer> foundClipIds = foundClips.stream().map(Clip::getId).collect(Collectors.toSet());
 

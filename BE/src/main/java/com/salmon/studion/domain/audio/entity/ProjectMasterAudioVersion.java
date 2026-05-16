@@ -2,6 +2,7 @@ package com.salmon.studion.domain.audio.entity;
 
 import com.salmon.studion.domain.project.entity.Project;
 import com.salmon.studion.global.common.entity.BaseEntity;
+import com.salmon.studion.global.common.enums.AudioVersionStatus;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -25,9 +26,14 @@ public class ProjectMasterAudioVersion extends BaseEntity {
     @JoinColumn(name = "audio_metadata_id", nullable = false)
     private AudioMetadata audioMetadata;
 
-    @Column(name = "name", nullable = false, length = 30)
+    @Column(name = "name", nullable = false, length = 50)
     private String name;
 
     @Column(name = "memo")
     private String memo;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status")
+    private AudioVersionStatus status;
+
 }

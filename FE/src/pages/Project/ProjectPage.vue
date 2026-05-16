@@ -23,6 +23,7 @@ import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
 import { useCommentStore } from './store/useCommentStore'
 import ExportModal from './components/ExportModal.vue';
+import VersionSaveModal from './components/VersionSaveModal.vue';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
 import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
@@ -551,14 +552,58 @@ function handleDeleteComment(payload: {
 
 const commentGroups = ref<TrackMeasureCommentGroup[]>([])
 
+watch(
+  () => commentStore.comments,
+  (newComments) => {
+    const newGroups = new Map<string, TrackMeasureCommentGroup>()
+
+    newComments.forEach((rootComment) => {
+      const trackIdStr = String(rootComment.trackId)
+      // 마스터 트랙은 인라인 코멘트를 지원하지 않으므로 무시
+      if (trackStore.masterTrack && trackIdStr === String(trackStore.masterTrack.trackId)) return;
+
+      const key = `${trackIdStr}-${rootComment.location}`
+      
+      const newComment: TimelineComment = {
+        id: String(rootComment.commentId),
+        author: rootComment.author?.nickname || 'Unknown',
+        content: rootComment.content,
+        color: '#d93ce6',
+        profileImageUrl: rootComment.author?.profileImgUrl,
+      }
+      
+      if (newGroups.has(key)) {
+        const group = newGroups.get(key)!
+        group.comments.push(newComment)
+        if (rootComment.isResolved === false) {
+          group.resolved = false
+        }
+      } else {
+        newGroups.set(key, {
+          trackId: trackIdStr,
+          trackName: findTrackName(trackIdStr),
+          measure: rootComment.location,
+          resolved: rootComment.isResolved,
+          comments: [newComment],
+        })
+      }
+    })
+
+    commentGroups.value = Array.from(newGroups.values())
+  },
+  { immediate: true, deep: true }
+)
+
 const isExportModalOpen = ref(false)
 
 function handleExport() {
   isExportModalOpen.value = true
 }
 
+const isVersionSaveModalOpen = ref(false)
+
 function handleSaveVersion() {
- // console.log('버전 저장')
+  isVersionSaveModalOpen.value = true
 }
 
 function handleUndo() {
@@ -658,6 +703,8 @@ const {
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
+  activeAiMarkers,
+  activeAiUiMode,
   selectedEqTrack,
   runAiAnalysis,
   handleApplyAiEq,
@@ -668,7 +715,7 @@ const {
   goNextAiAnalysis,
   goPrevAiAnalysis,
   isActiveClippingApplied,
-activeClippingAppliedInfo,
+  activeClippingAppliedInfo,
 } = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
@@ -1152,6 +1199,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         :ai-analyzed="shouldShowAiEqRevisionPanel"
         :ai-before-bands="aiBeforeBands"
         :ai-after-bands="aiAfterBands"
+        :ai-markers="activeAiMarkers"
+        :active-ai-ui-mode="activeAiUiMode"
         @apply-ai-eq="handleApplyAiEq"
         @cancel-ai-eq="handleCancelAiEq"
         @request-ai-eq-revision="handleRequestAiEqRevision"
@@ -1159,7 +1208,6 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         @update-eq-band="handleUpdateEqBand"
         @remove-eq-band="handleRemoveEqBand"
       />
-    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
     
     <ProjectSidePanel
       class="z-50"
@@ -1178,6 +1226,12 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   :project-id="projectId"
   :project-name="projectName"
   @close="isInviteModalOpen = false"
+    />
+    
+    <VersionSaveModal
+      :open="isVersionSaveModalOpen"
+      :project-id="Number(projectId)"
+      @close="isVersionSaveModalOpen = false"
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->

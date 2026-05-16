@@ -146,6 +146,61 @@ export interface SaveAudioMetadataResponse {
   }
 }
 
+type EqType = 'BELL' | 'LOW_SHELF' | 'HIGH_SHELF'
+type EqSourceType = 'USER_MANUAL' | 'SYSTEM' | 'AI_CONFIRM' | 'AI_APPLIED'
+
+export interface TrackEqSummary {
+  trackEqId: number
+  trackId: number
+  projectId: number
+}
+
+export interface TrackEqBandSummary {
+  trackEqBandId: number
+  trackEqId: number
+  bandOrder: number
+  eqType: EqType
+  frequencyHz: number
+  q: number
+  gainDeltaDb: number
+  jobId: number | null
+  suggestionActionId: number | null
+  appliedSuggestionId: number | null
+  sourceType: EqSourceType
+}
+
+interface TrackEqsResponse {
+  isSuccess: boolean
+  code: string
+  message: string
+  data: {
+    trackEqs: TrackEqSummary[]
+  }
+}
+
+interface TrackEqBandsResponse {
+  isSuccess: boolean
+  code: string
+  message: string
+  data: {
+    trackEqBandSummaries: TrackEqBandSummary[]
+  }
+}
+
+interface SaveTrackEqBandsRequest {
+  bands: {
+    bandOrder: number
+    eqType: EqType
+    frequencyHz: number
+    q: number
+    gainDeltaDb: number
+    sourceType: EqSourceType
+    jobId: number | null
+    suggestionActionId: number | null
+    appliedSuggestionId: number | null
+  }[]
+}
+
 
 // ==========================================
 // [API 객체] 프로젝트 관련 통신 모음집
@@ -197,6 +252,35 @@ export const projectApi = {
       author: c.user || c.author,
       replies: c.replies?.map((r: any) => ({ ...r, author: r.user || r.author })) || []
     })) as CommentDto[];
+  },
+
+  getProjectTrackEqs: async (projectId: number) => {
+    const response = await axiosInstance.get<TrackEqsResponse>(`/api/v1/eq/projects/${projectId}/track-eqs`)
+
+    return response.data.data.trackEqs
+  },
+
+  getTrackEqBands: async (trackEqId: number) => {
+    const response = await axiosInstance.get<TrackEqBandsResponse>(`/api/v1/eq/track-eqs/${trackEqId}/bands`)
+
+    return response.data.data.trackEqBandSummaries
+  },
+
+  saveTrackEqBands: async (
+    trackEqId: number,
+    payload: SaveTrackEqBandsRequest,
+  ) => {
+    const response = await axiosInstance.post<{
+      isSuccess: boolean
+      code: string
+      message: string
+      data: null
+    }>(
+      `/api/v1/eq/track-eqs/${trackEqId}/bands`,
+      payload,
+    )
+
+    return response.data
   },
 
   // 프로젝트 수동 저장

@@ -77,10 +77,6 @@ const hasAiEqBands = computed(() => {
   return props.aiAfterBands.length > 0
 })
 
-const hasAiMarkers = computed(() => {
-  return props.aiMarkers.length > 0
-})
-
 const shouldShowSingleEqGraph = computed(() => {
   return !props.aiAnalyzed || isMarkerOnlyMode.value
 })

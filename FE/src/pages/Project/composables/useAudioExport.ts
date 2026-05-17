@@ -179,9 +179,12 @@ export function useAudioExport() {
           // 클립의 시작 지점, 원본 오디오 내에서의 시작 오프셋, 그리고 재생 길이를 계산하여 Transport에 예약합니다.
           const exactStartTimeSec = clip.start * secondsPerBar
           const audioOffsetSec = (clip.audioStartMs || 0) / 1000
-          const audioDurationSec = clip.duration * secondsPerBar
+          const visualDurationSec = clip.duration * secondsPerBar
+          // BPM에 따른 재생 속도 조절: 클립의 시각적 길이 안에 원본 오디오가 전부 들어맞도록
+          const sourceAudioSec = clip.audioDurationMs / 1000
+          player.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1
 
-          player.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec)
+          player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec)
           offlinePlayers.push(player)
         }
       }

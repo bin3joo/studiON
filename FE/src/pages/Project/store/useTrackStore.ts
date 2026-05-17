@@ -37,6 +37,7 @@ export const useTrackStore = defineStore('track', () => {
 
     const trackEqNodes = new Map<number, TrackEqNode[]>()
     const trackAnalyzers = new Map<number, Tone.FFT>()
+    const trackPitchShifts = new Map<number, Tone.PitchShift>() // 트랙별 피치 시프트 노드 (키 변경 시 반음 단위 조정)
 
     const MAX_EQ_BANDS = 5
 
@@ -170,6 +171,41 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+    // [Tone.js 버그 픽스]
+    // Tone.js의 Player.sync()는 Transport에 의해 중간 지점에서 재생이 시작(Seek)될 때,
+    // playbackRate를 고려하지 않고 오프셋을 계산하는 버그가 있습니다.
+    // 이를 해결하기 위해 _start 내부 메서드를 몽키패칭하여 오프셋과 남은 재생 시간을 보정합니다.
+    const patchTonePlayerForSync = (player: any) => {
+        if (player._isPatchedForSync) return;
+        player._isPatchedForSync = true;
+        const origStart = player._start.bind(player);
+        
+        player._start = function(startTime: number, passedOffset: number, passedDuration?: number) {
+            const originalOffset = this.customOriginalOffset || 0;
+            const startOffsetTransport = passedOffset - originalOffset;
+            
+            let correctedOffset = passedOffset;
+            let correctedDuration = passedDuration;
+            
+            // playbackRate가 Tone.Param 객체일 수 있으므로 값을 안전하게 추출
+            const actualRate = (this.playbackRate && typeof this.playbackRate === 'object' && 'value' in this.playbackRate)
+                ? (this.playbackRate as any).value
+                : this.playbackRate;
+
+            // startOffsetTransport가 0보다 크다는 것은 처음부터가 아니라 중간부터(Seek) 시작된다는 의미
+            if (startOffsetTransport > 0.001 && actualRate !== 1) {
+                // Transport의 이동 시간만큼 오디오 버퍼도 진행되어야 하므로 playbackRate를 곱해줍니다.
+                correctedOffset = originalOffset + (startOffsetTransport * actualRate);
+                if (passedDuration !== undefined) {
+                    const originalDuration = this.customSourceAudioSec || passedDuration;
+                    correctedDuration = originalDuration - (startOffsetTransport * actualRate);
+                }
+            }
+            
+            origStart(startTime, correctedOffset, correctedDuration !== undefined ? Math.max(0, correctedDuration) : undefined);
+        };
+    };
+
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
     //<trackUIstate[]>로 UI용 트랙데이터만 들어올수 있음을 선언 ref이므로 추가 삭제시 화면이 반응함 
@@ -189,7 +225,7 @@ export const useTrackStore = defineStore('track', () => {
     const isPlaying = ref(false); //재생중인지 아닌지
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
-    Tone.getTransport().bpm.value = bpm.value;
+    Tone.getTransport().bpm.value = 120; // Transport 내부 시계는 항상 고정 (playbackRate로 속도 조절)
     // 메인 스레드 블로킹 시 이벤트 스킵 방지를 위한 스케줄링 여유시간 상향 조정
     Tone.getContext().lookAhead = 0.2;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
@@ -204,10 +240,198 @@ export const useTrackStore = defineStore('track', () => {
     masterPanner.channelCount = 2;
     masterPanner.channelCountMode = "explicit";
 
-    //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
+    //bpm이 변경될때마다 전체 클립을 재스케줄링 (Transport BPM은 고정, playbackRate만으로 속도 제어)
     watch(bpm, (newBpm) => {
-        Tone.getTransport().bpm.value = newBpm;
+        // Transport BPM은 변경하지 않음 — playbackRate와 이중 적용되어 재생 길이가 어긋나는 것을 방지
+
+        // BPM이 바뀌면 secondsPerBar가 바뀌므로 모든 클립의 재생 스케줄을 새 기준으로 재등록
+        // 재생 중이면 일시정지 → 재스케줄 → 자동 재개하여 타이밍 꼬임 방지
+        const wasPlaying = isPlaying.value;
+        if (wasPlaying) {
+            Tone.getTransport().pause();
+        }
+
+        // 현재 재생 위치(마디)를 보존하여 재스케줄 후 같은 마디에서 재개
+        // Tone.getTransport().seconds는 옛날 BPM 기준의 시간이고 secondsPerBar는 새 BPM 기준이므로,
+        // 이를 나누면 위치가 왜곡됨. 대신 이미 정확한 마디를 가리키는 playheadPosition.value를 사용함.
+        const currentBar = playheadPosition.value;
+
+        resyncAllClips();
+
+        // 메트로놈이 켜져 있으면 새 BPM 간격으로 재시작
+        if (isMetronomeActive.value) {
+            applyMetronomeState(true);
+        }
+
+        if (wasPlaying) {
+            const newOffsetTime = currentBar * secondsPerBar.value;
+            Tone.getTransport().start("+0.01", newOffsetTime);
+        }
     })
+
+    // ==========================================
+    // BPM (Tempo) 변경
+    // ==========================================
+    const changeBpm = (newBpm: number) => {
+        // 유효성 검사 (PlayController의 로직과 동일)
+        if (isNaN(newBpm) || newBpm < 30 || newBpm > 300) return;
+
+        // 로컬 값과 같으면 무시
+        if (bpm.value === newBpm) return;
+
+        // 로컬 즉시 적용 (Optimistic UI)
+        // bpm.value가 변경되면 위의 watch(bpm)가 트리거되어 자동으로 클립이 재스케줄링됩니다.
+        bpm.value = newBpm;
+        projectInfo.value.tempo = newBpm;
+
+        // 백엔드에 BPM 변경 요청 전송 → 브로드캐스트로 다른 사용자에게 전파
+        socketService.publish('PROJECT_BPM', {
+            projectId: projectInfo.value.projectId,
+            tempo: newBpm
+        });
+    };
+
+    // ==========================================
+    // 키(Key) 변경
+    // ==========================================
+    // UI(문자열) -> 백엔드(Enum)
+    const rootNoteToEnum: Record<string, string> = {
+        "C": "C",
+        "Db": "C_SHARP",
+        "D": "D",
+        "Eb": "E_FLAT",
+        "E": "E",
+        "F": "F",
+        "F#": "F_SHARP",
+        "G": "G",
+        "Ab": "A_FLAT",
+        "A": "A",
+        "Bb": "B_FLAT",
+        "B": "B"
+    };
+
+    // 백엔드(Enum) -> UI(문자열)
+    const enumToRootNote: Record<string, string> = {
+        "C": "C",
+        "C_SHARP": "Db",
+        "D": "D",
+        "E_FLAT": "Eb",
+        "E": "E",
+        "F": "F",
+        "F_SHARP": "F#",
+        "G": "G",
+        "A_FLAT": "Ab",
+        "A": "A",
+        "B_FLAT": "Bb",
+        "B": "B"
+    };
+
+    // 반음 인덱스 매핑 (C=0 ~ B=11)
+    const NOTE_TO_SEMITONE: Record<string, number> = {
+        "C": 0, "Db": 1, "D": 2, "Eb": 3,
+        "E": 4, "F": 5, "F#": 6, "G": 7,
+        "Ab": 8, "A": 9, "Bb": 10, "B": 11
+    };
+
+    // 두 키 사이의 최단 반음 차이 계산 (예: C→D = +2, C→A = -3)
+    const getSemitoneDiff = (fromNote: string, toNote: string): number => {
+        const from = NOTE_TO_SEMITONE[fromNote] ?? 0;
+        const to = NOTE_TO_SEMITONE[toNote] ?? 0;
+        let diff = to - from;
+        if (diff > 6) diff -= 12;
+        if (diff < -6) diff += 12;
+        return diff;
+    };
+
+    const changeKey = (rootNote: string, mode: string) => {
+        const oldNote = projectInfo.value.rootNote;
+        if (oldNote === rootNote && projectInfo.value.mode === mode) return;
+
+        // 피치 시프트 적용: 이전 키에서 새 키까지의 반음 차이만큼 조정
+        const semitones = getSemitoneDiff(oldNote, rootNote);
+        if (semitones !== 0) {
+            trackPitchShifts.forEach(ps => {
+                ps.pitch += semitones;
+            });
+        }
+
+        // 로컬 즉시 적용 (Optimistic UI)
+        projectInfo.value.rootNote = rootNote;
+        projectInfo.value.mode = mode;
+
+        // 백엔드로 보낼 때는 Enum 규격에 맞춰서 변환
+        const rootNoteEnum = rootNoteToEnum[rootNote] || rootNote;
+
+        socketService.publish('PROJECT_KEY', {
+            projectId: projectInfo.value.projectId,
+            rootNote: rootNoteEnum,
+            mode
+        });
+    };
+
+    // ==========================================
+    // 박자(Time Signature) 변경
+    // ==========================================
+    // 허용되는 박자 조합 (10가지)
+    const ALLOWED_TIME_SIGNATURES: [number, number][] = [
+        [2, 4], [3, 4], [4, 4], [5, 4], [6, 4], [7, 4],
+        [3, 8], [6, 8], [9, 8], [12, 8]
+    ];
+
+    // 박자 변경 시 내부 적용 로직 (로컬 즉시 적용 + 원격 브로드캐스트 수신 공용)
+    // DAW 표준: 클립의 마디 위치(숫자)는 그대로 유지, secondsPerBar만 바뀜
+    const applyTimeSignatureChange = (newNumerator: number, newDenominator: number) => {
+        const oldNumerator = projectInfo.value.timeSigNumerator;
+        const oldDenominator = projectInfo.value.timeSigDenominator;
+
+        // 이미 같은 값이면 무시 (브로드캐스트 자기 수신 차단)
+        if (oldNumerator === newNumerator && oldDenominator === newDenominator) return;
+
+        // 재생 중이면 일시정지
+        const wasPlaying = isPlaying.value;
+        if (wasPlaying) {
+            Tone.getTransport().pause();
+        }
+
+        // projectInfo 갱신 → secondsPerBar computed 자동 재계산
+        projectInfo.value.timeSigNumerator = newNumerator;
+        projectInfo.value.timeSigDenominator = newDenominator;
+
+        // 클립의 마디 위치(start, duration)는 그대로 유지
+        // secondsPerBar가 바뀌었으므로 오디오 스케줄만 재등록
+        resyncAllClips();
+
+        // 메트로놈 재시작 (박자 패턴이 바뀌었으므로)
+        if (isMetronomeActive.value) {
+            applyMetronomeState(true);
+        }
+
+        // 재생 중이었으면 현재 재생바 위치에서 재개
+        if (wasPlaying) {
+            const newOffsetTime = playheadPosition.value * secondsPerBar.value;
+            Tone.getTransport().start("+0.01", newOffsetTime);
+        }
+    };
+
+    // 사용자 액션: 박자 변경 요청 (UI → 소켓 발행)
+    const changeTimeSignature = (numerator: number, denominator: number) => {
+        // 허용 조합 검증
+        const isAllowed = ALLOWED_TIME_SIGNATURES.some(
+            ([n, d]) => n === numerator && d === denominator
+        );
+        if (!isAllowed) return;
+
+        // 로컬 즉시 적용 (Optimistic UI)
+        applyTimeSignatureChange(numerator, denominator);
+
+        // 백엔드에 박자 변경 요청 전송 → 브로드캐스트로 다른 사용자에게 전파
+        socketService.publish('PROJECT_TIME_SIGNATURE', {
+            projectId: projectInfo.value.projectId,
+            timeSigNumerator: numerator,
+            timeSigDenominator: denominator
+        });
+    };
+
 
     type SelectedTarget =
         | { type: 'TRACK'; trackId: number }
@@ -299,6 +523,72 @@ export const useTrackStore = defineStore('track', () => {
     }
     //1마디당 걸리는 시간 계산
     const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
+
+    // ==========================================
+    // 구간 반복 (Loop)
+    // ==========================================
+    const isLoopActive = ref(false);
+    const loopStartBar = ref(0);
+    const loopEndBar = ref(4);
+
+    watch([isLoopActive, loopStartBar, loopEndBar, bpm], () => {
+        if (isLoopActive.value) {
+            Tone.getTransport().setLoopPoints(
+                loopStartBar.value * secondsPerBar.value,
+                loopEndBar.value * secondsPerBar.value
+            );
+            Tone.getTransport().loop = true;
+        } else {
+            Tone.getTransport().loop = false;
+        }
+    });
+
+    // ==========================================
+    // 메트로놈 (Metronome / Click Track)
+    // ==========================================
+    const isMetronomeActive = ref(false);
+    let clickSynth: Tone.Synth | null = null;
+    let metronomeEventId: number | null = null;
+
+    const applyMetronomeState = (active: boolean) => {
+        // 기존 메트로놈 비활성화 시 스케줄링 해제 (다중 스케줄 방지)
+        if (metronomeEventId !== null) {
+            Tone.getTransport().clear(metronomeEventId);
+            metronomeEventId = null;
+        }
+
+        if (active) {
+            // Synth가 없으면 생성 — toDestination()으로 마스터 볼륨 무관하게 항상 출력
+            if (!clickSynth) {
+                clickSynth = new Tone.Synth({
+                    oscillator: { type: "square" },
+                    envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 }
+                }).toDestination();
+            }
+
+            const denom = projectInfo.value.timeSigDenominator || 4;
+            const numerator = projectInfo.value.timeSigNumerator || 4;
+            // Transport BPM이 고정이므로, 메트로놈 간격을 초 단위로 직접 계산합니다.
+            const beatIntervalSec = (denom === 8) ? (60 / bpm.value / 2) : (60 / bpm.value);
+
+            metronomeEventId = Tone.getTransport().scheduleRepeat((time) => {
+                // time은 AudioContext의 하드웨어 시간이고, Transport 내부 시간은 별도로 계산해야 합니다.
+                // 하드웨어 예약 시간(time)과 현재 시간(Tone.now())의 차이(Lookahead)를 Transport.seconds에 더해 정확한 예약 시점(초)을 구합니다.
+                const transportTimeSec = Tone.getTransport().seconds + Math.max(0, time - Tone.now());
+                
+                // 현재 재생 위치가 몇 번째 박자인지 계산 (반올림 처리로 스케줄링 오차 보정)
+                const absoluteBeat = Math.round(transportTimeSec / beatIntervalSec);
+                const currentBeat = absoluteBeat % numerator;
+
+                // 첫 박자는 '삑(C6)', 나머지는 '띡(C5)' 소리
+                const note = currentBeat === 0 ? "C6" : "C5";
+                clickSynth!.triggerAttackRelease(note, "64n", time, 0.5);
+            }, beatIntervalSec, 0);
+        }
+    };
+
+    watch(isMetronomeActive, applyMetronomeState);
+
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
@@ -509,11 +799,17 @@ export const useTrackStore = defineStore('track', () => {
 
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
+        // 기존 PitchShift 노드 해제
+        const oldPs = trackPitchShifts.get(trackId);
+        if (oldPs) { oldPs.dispose(); trackPitchShifts.delete(trackId); }
 
         const eqNodes = createTrackEqNodes(track)
         const analyzer = new Tone.FFT(2048)
+        // 피치 시프트 노드 생성 (Analyzer → PitchShift → Volume)
+        const pitchShift = new Tone.PitchShift({ pitch: 0, windowSize: 0.1 });
 
         trackAnalyzers.set(trackId, analyzer)
+        trackPitchShifts.set(trackId, pitchShift)
 
         if (eqNodes.length > 0) {
             for (let i = 0; i < eqNodes.length - 1; i += 1) {
@@ -521,10 +817,12 @@ export const useTrackStore = defineStore('track', () => {
             }
 
             eqNodes[eqNodes.length - 1].filter.connect(analyzer)
-            analyzer.connect(volume)
+            analyzer.connect(pitchShift)
+            pitchShift.connect(volume)
         }
         else {
-            analyzer.connect(volume)
+            analyzer.connect(pitchShift)
+            pitchShift.connect(volume)
         }
 
         reconnectTrackPlayers(trackId)
@@ -542,6 +840,9 @@ export const useTrackStore = defineStore('track', () => {
     function disposeTrackAudioChain(trackId: number) {
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
+        // PitchShift 노드도 함께 해제
+        const ps = trackPitchShifts.get(trackId);
+        if (ps) { ps.dispose(); trackPitchShifts.delete(trackId); }
     }
 
     // ==========================================
@@ -676,6 +977,54 @@ export const useTrackStore = defineStore('track', () => {
         } else {
             alert("처리 중 오류가 발생했습니다.");
         }
+    });
+
+    // --------------------- 박자 변경 수신 (소켓) ---------------------
+    socketService.subscribePersistent('MODIFIED_PROJECT_TIME_SIGNATURE', (data: any) => {
+        const newNum = data.timeSigNumerator;
+        const newDenom = data.timeSigDenominator;
+
+        // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
+        if (projectInfo.value.timeSigNumerator === newNum &&
+            projectInfo.value.timeSigDenominator === newDenom) return;
+
+        // 다른 사용자가 변경한 박자를 로컬에 적용
+        applyTimeSignatureChange(newNum, newDenom);
+    });
+
+    // --------------------- BPM 변경 수신 (소켓) ---------------------
+    socketService.subscribePersistent('MODIFIED_PROJECT_BPM', (data: any) => {
+        const newBpm = data.tempo;
+
+        // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
+        if (bpm.value === newBpm) return;
+
+        // 다른 사용자가 변경한 BPM을 로컬에 적용
+        // 변경 시 watch(bpm)이 트리거되어 자동 재스케줄링됨
+        bpm.value = newBpm;
+        projectInfo.value.tempo = newBpm;
+    });
+
+    // --------------------- 키(Key) 변경 수신 (소켓) ---------------------
+    socketService.subscribePersistent('MODIFIED_PROJECT_KEY', (data: any) => {
+        // 서버에서 온 Enum 문자열을 다시 프론트엔드 표기법으로 변환
+        const newNote = enumToRootNote[data.rootNote] || data.rootNote;
+        const newMode = data.mode;
+
+        // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
+        if (projectInfo.value.rootNote === newNote && projectInfo.value.mode === newMode) return;
+
+        // 피치 시프트 적용: 현재 로컬 키와 새 키 사이의 반음 차이만큼 조정
+        const semitones = getSemitoneDiff(projectInfo.value.rootNote, newNote);
+        if (semitones !== 0) {
+            trackPitchShifts.forEach(ps => {
+                ps.pitch += semitones;
+            });
+        }
+
+        // 다른 사용자가 변경한 키를 로컬에 적용
+        projectInfo.value.rootNote = newNote;
+        projectInfo.value.mode = newMode;
     });
 
     // --------------------- 클립 관련 (소켓) ---------------------
@@ -1470,6 +1819,11 @@ export const useTrackStore = defineStore('track', () => {
         });
 
         if (origStart !== undefined && origDuration !== undefined && origAudioStartMs !== undefined) {
+            // 리사이즈 시점의 클립에서 원본 오디오 비율(ms/bar)을 캡처
+            // BPM이 나중에 바뀌어도 이 비율은 항상 원본 오디오의 물리적 비율을 유지
+            const clip = trackList.value.flatMap(t => t.clips).find(c => c.clipId === clipId);
+            const capturedMsPerBar = clip ? clip.audioDurationMs / clip.duration : origDuration > 0 ? (origDuration * 2000 / origDuration) : 2000;
+
             pushCommand({
                 undo: () => {
                     const track = trackList.value.find(t => t.trackId === trackId);
@@ -1479,7 +1833,7 @@ export const useTrackStore = defineStore('track', () => {
                         clip.start = origStart;
                         clip.duration = origDuration;
                         clip.audioStartMs = origAudioStartMs;
-                        clip.audioDurationMs = origDuration * secondsPerBar.value * 1000;
+                        clip.audioDurationMs = origDuration * capturedMsPerBar;
                         resyncClip(clipId, origStart);
                         setTimeout(() => {
                             socketService.publish('CLIP_RESIZE', {
@@ -1499,8 +1853,8 @@ export const useTrackStore = defineStore('track', () => {
                         lockClip(clipId, trackId);
                         clip.start = newStart;
                         clip.duration = newDuration;
-                        clip.audioStartMs = origAudioStartMs + trimLeftBars * secondsPerBar.value * 1000;
-                        clip.audioDurationMs = newDuration * secondsPerBar.value * 1000;
+                        clip.audioStartMs = origAudioStartMs + trimLeftBars * capturedMsPerBar;
+                        clip.audioDurationMs = newDuration * capturedMsPerBar;
                         resyncClip(clipId, newStart);
                         setTimeout(() => {
                             socketService.publish('CLIP_RESIZE', {
@@ -1896,11 +2250,26 @@ export const useTrackStore = defineStore('track', () => {
                 // 3. EQ 체인 연결
                 connectPlayerToTrack(newPlayer, trackId);
 
+                // Tone.js sync 재생 오프셋 버그 패치 적용
+                patchTonePlayerForSync(newPlayer);
+
                 clipPlayers.set(clip.clipId, newPlayer);
 
                 const exactStartTimeSec = clip.start * secondsPerBar.value;
                 const audioOffsetSec = clip.audioStartMs / 1000;
-                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
+                const visualDurationSec = clip.duration * secondsPerBar.value;
+                const sourceAudioSec = clip.audioDurationMs / 1000;
+                
+                // 패치에서 사용할 원본 오프셋과 길이를 저장
+                (newPlayer as any).customOriginalOffset = audioOffsetSec;
+                (newPlayer as any).customSourceAudioSec = sourceAudioSec;
+
+                newPlayer.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+                // Tone.js는 내부적으로 duration/playbackRate로 실제 재생 길이를 계산하므로
+                // sourceAudioSec를 넘기면 정확히 visualDurationSec 만큼 재생 후 정지
+                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+                // Transport의 상태 관리를 위해 시각적 끝지점에 명시적으로 stop을 등록 (클립 밖으로 재생헤드 이동 시 고스트 재생 방지)
+                newPlayer.sync().stop(exactStartTimeSec + visualDurationSec);
             } catch (e) {
                // console.error("[Audio Load Error]:", e);
                 disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
@@ -1996,7 +2365,16 @@ export const useTrackStore = defineStore('track', () => {
             }
         }
 
-        const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
+        // [이슈 해결 반영 3: 시각적 재생바 레이턴시 보정]
+        // 스피커/이어폰의 물리적 출력 지연(Output Latency)만큼 재생바를 왼쪽으로 당겨서
+        // 귀에 소리가 들리는 순간과 재생바가 마디 선을 지나는 순간을 일치시킵니다.
+        let hardwareLatency = 0;
+        if (Tone.context && Tone.context.rawContext) {
+            hardwareLatency = (Tone.context.rawContext as any).outputLatency || 0;
+        }
+        const compensatedSeconds = Math.max(0, Tone.getTransport().seconds - hardwareLatency);
+
+        const currentPositionBar = compensatedSeconds / secondsPerBar.value;
         const px = currentPositionBar * pixelPerBar.value;
 
         // [최적화] 전역 CSS 변수(--playhead-px)를 :root에 설정하면 브라우저 전체의 Style Recalculation이 발생하여 프레임 드랍이 생깁니다.
@@ -2145,13 +2523,21 @@ export const useTrackStore = defineStore('track', () => {
                         track.trackId,
                     );
 
+                    patchTonePlayerForSync(player);
+
                    // console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
                     const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
-                    const audioDurationSec = clip.duration * secondsPerBar.value;
+                    const visualDurationSec = clip.duration * secondsPerBar.value;
+                    const sourceAudioSec = clip.audioDurationMs / 1000;
+                    
+                    (player as any).customOriginalOffset = audioOffsetSec;
+                    (player as any).customSourceAudioSec = sourceAudioSec;
 
-                    player.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec);
+                    player.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+                    player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+                    player.sync().stop(exactStartTimeSec + visualDurationSec);
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
                    // console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
@@ -2185,6 +2571,10 @@ export const useTrackStore = defineStore('track', () => {
         trackAnalyzers.forEach(analyzer => analyzer.dispose());
         trackAnalyzers.clear();
 
+        // 피치 시프트 노드 정리
+        trackPitchShifts.forEach(ps => ps.dispose());
+        trackPitchShifts.clear();
+
        // console.log("========== [Audio Engine Cleanup End] ==========");
     };
 
@@ -2217,18 +2607,67 @@ export const useTrackStore = defineStore('track', () => {
 
         const exactStartTimeSec = newStartBar * secondsPerBar.value;
         const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
-        const maxDuration = player.buffer.duration - audioOffsetSec;
-        const requestedDuration = targetClip.duration * secondsPerBar.value;
+        const visualDurationSec = targetClip.duration * secondsPerBar.value;
+        const sourceAudioSec = targetClip.audioDurationMs / 1000;
+        
+        (player as any).customOriginalOffset = audioOffsetSec;
+        (player as any).customSourceAudioSec = sourceAudioSec;
+        
+        const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+        player.playbackRate = rate;
 
-        const safeDurationSec = Math.max(0.01, Math.min(requestedDuration, maxDuration));
-
-       // console.log(`  └─ [Resync] 타임라인 스케줄링 -> 시작: ${exactStartTimeSec.toFixed(2)}초, Offset: ${audioOffsetSec.toFixed(2)}초, 재생길이: ${safeDurationSec.toFixed(2)}초`);
-
-        if (safeDurationSec > 0) {
-            player.sync().start(exactStartTimeSec, audioOffsetSec, safeDurationSec);
+        if (visualDurationSec > 0) {
+            player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+            player.sync().stop(exactStartTimeSec + visualDurationSec);
           //  console.log(`  └─ [Resync] 스케줄링 등록 완료! (상태: 정상)`);
         } else {
           //  console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
+        }
+    };
+
+    // ==========================================
+    // BPM 변경 시 전체 클립 재스케줄링
+    // ==========================================
+    // BPM이 바뀌면 secondsPerBar가 바뀌므로, 이미 player.sync().start()로 등록된
+    // 재생 길이(초)가 옛 BPM 기준이라 불일치가 발생합니다.
+    // 이 함수는 모든 clipPlayer를 unsync→재계산→재등록하여 동기화합니다.
+    const resyncAllClips = () => {
+        for (const [clipId, player] of clipPlayers) {
+            // 클립 데이터를 trackList에서 역추적
+            let targetClip: ClipUIState | null = null;
+            for (const track of trackList.value) {
+                const found = track.clips.find(c => c.clipId === clipId);
+                if (found) {
+                    targetClip = found;
+                    break;
+                }
+            }
+
+            if (!targetClip) continue;
+
+            // 기존 스케줄 해제
+            player.unsync();
+            player.stop();
+
+            // 새 secondsPerBar 기준으로 재계산
+            const exactStartTimeSec = targetClip.start * secondsPerBar.value;
+            const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
+            const visualDurationSec = targetClip.duration * secondsPerBar.value;
+            // BPM에 따른 재생 속도 조절
+            const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            
+            (player as any).customOriginalOffset = audioOffsetSec;
+            (player as any).customSourceAudioSec = sourceAudioSec;
+            
+            const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+            player.playbackRate = rate;
+
+            console.log(`[resyncAll] clipId=${clipId}, rate=${rate.toFixed(3)}, visualDur=${visualDurationSec.toFixed(2)}s, sourceDur=${sourceAudioSec.toFixed(2)}s`);
+
+            if (visualDurationSec > 0) {
+                player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+                player.sync().stop(exactStartTimeSec + visualDurationSec);
+            }
         }
     };
 
@@ -2376,7 +2815,7 @@ export const useTrackStore = defineStore('track', () => {
                     projectId: data.projectId,
                     name: data.name ?? '프로젝트',
                     tempo: data.tempo ?? 120,
-                    rootNote: data.rootNote ?? 'C',
+                    rootNote: enumToRootNote[data.rootNote] || data.rootNote || 'C',
                     mode: data.mode ?? 'MAJOR',
                     timeSigNumerator: data.timeSigNumerator ?? 4,
                     timeSigDenominator: data.timeSigDenominator ?? 4,
@@ -2498,6 +2937,12 @@ export const useTrackStore = defineStore('track', () => {
         isCommentMode,
         toggleCommentMode,
 
+        // 구간 반복 및 메트로놈
+        isLoopActive,
+        loopStartBar,
+        loopEndBar,
+        isMetronomeActive,
+
         // Getters
         pixelPerBar,
         totalTimelineWidth,
@@ -2557,6 +3002,15 @@ export const useTrackStore = defineStore('track', () => {
         lockClip,
         unlockClip,
         setTimelineContainer,
+
+        // 박자 변경
+        changeTimeSignature,
+
+        // BPM 변경
+        changeBpm,
+
+        // 키(Key) 변경
+        changeKey,
 
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,

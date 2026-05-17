@@ -352,7 +352,9 @@ function updateResizePosition() {
   const totalAudioDurationMs = (targetClip.audio?.durationMs && targetClip.audio.durationMs > 0)
     ? targetClip.audio.durationMs
     : (targetClip.audioStartMs + targetClip.audioDurationMs);
-  const maxAudioBars = totalAudioDurationMs / (trackStore.secondsPerBar * 1000);
+  // 원본 오디오의 ms/bar 비율을 보존 (BPM 무관하게 일정)
+  const msPerBar = state.origAudioDurationMs / state.origDuration;
+  const maxAudioBars = totalAudioDurationMs / msPerBar;
 
   if (state.side === 'right') {
     // 오른쪽 리사이즈: 스냅된 새로운 끝점을 기반으로 duration 계산
@@ -370,12 +372,12 @@ function updateResizePosition() {
     }
 
     // 음원 최대 길이 제한: 현재 audioStartMs부터 남은 오디오 길이까지만 늘릴 수 있음
-    const remainingAudioBars = (totalAudioDurationMs - state.origAudioStartMs) / (trackStore.secondsPerBar * 1000);
+    const remainingAudioBars = (totalAudioDurationMs - state.origAudioStartMs) / msPerBar;
     newDuration = Math.min(newDuration, remainingAudioBars);
     newDuration = Math.max(minDuration, newDuration);
     targetClip.duration = newDuration;
-    // 오디오 재생 범위도 같이 업데이트 (줄인 범위 밖 소리 차단)
-    targetClip.audioDurationMs = newDuration * trackStore.secondsPerBar * 1000;
+    // 오디오 재생 범위도 같이 업데이트 (원본 비율 유지)
+    targetClip.audioDurationMs = newDuration * msPerBar;
   } else if (state.side === 'left') {
     // 왼쪽 리사이즈: 스냅된 새로운 시작점을 기반으로 boundedDelta 계산
     let rawNewStart = state.origStart + deltaBar;
@@ -397,14 +399,14 @@ function updateResizePosition() {
     }
 
     // audioStartMs가 0 미만이 되지 않게 (왼쪽으로 확장 시 오디오 시작점 제한)
-    const newAudioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
-    if (newAudioStartMs < 0) boundedDelta = -state.origAudioStartMs / (trackStore.secondsPerBar * 1000);
+    const newAudioStartMs = state.origAudioStartMs + boundedDelta * msPerBar;
+    if (newAudioStartMs < 0) boundedDelta = -state.origAudioStartMs / msPerBar;
 
     targetClip.start = state.origStart + boundedDelta;
     targetClip.duration = state.origDuration - boundedDelta;
     // 왼쪽 리사이즈 시 오디오 시작점 이동 (줄인 만큼 오디오 시작점을 뒤로)
-    targetClip.audioStartMs = state.origAudioStartMs + boundedDelta * trackStore.secondsPerBar * 1000;
-    targetClip.audioDurationMs = targetClip.duration * trackStore.secondsPerBar * 1000;
+    targetClip.audioStartMs = state.origAudioStartMs + boundedDelta * msPerBar;
+    targetClip.audioDurationMs = targetClip.duration * msPerBar;
   }
 }
 
@@ -444,9 +446,9 @@ const onResizePointerUp = (e: PointerEvent) => {
   targetClip.duration = safeDuration;
   
   if (state.side === 'left') {
-    targetClip.audioStartMs = state.origAudioStartMs + safeTrimLeft * trackStore.secondsPerBar * 1000;
+    targetClip.audioStartMs = state.origAudioStartMs + safeTrimLeft * (state.origAudioDurationMs / state.origDuration);
   }
-  targetClip.audioDurationMs = safeDuration * trackStore.secondsPerBar * 1000;
+  targetClip.audioDurationMs = safeDuration * (state.origAudioDurationMs / state.origDuration);
 
   trackStore.resizeClip(
       targetClip.clipId, 

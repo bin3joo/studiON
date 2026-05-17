@@ -46,34 +46,39 @@ const expectedSizeMB = computed(() => {
 })
 
 async function handleExport() {
-  isExporting.value = true
   errorMessage.value = ''
-  
+  const suggestedFilename = `${props.projectName || 'project'}_master${isMono.value ? '_mono' : ''}.wav`
+  let fileHandle: any = null
+
   try {
-    const blob = await exportMasterAudio(isMono.value)
-    const suggestedFilename = `${props.projectName || 'project'}_master${isMono.value ? '_mono' : ''}.wav`
-    
-    // File System Access API
+    // File System Access API (브라우저 보안상 클릭 즉시 호출해야 함)
     if ('showSaveFilePicker' in window) {
       try {
-        const handle = await (window as any).showSaveFilePicker({
+        fileHandle = await (window as any).showSaveFilePicker({
           suggestedName: suggestedFilename,
           types: [{
             description: 'WAV Audio File',
             accept: { 'audio/wav': ['.wav'] },
           }],
         })
-        const writable = await handle.createWritable()
-        await writable.write(blob)
-        await writable.close()
-        
-        emit('close')
       } catch (err: any) {
         // AbortError is thrown if user cancels the picker, ignore it
-        if (err.name !== 'AbortError') {
-          throw err
-        }
+        if (err.name === 'AbortError') return
+        throw err
       }
+    }
+
+    isExporting.value = true
+
+    // 무거운 믹스다운 비동기 작업 수행
+    const blob = await exportMasterAudio(isMono.value)
+    
+    if (fileHandle) {
+      const writable = await fileHandle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+      
+      emit('close')
     } else {
       // Fallback for browsers that don't support showSaveFilePicker (e.g. Firefox)
       const url = URL.createObjectURL(blob)

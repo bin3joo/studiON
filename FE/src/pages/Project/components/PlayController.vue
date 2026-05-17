@@ -87,14 +87,40 @@ const startBpmEdit = () => {
 const confirmBpmEdit = () => {
   const newBpm = Number(bpmInputValue.value);
   if (!isNaN(newBpm) && newBpm >= 30 && newBpm <= 300) {
-    trackStore.bpm = newBpm;
-    trackStore.projectInfo.tempo = newBpm;
+    trackStore.changeBpm(newBpm);
   }
   isBpmEditing.value = false;
 };
 
 const cancelBpmEdit = () => {
   isBpmEditing.value = false;
+};
+
+// 6. 박자(Time Signature) 편집 관련 상태
+const isTimeSigPickerOpen = ref(false);
+
+// 허용되는 박자 조합 (10가지)
+const TIME_SIG_OPTIONS: { numerator: number; denominator: number; label: string }[] = [
+  { numerator: 2, denominator: 4, label: '2/4' },
+  { numerator: 3, denominator: 4, label: '3/4' },
+  { numerator: 4, denominator: 4, label: '4/4' },
+  { numerator: 5, denominator: 4, label: '5/4' },
+  { numerator: 6, denominator: 4, label: '6/4' },
+  { numerator: 7, denominator: 4, label: '7/4' },
+  { numerator: 3, denominator: 8, label: '3/8' },
+  { numerator: 6, denominator: 8, label: '6/8' },
+  { numerator: 9, denominator: 8, label: '9/8' },
+  { numerator: 12, denominator: 8, label: '12/8' },
+];
+
+const handleTimeSigChange = (numerator: number, denominator: number) => {
+  trackStore.changeTimeSignature(numerator, denominator);
+  isTimeSigPickerOpen.value = false;
+};
+
+const isCurrentTimeSig = (numerator: number, denominator: number) => {
+  return trackStore.projectInfo.timeSigNumerator === numerator
+    && trackStore.projectInfo.timeSigDenominator === denominator;
 };
 </script>
 
@@ -338,15 +364,81 @@ const cancelBpmEdit = () => {
         </span>
       </div>
 
-      <div 
-        :aria-label="`현재 박자: ${trackStore.projectInfo.timeSigNumerator}분의 ${trackStore.projectInfo.timeSigDenominator}박자`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
-      >
-        <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
-        <div class="flex items-center gap-1 font-display text-xs tracking-wider text-white tabular-nums">
-          <span>{{ trackStore.projectInfo.timeSigNumerator }}</span>
-          <span class="text-muted-foreground">/</span>
-          <span>{{ trackStore.projectInfo.timeSigDenominator }}</span>
+      <!-- 박자(Time Signature) 피커 -->
+      <div class="relative">
+        <button 
+          :aria-label="`현재 박자: ${trackStore.projectInfo.timeSigNumerator}/${trackStore.projectInfo.timeSigDenominator}. 클릭하여 변경`"
+          :aria-expanded="isTimeSigPickerOpen"
+          :class="[
+            'flex h-8 items-center gap-2 rounded border px-2.5 transition-colors',
+            isTimeSigPickerOpen
+              ? 'border-primary bg-primary/10'
+              : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/10 cursor-pointer'
+          ]"
+          @click="isTimeSigPickerOpen = !isTimeSigPickerOpen"
+        >
+          <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
+          <div class="flex items-center gap-1 font-display text-xs tracking-wider text-white tabular-nums">
+            <span>{{ trackStore.projectInfo.timeSigNumerator }}</span>
+            <span class="text-muted-foreground">/</span>
+            <span>{{ trackStore.projectInfo.timeSigDenominator }}</span>
+          </div>
+          <ChevronDown class="h-3 w-3 text-muted-foreground transition-transform" :class="isTimeSigPickerOpen ? 'rotate-180' : ''" aria-hidden="true" />
+        </button>
+
+        <!-- 박자 선택 팝업 -->
+        <div 
+          v-if="isTimeSigPickerOpen" 
+          role="dialog"
+          aria-label="박자 선택창"
+          class="absolute right-0 top-full mt-2 z-50 min-w-[200px] rounded-md border border-border bg-[#1c1c1c] p-4 shadow-xl shadow-black/50"
+        >
+          <!-- 바깥 클릭 시 닫기 -->
+          <div class="fixed inset-0 z-[-1]" @click="isTimeSigPickerOpen = false"></div>
+
+          <!-- /4 박자 그룹 -->
+          <div class="mb-3">
+            <span class="mb-1.5 block font-mono text-[9px] uppercase tracking-widest text-muted-foreground">4분음표 기준</span>
+            <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="4분음표 기준 박자 선택">
+              <button
+                v-for="opt in TIME_SIG_OPTIONS.filter(o => o.denominator === 4)"
+                :key="opt.label"
+                :aria-label="`박자 ${opt.label} 적용`"
+                :aria-pressed="isCurrentTimeSig(opt.numerator, opt.denominator)"
+                :class="[
+                  'flex h-9 items-center justify-center rounded-md border font-display text-sm tracking-wider transition-colors',
+                  isCurrentTimeSig(opt.numerator, opt.denominator)
+                    ? 'border-primary bg-primary/10 text-primary shadow-[0_0_10px_hsl(var(--primary)/0.4)]'
+                    : 'border-border bg-secondary/40 text-foreground hover:border-primary/60'
+                ]"
+                @click="handleTimeSigChange(opt.numerator, opt.denominator)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- /8 박자 그룹 -->
+          <div>
+            <span class="mb-1.5 block font-mono text-[9px] uppercase tracking-widest text-muted-foreground">8분음표 기준</span>
+            <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="8분음표 기준 박자 선택">
+              <button
+                v-for="opt in TIME_SIG_OPTIONS.filter(o => o.denominator === 8)"
+                :key="opt.label"
+                :aria-label="`박자 ${opt.label} 적용`"
+                :aria-pressed="isCurrentTimeSig(opt.numerator, opt.denominator)"
+                :class="[
+                  'flex h-9 items-center justify-center rounded-md border font-display text-sm tracking-wider transition-colors',
+                  isCurrentTimeSig(opt.numerator, opt.denominator)
+                    ? 'border-primary bg-primary/10 text-primary shadow-[0_0_10px_hsl(var(--primary)/0.4)]'
+                    : 'border-border bg-secondary/40 text-foreground hover:border-primary/60'
+                ]"
+                @click="handleTimeSigChange(opt.numerator, opt.denominator)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

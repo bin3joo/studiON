@@ -268,6 +268,92 @@ export const useTrackStore = defineStore('track', () => {
         }
     })
 
+    // ==========================================
+    // BPM (Tempo) 변경
+    // ==========================================
+    const changeBpm = (newBpm: number) => {
+        // 유효성 검사 (PlayController의 로직과 동일)
+        if (isNaN(newBpm) || newBpm < 30 || newBpm > 300) return;
+
+        // 로컬 값과 같으면 무시
+        if (bpm.value === newBpm) return;
+
+        // 로컬 즉시 적용 (Optimistic UI)
+        // bpm.value가 변경되면 위의 watch(bpm)가 트리거되어 자동으로 클립이 재스케줄링됩니다.
+        bpm.value = newBpm;
+        projectInfo.value.tempo = newBpm;
+
+        // 백엔드에 BPM 변경 요청 전송 → 브로드캐스트로 다른 사용자에게 전파
+        socketService.publish('PROJECT_BPM', {
+            projectId: projectInfo.value.projectId,
+            tempo: newBpm
+        });
+    };
+
+    // ==========================================
+    // 박자(Time Signature) 변경
+    // ==========================================
+    // 허용되는 박자 조합 (10가지)
+    const ALLOWED_TIME_SIGNATURES: [number, number][] = [
+        [2, 4], [3, 4], [4, 4], [5, 4], [6, 4], [7, 4],
+        [3, 8], [6, 8], [9, 8], [12, 8]
+    ];
+
+    // 박자 변경 시 내부 적용 로직 (로컬 즉시 적용 + 원격 브로드캐스트 수신 공용)
+    // DAW 표준: 클립의 마디 위치(숫자)는 그대로 유지, secondsPerBar만 바뀜
+    const applyTimeSignatureChange = (newNumerator: number, newDenominator: number) => {
+        const oldNumerator = projectInfo.value.timeSigNumerator;
+        const oldDenominator = projectInfo.value.timeSigDenominator;
+
+        // 이미 같은 값이면 무시 (브로드캐스트 자기 수신 차단)
+        if (oldNumerator === newNumerator && oldDenominator === newDenominator) return;
+
+        // 재생 중이면 일시정지
+        const wasPlaying = isPlaying.value;
+        if (wasPlaying) {
+            Tone.getTransport().pause();
+        }
+
+        // projectInfo 갱신 → secondsPerBar computed 자동 재계산
+        projectInfo.value.timeSigNumerator = newNumerator;
+        projectInfo.value.timeSigDenominator = newDenominator;
+
+        // 클립의 마디 위치(start, duration)는 그대로 유지
+        // secondsPerBar가 바뀌었으므로 오디오 스케줄만 재등록
+        resyncAllClips();
+
+        // 메트로놈 재시작 (박자 패턴이 바뀌었으므로)
+        if (isMetronomeActive.value) {
+            applyMetronomeState(true);
+        }
+
+        // 재생 중이었으면 현재 재생바 위치에서 재개
+        if (wasPlaying) {
+            const newOffsetTime = playheadPosition.value * secondsPerBar.value;
+            Tone.getTransport().start("+0.01", newOffsetTime);
+        }
+    };
+
+    // 사용자 액션: 박자 변경 요청 (UI → 소켓 발행)
+    const changeTimeSignature = (numerator: number, denominator: number) => {
+        // 허용 조합 검증
+        const isAllowed = ALLOWED_TIME_SIGNATURES.some(
+            ([n, d]) => n === numerator && d === denominator
+        );
+        if (!isAllowed) return;
+
+        // 로컬 즉시 적용 (Optimistic UI)
+        applyTimeSignatureChange(numerator, denominator);
+
+        // 백엔드에 박자 변경 요청 전송 → 브로드캐스트로 다른 사용자에게 전파
+        socketService.publish('PROJECT_TIME_SIGNATURE', {
+            projectId: projectInfo.value.projectId,
+            timeSigNumerator: numerator,
+            timeSigDenominator: denominator
+        });
+    };
+
+
     type SelectedTarget =
         | { type: 'TRACK'; trackId: number }
         | { type: 'MASTER' }
@@ -801,6 +887,32 @@ export const useTrackStore = defineStore('track', () => {
         } else {
             alert("처리 중 오류가 발생했습니다.");
         }
+    });
+
+    // --------------------- 박자 변경 수신 (소켓) ---------------------
+    socketService.subscribePersistent('MODIFIED_PROJECT_TIME_SIGNATURE', (data: any) => {
+        const newNum = data.timeSigNumerator;
+        const newDenom = data.timeSigDenominator;
+
+        // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
+        if (projectInfo.value.timeSigNumerator === newNum &&
+            projectInfo.value.timeSigDenominator === newDenom) return;
+
+        // 다른 사용자가 변경한 박자를 로컬에 적용
+        applyTimeSignatureChange(newNum, newDenom);
+    });
+
+    // --------------------- BPM 변경 수신 (소켓) ---------------------
+    socketService.subscribePersistent('MODIFIED_PROJECT_BPM', (data: any) => {
+        const newBpm = data.tempo;
+
+        // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
+        if (bpm.value === newBpm) return;
+
+        // 다른 사용자가 변경한 BPM을 로컬에 적용
+        // 변경 시 watch(bpm)이 트리거되어 자동 재스케줄링됨
+        bpm.value = newBpm;
+        projectInfo.value.tempo = newBpm;
     });
 
     // --------------------- 클립 관련 (소켓) ---------------------
@@ -2774,6 +2886,12 @@ export const useTrackStore = defineStore('track', () => {
         lockClip,
         unlockClip,
         setTimelineContainer,
+
+        // 박자 변경
+        changeTimeSignature,
+
+        // BPM 변경
+        changeBpm,
 
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,

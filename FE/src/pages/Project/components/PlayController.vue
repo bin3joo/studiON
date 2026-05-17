@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
-import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload } from 'lucide-vue-next';
+import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload, Repeat } from 'lucide-vue-next';
 import * as Tone from 'tone';
 import { trackEvent } from '@/shared/utils/analytics'
 
@@ -201,6 +201,41 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
         @click="handleStop"
       >
         <Square class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+      </button>
+
+      <!-- 메트로놈 토글 버튼 (M 단축키) -->
+      <button 
+        aria-label="메트로놈 토글"
+        :class="[
+          'grid h-8 w-10 place-items-center rounded border transition',
+          trackStore.isMetronomeActive 
+            ? 'border-primary bg-primary/20 text-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)]' 
+            : 'border-white/10 bg-white/5 text-white hover:bg-white/10 active:scale-95'
+        ]"
+        @click="trackStore.isMetronomeActive = !trackStore.isMetronomeActive"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+          <!-- 메트로놈 외형 (사다리꼴) -->
+          <path d="M6 20h12L15 4H9Z"/>
+          <!-- 똑딱거리는 시침 막대기 (하단 중앙에서 좌측 상단으로 뻗음) -->
+          <path d="M12 20 8 6"/>
+          <!-- 시침에 달린 무게추 -->
+          <circle cx="9.4" cy="11.5" r="1.5"/>
+        </svg>
+      </button>
+
+      <!-- 구간 반복(Loop) 토글 버튼 (L 단축키) -->
+      <button 
+        aria-label="구간 반복 토글"
+        :class="[
+          'grid h-8 w-10 place-items-center rounded border transition',
+          trackStore.isLoopActive 
+            ? 'border-pink-500 bg-pink-500/20 text-pink-400 shadow-[0_0_8px_rgba(236,72,153,0.6)]' 
+            : 'border-white/10 bg-white/5 text-white hover:bg-white/10 active:scale-95'
+        ]"
+        @click="trackStore.isLoopActive = !trackStore.isLoopActive"
+      >
+        <Repeat class="h-4 w-4" aria-hidden="true" />
       </button>
     </div>
 

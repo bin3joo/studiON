@@ -299,6 +299,72 @@ export const useTrackStore = defineStore('track', () => {
     }
     //1마디당 걸리는 시간 계산
     const secondsPerBar = computed(() => (projectInfo.value.timeSigNumerator * 60) / bpm.value);
+
+    // ==========================================
+    // 구간 반복 (Loop)
+    // ==========================================
+    const isLoopActive = ref(false);
+    const loopStartBar = ref(0);
+    const loopEndBar = ref(4);
+
+    watch([isLoopActive, loopStartBar, loopEndBar, bpm], () => {
+        if (isLoopActive.value) {
+            Tone.getTransport().setLoopPoints(
+                loopStartBar.value * secondsPerBar.value,
+                loopEndBar.value * secondsPerBar.value
+            );
+            Tone.getTransport().loop = true;
+        } else {
+            Tone.getTransport().loop = false;
+        }
+    });
+
+    // ==========================================
+    // 메트로놈 (Metronome / Click Track)
+    // ==========================================
+    const isMetronomeActive = ref(false);
+    let clickSynth: Tone.Synth | null = null;
+    let metronomeEventId: number | null = null;
+
+    watch(isMetronomeActive, (active) => {
+        if (active) {
+            // Synth가 없으면 생성 — toDestination()으로 마스터 볼륨 무관하게 항상 출력
+            if (!clickSynth) {
+                clickSynth = new Tone.Synth({
+                    oscillator: { type: "square" },
+                    envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 }
+                }).toDestination();
+            }
+
+            const denom = projectInfo.value.timeSigDenominator || 4;
+            const numerator = projectInfo.value.timeSigNumerator || 4;
+            const beatResolution = denom === 8 ? "8n" : "4n";
+
+            // [이슈 해결 반영 1] 절대 틱 기반 박자 계산으로 루프/점프 시에도 악센트가 정확하게 동기화됩니다.
+            // [이슈 해결 반영 2] startTime을 "0:0:0"으로 고정하고 AudioContext 상태 검사를 제거하여 첫 마디 누락을 방지합니다.
+            metronomeEventId = Tone.getTransport().scheduleRepeat((time) => {
+                let ticks = Tone.getTransport().ticks;
+                if (typeof Tone.getTransport().getTicksAtTime === 'function') {
+                    ticks = Math.max(0, Tone.getTransport().getTicksAtTime(time));
+                }
+
+                const ticksPerBeat = Tone.Time(beatResolution).toTicks();
+                const absoluteBeat = Math.round(ticks / ticksPerBeat);
+                const currentBeat = absoluteBeat % numerator;
+
+                // 첫 박자는 '삑(C6)', 나머지는 '띡(C5)' 소리
+                const note = currentBeat === 0 ? "C6" : "C5";
+                clickSynth!.triggerAttackRelease(note, "64n", time, 0.5);
+            }, beatResolution, "0:0:0");
+        } else {
+            // 메트로놈 비활성화 시 스케줄링 해제
+            if (metronomeEventId !== null) {
+                Tone.getTransport().clear(metronomeEventId);
+                metronomeEventId = null;
+            }
+        }
+    });
+
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
     const zoomlevel = ref(1) //가로 확대/축소 배율 (기본 1배)
@@ -1996,7 +2062,16 @@ export const useTrackStore = defineStore('track', () => {
             }
         }
 
-        const currentPositionBar = Tone.getTransport().seconds / secondsPerBar.value;
+        // [이슈 해결 반영 3: 시각적 재생바 레이턴시 보정]
+        // 스피커/이어폰의 물리적 출력 지연(Output Latency)만큼 재생바를 왼쪽으로 당겨서
+        // 귀에 소리가 들리는 순간과 재생바가 마디 선을 지나는 순간을 일치시킵니다.
+        let hardwareLatency = 0;
+        if (Tone.context && Tone.context.rawContext) {
+            hardwareLatency = (Tone.context.rawContext as any).outputLatency || 0;
+        }
+        const compensatedSeconds = Math.max(0, Tone.getTransport().seconds - hardwareLatency);
+
+        const currentPositionBar = compensatedSeconds / secondsPerBar.value;
         const px = currentPositionBar * pixelPerBar.value;
 
         // [최적화] 전역 CSS 변수(--playhead-px)를 :root에 설정하면 브라우저 전체의 Style Recalculation이 발생하여 프레임 드랍이 생깁니다.
@@ -2497,6 +2572,12 @@ export const useTrackStore = defineStore('track', () => {
         secondsPerBar,
         isCommentMode,
         toggleCommentMode,
+
+        // 구간 반복 및 메트로놈
+        isLoopActive,
+        loopStartBar,
+        loopEndBar,
+        isMetronomeActive,
 
         // Getters
         pixelPerBar,

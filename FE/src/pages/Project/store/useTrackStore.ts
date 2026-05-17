@@ -2815,7 +2815,7 @@ export const useTrackStore = defineStore('track', () => {
                     projectId: data.projectId,
                     name: data.name ?? '프로젝트',
                     tempo: data.tempo ?? 120,
-                    rootNote: data.rootNote ?? 'C',
+                    rootNote: enumToRootNote[data.rootNote] || data.rootNote || 'C',
                     mode: data.mode ?? 'MAJOR',
                     timeSigNumerator: data.timeSigNumerator ?? 4,
                     timeSigDenominator: data.timeSigDenominator ?? 4,

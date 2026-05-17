@@ -447,13 +447,8 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
         <button 
           :aria-label="`현재 키: ${displayKey}. 클릭하여 변경`"
           :aria-expanded="isKeyPickerOpen"
-          :class="[
-            'flex h-8 items-center gap-2 rounded border px-2.5 transition-colors cursor-pointer',
-            isKeyPickerOpen
-              ? 'border-primary bg-primary/10'
-              : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/10'
-          ]"
-          @click="isKeyPickerOpen = !isKeyPickerOpen"
+          disabled
+          class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
         >
           <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">키</span>
           <span class="font-display text-xs tracking-wider text-white">{{ displayKey }}</span>

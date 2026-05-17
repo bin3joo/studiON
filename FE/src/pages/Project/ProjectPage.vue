@@ -1173,7 +1173,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
           @scroll="handleHorizontalScroll"
         >
         <!-- 눈금자 -->
-        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
+        <div class="sticky top-0 z-50 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
           <TimelineRuler />
         </div>
      
@@ -1210,8 +1210,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
   <div
   ref="masterTrackWrapperRef"
-  class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
-  style="will-change: transform;"
+  class="mt-auto shrink-0 sticky bottom-0 z-[70] w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
 >
         <!-- 마스터 트랙 -->
           <TrackItem

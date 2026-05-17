@@ -71,6 +71,31 @@ const hasSelectedTrack = computed(() => trackStore.selectedTrackId !== null);
 const hasSelectedClip = computed(() => trackStore.selectedClip !== null);
 const hasClipboard = computed(() => trackStore.clipboardClip !== null);
 const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || trackStore.selectedClip !== null);
+
+// 5. BPM 편집 관련 상태
+const isBpmEditing = ref(false);
+const bpmInputValue = ref('');
+const bpmInputRef = ref<HTMLInputElement | null>(null);
+
+const startBpmEdit = () => {
+  isBpmEditing.value = true;
+  bpmInputValue.value = String(trackStore.bpm);
+  // DOM 갱신 후 input에 포커스
+  setTimeout(() => bpmInputRef.value?.select(), 0);
+};
+
+const confirmBpmEdit = () => {
+  const newBpm = Number(bpmInputValue.value);
+  if (!isNaN(newBpm) && newBpm >= 30 && newBpm <= 300) {
+    trackStore.bpm = newBpm;
+    trackStore.projectInfo.tempo = newBpm;
+  }
+  isBpmEditing.value = false;
+};
+
+const cancelBpmEdit = () => {
+  isBpmEditing.value = false;
+};
 </script>
 
 <template>
@@ -283,13 +308,33 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
   </button>
 
 
+      <!-- BPM 표시/편집 영역 -->
       <div 
-        :aria-label="`현재 템포: ${trackStore.projectInfo.tempo.toFixed(2)} BPM`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
+        :aria-label="`현재 템포: ${trackStore.bpm} BPM. 클릭하여 변경`"
+        class="flex h-8 items-center gap-2 rounded border px-2.5 cursor-pointer transition-colors"
+        :class="isBpmEditing 
+          ? 'border-primary bg-primary/10' 
+          : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/10'"
+        @click="!isBpmEditing && startBpmEdit()"
       >
         <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">BPM</span>
-        <span class="font-display text-xs tracking-wider text-white tabular-nums">
-          {{ trackStore.projectInfo.tempo.toFixed(2) }}
+        <!-- 편집 모드 -->
+        <input
+          v-if="isBpmEditing"
+          ref="bpmInputRef"
+          v-model="bpmInputValue"
+          type="number"
+          min="30"
+          max="300"
+          step="1"
+          class="w-14 bg-transparent font-display text-xs tracking-wider text-white tabular-nums outline-none border-none appearance-none [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
+          @keydown.enter="confirmBpmEdit"
+          @keydown.escape="cancelBpmEdit"
+          @blur="confirmBpmEdit"
+        />
+        <!-- 표시 모드 -->
+        <span v-else class="font-display text-xs tracking-wider text-white tabular-nums">
+          {{ trackStore.bpm.toFixed(0) }}
         </span>
       </div>
 

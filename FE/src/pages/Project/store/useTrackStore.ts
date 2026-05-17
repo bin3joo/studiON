@@ -189,7 +189,7 @@ export const useTrackStore = defineStore('track', () => {
     const isPlaying = ref(false); //재생중인지 아닌지
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
-    Tone.getTransport().bpm.value = bpm.value;
+    Tone.getTransport().bpm.value = 120; // Transport 내부 시계는 항상 고정 (playbackRate로 속도 조절)
     // 메인 스레드 블로킹 시 이벤트 스킵 방지를 위한 스케줄링 여유시간 상향 조정
     Tone.getContext().lookAhead = 0.2;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
@@ -204,9 +204,32 @@ export const useTrackStore = defineStore('track', () => {
     masterPanner.channelCount = 2;
     masterPanner.channelCountMode = "explicit";
 
-    //bpm이 변경될때마다 Tone.js Transport의 템포도 함께 업데이트
+    //bpm이 변경될때마다 전체 클립을 재스케줄링 (Transport BPM은 고정, playbackRate만으로 속도 제어)
     watch(bpm, (newBpm) => {
-        Tone.getTransport().bpm.value = newBpm;
+        // Transport BPM은 변경하지 않음 — playbackRate와 이중 적용되어 재생 길이가 어긋나는 것을 방지
+
+        // BPM이 바뀌면 secondsPerBar가 바뀌므로 모든 클립의 재생 스케줄을 새 기준으로 재등록
+        // 재생 중이면 일시정지 → 재스케줄 → 자동 재개하여 타이밍 꼬임 방지
+        const wasPlaying = isPlaying.value;
+        if (wasPlaying) {
+            Tone.getTransport().pause();
+        }
+
+        // 현재 재생 위치(마디)를 보존하여 재스케줄 후 같은 마디에서 재개
+        const currentBar = Tone.getTransport().seconds / secondsPerBar.value;
+
+        resyncAllClips();
+
+        // 메트로놈이 켜져 있으면 새 BPM 간격으로 재시작
+        if (isMetronomeActive.value) {
+            isMetronomeActive.value = false;
+            isMetronomeActive.value = true;
+        }
+
+        if (wasPlaying) {
+            const newOffsetTime = currentBar * secondsPerBar.value;
+            Tone.getTransport().start("+0.01", newOffsetTime);
+        }
     })
 
     type SelectedTarget =
@@ -338,24 +361,19 @@ export const useTrackStore = defineStore('track', () => {
 
             const denom = projectInfo.value.timeSigDenominator || 4;
             const numerator = projectInfo.value.timeSigNumerator || 4;
-            const beatResolution = denom === 8 ? "8n" : "4n";
+            // Transport BPM이 고정이므로, 메트로놈 간격을 초 단위로 직접 계산합니다.
+            const beatIntervalSec = (denom === 8) ? (60 / bpm.value / 2) : (60 / bpm.value);
 
-            // [이슈 해결 반영 1] 절대 틱 기반 박자 계산으로 루프/점프 시에도 악센트가 정확하게 동기화됩니다.
-            // [이슈 해결 반영 2] startTime을 "0:0:0"으로 고정하고 AudioContext 상태 검사를 제거하여 첫 마디 누락을 방지합니다.
             metronomeEventId = Tone.getTransport().scheduleRepeat((time) => {
-                let ticks = Tone.getTransport().ticks;
-                if (typeof Tone.getTransport().getTicksAtTime === 'function') {
-                    ticks = Math.max(0, Tone.getTransport().getTicksAtTime(time));
-                }
-
-                const ticksPerBeat = Tone.Time(beatResolution).toTicks();
-                const absoluteBeat = Math.round(ticks / ticksPerBeat);
+                // 현재 Transport 시간(초)을 기반으로 몇 번째 박자인지 계산
+                const currentTimeSec = time;
+                const absoluteBeat = Math.round(currentTimeSec / beatIntervalSec);
                 const currentBeat = absoluteBeat % numerator;
 
                 // 첫 박자는 '삑(C6)', 나머지는 '띡(C5)' 소리
                 const note = currentBeat === 0 ? "C6" : "C5";
                 clickSynth!.triggerAttackRelease(note, "64n", time, 0.5);
-            }, beatResolution, "0:0:0");
+            }, beatIntervalSec, 0);
         } else {
             // 메트로놈 비활성화 시 스케줄링 해제
             if (metronomeEventId !== null) {
@@ -1536,6 +1554,11 @@ export const useTrackStore = defineStore('track', () => {
         });
 
         if (origStart !== undefined && origDuration !== undefined && origAudioStartMs !== undefined) {
+            // 리사이즈 시점의 클립에서 원본 오디오 비율(ms/bar)을 캡처
+            // BPM이 나중에 바뀌어도 이 비율은 항상 원본 오디오의 물리적 비율을 유지
+            const clip = trackList.value.flatMap(t => t.clips).find(c => c.clipId === clipId);
+            const capturedMsPerBar = clip ? clip.audioDurationMs / clip.duration : origDuration > 0 ? (origDuration * 2000 / origDuration) : 2000;
+
             pushCommand({
                 undo: () => {
                     const track = trackList.value.find(t => t.trackId === trackId);
@@ -1545,7 +1568,7 @@ export const useTrackStore = defineStore('track', () => {
                         clip.start = origStart;
                         clip.duration = origDuration;
                         clip.audioStartMs = origAudioStartMs;
-                        clip.audioDurationMs = origDuration * secondsPerBar.value * 1000;
+                        clip.audioDurationMs = origDuration * capturedMsPerBar;
                         resyncClip(clipId, origStart);
                         setTimeout(() => {
                             socketService.publish('CLIP_RESIZE', {
@@ -1565,8 +1588,8 @@ export const useTrackStore = defineStore('track', () => {
                         lockClip(clipId, trackId);
                         clip.start = newStart;
                         clip.duration = newDuration;
-                        clip.audioStartMs = origAudioStartMs + trimLeftBars * secondsPerBar.value * 1000;
-                        clip.audioDurationMs = newDuration * secondsPerBar.value * 1000;
+                        clip.audioStartMs = origAudioStartMs + trimLeftBars * capturedMsPerBar;
+                        clip.audioDurationMs = newDuration * capturedMsPerBar;
                         resyncClip(clipId, newStart);
                         setTimeout(() => {
                             socketService.publish('CLIP_RESIZE', {
@@ -1966,7 +1989,13 @@ export const useTrackStore = defineStore('track', () => {
 
                 const exactStartTimeSec = clip.start * secondsPerBar.value;
                 const audioOffsetSec = clip.audioStartMs / 1000;
-                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, clip.duration * secondsPerBar.value);
+                const visualDurationSec = clip.duration * secondsPerBar.value;
+                // BPM에 따른 재생 속도 조절: 클립의 시각적 길이 안에 원본 오디오가 전부 들어맞도록
+                const sourceAudioSec = clip.audioDurationMs / 1000;
+                newPlayer.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+                // Tone.js는 내부적으로 duration/playbackRate로 실제 재생 길이를 계산하므로
+                // sourceAudioSec를 넘기면 정확히 visualDurationSec 만큼 재생 후 정지
+                newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
             } catch (e) {
                // console.error("[Audio Load Error]:", e);
                 disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
@@ -2224,9 +2253,10 @@ export const useTrackStore = defineStore('track', () => {
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
                     const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
-                    const audioDurationSec = clip.duration * secondsPerBar.value;
-
-                    player.sync().start(exactStartTimeSec, audioOffsetSec, audioDurationSec);
+                    const visualDurationSec = clip.duration * secondsPerBar.value;
+                    const sourceAudioSec = clip.audioDurationMs / 1000;
+                    player.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+                    player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
                    // console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
@@ -2292,18 +2322,58 @@ export const useTrackStore = defineStore('track', () => {
 
         const exactStartTimeSec = newStartBar * secondsPerBar.value;
         const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
-        const maxDuration = player.buffer.duration - audioOffsetSec;
-        const requestedDuration = targetClip.duration * secondsPerBar.value;
+        const visualDurationSec = targetClip.duration * secondsPerBar.value;
+        // BPM에 따른 재생 속도 조절: 클립의 시각적 길이 안에 원본 오디오가 전부 들어맞도록
+        const sourceAudioSec = targetClip.audioDurationMs / 1000;
+        const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+        player.playbackRate = rate;
 
-        const safeDurationSec = Math.max(0.01, Math.min(requestedDuration, maxDuration));
-
-       // console.log(`  └─ [Resync] 타임라인 스케줄링 -> 시작: ${exactStartTimeSec.toFixed(2)}초, Offset: ${audioOffsetSec.toFixed(2)}초, 재생길이: ${safeDurationSec.toFixed(2)}초`);
-
-        if (safeDurationSec > 0) {
-            player.sync().start(exactStartTimeSec, audioOffsetSec, safeDurationSec);
+        if (visualDurationSec > 0) {
+            player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
           //  console.log(`  └─ [Resync] 스케줄링 등록 완료! (상태: 정상)`);
         } else {
           //  console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
+        }
+    };
+
+    // ==========================================
+    // BPM 변경 시 전체 클립 재스케줄링
+    // ==========================================
+    // BPM이 바뀌면 secondsPerBar가 바뀌므로, 이미 player.sync().start()로 등록된
+    // 재생 길이(초)가 옛 BPM 기준이라 불일치가 발생합니다.
+    // 이 함수는 모든 clipPlayer를 unsync→재계산→재등록하여 동기화합니다.
+    const resyncAllClips = () => {
+        for (const [clipId, player] of clipPlayers) {
+            // 클립 데이터를 trackList에서 역추적
+            let targetClip: ClipUIState | null = null;
+            for (const track of trackList.value) {
+                const found = track.clips.find(c => c.clipId === clipId);
+                if (found) {
+                    targetClip = found;
+                    break;
+                }
+            }
+
+            if (!targetClip) continue;
+
+            // 기존 스케줄 해제
+            player.unsync();
+            player.stop();
+
+            // 새 secondsPerBar 기준으로 재계산
+            const exactStartTimeSec = targetClip.start * secondsPerBar.value;
+            const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
+            const visualDurationSec = targetClip.duration * secondsPerBar.value;
+            // BPM에 따른 재생 속도 조절
+            const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
+            player.playbackRate = rate;
+
+            console.log(`[resyncAll] clipId=${clipId}, rate=${rate.toFixed(3)}, visualDur=${visualDurationSec.toFixed(2)}s, sourceDur=${sourceAudioSec.toFixed(2)}s`);
+
+            if (visualDurationSec > 0) {
+                player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+            }
         }
     };
 

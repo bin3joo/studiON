@@ -37,6 +37,7 @@ export const useTrackStore = defineStore('track', () => {
 
     const trackEqNodes = new Map<number, TrackEqNode[]>()
     const trackAnalyzers = new Map<number, Tone.FFT>()
+    const trackPitchShifts = new Map<number, Tone.PitchShift>() // 트랙별 피치 시프트 노드 (키 변경 시 반음 단위 조정)
 
     const MAX_EQ_BANDS = 5
 
@@ -287,6 +288,84 @@ export const useTrackStore = defineStore('track', () => {
         socketService.publish('PROJECT_BPM', {
             projectId: projectInfo.value.projectId,
             tempo: newBpm
+        });
+    };
+
+    // ==========================================
+    // 키(Key) 변경
+    // ==========================================
+    // UI(문자열) -> 백엔드(Enum)
+    const rootNoteToEnum: Record<string, string> = {
+        "C": "C",
+        "Db": "C_SHARP",
+        "D": "D",
+        "Eb": "E_FLAT",
+        "E": "E",
+        "F": "F",
+        "F#": "F_SHARP",
+        "G": "G",
+        "Ab": "A_FLAT",
+        "A": "A",
+        "Bb": "B_FLAT",
+        "B": "B"
+    };
+
+    // 백엔드(Enum) -> UI(문자열)
+    const enumToRootNote: Record<string, string> = {
+        "C": "C",
+        "C_SHARP": "Db",
+        "D": "D",
+        "E_FLAT": "Eb",
+        "E": "E",
+        "F": "F",
+        "F_SHARP": "F#",
+        "G": "G",
+        "A_FLAT": "Ab",
+        "A": "A",
+        "B_FLAT": "Bb",
+        "B": "B"
+    };
+
+    // 반음 인덱스 매핑 (C=0 ~ B=11)
+    const NOTE_TO_SEMITONE: Record<string, number> = {
+        "C": 0, "Db": 1, "D": 2, "Eb": 3,
+        "E": 4, "F": 5, "F#": 6, "G": 7,
+        "Ab": 8, "A": 9, "Bb": 10, "B": 11
+    };
+
+    // 두 키 사이의 최단 반음 차이 계산 (예: C→D = +2, C→A = -3)
+    const getSemitoneDiff = (fromNote: string, toNote: string): number => {
+        const from = NOTE_TO_SEMITONE[fromNote] ?? 0;
+        const to = NOTE_TO_SEMITONE[toNote] ?? 0;
+        let diff = to - from;
+        if (diff > 6) diff -= 12;
+        if (diff < -6) diff += 12;
+        return diff;
+    };
+
+    const changeKey = (rootNote: string, mode: string) => {
+        const oldNote = projectInfo.value.rootNote;
+        if (oldNote === rootNote && projectInfo.value.mode === mode) return;
+
+        // 피치 시프트 적용: 이전 키에서 새 키까지의 반음 차이만큼 조정
+        const semitones = getSemitoneDiff(oldNote, rootNote);
+        if (semitones !== 0) {
+            trackPitchShifts.forEach(ps => {
+                ps.pitch += semitones;
+            });
+        }
+
+        // 로컬 즉시 적용 (Optimistic UI)
+        projectInfo.value.rootNote = rootNote;
+        projectInfo.value.mode = mode;
+
+        // 백엔드로 보낼 때는 Enum 규격에 맞춰서 변환
+        const rootNoteEnum = rootNoteToEnum[rootNote] || rootNote;
+
+        socketService.publish('PROJECT_KEY', {
+            projectId: projectInfo.value.projectId,
+            rootNote: rootNoteEnum,
+            mode
         });
     };
 
@@ -720,11 +799,17 @@ export const useTrackStore = defineStore('track', () => {
 
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
+        // 기존 PitchShift 노드 해제
+        const oldPs = trackPitchShifts.get(trackId);
+        if (oldPs) { oldPs.dispose(); trackPitchShifts.delete(trackId); }
 
         const eqNodes = createTrackEqNodes(track)
         const analyzer = new Tone.FFT(2048)
+        // 피치 시프트 노드 생성 (Analyzer → PitchShift → Volume)
+        const pitchShift = new Tone.PitchShift({ pitch: 0, windowSize: 0.1 });
 
         trackAnalyzers.set(trackId, analyzer)
+        trackPitchShifts.set(trackId, pitchShift)
 
         if (eqNodes.length > 0) {
             for (let i = 0; i < eqNodes.length - 1; i += 1) {
@@ -732,10 +817,12 @@ export const useTrackStore = defineStore('track', () => {
             }
 
             eqNodes[eqNodes.length - 1].filter.connect(analyzer)
-            analyzer.connect(volume)
+            analyzer.connect(pitchShift)
+            pitchShift.connect(volume)
         }
         else {
-            analyzer.connect(volume)
+            analyzer.connect(pitchShift)
+            pitchShift.connect(volume)
         }
 
         reconnectTrackPlayers(trackId)
@@ -753,6 +840,9 @@ export const useTrackStore = defineStore('track', () => {
     function disposeTrackAudioChain(trackId: number) {
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
+        // PitchShift 노드도 함께 해제
+        const ps = trackPitchShifts.get(trackId);
+        if (ps) { ps.dispose(); trackPitchShifts.delete(trackId); }
     }
 
     // ==========================================
@@ -913,6 +1003,28 @@ export const useTrackStore = defineStore('track', () => {
         // 변경 시 watch(bpm)이 트리거되어 자동 재스케줄링됨
         bpm.value = newBpm;
         projectInfo.value.tempo = newBpm;
+    });
+
+    // --------------------- 키(Key) 변경 수신 (소켓) ---------------------
+    socketService.subscribePersistent('MODIFIED_PROJECT_KEY', (data: any) => {
+        // 서버에서 온 Enum 문자열을 다시 프론트엔드 표기법으로 변환
+        const newNote = enumToRootNote[data.rootNote] || data.rootNote;
+        const newMode = data.mode;
+
+        // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
+        if (projectInfo.value.rootNote === newNote && projectInfo.value.mode === newMode) return;
+
+        // 피치 시프트 적용: 현재 로컬 키와 새 키 사이의 반음 차이만큼 조정
+        const semitones = getSemitoneDiff(projectInfo.value.rootNote, newNote);
+        if (semitones !== 0) {
+            trackPitchShifts.forEach(ps => {
+                ps.pitch += semitones;
+            });
+        }
+
+        // 다른 사용자가 변경한 키를 로컬에 적용
+        projectInfo.value.rootNote = newNote;
+        projectInfo.value.mode = newMode;
     });
 
     // --------------------- 클립 관련 (소켓) ---------------------
@@ -2459,6 +2571,10 @@ export const useTrackStore = defineStore('track', () => {
         trackAnalyzers.forEach(analyzer => analyzer.dispose());
         trackAnalyzers.clear();
 
+        // 피치 시프트 노드 정리
+        trackPitchShifts.forEach(ps => ps.dispose());
+        trackPitchShifts.clear();
+
        // console.log("========== [Audio Engine Cleanup End] ==========");
     };
 
@@ -2892,6 +3008,9 @@ export const useTrackStore = defineStore('track', () => {
 
         // BPM 변경
         changeBpm,
+
+        // 키(Key) 변경
+        changeKey,
 
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,

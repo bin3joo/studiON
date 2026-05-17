@@ -59,7 +59,6 @@ const onClick = (e: MouseEvent) => {
 //마우스 왼쪽 버튼을 누르는 순간 단 한번 발생
 const onPointerDown = (e: PointerEvent) => {
   //마우스 좌클릭(버튼 번호 0)일때만 작동하도록 방어
-  //마우스 우클릭이나 휠을 방어
   if(e.button !== 0) return;
 
   e.stopPropagation(); // 부모의 클릭 해제(deselect) 이벤트와 충돌 차단
@@ -83,14 +82,13 @@ const onPointerMove = (e: PointerEvent) => {
   }
 
   //화면그리기 요청 통제
-  //모니터가 그릴 준비가 된 타이밍(60fps)에 맞춰서 한 번만 계산
   if(rafId){
     cancelAnimationFrame(rafId);
   }
 
   rafId = requestAnimationFrame(()=>{
     updatePlayhead(e.clientX);
-    rafId = null; // 실행 후에는 변수를 비워준다.
+    rafId = null; 
   });
 };
 
@@ -99,33 +97,30 @@ const onPointerUp = (e:PointerEvent) => {
   if(!isScrubbing.value) return;
   isScrubbing.value = false;
 
-  //찌꺼기 렌더링 요청 취소
   if(rafId){
     cancelAnimationFrame(rafId);
     rafId = null;
   }
 
   try{
-    //마우스 캡처 해제
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-  }catch(error){
-   // console.error(error);
-  }
+  }catch(error){}
 };
 
 // ==========================================
-// 구간 반복 (Loop) 마커 드래그 로직
+// 구간 반복 (Loop) 마커 드래그 및 이동 로직
 // ==========================================
-const loopDragState = ref<{ type: 'start' | 'end' | null, startX: number, initialBar: number }>({ type: null, startX: 0, initialBar: 0 });
+const loopDragState = ref<{ type: 'start' | 'end' | 'move' | null, startX: number, initialStart: number, initialEnd: number }>({ type: null, startX: 0, initialStart: 0, initialEnd: 0 });
 
-const onLoopMarkerDown = (e: PointerEvent, type: 'start' | 'end') => {
+const onLoopMarkerDown = (e: PointerEvent, type: 'start' | 'end' | 'move') => {
   e.stopPropagation();
   if (e.button !== 0) return;
   
   loopDragState.value = {
     type,
     startX: e.clientX,
-    initialBar: type === 'start' ? trackStore.loopStartBar : trackStore.loopEndBar
+    initialStart: trackStore.loopStartBar,
+    initialEnd: trackStore.loopEndBar
   };
   
   window.addEventListener('pointermove', onLoopMarkerMove);
@@ -138,16 +133,35 @@ const onLoopMarkerMove = (e: PointerEvent) => {
   const dx = e.clientX - loopDragState.value.startX;
   const dBar = dx / trackStore.pixelPerBar;
   
-  let newBar = loopDragState.value.initialBar + dBar;
-  
   // Snap to grid (1박자 단위 스냅)
   const snapResolution = 1 / (trackStore.projectInfo.timeSigNumerator || 4);
-  newBar = Math.round(newBar / snapResolution) * snapResolution;
   
-  if (loopDragState.value.type === 'start') {
+  if (loopDragState.value.type === 'move') {
+    let shiftBar = Math.round(dBar / snapResolution) * snapResolution;
+    let newStart = loopDragState.value.initialStart + shiftBar;
+    let newEnd = loopDragState.value.initialEnd + shiftBar;
+    
+    // 타임라인 범위(0 ~ 전체 마디 수)를 벗어나지 않도록 보정
+    if (newStart < 0) {
+      newEnd -= newStart;
+      newStart = 0;
+    }
+    if (newEnd > trackStore.projectInfo.totalBarCount) {
+      const overflow = newEnd - trackStore.projectInfo.totalBarCount;
+      newStart -= overflow;
+      newEnd = trackStore.projectInfo.totalBarCount;
+    }
+    
+    trackStore.loopStartBar = newStart;
+    trackStore.loopEndBar = newEnd;
+  } else if (loopDragState.value.type === 'start') {
+    let newBar = loopDragState.value.initialStart + dBar;
+    newBar = Math.round(newBar / snapResolution) * snapResolution;
     newBar = Math.max(0, Math.min(newBar, trackStore.loopEndBar - snapResolution));
     trackStore.loopStartBar = newBar;
-  } else {
+  } else if (loopDragState.value.type === 'end') {
+    let newBar = loopDragState.value.initialEnd + dBar;
+    newBar = Math.round(newBar / snapResolution) * snapResolution;
     newBar = Math.max(trackStore.loopStartBar + snapResolution, Math.min(newBar, trackStore.projectInfo.totalBarCount));
     trackStore.loopEndBar = newBar;
   }
@@ -263,14 +277,20 @@ onUnmounted(() => {
             width: `${(trackStore.loopEndBar - trackStore.loopStartBar) * trackStore.pixelPerBar}px`
           }"
         >
+          <!-- 중앙 이동 영역 (드래그하여 전체 이동) -->
+          <div 
+            class="absolute inset-y-0 left-1.5 right-1.5 cursor-grab active:cursor-grabbing hover:bg-pink-500/10 pointer-events-auto"
+            @pointerdown.stop="(e) => onLoopMarkerDown(e, 'move')"
+          ></div>
+          
           <!-- 왼쪽 조절 핸들 -->
           <div 
-            class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-ew-resize hover:bg-pink-400/50 pointer-events-auto"
+            class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-ew-resize hover:bg-pink-400/50 pointer-events-auto z-10"
             @pointerdown.stop="(e) => onLoopMarkerDown(e, 'start')"
           ></div>
           <!-- 오른쪽 조절 핸들 -->
           <div 
-            class="absolute top-0 bottom-0 -right-1.5 w-3 cursor-ew-resize hover:bg-pink-400/50 pointer-events-auto"
+            class="absolute top-0 bottom-0 -right-1.5 w-3 cursor-ew-resize hover:bg-pink-400/50 pointer-events-auto z-10"
             @pointerdown.stop="(e) => onLoopMarkerDown(e, 'end')"
           ></div>
         </div>

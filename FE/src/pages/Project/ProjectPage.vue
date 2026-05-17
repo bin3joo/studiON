@@ -392,8 +392,9 @@ onUnmounted(()=>{
   disconnectProjectSocket()
   // 프로젝트 페이지를 벗어날 때 오디오 재생 즉시 중지
   trackStore.stopPlay();
-  // 프로젝트를 나갈 때 코멘트 모드 상태 초기화
+  // 프로젝트를 나갈 때 코멘트 모드 및 반복 재생 상태 초기화
   trackStore.isCommentMode = false;
+  trackStore.isLoopActive = false;
 })
 
 

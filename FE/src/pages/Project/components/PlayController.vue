@@ -284,7 +284,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
             ? 'border-pink-500 bg-pink-500/20 text-pink-400 shadow-[0_0_8px_rgba(236,72,153,0.6)]' 
             : 'border-white/10 bg-white/5 text-white hover:bg-white/10 active:scale-95'
         ]"
-        @click="trackStore.isLoopActive = !trackStore.isLoopActive"
+        @click="trackStore.toggleLoop()"
       >
         <Repeat class="h-4 w-4" aria-hidden="true" />
       </button>

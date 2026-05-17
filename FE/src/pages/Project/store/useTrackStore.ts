@@ -531,6 +531,31 @@ export const useTrackStore = defineStore('track', () => {
     const loopStartBar = ref(0);
     const loopEndBar = ref(4);
 
+    const toggleLoop = () => {
+        isLoopActive.value = !isLoopActive.value;
+        if (isLoopActive.value) {
+            const timelineContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
+            if (timelineContainer) {
+                const scrollLeft = timelineContainer.scrollLeft;
+                const width = timelineContainer.clientWidth;
+                const centerPx = scrollLeft + width / 2;
+                const centerBar = centerPx / pixelPerBar.value;
+                const snapResolution = 1 / (projectInfo.value.timeSigNumerator || 4);
+                
+                let start = Math.max(0, Math.round((centerBar - 2) / snapResolution) * snapResolution);
+                let end = Math.min(projectInfo.value.totalBarCount, start + 4);
+                
+                // 만약 시작점이 너무 뒤로 가서 4마디를 못 채우면 앞으로 당김
+                if (end - start < 4 && start > 0) {
+                    start = Math.max(0, end - 4);
+                }
+                
+                loopStartBar.value = start;
+                loopEndBar.value = end;
+            }
+        }
+    };
+
     watch([isLoopActive, loopStartBar, loopEndBar, bpm], () => {
         if (isLoopActive.value) {
             Tone.getTransport().setLoopPoints(
@@ -2956,6 +2981,7 @@ export const useTrackStore = defineStore('track', () => {
         moveClipToTrack,
         stopPlay,
         updatePlayheadLoop,
+        toggleLoop,
         resyncClip,
         selectedClip,
         selectedTrackId,

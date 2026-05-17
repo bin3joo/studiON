@@ -170,6 +170,41 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
 
+    // [Tone.js 버그 픽스]
+    // Tone.js의 Player.sync()는 Transport에 의해 중간 지점에서 재생이 시작(Seek)될 때,
+    // playbackRate를 고려하지 않고 오프셋을 계산하는 버그가 있습니다.
+    // 이를 해결하기 위해 _start 내부 메서드를 몽키패칭하여 오프셋과 남은 재생 시간을 보정합니다.
+    const patchTonePlayerForSync = (player: any) => {
+        if (player._isPatchedForSync) return;
+        player._isPatchedForSync = true;
+        const origStart = player._start.bind(player);
+        
+        player._start = function(startTime: number, passedOffset: number, passedDuration?: number) {
+            const originalOffset = this.customOriginalOffset || 0;
+            const startOffsetTransport = passedOffset - originalOffset;
+            
+            let correctedOffset = passedOffset;
+            let correctedDuration = passedDuration;
+            
+            // playbackRate가 Tone.Param 객체일 수 있으므로 값을 안전하게 추출
+            const actualRate = (this.playbackRate && typeof this.playbackRate === 'object' && 'value' in this.playbackRate)
+                ? (this.playbackRate as any).value
+                : this.playbackRate;
+
+            // startOffsetTransport가 0보다 크다는 것은 처음부터가 아니라 중간부터(Seek) 시작된다는 의미
+            if (startOffsetTransport > 0.001 && actualRate !== 1) {
+                // Transport의 이동 시간만큼 오디오 버퍼도 진행되어야 하므로 playbackRate를 곱해줍니다.
+                correctedOffset = originalOffset + (startOffsetTransport * actualRate);
+                if (passedDuration !== undefined) {
+                    const originalDuration = this.customSourceAudioSec || passedDuration;
+                    correctedDuration = originalDuration - (startOffsetTransport * actualRate);
+                }
+            }
+            
+            origStart(startTime, correctedOffset, correctedDuration !== undefined ? Math.max(0, correctedDuration) : undefined);
+        };
+    };
+
     //[1-1] 백엔드 연동 데이터
     const trackList = ref<TrackUIState[]>([]); //트랙들을 담을 배열
     //<trackUIstate[]>로 UI용 트랙데이터만 들어올수 있음을 선언 ref이므로 추가 삭제시 화면이 반응함 
@@ -216,14 +251,15 @@ export const useTrackStore = defineStore('track', () => {
         }
 
         // 현재 재생 위치(마디)를 보존하여 재스케줄 후 같은 마디에서 재개
-        const currentBar = Tone.getTransport().seconds / secondsPerBar.value;
+        // Tone.getTransport().seconds는 옛날 BPM 기준의 시간이고 secondsPerBar는 새 BPM 기준이므로,
+        // 이를 나누면 위치가 왜곡됨. 대신 이미 정확한 마디를 가리키는 playheadPosition.value를 사용함.
+        const currentBar = playheadPosition.value;
 
         resyncAllClips();
 
         // 메트로놈이 켜져 있으면 새 BPM 간격으로 재시작
         if (isMetronomeActive.value) {
-            isMetronomeActive.value = false;
-            isMetronomeActive.value = true;
+            applyMetronomeState(true);
         }
 
         if (wasPlaying) {
@@ -349,7 +385,13 @@ export const useTrackStore = defineStore('track', () => {
     let clickSynth: Tone.Synth | null = null;
     let metronomeEventId: number | null = null;
 
-    watch(isMetronomeActive, (active) => {
+    const applyMetronomeState = (active: boolean) => {
+        // 기존 메트로놈 비활성화 시 스케줄링 해제 (다중 스케줄 방지)
+        if (metronomeEventId !== null) {
+            Tone.getTransport().clear(metronomeEventId);
+            metronomeEventId = null;
+        }
+
         if (active) {
             // Synth가 없으면 생성 — toDestination()으로 마스터 볼륨 무관하게 항상 출력
             if (!clickSynth) {
@@ -365,23 +407,22 @@ export const useTrackStore = defineStore('track', () => {
             const beatIntervalSec = (denom === 8) ? (60 / bpm.value / 2) : (60 / bpm.value);
 
             metronomeEventId = Tone.getTransport().scheduleRepeat((time) => {
-                // 현재 Transport 시간(초)을 기반으로 몇 번째 박자인지 계산
-                const currentTimeSec = time;
-                const absoluteBeat = Math.round(currentTimeSec / beatIntervalSec);
+                // time은 AudioContext의 하드웨어 시간이고, Transport 내부 시간은 별도로 계산해야 합니다.
+                // 하드웨어 예약 시간(time)과 현재 시간(Tone.now())의 차이(Lookahead)를 Transport.seconds에 더해 정확한 예약 시점(초)을 구합니다.
+                const transportTimeSec = Tone.getTransport().seconds + Math.max(0, time - Tone.now());
+                
+                // 현재 재생 위치가 몇 번째 박자인지 계산 (반올림 처리로 스케줄링 오차 보정)
+                const absoluteBeat = Math.round(transportTimeSec / beatIntervalSec);
                 const currentBeat = absoluteBeat % numerator;
 
                 // 첫 박자는 '삑(C6)', 나머지는 '띡(C5)' 소리
                 const note = currentBeat === 0 ? "C6" : "C5";
                 clickSynth!.triggerAttackRelease(note, "64n", time, 0.5);
             }, beatIntervalSec, 0);
-        } else {
-            // 메트로놈 비활성화 시 스케줄링 해제
-            if (metronomeEventId !== null) {
-                Tone.getTransport().clear(metronomeEventId);
-                metronomeEventId = null;
-            }
         }
-    });
+    };
+
+    watch(isMetronomeActive, applyMetronomeState);
 
     let animationFrameId = 0; //requestAnimationFrame 실행 ID (취소를 위해 필요)
     const playheadPosition = ref(0); //현재 재생 위치(마디 단위)
@@ -1985,17 +2026,26 @@ export const useTrackStore = defineStore('track', () => {
                 // 3. EQ 체인 연결
                 connectPlayerToTrack(newPlayer, trackId);
 
+                // Tone.js sync 재생 오프셋 버그 패치 적용
+                patchTonePlayerForSync(newPlayer);
+
                 clipPlayers.set(clip.clipId, newPlayer);
 
                 const exactStartTimeSec = clip.start * secondsPerBar.value;
                 const audioOffsetSec = clip.audioStartMs / 1000;
                 const visualDurationSec = clip.duration * secondsPerBar.value;
-                // BPM에 따른 재생 속도 조절: 클립의 시각적 길이 안에 원본 오디오가 전부 들어맞도록
                 const sourceAudioSec = clip.audioDurationMs / 1000;
+                
+                // 패치에서 사용할 원본 오프셋과 길이를 저장
+                (newPlayer as any).customOriginalOffset = audioOffsetSec;
+                (newPlayer as any).customSourceAudioSec = sourceAudioSec;
+
                 newPlayer.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
                 // Tone.js는 내부적으로 duration/playbackRate로 실제 재생 길이를 계산하므로
                 // sourceAudioSec를 넘기면 정확히 visualDurationSec 만큼 재생 후 정지
                 newPlayer.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+                // Transport의 상태 관리를 위해 시각적 끝지점에 명시적으로 stop을 등록 (클립 밖으로 재생헤드 이동 시 고스트 재생 방지)
+                newPlayer.sync().stop(exactStartTimeSec + visualDurationSec);
             } catch (e) {
                // console.error("[Audio Load Error]:", e);
                 disposeClipAudio(clip.clipId); // EQ 기능의 완전 해제 함수 사용
@@ -2249,14 +2299,21 @@ export const useTrackStore = defineStore('track', () => {
                         track.trackId,
                     );
 
+                    patchTonePlayerForSync(player);
+
                    // console.log(`[Setup] 클립 ${clip.clipId} 오디오 로드 성공. (버퍼길이: ${player.buffer.duration.toFixed(2)}초)`);
 
                     const exactStartTimeSec = clip.start * secondsPerBar.value;
                     const audioOffsetSec = (clip.audioStartMs || 0) / 1000;
                     const visualDurationSec = clip.duration * secondsPerBar.value;
                     const sourceAudioSec = clip.audioDurationMs / 1000;
+                    
+                    (player as any).customOriginalOffset = audioOffsetSec;
+                    (player as any).customSourceAudioSec = sourceAudioSec;
+
                     player.playbackRate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
                     player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+                    player.sync().stop(exactStartTimeSec + visualDurationSec);
                     clipPlayers.set(clip.clipId, player);
                 } catch (error) {
                    // console.error(`[Setup 🚨] 클립 ${clip.clipId} 로드 실패:`, error);
@@ -2323,13 +2380,17 @@ export const useTrackStore = defineStore('track', () => {
         const exactStartTimeSec = newStartBar * secondsPerBar.value;
         const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
         const visualDurationSec = targetClip.duration * secondsPerBar.value;
-        // BPM에 따른 재생 속도 조절: 클립의 시각적 길이 안에 원본 오디오가 전부 들어맞도록
         const sourceAudioSec = targetClip.audioDurationMs / 1000;
+        
+        (player as any).customOriginalOffset = audioOffsetSec;
+        (player as any).customSourceAudioSec = sourceAudioSec;
+        
         const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
         player.playbackRate = rate;
 
         if (visualDurationSec > 0) {
             player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+            player.sync().stop(exactStartTimeSec + visualDurationSec);
           //  console.log(`  └─ [Resync] 스케줄링 등록 완료! (상태: 정상)`);
         } else {
           //  console.error(`  └─ [Resync 🚨] 재생 길이(safeDurationSec)가 0 이하입니다! 스케줄링 실패.`);
@@ -2366,6 +2427,10 @@ export const useTrackStore = defineStore('track', () => {
             const visualDurationSec = targetClip.duration * secondsPerBar.value;
             // BPM에 따른 재생 속도 조절
             const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            
+            (player as any).customOriginalOffset = audioOffsetSec;
+            (player as any).customSourceAudioSec = sourceAudioSec;
+            
             const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
             player.playbackRate = rate;
 
@@ -2373,6 +2438,7 @@ export const useTrackStore = defineStore('track', () => {
 
             if (visualDurationSec > 0) {
                 player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
+                player.sync().stop(exactStartTimeSec + visualDurationSec);
             }
         }
     };

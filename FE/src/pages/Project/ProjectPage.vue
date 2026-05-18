@@ -724,9 +724,8 @@ function handlePanelAddReply(parentCommentId: number, content: string) {
 
 const {
   aiAnalyzing,
-  aiConflict,
-  activeAiAnalysisCurrentIndex,
-  aiAnalysisTotalCount,
+  activeAiAnalysis,
+  aiAnalysisItems,
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
@@ -739,10 +738,9 @@ const {
   handleRequestAiEqRevision,
   handleApplyClippingIssue,
   handleDismissClippingIssue,
-  goNextAiAnalysis,
-  goPrevAiAnalysis,
-  isActiveClippingApplied,
-  activeClippingAppliedInfo,
+  setActiveAiAnalysis,
+  checkIsClippingApplied,
+  getClippingAppliedInfo,
 } = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
@@ -1020,34 +1018,6 @@ function scrollToAiConflict(conflict: any) {
   })
 }
 
-async function handleNextAiAnalysis() {
-  goNextAiAnalysis()
-  await nextTick()
-
-  if (aiConflict.value) {
-    scrollToAiConflict(aiConflict.value)
-  }
-}
-
-async function handlePrevAiAnalysis() {
-  goPrevAiAnalysis()
-  await nextTick()
-
-  if (aiConflict.value) {
-    scrollToAiConflict(aiConflict.value)
-  }
-}
-
-const aiBubblePosition = computed<AiBubblePosition>(() => {
-  if (!aiConflict.value) {
-    return {
-      mode: 'absolute',
-      top: 12,
-    }
-  }
-
-  return getAiBubblePosition(aiConflict.value)
-})
 
 const PROJECT_GUIDE_STORAGE_KEY = 'studion-project-guide-seen'
 
@@ -1171,17 +1141,15 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         </div>
      
         <AiConflictOverlay
-          v-if="aiConflict"
-          :conflict="aiConflict"
-          :bubble-position="aiBubblePosition"
-          :current-index="activeAiAnalysisCurrentIndex"
-          :total-count="aiAnalysisTotalCount"
-          :is-clipping-applied="isActiveClippingApplied"
-          :clipping-applied-info="activeClippingAppliedInfo"
-          @next="handleNextAiAnalysis"
-          @prev="handlePrevAiAnalysis"
-          @apply-clipping="handleApplyClippingIssue"
-          @dismiss-clipping="handleDismissClippingIssue"
+          v-for="conflict in aiAnalysisItems"
+          :key="conflict.id"
+          :conflict="conflict"
+          :bubble-position="getAiBubblePosition(conflict)"
+          :is-clipping-applied="checkIsClippingApplied(conflict)"
+          :clipping-applied-info="getClippingAppliedInfo(conflict)"
+          @open="setActiveAiAnalysis(conflict.id)"
+          @apply-clipping="handleApplyClippingIssue(conflict)"
+          @dismiss-clipping="handleDismissClippingIssue(conflict)"
         />
      
         <!--  [세로 스크롤] -->

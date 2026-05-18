@@ -68,39 +68,89 @@ export function useProjectAiWorkflow(projectId: number) {
   const aiAnalyzing = ref(false)
 
   const aiAnalysisItems = ref<AiAnalysisItem[]>([])
-  const activeAiAnalysisIndex = ref(0)
+  const activeAiAnalysisId = ref<string | number | null>(null)
 
   // 개발 환경 테스트용 Mock 데이터 주입 함수 (콘솔에서 window.testAi() 로 실행 가능)
   ;(window as any).testAi = () => {
-    aiAnalysisItems.value = [{
-      id: 'mock-1',
-      issueType: 'clipping',
-      kind: 'CLIPPING',
-      uiMode: 'INLINE' as any,
-      jobId: null,
-      regionId: null,
-      startMs: 2000,
-      endMs: 6000,
-      targetType: 'MASTER_TRACK',
-      targetTrackId: null,
-      startPercent: 10,
-      endPercent: 30,
-      startPx: 0,
-      endPx: 0,
-      barStart: 2,
-      barEnd: 4,
-      title: '[테스트] 동적 위치 확인용',
-      summary: '마우스 휠(Alt+스크롤)을 돌려 마디 길이에 맞춰 박스가 실시간으로 변하는지 테스트하세요.',
-      bullets: ['시작: 2.0초', '끝: 6.0초'],
-      recommendedGainReductionDb: -3.0,
-      actions: [],
-      markers: []
-    } as any];
-    activeAiAnalysisIndex.value = 0;
+    aiAnalysisItems.value = [
+      {
+        id: 'mock-1',
+        issueType: 'clipping',
+        kind: 'CLIPPING',
+        uiMode: 'master_trim' as any,
+        jobId: null,
+        regionId: null,
+        startMs: 2000,
+        endMs: 6000,
+        targetType: 'MASTER_TRACK',
+        targetTrackId: null,
+        startPercent: 10,
+        endPercent: 30,
+        startPx: 0,
+        endPx: 0,
+        barStart: 2,
+        barEnd: 4,
+        title: '[테스트] 클리핑 마커 1',
+        summary: '첫 번째 문제 구간입니다. ✨ 버튼을 눌러 확인하세요.',
+        bullets: ['시작: 2.0초', '끝: 6.0초'],
+        recommendedGainReductionDb: -3.0,
+        actions: [],
+        markers: []
+      } as any,
+      {
+        id: 'mock-2',
+        issueType: 'harshness',
+        kind: 'HARSHNESS',
+        uiMode: 'marker_only' as any,
+        jobId: null,
+        regionId: null,
+        startMs: 12000,
+        endMs: 16000,
+        targetType: 'TRACK',
+        targetTrackId: 1,
+        startPercent: 40,
+        endPercent: 50,
+        startPx: 0,
+        endPx: 0,
+        barStart: 6,
+        barEnd: 8,
+        title: '[테스트] 하쉬니스 마커 2',
+        summary: '두 번째 문제 구간입니다. 다른 위치에 마커가 생깁니다.',
+        bullets: ['고음역대 쏘는 소리 감지'],
+        recommendedGainReductionDb: null,
+        actions: [],
+        markers: []
+      } as any,
+      {
+        id: 'mock-3',
+        issueType: 'band_overlap',
+        kind: 'BAND_OVERLAP',
+        uiMode: 'eq_ai' as any,
+        jobId: null,
+        regionId: null,
+        startMs: 24000,
+        endMs: 28000,
+        targetType: 'TIMELINE',
+        targetTrackId: 2,
+        startPercent: 70,
+        endPercent: 80,
+        startPx: 0,
+        endPx: 0,
+        barStart: 12,
+        barEnd: 14,
+        title: '[테스트] 대역 중복 마커 3',
+        summary: '세 번째 문제 구간입니다.',
+        bullets: ['보컬과 베이스 대역이 충돌합니다.'],
+        recommendedGainReductionDb: null,
+        actions: [],
+        markers: []
+      } as any
+    ];
+    activeAiAnalysisId.value = 'mock-1';
   }
 
   const activeAiAnalysis = computed(() => {
-    return aiAnalysisItems.value[activeAiAnalysisIndex.value] ?? null
+    return aiAnalysisItems.value.find(item => item.id === activeAiAnalysisId.value) ?? null
   })
 
   // 기존 ProjectPage / Overlay 호환용
@@ -810,7 +860,7 @@ function hasAiEqSuggestion(statusResult: any) {
   try {
     aiAnalyzing.value = true
     aiAnalysisItems.value = []
-    activeAiAnalysisIndex.value = 0
+    activeAiAnalysisId.value = null
     aiAfterBands.value = []
     currentAiJobId.value = null
     selectedAiRegionId.value = null
@@ -895,7 +945,7 @@ if (mergedItems.length > 0) {
   return
 }
 
-activeAiAnalysisIndex.value = 0
+activeAiAnalysisId.value = mergedItems.length > 0 ? mergedItems[0].id : null
 
 syncSelectedRegionIdFromActiveItem()
 applyActiveAiAnalysisSelection()
@@ -989,7 +1039,7 @@ function handleApplyAiEq() {
 
 function handleCancelAiEq() {
   aiAnalysisItems.value = []
-  activeAiAnalysisIndex.value = 0
+  activeAiAnalysisId.value = null
   selectedAiRegionId.value = null
   currentAiJobId.value = null
   aiBeforeBands.value = []
@@ -1009,9 +1059,7 @@ function isActionableClippingItem(item: AiAnalysisItem) {
   )
 }
 
-function getActiveClippingTrimAction(): AiSuggestionAction | null {
-  const item = activeAiAnalysis.value
-
+function getActiveClippingTrimAction(item: AiAnalysisItem): AiSuggestionAction | null {
   if (!item || item.kind !== 'CLIPPING') return null
 
   const action = item.actions.find(action =>
@@ -1031,9 +1079,8 @@ function getActiveClippingTrimAction(): AiSuggestionAction | null {
   }
 }
 
-async function handleApplyClippingIssue() {
+async function handleApplyClippingIssue(item: AiAnalysisItem) {
   if (aiAnalyzing.value) return
-  const item = activeAiAnalysis.value
 
   if (!item || item.kind !== 'CLIPPING') return
 
@@ -1042,7 +1089,7 @@ async function handleApplyClippingIssue() {
     return
   }
 
-  const action = getActiveClippingTrimAction()
+  const action = getActiveClippingTrimAction(item)
 
   if (!action || action.recommendedReductionDb == null) {
     alert('클리핑 적용값이 없습니다.')
@@ -1115,14 +1162,13 @@ async function handleApplyClippingIssue() {
   }
 }
 
-function handleDismissClippingIssue() {
-  const item = activeAiAnalysis.value
+function handleDismissClippingIssue(item: AiAnalysisItem) {
 
   if (import.meta.env.DEV) {
    // console.debug('[AI clipping dismiss]', item)
   }
 
-  goNextAiAnalysis()
+  activeAiAnalysisId.value = null
 }
 
 function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
@@ -1263,63 +1309,23 @@ function resetAiEqSuggestionOnNavigation() {
   aiAfterBands.value = []
 }
 
-function goNextAiAnalysis() {
-  if (aiAnalysisItems.value.length === 0) return
-
-  activeAiAnalysisIndex.value =
-    (activeAiAnalysisIndex.value + 1) % aiAnalysisItems.value.length
-
+function setActiveAiAnalysis(id: string | number) {
+  activeAiAnalysisId.value = id
   syncSelectedRegionIdFromActiveItem()
   resetAiEqSuggestionOnNavigation()
   applyActiveAiAnalysisSelection()
   syncAiPreviewBandsFromActiveItem()
 }
 
-function goPrevAiAnalysis() {
-  if (aiAnalysisItems.value.length === 0) return
-
-  activeAiAnalysisIndex.value =
-    activeAiAnalysisIndex.value === 0
-      ? aiAnalysisItems.value.length - 1
-      : activeAiAnalysisIndex.value - 1
-
-  syncSelectedRegionIdFromActiveItem()
-  resetAiEqSuggestionOnNavigation()
-  applyActiveAiAnalysisSelection()
-  syncAiPreviewBandsFromActiveItem()
-}
-
-const activeAiAnalysisCurrentIndex = computed(() => {
-  return activeAiAnalysisIndex.value
-})
-
-const aiAnalysisTotalCount = computed(() => {
-  return aiAnalysisItems.value.length
-})
-
-const shouldShowAiEqRevisionPanel = computed(() => {
-  const item = activeAiAnalysis.value
-
-  if (!item) return false
-
-  return item.uiMode === 'eq_ai' || item.markers.length > 0
-})
-
-const activeClippingAppliedInfo = computed(() => {
-  const item = activeAiAnalysis.value
-
+function getClippingAppliedInfo(item: AiAnalysisItem) {
   if (!item || item.kind !== 'CLIPPING') return null
-
   return appliedClippingInfoMap.value.get(item.id) ?? null
-})
+}
 
-const isActiveClippingApplied = computed(() => {
-  const item = activeAiAnalysis.value
-
+function checkIsClippingApplied(item: AiAnalysisItem) {
   if (!item || item.kind !== 'CLIPPING') return false
-
   return appliedClippingIssueIds.value.has(item.id)
-})
+}
 
 const activeAiMarkers = computed(() => {
   return activeAiAnalysis.value?.markers ?? []
@@ -1369,6 +1375,14 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     : null
 }
 
+  const shouldShowAiEqRevisionPanel = computed(() => {
+    const item = activeAiAnalysis.value
+
+    if (!item) return false
+
+    return item.uiMode === 'eq_ai' || item.markers.length > 0
+  })
+
   return {
     activeAiMarkers,
     aiAnalyzing,
@@ -1382,15 +1396,12 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     handleRequestAiEqRevision,
     handleApplyClippingIssue,
     handleDismissClippingIssue,
+    setActiveAiAnalysis,
     aiAnalysisItems,
     activeAiAnalysis,
-    activeAiAnalysisCurrentIndex,
-    aiAnalysisTotalCount,
     shouldShowAiEqRevisionPanel,
-    goNextAiAnalysis,
-    goPrevAiAnalysis,
-    isActiveClippingApplied,
-    activeClippingAppliedInfo,
+    checkIsClippingApplied,
+    getClippingAppliedInfo,
     activeAiUiMode,
     isActiveAiMarkerOnly,
   }

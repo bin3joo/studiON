@@ -52,6 +52,7 @@ const dragoffsetY = ref(0); //클립을 잡고 움직이기 시작한 지점으�
 
 //오토스크롤 위한 추가 변수들
 const startScrollLeft = ref(0); //드래그 시작 시점의 스크롤 위치
+const startScrollTop = ref(0); //드래그 시작 시점의 세로 스크롤 위치
 let scrollContainer: HTMLElement | null = null; //스크롤되는 부모 요소
 let currentClientX = 0; //현재 마우스 X 좌표 (루프에서 감시용)
 let currentClientY = 0; //현재 마우스 Y 좌표 (수직 오토스크롤 감시용)
@@ -62,8 +63,11 @@ function updateClipPosition() {
   if(!activeClip.value || !scrollContainer) return;
 
   const currentScrollLeft = (scrollContainer as HTMLElement).scrollLeft; //현재 스크롤량 가져오기
+  const currentScrollTop = (scrollContainer as HTMLElement).scrollTop; //현재 세로 스크롤량 가져오기
 
-  const deltaX = (currentClientX - startMouseX.value) / trackStore.workspaceZoom + (currentScrollLeft - startScrollLeft.value); //이동거리 계산
+  const deltaX = ((currentClientX - startMouseX.value) + (currentScrollLeft - startScrollLeft.value)) / trackStore.workspaceZoom; //이동거리 계산
+  dragoffsetY.value = ((currentClientY - startMouseY.value) + (currentScrollTop - startScrollTop.value)) / trackStore.workspaceZoom; //세로 이동값 계산
+
   const deltaBar = deltaX / trackStore.pixelPerBar; //이동 거리를 마디 단위로 변환
   let newStart = startClipBar.value + deltaBar; //새로운 시작점 계산
 
@@ -159,6 +163,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   // 가장 가까운 스크롤 영역('.overflow-auto')을 찾아 오토 스크롤 셋팅
   scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
+  startScrollTop.value = scrollContainer ? scrollContainer.scrollTop : 0;
   currentClientX = e.clientX; // 좌표 초기화
   currentClientY = e.clientY;
 
@@ -177,7 +182,6 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     //1. 엔진이 알 수 있게 마우스 좌표 최신화
     currentClientX = e.clientX;
     currentClientY = e.clientY;
-    dragoffsetY.value = e.clientY - startMouseY.value; //2. 세로 이동값 계산
 
 
     //2. 업데이트 클립으로 위치 갱신
@@ -340,8 +344,8 @@ function updateResizePosition() {
   const state = resizeState.value;
   const targetClip = state.clip as ClipUIState;
   
-  // 마우스 이동 거리 + 화면 스크롤 이동 거리 합산
-  const deltaX = (currentClientX - state.startX) / trackStore.workspaceZoom + (currentScrollLeft - startScrollLeft.value);
+  // 마우스 이동 거리 + 화면 스크롤 이동 거리 합산 (크롬 zoom 특성상 scrollLeft도 시각적 픽셀을 반환하므로 같이 나눔)
+  const deltaX = ((currentClientX - state.startX) + (currentScrollLeft - startScrollLeft.value)) / trackStore.workspaceZoom;
   let deltaBar = deltaX / trackStore.pixelPerBar;
 
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
@@ -498,8 +502,8 @@ const onTrackRightClick = (e: MouseEvent, trackId: number) => {
   const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
-  // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표
-  const absoluteX = (e.clientX / trackStore.workspaceZoom) - 224 + scrollLeft; 
+  // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표 (zoom 반영)
+  const absoluteX = ((e.clientX + scrollLeft) / trackStore.workspaceZoom) - 224; 
   
   // 스냅 해상도(subDivision)에 맞춰서 위치 보정
   let targetBar = absoluteX / trackStore.pixelPerBar;
@@ -508,8 +512,8 @@ const onTrackRightClick = (e: MouseEvent, trackId: number) => {
 
   menuState.value = {
     isOpen: true,
-    x: e.clientX / trackStore.workspaceZoom,
-    y: e.clientY / trackStore.workspaceZoom,
+    x: e.clientX,
+    y: e.clientY,
     type: 'track',
     targetTrackId: trackId,
     targetClip: null,
@@ -521,8 +525,8 @@ const onTrackRightClick = (e: MouseEvent, trackId: number) => {
 const onClipRightClick = (e: MouseEvent, clip: ClipUIState, trackId: number) => {
   menuState.value = {
     isOpen: true,
-    x: e.clientX / trackStore.workspaceZoom,
-    y: e.clientY / trackStore.workspaceZoom,
+    x: e.clientX,
+    y: e.clientY,
     type: 'clip',
     targetTrackId: trackId,
     targetClip: clip,

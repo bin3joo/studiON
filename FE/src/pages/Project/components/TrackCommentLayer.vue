@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
-import { SmilePlus, ArrowUpCircle, X, Check, Trash2 } from 'lucide-vue-next'
+import { SmilePlus, ArrowUpCircle, X, Check, Trash2, CornerDownRight } from 'lucide-vue-next'
 import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 import type { TrackMeasureCommentGroup, TimelineComment } from '../types/comment.types'
 import { useTrackStore } from '../store/useTrackStore';
@@ -42,6 +42,7 @@ const emit = defineEmits<{
     trackName: string
     measure: number
     content: string
+    parentCommentId?: number | null
   }]
   'resolve-comment': [payload: {
     trackId: string
@@ -207,11 +208,15 @@ function submitComment(measure: number) {
 
   if (!trimmed) return
 
+  const group = getCommentGroup(measure)
+  const parentCommentId = group && group.comments.length > 0 ? Number(group.comments[0].id) : null
+
   emit('submit-inline-comment', {
     trackId: props.trackId,
     trackName: props.trackName,
     measure,
     content: trimmed,
+    parentCommentId,
   })
 
   draftComment.value = ''
@@ -367,8 +372,8 @@ function parseMentions(content: string) {
         v-for="cluster in clusteredCommentMarkers"
         :key="`${trackId}-cluster-${cluster.x}-${cluster.items.length}`"
         type="button"
-        class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 translate-x-0.5 flex h-[22px] min-w-[22px] items-center justify-center rounded-[6px] border px-1.5 shadow-md transition hover:border-primary before:absolute before:-inset-3 before:content-['']"
-        :class="cluster.items[0].group.resolved ? 'border-green-500 bg-[#1c1c1c]' : 'border-white/20 bg-[#1c1c1c]'"
+        class="pointer-events-auto absolute top-1.5 z-40 translate-x-0.5 flex h-[22px] min-w-[22px] items-center justify-center rounded-[6px] border-2 px-1.5 shadow-md transition hover:border-primary before:absolute before:-inset-3 before:content-['']"
+        :class="cluster.items[0].group.resolved ? 'border-green-500 bg-[#1c1c1c]' : 'border-white/60 bg-[#1c1c1c]'"
         :style="{ left: `${cluster.x}px` }"
         @mousedown.stop.prevent="openCommentCluster(cluster, $event)"
       >
@@ -410,7 +415,7 @@ function parseMentions(content: string) {
       <button
         v-if="trackStore.isCommentMode && activeCellLocation !== null && !hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
         type="button"
-        class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 grid h-7 w-7 translate-x-0.5 place-items-center rounded-full border border-white/20 bg-[#282828] text-white shadow-md transition hover:border-primary hover:text-primary before:absolute before:-inset-4 before:content-['']"
+        class="pointer-events-auto absolute top-1.5 z-40 grid h-7 w-7 translate-x-0.5 place-items-center rounded-full border-2 border-white/60 bg-[#282828] text-white shadow-md transition hover:border-primary hover:text-primary before:absolute before:-inset-4 before:content-['']"
         :style="{ left: `${activeCellLeft}px` }"
         @mousedown.stop.prevent="openCommentBox(activeCellLocation, $event)"
         @mouseenter="isButtonHovered = true"
@@ -423,7 +428,7 @@ function parseMentions(content: string) {
       <button
         v-if="trackStore.isCommentMode && activeCellLocation !== null && hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
         type="button"
-        class="pointer-events-auto absolute top-0 -translate-y-1/2 z-40 flex h-[26px] max-w-[300px] translate-x-0.5 items-center gap-2 overflow-hidden whitespace-nowrap rounded-[6px] border border-white/20 bg-[#1c1c1c] px-2.5 shadow-xl transition hover:border-primary"
+        class="pointer-events-auto absolute top-1.5 z-40 flex h-[26px] max-w-[300px] translate-x-0.5 items-center gap-2 overflow-hidden whitespace-nowrap rounded-[6px] border-2 border-white/60 bg-[#1c1c1c] px-2.5 shadow-xl transition hover:border-primary"
         :style="{ left: `${activeCellLeft}px` }"
         @mousedown.stop.prevent="openCommentBox(activeCellLocation, $event)"
         @mouseenter="isButtonHovered = true"
@@ -444,7 +449,7 @@ function parseMentions(content: string) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="expandedMeasure !== null"
-        class="pointer-events-auto absolute z-[120] w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-3"
+        class="track-comment-box pointer-events-auto absolute z-[120] w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-3"
         :class="expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]'"
         :style="{ left: `calc(${expandedCellLeft}px + 13px)` }"
         @mousedown.stop
@@ -504,7 +509,8 @@ function parseMentions(content: string) {
               :class="getCommentGroup(expandedMeasure)?.resolved ? 'opacity-50' : ''"
             >
               <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2" :class="{ 'ml-4': idx > 0 }">
+                  <CornerDownRight v-if="idx > 0" class="h-3.5 w-3.5 shrink-0 text-white/40" />
                   <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: comment.profileImageUrl ? 'transparent' : (comment.color || getAuthorColor(comment.author)) }">
                     <img v-if="comment.profileImageUrl" :src="comment.profileImageUrl || undefined" class="h-full w-full object-cover" />
                     <span v-else class="text-[9px] font-bold text-white/90">{{ comment.author.slice(0, 2) }}</span>
@@ -530,7 +536,7 @@ function parseMentions(content: string) {
                   </button>
                 </div>
               </div>
-              <div class="pl-[18px]">
+              <div class="pl-[18px]" :class="{ 'ml-9': idx > 0 }">
                 <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-white">
                   <template v-for="(part, i) in parseMentions(comment.mention ? comment.mention + ' \n' + comment.content : comment.content)" :key="i">
                     <span v-if="part.isMention" class="font-medium text-[#FF3DCB]">{{ part.text }}</span>

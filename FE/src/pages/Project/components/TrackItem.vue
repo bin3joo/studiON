@@ -1389,12 +1389,5 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
     @close="isFileSizeWarningOpen = false"
   />
 </template>
-<style>
-/* 코멘트 모드일 때 작업 영역 내의 모든 요소(클립 포함)의 커서를 강제로 코멘트 아이콘으로 변경 */
-.comment-mode-active,
-.comment-mode-active * {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23FF3DCB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") 12 12, auto !important;
-}
-</style>
 <style scoped>
 </style>

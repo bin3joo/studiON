@@ -122,3 +122,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* 코멘트 모드일 때 타임라인 전체 영역 커서 변경 */
+.comment-mode-active,
+.comment-mode-active * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23FF3DCB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") 12 12, auto !important;
+}
+
+/* 코멘트 팝업(입력 및 확인 창) 내부에서는 원래 마우스 커서로 복구 */
+.comment-mode-active .track-comment-box,
+.comment-mode-active .track-comment-box * {
+  cursor: auto !important;
+}

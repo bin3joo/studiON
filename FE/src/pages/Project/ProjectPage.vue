@@ -339,6 +339,7 @@ onMounted(async () => {
   if(projectId){
     const numericProjectId = Number(projectId)
     await trackStore.fetchProject(Number(projectId))
+    commentStore.fetchComments(numericProjectId)
 
     trackEvent('project_opened', {
     project_id: numericProjectId,
@@ -589,9 +590,17 @@ watch(
         profileImageUrl: rootComment.author?.profileImgUrl,
       }
       
+      const replyComments: TimelineComment[] = (rootComment.replies || []).map(reply => ({
+        id: String(reply.commentId),
+        author: reply.author?.nickname || 'Unknown',
+        content: reply.content,
+        color: '#d93ce6',
+        profileImageUrl: reply.author?.profileImgUrl,
+      }))
+      
       if (newGroups.has(key)) {
         const group = newGroups.get(key)!
-        group.comments.push(newComment)
+        group.comments.push(newComment, ...replyComments)
         if (rootComment.isResolved === false) {
           group.resolved = false
         }
@@ -601,7 +610,7 @@ watch(
           trackName: findTrackName(trackIdStr),
           measure: rootComment.location,
           resolved: rootComment.isResolved,
-          comments: [newComment],
+          comments: [newComment, ...replyComments],
         })
       }
     })
@@ -664,6 +673,7 @@ function handleSubmitInlineComment(payload: {
   trackName: string
   measure: number
   content: string
+  parentCommentId?: number | null
 }) {
   const trimmed = payload.content.trim()
 
@@ -680,7 +690,7 @@ function handleSubmitInlineComment(payload: {
 
   socketService.publish('COMMENT_ADD', {
     trackId,
-    parentCommentId: null,
+    parentCommentId: payload.parentCommentId || null,
     content: trimmed,
     location: payload.measure,
     mentionedUserIds: [],
@@ -1168,6 +1178,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
+          :class="trackStore.isCommentMode ? 'comment-mode-active' : ''"
           data-guide="timeline"
           @pointerdown.stop="handleBackgroundPointerDown"
           @scroll="handleHorizontalScroll"

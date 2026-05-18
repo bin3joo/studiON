@@ -9,6 +9,11 @@ pipeline {
 
     environment {
         COMPOSE_PROJECT_NAME = 'studion'
+        DEPLOY_HOST = '43.203.167.41'
+        DEPLOY_USER = 'ec2-user'
+        DEPLOY_DIR = '/home/ec2-user/deploy/S14P31A205'
+        NGINX_STUDION_DIR = '/etc/nginx/studion'
+        NGINX_SITE_CONF = '/etc/nginx/conf.d/studion.conf'
     }
 
     stages {
@@ -59,15 +64,89 @@ pipeline {
             }
         }
         
-        stage('CD - Build App') {
+        stage('CD - Select Target') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.prod.yaml build'
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    script {
+                        env.ACTIVE_COLOR = sh(
+                            script: '''
+                                ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "cat ${NGINX_STUDION_DIR}/active-color 2>/dev/null || echo green"
+                            ''',
+                            returnStdout: true
+                        ).trim()
+                        env.TARGET_COLOR = env.ACTIVE_COLOR == 'blue' ? 'green' : 'blue'
+                        env.OLD_COLOR = env.ACTIVE_COLOR == 'blue' ? 'blue' : 'green'
+                        env.TARGET_BACKEND_PORT = env.TARGET_COLOR == 'blue' ? '8081' : '8082'
+                    }
+                }
             }
         }
-        
-        stage('CD - Deploy App') {
+
+        stage('CD - Sync Source') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.prod.yaml up -d --remove-orphans'
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p ${DEPLOY_DIR}"
+                        rsync -az --delete \
+                          --exclude '.git' \
+                          --exclude '.env' \
+                          --exclude '.env.*' \
+                          --exclude 'FE/node_modules' \
+                          --exclude 'BE/build' \
+                          ./ ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/
+                        scp .env.prod ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/.env.prod
+                    '''
+                }
+            }
+        }
+
+        stage('CD - Build Target') {
+            steps {
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.prod.yaml up -d redis && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml build"
+                    '''
+                }
+            }
+        }
+
+        stage('CD - Deploy Target') {
+            steps {
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml up -d"
+                    '''
+                }
+            }
+        }
+
+        stage('CD - Health Check') {
+            steps {
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "for i in \$(seq 1 30); do curl -fsS http://127.0.0.1:${TARGET_BACKEND_PORT}/actuator/health | grep -q UP && exit 0; sleep 5; done; exit 1"
+                    '''
+                }
+            }
+        }
+
+        stage('CD - Switch Nginx') {
+            steps {
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "sudo mkdir -p ${NGINX_STUDION_DIR} && sudo cp ${DEPLOY_DIR}/INFRA/nginx/app.conf ${NGINX_SITE_CONF} && sudo cp ${DEPLOY_DIR}/INFRA/nginx/upstream-${TARGET_COLOR}.conf ${NGINX_STUDION_DIR}/upstream-active.conf && echo ${TARGET_COLOR} | sudo tee ${NGINX_STUDION_DIR}/active-color >/dev/null && sudo nginx -t && sudo systemctl reload nginx"
+                    '''
+                }
+            }
+        }
+
+        stage('CD - Stop Old App') {
+            steps {
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.${OLD_COLOR}.yaml down || true"
+                    '''
+                }
             }
         }
         
@@ -90,7 +169,11 @@ pipeline {
         
         stage('CD - Status App') {
             steps {
-                sh 'docker compose --env-file .env.prod -f compose.prod.yaml ps'
+                sshagent(credentials: ['studion-ec2-ssh']) {
+                    sh '''
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.prod.yaml ps && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml ps"
+                    '''
+                }
             }
         }
     }

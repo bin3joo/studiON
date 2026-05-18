@@ -1,5 +1,6 @@
 import { axiosInstance } from '@/shared/api/axiosInstance'
 import type {
+  ApiResponse,
   FetchPositionsResponse,
   OnboardingRequest,
   OnboardingResponse,
@@ -45,6 +46,18 @@ export async function completeOnboarding(
 export async function reissueAccessToken(): Promise<TokenExchangeResponse> {
   const { data } = await axiosInstance.post<TokenExchangeResponse>(
     '/api/v1/auth/reissue',
+    undefined,
+    {
+      withCredentials: true,
+    },
+  )
+
+  return data
+}
+
+export async function requestLogout(): Promise<ApiResponse<null>> {
+  const { data } = await axiosInstance.post<ApiResponse<null>>(
+    '/api/v1/auth/logout',
     undefined,
     {
       withCredentials: true,

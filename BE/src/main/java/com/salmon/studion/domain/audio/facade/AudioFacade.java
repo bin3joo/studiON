@@ -105,7 +105,7 @@ public class AudioFacade {
 
     // TODO: 유저테스트 전용 임시 구현 (추후 수정 필요 - validateTempUserTotalAudioLimit())
     private void validateTempUserTotalAudioLimit(Integer userId, Integer requestedSizeBytes) {
-        long currentTotalSizeBytes = audioMetadataRepository.sumSizeBytesByCreatedBy(userId);
+        long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
         long nextTotalSizeBytes = currentTotalSizeBytes + requestedSizeBytes.longValue();
 
         if (nextTotalSizeBytes > tempUserTotalLimitBytes) {

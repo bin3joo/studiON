@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { reissueAccessToken } from '../api/onboarding.api'
+import { reissueAccessToken, requestLogout } from '../api/onboarding.api'
 
 export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref<string | null>(null)
@@ -29,11 +29,22 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function logout() {
+    clearAccessToken()
+
+    try {
+      await requestLogout()
+    } catch {
+      // 서버 요청 실패와 무관하게 클라이언트는 로그아웃 상태를 유지한다.
+    }
+  }
+
   return {
     accessToken,
     isLoggedIn,
     setAccessToken,
     clearAccessToken,
     silentRefresh,
+    logout,
   }
 })

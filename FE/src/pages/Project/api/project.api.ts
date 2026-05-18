@@ -9,7 +9,7 @@ import type {
   ProjectId,
   RootNote,
 } from '../types/project.types'
-import type { FetchCommentsParams, FetchCommentsResponse } from '../types/comment.types';
+import type { FetchCommentsParams, FetchCommentsResponse, CommentDto } from '../types/comment.types';
 import { axiosInstance } from '@/shared/api/axiosInstance';
 import type { TrackDto } from '@/pages/Project/types';
 import type { SaveProjectSnapshotResponse } from '../types/project.types';
@@ -146,6 +146,61 @@ export interface SaveAudioMetadataResponse {
   }
 }
 
+type EqType = 'BELL' | 'LOW_SHELF' | 'HIGH_SHELF'
+type EqSourceType = 'USER_MANUAL' | 'SYSTEM' | 'AI_CONFIRM' | 'AI_APPLIED'
+
+export interface TrackEqSummary {
+  trackEqId: number
+  trackId: number
+  projectId: number
+}
+
+export interface TrackEqBandSummary {
+  trackEqBandId: number
+  trackEqId: number
+  bandOrder: number
+  eqType: EqType
+  frequencyHz: number
+  q: number
+  gainDeltaDb: number
+  jobId: number | null
+  suggestionActionId: number | null
+  appliedSuggestionId: number | null
+  sourceType: EqSourceType
+}
+
+interface TrackEqsResponse {
+  isSuccess: boolean
+  code: string
+  message: string
+  data: {
+    trackEqs: TrackEqSummary[]
+  }
+}
+
+interface TrackEqBandsResponse {
+  isSuccess: boolean
+  code: string
+  message: string
+  data: {
+    trackEqBandSummaries: TrackEqBandSummary[]
+  }
+}
+
+interface SaveTrackEqBandsRequest {
+  bands: {
+    bandOrder: number
+    eqType: EqType
+    frequencyHz: number
+    q: number
+    gainDeltaDb: number
+    sourceType: EqSourceType
+    jobId: number | null
+    suggestionActionId: number | null
+    appliedSuggestionId: number | null
+  }[]
+}
+
 
 // ==========================================
 // [API 객체] 프로젝트 관련 통신 모음집
@@ -186,13 +241,46 @@ export const projectApi = {
 
   //프로젝트 코멘트 목록 조회
   getComments: async (projectId: number, params?: FetchCommentsParams) => {
-    const response = await axiosInstance.get<FetchCommentsResponse>(
+    const response = await axiosInstance.get<any>(
       `/api/v1/projects/${projectId}/comments`,
       { params }
     );
-    //인터셉터를 통해 response.data.data 내의 comments 배열이 반환됨
-    return response.data.data.comments;
+    const comments = response.data.data.comments || [];
+    // 백엔드 응답 필드명(user)을 프론트엔드 컴포넌트(author)에 맞게 맵핑
+    return comments.map((c: any) => ({
+      ...c,
+      author: c.user || c.author,
+      replies: c.replies?.map((r: any) => ({ ...r, author: r.user || r.author })) || []
+    })) as CommentDto[];
+  },
 
+  getProjectTrackEqs: async (projectId: number) => {
+    const response = await axiosInstance.get<TrackEqsResponse>(`/api/v1/eq/projects/${projectId}/track-eqs`)
+
+    return response.data.data.trackEqs
+  },
+
+  getTrackEqBands: async (trackEqId: number) => {
+    const response = await axiosInstance.get<TrackEqBandsResponse>(`/api/v1/eq/track-eqs/${trackEqId}/bands`)
+
+    return response.data.data.trackEqBandSummaries
+  },
+
+  saveTrackEqBands: async (
+    trackEqId: number,
+    payload: SaveTrackEqBandsRequest,
+  ) => {
+    const response = await axiosInstance.post<{
+      isSuccess: boolean
+      code: string
+      message: string
+      data: null
+    }>(
+      `/api/v1/eq/track-eqs/${trackEqId}/bands`,
+      payload,
+    )
+
+    return response.data
   },
 
   // 프로젝트 수동 저장

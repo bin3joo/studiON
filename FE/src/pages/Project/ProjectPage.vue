@@ -962,24 +962,9 @@ function getAiBubblePosition(conflict: any): AiBubblePosition {
   }
 
   if (conflict.kind === 'CLIPPING') {
-    const containerRect = container.getBoundingClientRect()
-    const masterRect = masterTrackWrapperRef.value?.getBoundingClientRect()
-
-    const left = Math.min(
-      Math.max(
-        containerRect.left + conflict.endPx - container.scrollLeft + 8,
-        containerRect.left + 280,
-      ),
-      window.innerWidth - 390,
-    )
-
     return {
-      mode: 'fixed',
-      left,
-      bottom: Math.max(
-        0,
-        window.innerHeight - (masterRect?.bottom ?? window.innerHeight),
-      ),
+      mode: 'absolute',
+      top: 12,
     }
   }
 

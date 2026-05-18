@@ -70,6 +70,35 @@ export function useProjectAiWorkflow(projectId: number) {
   const aiAnalysisItems = ref<AiAnalysisItem[]>([])
   const activeAiAnalysisIndex = ref(0)
 
+  // 개발 환경 테스트용 Mock 데이터 주입 함수 (콘솔에서 window.testAi() 로 실행 가능)
+  ;(window as any).testAi = () => {
+    aiAnalysisItems.value = [{
+      id: 'mock-1',
+      issueType: 'clipping',
+      kind: 'CLIPPING',
+      uiMode: 'INLINE' as any,
+      jobId: null,
+      regionId: null,
+      startMs: 2000,
+      endMs: 6000,
+      targetType: 'MASTER_TRACK',
+      targetTrackId: null,
+      startPercent: 10,
+      endPercent: 30,
+      startPx: 0,
+      endPx: 0,
+      barStart: 2,
+      barEnd: 4,
+      title: '[테스트] 동적 위치 확인용',
+      summary: '마우스 휠(Alt+스크롤)을 돌려 마디 길이에 맞춰 박스가 실시간으로 변하는지 테스트하세요.',
+      bullets: ['시작: 2.0초', '끝: 6.0초'],
+      recommendedGainReductionDb: -3.0,
+      actions: [],
+      markers: []
+    } as any];
+    activeAiAnalysisIndex.value = 0;
+  }
+
   const activeAiAnalysis = computed(() => {
     return aiAnalysisItems.value[activeAiAnalysisIndex.value] ?? null
   })

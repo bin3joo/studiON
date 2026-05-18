@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, computed, type StyleValue } from 'vue'
+import { ChevronUp, ChevronDown, Sparkles } from 'lucide-vue-next'
+import { useTrackStore } from '../store/useTrackStore'
+
+const trackStore = useTrackStore()
 
 const props = defineProps<{
   conflict: {
@@ -9,6 +13,8 @@ const props = defineProps<{
     endPercent: number
     startPx: number
     endPx: number
+    startMs: number
+    endMs: number
     barStart: number
     barEnd: number
     title: string
@@ -16,16 +22,10 @@ const props = defineProps<{
     bullets: string[]
     recommendedGainReductionDb: number | null
   }
-  bubblePosition:
-  | {
-      mode: 'absolute'
-      top: number
-    }
-  | {
-      mode: 'fixed'
-      left: number
-      bottom: number
-    }
+  bubblePosition: {
+    mode: 'absolute'
+    top: number
+  }
   currentIndex: number
   totalCount: number
   isClippingApplied?: boolean
@@ -43,7 +43,7 @@ const emit = defineEmits<{
   dismissClipping: []
 }>()
 
-const open = ref(true)
+const open = ref(false)
 
 watch(
   () => props.conflict.id,
@@ -63,73 +63,84 @@ const issueLabel = () => {
 }
 
 const bubbleWrapperStyle = computed<StyleValue>(() => {
-  if (props.bubblePosition.mode === 'fixed') {
-    return {
-      position: 'fixed',
-      left: `${props.bubblePosition.left}px`,
-      bottom: `${props.bubblePosition.bottom}px`,
-    }
-  }
-
   return {
     position: 'absolute',
-    left: '100%',
-    marginLeft: '8px',
+    left: '0',
+    marginLeft: '-16px',
     top: `${props.bubblePosition.top}px`,
   }
+})
+
+const TIMELINE_TRACK_HEADER_WIDTH = 256
+
+const dynamicStartPx = computed(() => {
+  const startBarFloat = props.conflict.startMs / (trackStore.secondsPerBar * 1000)
+  return TIMELINE_TRACK_HEADER_WIDTH + (startBarFloat * trackStore.pixelPerBar)
+})
+
+const dynamicWidthPx = computed(() => {
+  const startBarFloat = props.conflict.startMs / (trackStore.secondsPerBar * 1000)
+  const endBarFloat = Math.max(props.conflict.endMs / (trackStore.secondsPerBar * 1000), startBarFloat + 0.25)
+  return Math.max((endBarFloat - startBarFloat) * trackStore.pixelPerBar, 8)
 })
 </script>
 
 <template>
   <div
-    class="pointer-events-none absolute top-[34px] bottom-[0px] z-[999] rounded border border-purple-400/70 bg-purple-500/20 shadow-[0_0_24px_rgba(217,70,239,0.35)]"
+    class="pointer-events-none absolute top-[34px] bottom-0 z-50 border-x border-red-500 bg-red-500/20"
     :style="{
-      left: `${props.conflict.startPx}px`,
-      width: `${Math.max(props.conflict.endPx - props.conflict.startPx, 8)}px`,
+      left: `${dynamicStartPx}px`,
+      width: `${dynamicWidthPx}px`,
     }"
   >
-    <div class="absolute inset-0 border-x border-red-400/80 bg-red-500/20" />
-
     <div
-  class="pointer-events-auto"
+      class="pointer-events-auto"
   :style="bubbleWrapperStyle"
   @pointerdown.stop
 >
       <button
         type="button"
-        class="relative z-[1000] grid h-7 w-7 place-items-center rounded-full bg-fuchsia-500 text-white shadow-[0_0_16px_rgba(217,70,239,0.8)]"
+        class="relative z-[1000] grid h-8 w-8 place-items-center rounded-full bg-[conic-gradient(from_180deg,#8B5CF6,#38BDF8,#22C55E,#F59E0B,#EC4899,#8B5CF6)] shadow-lg hover:scale-105 transition-transform"
         @click="open = !open"
       >
-        ✨
+        <span class="absolute h-7 w-7 rounded-full bg-[#171717]" />
+        <Sparkles class="relative z-10 h-4 w-4 text-white" aria-hidden="true" />
       </button>
 
       <div
-  v-if="open"
-  class="absolute z-[1000] w-[360px] rounded-lg border border-fuchsia-400/60 bg-[#202025]/95 text-white shadow-[0_0_28px_rgba(217,70,239,0.35)] backdrop-blur"
-  :class="props.conflict.kind === 'CLIPPING' ? 'left-10 bottom-0' : 'left-10 top-0'"
->
-        <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-fuchsia-300">
-            <span>✨</span>
-            <span>AI Analysis</span>
+        v-if="open"
+        class="absolute z-50 w-[360px] rounded-lg p-px shadow-2xl backdrop-blur-md top-10 left-1/2 -translate-x-1/2"
+      >
+        <div class="absolute inset-0 rounded-lg bg-[linear-gradient(135deg,#8B5CF6,#3B82F6,#06B6D4,#22C55E,#F59E0B,#EC4899)] opacity-80" />
+        
+        <div class="relative h-full w-full rounded-[7px] bg-[#171717]/95">
+          <div class="flex items-center justify-between border-b border-white/10 px-4 py-3 rounded-t-[7px]">
+            <div class="flex items-center gap-2 text-[11px] font-bold tracking-[0.18em] text-white">
+              <span class="grid h-5 w-5 place-items-center rounded-full bg-[conic-gradient(from_180deg,#8B5CF6,#38BDF8,#22C55E,#F59E0B,#EC4899,#8B5CF6)]">
+                <span class="absolute h-4 w-4 rounded-full bg-[#171717]" />
+                <Sparkles class="relative z-10 h-3 w-3 text-white" aria-hidden="true" />
+              </span>
+              <span class="bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent uppercase mt-0.5">
+                AI ANALYSIS
+              </span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-bold text-white/70">
+                {{ issueLabel() }}
+              </span>
+
+              <button
+                type="button"
+                class="ml-1 text-sm text-white/50 hover:text-white transition"
+                @click.stop="close"
+              >
+                ×
+              </button>
+            </div>
           </div>
 
-          <div class="flex items-center gap-2">
-            <span class="rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-bold text-white/70">
-              {{ issueLabel() }}
-            </span>
-
-            <button
-              type="button"
-              class="text-sm text-white/50 hover:text-white"
-              @click="close"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-
-        <div class="space-y-3 px-4 py-4">
+          <div class="space-y-3 px-4 py-4">
           <div class="text-base font-semibold">
             {{ props.conflict.title }}
           </div>
@@ -233,6 +244,7 @@ const bubbleWrapperStyle = computed<StyleValue>(() => {
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   </div>

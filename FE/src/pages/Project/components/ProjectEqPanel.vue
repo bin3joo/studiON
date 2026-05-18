@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Play, Sparkles, Wand2 } from 'lucide-vue-next'
+import { Play, Sparkles, Wand2, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import type { TrackUIState, TrackEqBandState } from '../types'
 import EqGraph from './EqGraph.vue'
 import { useTrackStore } from '../store/useTrackStore'
@@ -30,6 +30,8 @@ type EqMarker = {
 const trackStore = useTrackStore()
 const spectrumData = ref<number[]>([])
 let spectrumRafId: number | null = null
+
+const isCollapsed = ref(false)
 
 const currentBands = computed(() => {
   return props.selectedTrack?.eq?.bands ?? []
@@ -169,10 +171,13 @@ watch(
 
 <template>
   <section
-    class="shrink-0 border-t border-white/10 bg-[#202020] shadow-[0_-18px_30px_rgba(0,0,0,0.45)]"
+    class="shrink-0 border-t border-white/10 bg-[#202020] shadow-[0_-18px_30px_rgba(0,0,0,0.45)] transition-all"
   >
     <!-- 상단 헤더 -->
-    <div class="flex h-12 items-center gap-3 border-b border-white/10 px-5">
+    <div 
+      class="flex h-12 cursor-pointer items-center gap-3 border-b border-white/10 px-5 hover:bg-white/5 transition"
+      @click="isCollapsed = !isCollapsed"
+    >
       <Sparkles
         class="h-4 w-4 text-[#FF8F1A]"
         :class="{ 'animate-pulse': aiAnalyzing }"
@@ -185,7 +190,15 @@ watch(
       <span class="font-mono text-[11px] tracking-widest text-gray-400">
         {{ selectedTrack ? selectedTrack.name : '트랙을 선택하세요' }}
       </span>
+
+      <div class="ml-auto text-gray-400 transition">
+        <ChevronUp v-if="!isCollapsed" class="h-4 w-4" />
+        <ChevronDown v-else class="h-4 w-4" />
+      </div>
     </div>
+
+    <!-- 패널 내용 -->
+    <div v-show="!isCollapsed">
 
     <!-- 트랙 미선택: 빈 EQ 상태 -->
     <div
@@ -375,5 +388,7 @@ watch(
 />
   </div>
 </div>
+    </div>
+    <!-- 패널 내용 끝 -->
   </section>
 </template>

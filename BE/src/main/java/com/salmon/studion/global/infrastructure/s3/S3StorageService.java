@@ -15,6 +15,8 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.File;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 
@@ -90,9 +92,7 @@ public class S3StorageService {
                 .key(objectKey);
 
         if (downloadFileName != null && !downloadFileName.isBlank()) {
-            getObjectRequestBuilder.responseContentDisposition(
-                    "attachment; filename=\"" + downloadFileName + "\""
-            );
+            getObjectRequestBuilder.responseContentDisposition(buildDownloadContentDisposition(downloadFileName));
         }
 
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
@@ -105,6 +105,14 @@ public class S3StorageService {
                 .toString();
 
         return DownloadPresignedUrlResult.of(downloadUrl, expiresAt);
+    }
+
+    // 한글 파일명도 S3 presigned download URL에서 안전하게 처리되도록 Content-Disposition 값을 생성하는 메서드
+    private String buildDownloadContentDisposition(String downloadFileName) {
+        String encodedFileName = URLEncoder.encode(downloadFileName, StandardCharsets.UTF_8)
+                .replace("+", "%20");
+
+        return "attachment; filename=\"audio-version\"; filename*=UTF-8''" + encodedFileName;
     }
 
     public void validateUploadedObject(String objectKey, Integer expectedSizeBytes, String expectedContentType) {

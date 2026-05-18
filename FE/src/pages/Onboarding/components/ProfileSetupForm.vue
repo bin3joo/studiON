@@ -169,10 +169,6 @@ async function handleSubmit() {
   }
 }
 
-function handleSkip() {
-  router.push('/dashboard')
-}
-
 function handleEnterDashboard() {
   router.push('/dashboard')
 }
@@ -204,14 +200,6 @@ function handleEditAgain() {
             협업 매칭에 사용됩니다.
           </p>
         </div>
-
-        <button
-          type="button"
-          class="rounded-full border border-white/10 px-4 py-1.5 text-xs uppercase tracking-[0.25em] text-zinc-400 transition hover:border-[#FF3DCB]/60 hover:text-[#FF3DCB]"
-          @click="handleSkip"
-        >
-          Skip
-        </button>
       </div>
 
       <div class="mt-10">

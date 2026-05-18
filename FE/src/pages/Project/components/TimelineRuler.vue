@@ -2,6 +2,7 @@
 import {ref, onMounted, onUnmounted} from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import * as Tone from 'tone';
+import LoopMarker from './LoopMarker.vue';
 
 // 트랙 스토어에서 타임라인 상태와 픽셀 계산 사용
 const trackStore = useTrackStore();
@@ -114,52 +115,6 @@ const onPointerUp = (e:PointerEvent) => {
 };
 
 // ==========================================
-// 구간 반복 (Loop) 마커 드래그 로직
-// ==========================================
-const loopDragState = ref<{ type: 'start' | 'end' | null, startX: number, initialBar: number }>({ type: null, startX: 0, initialBar: 0 });
-
-const onLoopMarkerDown = (e: PointerEvent, type: 'start' | 'end') => {
-  e.stopPropagation();
-  if (e.button !== 0) return;
-  
-  loopDragState.value = {
-    type,
-    startX: e.clientX,
-    initialBar: type === 'start' ? trackStore.loopStartBar : trackStore.loopEndBar
-  };
-  
-  window.addEventListener('pointermove', onLoopMarkerMove);
-  window.addEventListener('pointerup', onLoopMarkerUp);
-};
-
-const onLoopMarkerMove = (e: PointerEvent) => {
-  if (!loopDragState.value.type) return;
-  
-  const dx = e.clientX - loopDragState.value.startX;
-  const dBar = dx / trackStore.pixelPerBar;
-  
-  let newBar = loopDragState.value.initialBar + dBar;
-  
-  // Snap to grid (1박자 단위 스냅)
-  const snapResolution = 1 / (trackStore.projectInfo.timeSigNumerator || 4);
-  newBar = Math.round(newBar / snapResolution) * snapResolution;
-  
-  if (loopDragState.value.type === 'start') {
-    newBar = Math.max(0, Math.min(newBar, trackStore.loopEndBar - snapResolution));
-    trackStore.loopStartBar = newBar;
-  } else {
-    newBar = Math.max(trackStore.loopStartBar + snapResolution, Math.min(newBar, trackStore.projectInfo.totalBarCount));
-    trackStore.loopEndBar = newBar;
-  }
-};
-
-const onLoopMarkerUp = () => {
-  loopDragState.value.type = null;
-  window.removeEventListener('pointermove', onLoopMarkerMove);
-  window.removeEventListener('pointerup', onLoopMarkerUp);
-};
-
-// ==========================================
 // 스크롤 로직 추가
 // ==========================================
 const handleWheel = (e: WheelEvent) => {
@@ -254,26 +209,8 @@ onUnmounted(() => {
           </template>
         </div>
 
-        <!-- 구간 반복(Loop) 마커 -->
-        <div 
-          v-if="trackStore.isLoopActive"
-          class="absolute top-0 bottom-0 bg-pink-500/20 border-x-2 border-pink-500 z-30"
-          :style="{
-            left: `${trackStore.loopStartBar * trackStore.pixelPerBar}px`,
-            width: `${(trackStore.loopEndBar - trackStore.loopStartBar) * trackStore.pixelPerBar}px`
-          }"
-        >
-          <!-- 왼쪽 조절 핸들 -->
-          <div 
-            class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-ew-resize hover:bg-pink-400/50 pointer-events-auto"
-            @pointerdown.stop="(e) => onLoopMarkerDown(e, 'start')"
-          ></div>
-          <!-- 오른쪽 조절 핸들 -->
-          <div 
-            class="absolute top-0 bottom-0 -right-1.5 w-3 cursor-ew-resize hover:bg-pink-400/50 pointer-events-auto"
-            @pointerdown.stop="(e) => onLoopMarkerDown(e, 'end')"
-          ></div>
-        </div>
+        <!-- 구간 반복(Loop) 마커 (분리된 컴포넌트 사용) -->
+        <LoopMarker />
 
         <div 
           aria-label="현재 재생 위치 표시 바"

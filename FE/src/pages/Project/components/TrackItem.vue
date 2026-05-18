@@ -701,13 +701,16 @@ const handleVolumeInput = (e: Event) => {
   isDraggingVolume.value = true;
   const val = Number((e.target as HTMLInputElement).value);
   localVolume.value = parseFloat(trackStore.getVolumeFromPercent(val).toFixed(1));
+  // 실시간 로컬 오디오 업데이트 (소켓 전송 안함)
+  trackStore.setTrackVolume(props.track.trackId, localVolume.value, false);
 };
 
 const handleVolumeChange = (e: Event) => {
   isDraggingVolume.value = false;
   const val = Number((e.target as HTMLInputElement).value);
   const finalVolume = parseFloat(trackStore.getVolumeFromPercent(val).toFixed(1));
-  trackStore.setTrackVolume(props.track.trackId, finalVolume);
+  // 변경 완료 시 소켓 전송
+  trackStore.setTrackVolume(props.track.trackId, finalVolume, true);
 };
 
 // 패닝 슬라이더 드래그 로직
@@ -721,12 +724,15 @@ const displayPan = computed(() => {
 const handlePanInput = (e: Event) => {
   isDraggingPan.value = true;
   localPan.value = Number((e.target as HTMLInputElement).value);
+  // 실시간 로컬 오디오 업데이트 (소켓 전송 안함)
+  trackStore.setTrackPan(props.track.trackId, localPan.value, false);
 };
 
 const handlePanChange = (e: Event) => {
   isDraggingPan.value = false;
   const pan = Number((e.target as HTMLInputElement).value);
-  trackStore.setTrackPan(props.track.trackId, pan);
+  // 변경 완료 시 소켓 전송
+  trackStore.setTrackPan(props.track.trackId, pan, true);
 };
 
 const isEditingVolume = ref(false);

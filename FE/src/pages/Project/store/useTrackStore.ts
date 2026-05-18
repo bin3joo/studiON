@@ -1974,7 +1974,7 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // 트랙 볼륨 조절 (-60dB ~ 6dB)
-    const setTrackVolume = (trackId: number, volume: number) => {
+    const setTrackVolume = (trackId: number, volume: number, emitSocket: boolean = true) => {
         if (trackId === 999999) {
             masterTrack.value.volume = volume;
             masterVolume.volume.value = volume;
@@ -1988,11 +1988,13 @@ export const useTrackStore = defineStore('track', () => {
         const vol = trackVolumes.get(trackId);
         if (vol) vol.volume.value = volume;
 
-        socketService.publish('TRACK_VOLUME_CHANGE', {
-            projectId: projectInfo.value.projectId,
-            trackId: trackId,
-            volume: volume
-        });
+        if (emitSocket) {
+            socketService.publish('TRACK_VOLUME_CHANGE', {
+                projectId: projectInfo.value.projectId,
+                trackId: trackId,
+                volume: volume
+            });
+        }
     };
 
     // 볼륨 UI 0dB 매핑 (80% 지점에 위치)
@@ -2013,7 +2015,7 @@ export const useTrackStore = defineStore('track', () => {
     };
 
     // 트랙 패닝 조절 (-100 ~ 100)
-    const setTrackPan = (trackId: number, pan: number) => {
+    const setTrackPan = (trackId: number, pan: number, emitSocket: boolean = true) => {
        // console.log(`[패닝 디버그] setTrackPan 호출! trackId=${trackId}, pan=${pan}`);
         if (trackId === 999999) {
             masterTrack.value.pan = pan;
@@ -2039,11 +2041,13 @@ export const useTrackStore = defineStore('track', () => {
             // console.log(`[패닝 디버그] 현재 trackVolumes 키 목록:`, [...trackVolumes.keys()]);
         }
 
-        socketService.publish('TRACK_PAN_CHANGE', {
-            projectId: projectInfo.value.projectId,
-            trackId: trackId,
-            pan: pan
-        });
+        if (emitSocket) {
+            socketService.publish('TRACK_PAN_CHANGE', {
+                projectId: projectInfo.value.projectId,
+                trackId: trackId,
+                pan: pan
+            });
+        }
     };
 
     //트랙 삭제 기능

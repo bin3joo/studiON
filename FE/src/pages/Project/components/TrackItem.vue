@@ -1062,7 +1062,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
               step="0.1"
             />
             <span v-else class="font-mono text-[10px] tabular-nums text-white pointer-events-none">
-              {{ displayVolume.toFixed(1) }}
+              {{ displayVolume <= -60 ? '-inf' : displayVolume.toFixed(1) }}
             </span>
           </div>
         </div>

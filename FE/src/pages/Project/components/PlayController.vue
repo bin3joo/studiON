@@ -130,29 +130,31 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
   <!--select none은 마우스로 선택할 수 없게 함-->
   <nav 
     aria-label="트랜스포트 컨트롤 및 프로젝트 정보 바"
-    class="relative flex h-12 w-full items-center justify-between border-b border-border bg-[#151515] px-4 md:px-6 select-none"
+    class="relative h-12 w-full border-b border-border bg-[#151515] select-none overflow-x-auto [&::-webkit-scrollbar]:hidden"
   >
+    <div class="flex h-full items-center justify-between w-full min-w-[1000px] px-4 md:px-6 gap-4">
+
   <!--:arial-label 재생바가 움직일때마다 읽는 정보가 실시간으로 변경 font mono는 숫자 바뀔떄 UI 흔들림을 방지-->
-    <div class="flex items-center">
-      <!--tabular-nums : 고정폭 숫자표시로 숫자바뀔떄 UI 흔들림을 방지 drop-shadow : 숫자에 네온 효과-->
-      <div 
-        id="playhead-position-display"
-        :aria-label="`현재 재생 위치: ${playheadBar}마디 ${playheadBeat}박자, 전체 ${totalBars}마디`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-3 font-mono text-sm"
-      >
-        <!-- 마디 정보 -->
-        <span class="text-[10px] uppercase tracking-wider text-muted-foreground" aria-hidden="true">마디</span>
-        <span class="tabular-nums text-primary drop-shadow-[0_0_6px_hsl(var(--primary)/0.6)]">
-          <span id="playhead-bar-text">{{ playheadBar }}</span><span class="text-muted-foreground">.</span><span id="playhead-beat-text">{{ playheadBeat }}</span>
-        </span>
-        <span class="text-muted-foreground" aria-hidden="true">/</span>
-        <span class="tabular-nums text-muted-foreground">{{ totalBars }}</span>
-      </div>
+      <!-- 1. 좌측 영역: Playhead + Tools -->
+      <div class="flex items-center gap-6">
+        <!-- Playhead -->
+        <div class="flex items-center">
+          <div 
+            id="playhead-position-display"
+            :aria-label="`현재 재생 위치: ${playheadBar}마디 ${playheadBeat}박자, 전체 ${totalBars}마디`"
+            class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-3 font-mono text-sm"
+          >
+            <span class="text-[10px] uppercase tracking-wider text-muted-foreground" aria-hidden="true">마디</span>
+            <span class="tabular-nums text-primary drop-shadow-[0_0_6px_hsl(var(--primary)/0.6)]">
+              <span id="playhead-bar-text">{{ playheadBar }}</span><span class="text-muted-foreground">.</span><span id="playhead-beat-text">{{ playheadBeat }}</span>
+            </span>
+            <span class="text-muted-foreground" aria-hidden="true">/</span>
+            <span class="tabular-nums text-muted-foreground">{{ totalBars }}</span>
+          </div>
+        </div>
 
-    </div>
-
-    <!-- 단축키 도구 모음 (타임라인 1에 맞춤) -->
-    <div class="absolute left-[224px] flex items-center gap-1" role="group" aria-label="클립 및 트랙 도구">
+        <!-- 단축키 도구 모음 -->
+        <div class="flex items-center gap-1 shrink-0" role="group" aria-label="클립 및 트랙 도구">
       <!-- 트랙 이벤트: 트랙이 선택되어야 활성화 -->
       <button 
         class="inline-flex h-8 w-8 items-center justify-center rounded transition text-muted-foreground hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
@@ -228,11 +230,12 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
         @click="emit('action-delete')"
       >
         <Trash2 class="h-4 w-4" />
-      </button>
+        </button>
+      </div>
     </div>
 
-    <!--absolute left-1/2 flex -translate-x-1/2 : 버튼을 정확히 가운데 배치 role='group' 그룹으로 묶어줌-->
-    <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤" data-guide="play-controls">
+    <!-- 2. 중앙 영역: 재생 컨트롤 -->
+    <div class="flex items-center justify-center gap-1.5 shrink-0" role="group" aria-label="재생 컨트롤" data-guide="play-controls">
       <button 
         :aria-label="trackStore.isPlaying ? '일시정지' : '재생 시작'"
         :class="[
@@ -291,13 +294,14 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
       </button>
     </div>
 
-    <div class="flex items-center gap-2">
+    <!-- 3. 우측 영역: AI 분석 및 곡 정보 -->
+    <div class="flex items-center gap-2 shrink-0">
   <button
     type="button"
     aria-label="AI 믹스 분석 실행"
     :disabled="props.aiAnalyzing"
     data-guide="ai-analysis"
-    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full p-[1px] transition-all duration-300 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
+    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full p-px transition-all duration-300 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
     @click="handleRunAiAnalysisClick"
   >
     <!-- gradient border -->
@@ -542,6 +546,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
         </div>
       </div>
     </div>
+  </div>
   </nav>
 </template>
 

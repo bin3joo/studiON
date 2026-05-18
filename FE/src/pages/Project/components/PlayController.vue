@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
-import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload } from 'lucide-vue-next';
+import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload, Repeat } from 'lucide-vue-next';
 import * as Tone from 'tone';
 import { trackEvent } from '@/shared/utils/analytics'
 
@@ -25,8 +25,8 @@ const displayKey = computed(() => {
 });
 
 const handleKeyChange = (newNote: string, newMode: string) => {
-  trackStore.projectInfo.rootNote = newNote;
-  trackStore.projectInfo.mode = newMode;
+  trackStore.changeKey(newNote, newMode);
+  isKeyPickerOpen.value = false;
 };
 
 // 3. 재생 제어 함수
@@ -71,6 +71,57 @@ const hasSelectedTrack = computed(() => trackStore.selectedTrackId !== null);
 const hasSelectedClip = computed(() => trackStore.selectedClip !== null);
 const hasClipboard = computed(() => trackStore.clipboardClip !== null);
 const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || trackStore.selectedClip !== null);
+
+// 5. BPM 편집 관련 상태
+const isBpmEditing = ref(false);
+const bpmInputValue = ref('');
+const bpmInputRef = ref<HTMLInputElement | null>(null);
+
+const startBpmEdit = () => {
+  isBpmEditing.value = true;
+  bpmInputValue.value = String(trackStore.bpm);
+  // DOM 갱신 후 input에 포커스
+  setTimeout(() => bpmInputRef.value?.select(), 0);
+};
+
+const confirmBpmEdit = () => {
+  const newBpm = Number(bpmInputValue.value);
+  if (!isNaN(newBpm) && newBpm >= 30 && newBpm <= 300) {
+    trackStore.changeBpm(newBpm);
+  }
+  isBpmEditing.value = false;
+};
+
+const cancelBpmEdit = () => {
+  isBpmEditing.value = false;
+};
+
+// 6. 박자(Time Signature) 편집 관련 상태
+const isTimeSigPickerOpen = ref(false);
+
+// 허용되는 박자 조합 (10가지)
+const TIME_SIG_OPTIONS: { numerator: number; denominator: number; label: string }[] = [
+  { numerator: 2, denominator: 4, label: '2/4' },
+  { numerator: 3, denominator: 4, label: '3/4' },
+  { numerator: 4, denominator: 4, label: '4/4' },
+  { numerator: 5, denominator: 4, label: '5/4' },
+  { numerator: 6, denominator: 4, label: '6/4' },
+  { numerator: 7, denominator: 4, label: '7/4' },
+  { numerator: 3, denominator: 8, label: '3/8' },
+  { numerator: 6, denominator: 8, label: '6/8' },
+  { numerator: 9, denominator: 8, label: '9/8' },
+  { numerator: 12, denominator: 8, label: '12/8' },
+];
+
+const handleTimeSigChange = (numerator: number, denominator: number) => {
+  trackStore.changeTimeSignature(numerator, denominator);
+  isTimeSigPickerOpen.value = false;
+};
+
+const isCurrentTimeSig = (numerator: number, denominator: number) => {
+  return trackStore.projectInfo.timeSigNumerator === numerator
+    && trackStore.projectInfo.timeSigDenominator === denominator;
+};
 </script>
 
 <template>
@@ -180,7 +231,7 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
     </div>
 
     <!--absolute left-1/2 flex -translate-x-1/2 : 버튼을 정확히 가운데 배치 role='group' 그룹으로 묶어줌-->
-    <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤">
+    <div class="absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5" role="group" aria-label="재생 컨트롤" data-guide="play-controls">
       <button 
         :aria-label="trackStore.isPlaying ? '일시정지' : '재생 시작'"
         :class="[
@@ -201,6 +252,41 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
         @click="handleStop"
       >
         <Square class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+      </button>
+
+      <!-- 메트로놈 토글 버튼 (M 단축키) -->
+      <button 
+        aria-label="메트로놈 토글"
+        :class="[
+          'grid h-8 w-10 place-items-center rounded border transition',
+          trackStore.isMetronomeActive 
+            ? 'border-primary bg-primary/20 text-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)]' 
+            : 'border-white/10 bg-white/5 text-white hover:bg-white/10 active:scale-95'
+        ]"
+        @click="trackStore.isMetronomeActive = !trackStore.isMetronomeActive"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+          <!-- 메트로놈 외형 (사다리꼴) -->
+          <path d="M6 20h12L15 4H9Z"/>
+          <!-- 똑딱거리는 시침 막대기 (하단 중앙에서 좌측 상단으로 뻗음) -->
+          <path d="M12 20 8 6"/>
+          <!-- 시침에 달린 무게추 -->
+          <circle cx="9.4" cy="11.5" r="1.5"/>
+        </svg>
+      </button>
+
+      <!-- 구간 반복(Loop) 토글 버튼 (L 단축키) -->
+      <button 
+        aria-label="구간 반복 토글"
+        :class="[
+          'grid h-8 w-10 place-items-center rounded border transition',
+          trackStore.isLoopActive 
+            ? 'border-pink-500 bg-pink-500/20 text-pink-400 shadow-[0_0_8px_rgba(236,72,153,0.6)]' 
+            : 'border-white/10 bg-white/5 text-white hover:bg-white/10 active:scale-95'
+        ]"
+        @click="trackStore.isLoopActive = !trackStore.isLoopActive"
+      >
+        <Repeat class="h-4 w-4" aria-hidden="true" />
       </button>
     </div>
 
@@ -248,25 +334,111 @@ const hasAnySelection = computed(() => trackStore.selectedTrackId !== null || tr
   </button>
 
 
+      <!-- BPM 표시/편집 영역 -->
       <div 
-        :aria-label="`현재 템포: ${trackStore.projectInfo.tempo.toFixed(2)} BPM`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
+        :aria-label="`현재 템포: ${trackStore.bpm} BPM. 클릭하여 변경`"
+        class="flex h-8 items-center gap-2 rounded border px-2.5 cursor-pointer transition-colors"
+        :class="isBpmEditing 
+          ? 'border-primary bg-primary/10' 
+          : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/10'"
+        @click="!isBpmEditing && startBpmEdit()"
       >
         <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">BPM</span>
-        <span class="font-display text-xs tracking-wider text-white tabular-nums">
-          {{ trackStore.projectInfo.tempo.toFixed(2) }}
+        <!-- 편집 모드 -->
+        <input
+          v-if="isBpmEditing"
+          ref="bpmInputRef"
+          v-model="bpmInputValue"
+          type="number"
+          min="30"
+          max="300"
+          step="1"
+          class="w-14 bg-transparent font-display text-xs tracking-wider text-white tabular-nums outline-none border-none appearance-none [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
+          @keydown.enter="confirmBpmEdit"
+          @keydown.escape="cancelBpmEdit"
+          @blur="confirmBpmEdit"
+        />
+        <!-- 표시 모드 -->
+        <span v-else class="font-display text-xs tracking-wider text-white tabular-nums">
+          {{ trackStore.bpm.toFixed(0) }}
         </span>
       </div>
 
-      <div 
-        :aria-label="`현재 박자: ${trackStore.projectInfo.timeSigNumerator}분의 ${trackStore.projectInfo.timeSigDenominator}박자`"
-        class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-2.5 opacity-50 cursor-not-allowed"
-      >
-        <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
-        <div class="flex items-center gap-1 font-display text-xs tracking-wider text-white tabular-nums">
-          <span>{{ trackStore.projectInfo.timeSigNumerator }}</span>
-          <span class="text-muted-foreground">/</span>
-          <span>{{ trackStore.projectInfo.timeSigDenominator }}</span>
+      <!-- 박자(Time Signature) 피커 -->
+      <div class="relative">
+        <button 
+          :aria-label="`현재 박자: ${trackStore.projectInfo.timeSigNumerator}/${trackStore.projectInfo.timeSigDenominator}. 클릭하여 변경`"
+          :aria-expanded="isTimeSigPickerOpen"
+          :class="[
+            'flex h-8 items-center gap-2 rounded border px-2.5 transition-colors',
+            isTimeSigPickerOpen
+              ? 'border-primary bg-primary/10'
+              : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/10 cursor-pointer'
+          ]"
+          @click="isTimeSigPickerOpen = !isTimeSigPickerOpen"
+        >
+          <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
+          <div class="flex items-center gap-1 font-display text-xs tracking-wider text-white tabular-nums">
+            <span>{{ trackStore.projectInfo.timeSigNumerator }}</span>
+            <span class="text-muted-foreground">/</span>
+            <span>{{ trackStore.projectInfo.timeSigDenominator }}</span>
+          </div>
+          <ChevronDown class="h-3 w-3 text-muted-foreground transition-transform" :class="isTimeSigPickerOpen ? 'rotate-180' : ''" aria-hidden="true" />
+        </button>
+
+        <!-- 박자 선택 팝업 -->
+        <div 
+          v-if="isTimeSigPickerOpen" 
+          role="dialog"
+          aria-label="박자 선택창"
+          class="absolute right-0 top-full mt-2 z-50 min-w-[200px] rounded-md border border-border bg-[#1c1c1c] p-4 shadow-xl shadow-black/50"
+        >
+          <!-- 바깥 클릭 시 닫기 -->
+          <div class="fixed inset-0 z-[-1]" @click="isTimeSigPickerOpen = false"></div>
+
+          <!-- /4 박자 그룹 -->
+          <div class="mb-3">
+            <span class="mb-1.5 block font-mono text-[9px] uppercase tracking-widest text-muted-foreground">4분음표 기준</span>
+            <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="4분음표 기준 박자 선택">
+              <button
+                v-for="opt in TIME_SIG_OPTIONS.filter(o => o.denominator === 4)"
+                :key="opt.label"
+                :aria-label="`박자 ${opt.label} 적용`"
+                :aria-pressed="isCurrentTimeSig(opt.numerator, opt.denominator)"
+                :class="[
+                  'flex h-9 items-center justify-center rounded-md border font-display text-sm tracking-wider transition-colors',
+                  isCurrentTimeSig(opt.numerator, opt.denominator)
+                    ? 'border-primary bg-primary/10 text-primary shadow-[0_0_10px_hsl(var(--primary)/0.4)]'
+                    : 'border-border bg-secondary/40 text-foreground hover:border-primary/60'
+                ]"
+                @click="handleTimeSigChange(opt.numerator, opt.denominator)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- /8 박자 그룹 -->
+          <div>
+            <span class="mb-1.5 block font-mono text-[9px] uppercase tracking-widest text-muted-foreground">8분음표 기준</span>
+            <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="8분음표 기준 박자 선택">
+              <button
+                v-for="opt in TIME_SIG_OPTIONS.filter(o => o.denominator === 8)"
+                :key="opt.label"
+                :aria-label="`박자 ${opt.label} 적용`"
+                :aria-pressed="isCurrentTimeSig(opt.numerator, opt.denominator)"
+                :class="[
+                  'flex h-9 items-center justify-center rounded-md border font-display text-sm tracking-wider transition-colors',
+                  isCurrentTimeSig(opt.numerator, opt.denominator)
+                    ? 'border-primary bg-primary/10 text-primary shadow-[0_0_10px_hsl(var(--primary)/0.4)]'
+                    : 'border-border bg-secondary/40 text-foreground hover:border-primary/60'
+                ]"
+                @click="handleTimeSigChange(opt.numerator, opt.denominator)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

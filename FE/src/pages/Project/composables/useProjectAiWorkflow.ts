@@ -69,9 +69,13 @@ export function useProjectAiWorkflow(projectId: number) {
 
   const aiAnalysisItems = ref<AiAnalysisItem[]>([])
   const activeAiAnalysisId = ref<string | number | null>(null)
+  const aiSuccessMessage = ref<string | null>(null)
 
   // 개발 환경 테스트용 Mock 데이터 주입 함수 (콘솔에서 window.testAi() 로 실행 가능)
   ;(window as any).testAi = () => {
+    const t1 = trackStore.trackList.length > 0 ? trackStore.trackList[0].trackId : 1;
+    const t2 = trackStore.trackList.length > 1 ? trackStore.trackList[1].trackId : t1;
+
     aiAnalysisItems.value = [
       {
         id: 'mock-1',
@@ -104,18 +108,18 @@ export function useProjectAiWorkflow(projectId: number) {
         uiMode: 'marker_only' as any,
         jobId: null,
         regionId: null,
-        startMs: 12000,
-        endMs: 16000,
+        startMs: 0,         // 테스트하기 쉽도록 0초부터 시작
+        endMs: 10000,       // 10초까지 (대부분의 클립이 겹치게)
         targetType: 'TRACK',
-        targetTrackId: 1,
-        startPercent: 40,
-        endPercent: 50,
+        targetTrackId: t1,  // 실제 첫 번째 트랙 ID 매핑
+        startPercent: 0,
+        endPercent: 10,
         startPx: 0,
         endPx: 0,
-        barStart: 6,
-        barEnd: 8,
-        title: '[테스트] 하쉬니스 마커 2',
-        summary: '두 번째 문제 구간입니다. 다른 위치에 마커가 생깁니다.',
+        barStart: 0,
+        barEnd: 4,
+        title: '[테스트] 첫번째 트랙 하쉬니스',
+        summary: '이 트랙의 0~10초 구간 클립은 AI 잠금이 걸립니다.',
         bullets: ['고음역대 쏘는 소리 감지'],
         recommendedGainReductionDb: null,
         actions: [],
@@ -128,18 +132,18 @@ export function useProjectAiWorkflow(projectId: number) {
         uiMode: 'eq_ai' as any,
         jobId: null,
         regionId: null,
-        startMs: 24000,
-        endMs: 28000,
+        startMs: 0,
+        endMs: 15000,
         targetType: 'TIMELINE',
-        targetTrackId: 2,
-        startPercent: 70,
-        endPercent: 80,
+        targetTrackId: t2, // 실제 두 번째 트랙 ID 매핑
+        startPercent: 0,
+        endPercent: 15,
         startPx: 0,
         endPx: 0,
-        barStart: 12,
-        barEnd: 14,
-        title: '[테스트] 대역 중복 마커 3',
-        summary: '세 번째 문제 구간입니다.',
+        barStart: 0,
+        barEnd: 6,
+        title: '[테스트] 두번째 트랙 대역 중복',
+        summary: '이 트랙의 0~15초 구간 클립은 AI 잠금이 걸립니다.',
         bullets: ['보컬과 베이스 대역이 충돌합니다.'],
         recommendedGainReductionDb: null,
         actions: [],
@@ -1026,6 +1030,15 @@ function handleApplyAiEq() {
     item.id,
   ])
 
+  // 자동 삭제 및 모달 팝업
+  aiSuccessMessage.value = 'AI EQ 설정이 성공적으로 적용되었습니다.'
+  aiAnalysisItems.value = aiAnalysisItems.value.filter(i => i.id !== item.id)
+  if (activeAiAnalysisId.value === item.id) activeAiAnalysisId.value = null
+
+  setTimeout(() => {
+    aiSuccessMessage.value = null
+  }, 2500)
+
   const appliedTrack = trackStore.trackList.find(track =>
     Number(track.trackId) === Number(targetTrackId)
   )
@@ -1129,16 +1142,25 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
     ])
 
     appliedClippingInfoMap.value = new Map([
-  ...appliedClippingInfoMap.value,
-  [
-    item.id,
-    {
-      reductionDb: Math.abs(recommendedReductionDb),
-      inputGainDb: savedLimiter.inputGainDb,
-      ceilingDbfs: savedLimiter.ceilingDbfs,
-    },
-  ],
-])
+      ...appliedClippingInfoMap.value,
+      [
+        item.id,
+        {
+          reductionDb: Math.abs(recommendedReductionDb),
+          inputGainDb: savedLimiter.inputGainDb,
+          ceilingDbfs: savedLimiter.ceilingDbfs,
+        },
+      ],
+    ])
+
+    // 자동 삭제 및 모달 팝업
+    aiSuccessMessage.value = '마스터 리미터에 클리핑 감소안이 반영되었습니다.'
+    aiAnalysisItems.value = aiAnalysisItems.value.filter(i => i.id !== item.id)
+    if (activeAiAnalysisId.value === item.id) activeAiAnalysisId.value = null
+
+    setTimeout(() => {
+      aiSuccessMessage.value = null
+    }, 2500)
 
    // goNextAiAnalysis()
   } catch (error: any) {
@@ -1163,12 +1185,11 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
 }
 
 function handleDismissClippingIssue(item: AiAnalysisItem) {
-
-  if (import.meta.env.DEV) {
-   // console.debug('[AI clipping dismiss]', item)
+  aiAnalysisItems.value = aiAnalysisItems.value.filter(i => i.id !== item.id)
+  
+  if (activeAiAnalysisId.value === item.id) {
+    activeAiAnalysisId.value = null
   }
-
-  activeAiAnalysisId.value = null
 }
 
 function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
@@ -1405,5 +1426,6 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     getClippingAppliedInfo,
     activeAiUiMode,
     isActiveAiMarkerOnly,
+    aiSuccessMessage,
   }
 }

@@ -235,62 +235,48 @@ const dynamicWidthPx = computed(() => {
           </ul>
 
           <div
-  v-if="props.conflict.kind === 'CLIPPING'"
+            v-if="props.conflict.kind === 'CLIPPING'"
+            class="space-y-3 border-t border-white/10 pt-3"
+          >
+            <p class="text-xs leading-relaxed text-white/60">
+              마스터 트랙에서 클리핑이 감지됐어요.
+              AI는 약 {{ Math.abs(props.conflict.recommendedGainReductionDb ?? 0).toFixed(2) }}dB 감소를 제안합니다.
+            </p>
+
+            <div class="flex gap-2">
+              <button
+                type="button"
+                :disabled="props.conflict.recommendedGainReductionDb == null"
+                class="w-full rounded-md bg-[#FF8F1A] px-3 py-1.5 text-xs font-bold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 transition"
+                @click="emit('applyClipping')"
+              >
+                적용하기
+              </button>
+
+              <button
+                type="button"
+                class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
+                @click="emit('dismissClipping')"
+              >
+                건너뛰기
+              </button>
+            </div>
+          </div>
+
+<!-- 클리핑이 아닌 다른 모든 이슈 처리 (테스트 등) -->
+<div
+  v-else
   class="space-y-3 border-t border-white/10 pt-3"
 >
-  <div
-    v-if="props.isClippingApplied"
-    class="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2"
-  >
-    <div class="text-xs font-bold text-emerald-300">
-      적용 완료
-    </div>
-
-    <p class="mt-1 text-xs leading-relaxed text-white/65">
-      마스터 리미터 draft에 클리핑 감소안이 반영됐어요.
-    </p>
-
-    <div
-      v-if="props.clippingAppliedInfo"
-      class="mt-2 space-y-1 text-[11px] text-white/50"
+  <div class="flex gap-2">
+    <button
+      type="button"
+      class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
+      @click="emit('dismissClipping')"
     >
-      <div>
-        감소량: {{ props.clippingAppliedInfo.reductionDb.toFixed(2) }}dB
-      </div>
-      <div>
-        Input Gain: {{ props.clippingAppliedInfo.inputGainDb.toFixed(2) }}dB
-      </div>
-      <div>
-        Ceiling: {{ props.clippingAppliedInfo.ceilingDbfs.toFixed(1) }}dBFS
-      </div>
-    </div>
+      무시하기 (범위 삭제)
+    </button>
   </div>
-
-  <template v-else>
-    <p class="text-xs leading-relaxed text-white/60">
-      마스터 트랙에서 클리핑이 감지됐어요.
-      AI는 약 {{ Math.abs(props.conflict.recommendedGainReductionDb ?? 0).toFixed(2) }}dB 감소를 제안합니다.
-    </p>
-
-    <div class="flex gap-2">
-      <button
-        type="button"
-        :disabled="props.conflict.recommendedGainReductionDb == null"
-        class="rounded-md bg-[#FF8F1A] px-3 py-1.5 text-xs font-bold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-        @click="emit('applyClipping')"
-      >
-        적용하기
-      </button>
-
-      <button
-        type="button"
-        class="rounded-md border border-white/15 px-3 py-1.5 text-xs font-bold text-white/70 hover:border-white/30 hover:text-white"
-        @click="emit('dismissClipping')"
-      >
-        건너뛰기
-      </button>
-    </div>
-  </template>
 </div>
 
         </div>

@@ -4,7 +4,7 @@ import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical, Sparkles} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
 import FileSizeWarningModal from './FileSizeWarningModal.vue'
@@ -23,6 +23,20 @@ const trackStore = useTrackStore();
 
 const aiAnalysisItems = inject<Ref<any[]>>('aiAnalysisItems')
 const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId')
+const aiAnalyzing = inject<Ref<boolean>>('aiAnalyzing')
+
+const isAiLocked = (clip: ClipUIState) => {
+  if (aiAnalyzing?.value) return true;
+  if (!aiAnalysisItems?.value || aiAnalysisItems.value.length === 0) return false;
+
+  const clipStartMs = clip.start * trackStore.secondsPerBar * 1000;
+  const clipEndMs = (clip.start + clip.duration) * trackStore.secondsPerBar * 1000;
+
+  return aiAnalysisItems.value.some(conflict => {
+    if (String(conflict.targetTrackId) !== String(props.track.trackId)) return false;
+    return clipStartMs < conflict.endMs && clipEndMs > conflict.startMs;
+  });
+}
 
 const getConflictLeft = (conflict: any) => {
   const startBarFloat = conflict.startMs / (trackStore.secondsPerBar * 1000)
@@ -152,8 +166,9 @@ function autoScrollLoop() {
 // 3. 마우스 조작 이벤트 핸들러
 // ==========================================
 
-//1.클립을 쥐었을 때 (Pointer Down)
+// 클립 드래그(마우스 다운) 시작
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
+  if (clip.isLocked || isAiLocked(clip)) return;
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return; // 좌클릭만 허용하기
   // 누군가(다른 사람) 이미 잠근 클립이면 아예 건드리지도 못하게 튕겨냄
@@ -316,8 +331,9 @@ const resizeState = ref({
   isResizing: false
 });
 
-// 리사이즈 핸들 잡기
+// 리사이즈 마우스 다운 (가장자리 6-dot 핸들)
 const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 'right') => {
+  if (clip.isLocked || isAiLocked(clip)) return;
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return;
   if(clip.isLocked) return; //클립이 잠겨있으면 리사이즈 금지
@@ -537,6 +553,7 @@ const onTrackRightClick = (e: MouseEvent, trackId: number) => {
 
 // 2. 클립 우클릭
 const onClipRightClick = (e: MouseEvent, clip: ClipUIState, trackId: number) => {
+  if (clip.isLocked || isAiLocked(clip)) return;
   menuState.value = {
     isOpen: true,
     x: e.clientX,
@@ -1231,7 +1248,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
         >
           <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
-            v-if="!isMaster"
+            v-if="!isMaster && !clip.isLocked && !isAiLocked(clip)"
             class="group absolute left-0 top-0 bottom-0 w-3 z-20 cursor-w-resize flex items-center justify-center rounded-l-md transition-colors hover:bg-white/20"
             :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
@@ -1254,7 +1271,6 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
             />
           </div>
 
-          <!-- 우측 상단 잠금 표시 아이콘 (진하고 명확하게 강조) -->
           <div 
             v-if="clip.isLocked && !isMaster" 
             class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-red-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
@@ -1262,6 +1278,28 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           >
             <Lock class="h-3 w-3" />
           </div>
+
+          <!-- AI 잠금 배경 패턴 -->
+          <div 
+            v-if="!clip.isLocked && isAiLocked(clip) && !isMaster"
+            class="absolute inset-0 z-20 flex items-center justify-evenly overflow-hidden pointer-events-none bg-blue-500/10"
+          >
+            <Sparkles 
+              v-for="i in Math.max(1, Math.ceil(clip.duration / 2))" 
+              :key="'ai-lock-pattern-'+i"
+              class="h-10 w-10 text-white/20 shrink-0" 
+            />
+          </div>
+
+          <!-- 우측 상단 AI 잠금 표시 아이콘 -->
+          <div 
+            v-if="!clip.isLocked && isAiLocked(clip) && !isMaster" 
+            class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-blue-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
+            title="AI 분석/수정 대기 중입니다 (해결 전까지 조작 불가)"
+          >
+            <Sparkles class="h-3 w-3" />
+          </div>
+
           <div 
             v-if="!isMaster"
             aria-hidden="true"
@@ -1278,7 +1316,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
 
           <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
-            v-if="!isMaster"
+            v-if="!isMaster && !clip.isLocked && !isAiLocked(clip)"
             class="group absolute right-0 top-0 bottom-0 w-3 z-20 cursor-e-resize flex items-center justify-center rounded-r-md transition-colors hover:bg-white/20"
             :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'right')"

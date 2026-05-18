@@ -741,10 +741,12 @@ const {
   setActiveAiAnalysis,
   checkIsClippingApplied,
   getClippingAppliedInfo,
+  aiSuccessMessage,
 } = useProjectAiWorkflow(Number(projectId))
 
 provide('aiAnalysisItems', aiAnalysisItems)
 provide('activeAiAnalysisId', activeAiAnalysisId)
+provide('aiAnalyzing', aiAnalyzing)
 
 function handleAddEqBand(payload: {
   frequencyHz: number
@@ -1250,6 +1252,21 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         <button @click="isInvalidDropModalOpen = false" class="mt-4 w-full rounded-md bg-primary py-2 text-sm font-semibold text-black hover:bg-primary/80 transition-colors">
           확인
         </button>
+      </div>
+    </div>
+
+    <!-- AI 성공 메시지 모달 -->
+    <div v-if="aiSuccessMessage" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
+      <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
+        <div class="rounded-full bg-emerald-500/20 p-3">
+          <svg class="h-6 w-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <div class="text-center">
+          <h3 class="text-base font-semibold text-white">AI 분석 적용 완료</h3>
+          <p class="mt-2 text-sm text-gray-400">{{ aiSuccessMessage }}</p>
+        </div>
       </div>
     </div>
   </div>

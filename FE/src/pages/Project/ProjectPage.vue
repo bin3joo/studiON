@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -724,7 +724,7 @@ function handlePanelAddReply(parentCommentId: number, content: string) {
 
 const {
   aiAnalyzing,
-  activeAiAnalysis,
+  activeAiAnalysisId,
   aiAnalysisItems,
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
@@ -742,6 +742,9 @@ const {
   checkIsClippingApplied,
   getClippingAppliedInfo,
 } = useProjectAiWorkflow(Number(projectId))
+
+provide('aiAnalysisItems', aiAnalysisItems)
+provide('activeAiAnalysisId', activeAiAnalysisId)
 
 function handleAddEqBand(payload: {
   frequencyHz: number
@@ -1140,20 +1143,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
           <TimelineRuler />
         </div>
      
-        <AiConflictOverlay
-          v-for="conflict in aiAnalysisItems"
-          :key="conflict.id"
-          :conflict="conflict"
-          :bubble-position="getAiBubblePosition(conflict)"
-          :is-clipping-applied="checkIsClippingApplied(conflict)"
-          :clipping-applied-info="getClippingAppliedInfo(conflict)"
-          @open="setActiveAiAnalysis(conflict.id)"
-          @apply-clipping="handleApplyClippingIssue(conflict)"
-          @dismiss-clipping="handleDismissClippingIssue(conflict)"
-        />
+
      
         <!--  [세로 스크롤] -->
-        <div class="w-max min-w-full pb-4 flex-1">
+        <div class="w-max min-w-full pb-4 relative">
   <TrackList
     :hovered-measure="hoveredMeasure"
     :hovered-track-id="hoveredTrackId"
@@ -1162,7 +1155,21 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     @submit-inline-comment="handleSubmitInlineComment"
     @resolve-comment="handleResolveComment"
     @delete-comment="handleDeleteComment"
-  />
+  >
+    <template #overlays>
+      <AiConflictOverlay
+        v-for="conflict in aiAnalysisItems"
+        :key="conflict.id"
+        :conflict="conflict"
+        :bubble-position="getAiBubblePosition(conflict)"
+        :is-clipping-applied="checkIsClippingApplied(conflict)"
+        :clipping-applied-info="getClippingAppliedInfo(conflict)"
+        @open="setActiveAiAnalysis(conflict.id)"
+        @apply-clipping="handleApplyClippingIssue(conflict)"
+        @dismiss-clipping="handleDismissClippingIssue(conflict)"
+      />
+    </template>
+  </TrackList>
 </div>
   <DefaultTrackDropGuide
     v-if="shouldShowDefaultTrackGuide"
@@ -1171,7 +1178,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
   <div
   ref="masterTrackWrapperRef"
-  class="mt-auto shrink-0 sticky bottom-0 z-[70] w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
+  class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
 >
         <!-- 마스터 트랙 -->
           <TrackItem

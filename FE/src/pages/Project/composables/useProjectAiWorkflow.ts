@@ -1398,6 +1398,7 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     handleDismissClippingIssue,
     setActiveAiAnalysis,
     aiAnalysisItems,
+    activeAiAnalysisId,
     activeAiAnalysis,
     shouldShowAiEqRevisionPanel,
     checkIsClippingApplied,

@@ -152,9 +152,10 @@ const emit = defineEmits<{
     <div 
       v-if="trackStore.trackList.length > 0" 
       aria-label="트랙 목록" 
-      class="flex flex-col"
+      class="flex flex-col relative"
       :style="{ paddingTop: `${visibleTracksInfo.paddingTop}px`, paddingBottom: `${visibleTracksInfo.paddingBottom}px` }"
     >
+      <slot name="overlays"></slot>
       <!-- 드래그 앤 드롭 이벤트 연결 -->
       <div
         v-for="item in visibleTracksInfo.list"

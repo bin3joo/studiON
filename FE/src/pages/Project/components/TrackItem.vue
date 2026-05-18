@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {ref, computed, nextTick} from 'vue';
+import {ref, computed, inject, type Ref, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
@@ -20,6 +20,20 @@ const props = defineProps<{
 
 //스토어 사용
 const trackStore = useTrackStore();
+
+const aiAnalysisItems = inject<Ref<any[]>>('aiAnalysisItems')
+const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId')
+
+const getConflictLeft = (conflict: any) => {
+  const startBarFloat = conflict.startMs / (trackStore.secondsPerBar * 1000)
+  return startBarFloat * trackStore.pixelPerBar
+}
+
+const getConflictWidth = (conflict: any) => {
+  const startBarFloat = conflict.startMs / (trackStore.secondsPerBar * 1000)
+  const endBarFloat = Math.max(conflict.endMs / (trackStore.secondsPerBar * 1000), startBarFloat + 0.25)
+  return Math.max((endBarFloat - startBarFloat) * trackStore.pixelPerBar, 8)
+}
 
 // 뷰포트 내에 존재하는 클립만 필터링하여 렌더링하는 가로 가상 스크롤 적용 (정렬 포함)
 const visibleClips = computed(() => {
@@ -1109,6 +1123,25 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
         ></div>
 
       <!--마디 세로줄 렌더링 (CSS 배경 패턴으로 DOM 0개 — 성능 최적화)-->
+        <div 
+          aria-hidden="true" 
+          class="pointer-events-none absolute inset-0 z-0 border-b border-white/5 bg-[#171717]"
+        />
+
+        <!-- AI Conflict Backgrounds -->
+        <template v-if="!props.isMaster && aiAnalysisItems">
+          <div
+            v-for="conflict in aiAnalysisItems"
+            :key="conflict.id"
+            v-show="activeAiAnalysisId === conflict.id"
+            class="pointer-events-none absolute top-0 bottom-0 z-0 border-x border-red-500 bg-red-500/20"
+            :style="{
+              left: getConflictLeft(conflict) + 'px',
+              width: getConflictWidth(conflict) + 'px'
+            }"
+          />
+        </template>
+
         <div 
           aria-hidden="true" 
           class="pointer-events-none absolute inset-0 z-0"

@@ -28,12 +28,12 @@ const updateLoopPosition = () => {
   const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   const currentScrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
-  // 마우스의 이동 거리 + 화면(스크롤)의 이동 거리 합산
-  const dx = currentClientX - dragState.value.startX + (currentScrollLeft - dragState.value.startScrollLeft);
+  // 마우스의 이동 거리 + 화면(스크롤)의 이동 거리 합산 (크롬 zoom 특성상 scrollLeft도 시각적 픽셀을 반환하므로 같이 나눔)
+  const dx = ((currentClientX - dragState.value.startX) + (currentScrollLeft - dragState.value.startScrollLeft)) / trackStore.workspaceZoom;
   const dBar = dx / trackStore.pixelPerBar;
   
-  // 1박자 단위 스냅
-  const snapRes = 1 / (trackStore.projectInfo.timeSigNumerator || 4);
+  // 현재 설정된 그리드(SubDivision) 단위 스냅
+  const snapRes = 1 / (trackStore.subDivision || 4);
   
   if (dragState.value.type === 'start') {
     let newBar = dragState.value.initialStartBar + dBar;

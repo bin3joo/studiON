@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import {ref, computed, nextTick} from 'vue';
+import {ref, computed, inject, type Ref, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
-import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical} from 'lucide-vue-next';
+import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical, Sparkles} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
 import TrackCommentLayer from './TrackCommentLayer.vue'
 import FileSizeWarningModal from './FileSizeWarningModal.vue'
@@ -20,6 +20,34 @@ const props = defineProps<{
 
 //스토어 사용
 const trackStore = useTrackStore();
+
+const aiAnalysisItems = inject<Ref<any[]>>('aiAnalysisItems')
+const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId')
+const aiAnalyzing = inject<Ref<boolean>>('aiAnalyzing')
+
+const isAiLocked = (clip: ClipUIState) => {
+  if (aiAnalyzing?.value) return true;
+  if (!aiAnalysisItems?.value || aiAnalysisItems.value.length === 0) return false;
+
+  const clipStartMs = clip.start * trackStore.secondsPerBar * 1000;
+  const clipEndMs = (clip.start + clip.duration) * trackStore.secondsPerBar * 1000;
+
+  return aiAnalysisItems.value.some(conflict => {
+    if (String(conflict.targetTrackId) !== String(props.track.trackId)) return false;
+    return clipStartMs < conflict.endMs && clipEndMs > conflict.startMs;
+  });
+}
+
+const getConflictLeft = (conflict: any) => {
+  const startBarFloat = conflict.startMs / (trackStore.secondsPerBar * 1000)
+  return startBarFloat * trackStore.pixelPerBar
+}
+
+const getConflictWidth = (conflict: any) => {
+  const startBarFloat = conflict.startMs / (trackStore.secondsPerBar * 1000)
+  const endBarFloat = Math.max(conflict.endMs / (trackStore.secondsPerBar * 1000), startBarFloat + 0.25)
+  return Math.max((endBarFloat - startBarFloat) * trackStore.pixelPerBar, 8)
+}
 
 // 뷰포트 내에 존재하는 클립만 필터링하여 렌더링하는 가로 가상 스크롤 적용 (정렬 포함)
 const visibleClips = computed(() => {
@@ -52,6 +80,7 @@ const dragoffsetY = ref(0); //클립을 잡고 움직이기 시작한 지점으�
 
 //오토스크롤 위한 추가 변수들
 const startScrollLeft = ref(0); //드래그 시작 시점의 스크롤 위치
+const startScrollTop = ref(0); //드래그 시작 시점의 세로 스크롤 위치
 let scrollContainer: HTMLElement | null = null; //스크롤되는 부모 요소
 let currentClientX = 0; //현재 마우스 X 좌표 (루프에서 감시용)
 let currentClientY = 0; //현재 마우스 Y 좌표 (수직 오토스크롤 감시용)
@@ -62,8 +91,11 @@ function updateClipPosition() {
   if(!activeClip.value || !scrollContainer) return;
 
   const currentScrollLeft = (scrollContainer as HTMLElement).scrollLeft; //현재 스크롤량 가져오기
+  const currentScrollTop = (scrollContainer as HTMLElement).scrollTop; //현재 세로 스크롤량 가져오기
 
-  const deltaX = (currentClientX - startMouseX.value) + (currentScrollLeft - startScrollLeft.value); //이동거리 계산
+  const deltaX = ((currentClientX - startMouseX.value) + (currentScrollLeft - startScrollLeft.value)) / trackStore.workspaceZoom; //이동거리 계산
+  dragoffsetY.value = ((currentClientY - startMouseY.value) + (currentScrollTop - startScrollTop.value)) / trackStore.workspaceZoom; //세로 이동값 계산
+
   const deltaBar = deltaX / trackStore.pixelPerBar; //이동 거리를 마디 단위로 변환
   let newStart = startClipBar.value + deltaBar; //새로운 시작점 계산
 
@@ -100,7 +132,7 @@ function autoScrollLoop() {
   }
 
   //2. 왼화면 끝 도달 (왼쪽 컨트롤 패널 224px 고려)
-  if(currentClientX < 224 + EDGE_THRESHOLD){
+  if(currentClientX < 224 * trackStore.workspaceZoom + EDGE_THRESHOLD){
     (scrollContainer as HTMLElement).scrollLeft -= SCROLL_SPEED; 
     scrolled = true;
   }
@@ -134,8 +166,9 @@ function autoScrollLoop() {
 // 3. 마우스 조작 이벤트 핸들러
 // ==========================================
 
-//1.클립을 쥐었을 때 (Pointer Down)
+// 클립 드래그(마우스 다운) 시작
 const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
+  if (clip.isLocked || isAiLocked(clip)) return;
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return; // 좌클릭만 허용하기
   // 누군가(다른 사람) 이미 잠근 클립이면 아예 건드리지도 못하게 튕겨냄
@@ -159,6 +192,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   // 가장 가까운 스크롤 영역('.overflow-auto')을 찾아 오토 스크롤 셋팅
   scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   startScrollLeft.value = scrollContainer ? scrollContainer.scrollLeft : 0;
+  startScrollTop.value = scrollContainer ? scrollContainer.scrollTop : 0;
   currentClientX = e.clientX; // 좌표 초기화
   currentClientY = e.clientY;
 
@@ -177,7 +211,6 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
     //1. 엔진이 알 수 있게 마우스 좌표 최신화
     currentClientX = e.clientX;
     currentClientY = e.clientY;
-    dragoffsetY.value = e.clientY - startMouseY.value; //2. 세로 이동값 계산
 
 
     //2. 업데이트 클립으로 위치 갱신
@@ -298,8 +331,9 @@ const resizeState = ref({
   isResizing: false
 });
 
-// 리사이즈 핸들 잡기
+// 리사이즈 마우스 다운 (가장자리 6-dot 핸들)
 const onResizePointerDown = (e: PointerEvent, clip: ClipUIState, side: 'left' | 'right') => {
+  if (clip.isLocked || isAiLocked(clip)) return;
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
   if(e.button !== 0) return;
   if(clip.isLocked) return; //클립이 잠겨있으면 리사이즈 금지
@@ -340,8 +374,8 @@ function updateResizePosition() {
   const state = resizeState.value;
   const targetClip = state.clip as ClipUIState;
   
-  // 마우스 이동 거리 + 화면 스크롤 이동 거리 합산
-  const deltaX = (currentClientX - state.startX) + (currentScrollLeft - startScrollLeft.value);
+  // 마우스 이동 거리 + 화면 스크롤 이동 거리 합산 (크롬 zoom 특성상 scrollLeft도 시각적 픽셀을 반환하므로 같이 나눔)
+  const deltaX = ((currentClientX - state.startX) + (currentScrollLeft - startScrollLeft.value)) / trackStore.workspaceZoom;
   let deltaBar = deltaX / trackStore.pixelPerBar;
 
   const minDuration = 0.5; // 최소 0.5마디 길이 보장
@@ -498,8 +532,8 @@ const onTrackRightClick = (e: MouseEvent, trackId: number) => {
   const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
-  // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표
-  const absoluteX = e.clientX - 224 + scrollLeft; 
+  // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표 (zoom 반영)
+  const absoluteX = ((e.clientX + scrollLeft) / trackStore.workspaceZoom) - 224; 
   
   // 스냅 해상도(subDivision)에 맞춰서 위치 보정
   let targetBar = absoluteX / trackStore.pixelPerBar;
@@ -519,6 +553,7 @@ const onTrackRightClick = (e: MouseEvent, trackId: number) => {
 
 // 2. 클립 우클릭
 const onClipRightClick = (e: MouseEvent, clip: ClipUIState, trackId: number) => {
+  if (clip.isLocked || isAiLocked(clip)) return;
   menuState.value = {
     isOpen: true,
     x: e.clientX,
@@ -674,7 +709,7 @@ const onDrop = (e: DragEvent) => {
   const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
   const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
-  const absoluteX = e.clientX - 224 + scrollLeft; // 224는 왼쪽 컨트롤 패널 너비
+  const absoluteX = (e.clientX / trackStore.workspaceZoom) - 224 + scrollLeft; // 224는 왼쪽 컨트롤 패널 너비
   let targetBar = absoluteX / trackStore.pixelPerBar;
   
   // 스냅 해상도에 맞춰 위치 보정
@@ -853,7 +888,7 @@ const onWorkAreaMouseMove = (e: MouseEvent) => {
 
   const target = e.currentTarget as HTMLElement;
   const rect = target.getBoundingClientRect();
-  const absoluteX = e.clientX - rect.left;
+  const absoluteX = (e.clientX / trackStore.workspaceZoom) - rect.left / trackStore.workspaceZoom;
 
   //마우스 위치를 바탕으로 정확한 '마디(Measure)' 역산
   const rawLocation = (absoluteX / trackStore.pixelPerBar) + 1;
@@ -1027,7 +1062,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
               step="0.1"
             />
             <span v-else class="font-mono text-[10px] tabular-nums text-white pointer-events-none">
-              {{ displayVolume.toFixed(1) }}
+              {{ displayVolume <= -60 ? '-inf' : displayVolume.toFixed(1) }}
             </span>
           </div>
         </div>
@@ -1107,16 +1142,41 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
       <!--마디 세로줄 렌더링 (CSS 배경 패턴으로 DOM 0개 — 성능 최적화)-->
         <div 
           aria-hidden="true" 
+          class="pointer-events-none absolute inset-0 z-0 border-b border-white/5 bg-[#171717]"
+        />
+
+        <!-- AI Conflict Backgrounds -->
+        <template v-if="!props.isMaster && aiAnalysisItems">
+          <div
+            v-for="conflict in aiAnalysisItems"
+            :key="conflict.id"
+            v-show="activeAiAnalysisId === conflict.id"
+            class="pointer-events-none absolute top-0 bottom-0 z-40 border-x border-red-500 bg-red-500/20"
+            :style="{
+              left: getConflictLeft(conflict) + 'px',
+              width: getConflictWidth(conflict) + 'px'
+            }"
+          />
+        </template>
+
+        <div 
+          aria-hidden="true" 
           class="pointer-events-none absolute inset-0 z-0"
           :style="{
             backgroundImage: [
-              `repeating-linear-gradient(to right, #505567 0px, #505567 1px, transparent 1px, transparent ${trackStore.pixelPerBar * 4}px)`,
-              `repeating-linear-gradient(to right, #393C45 0px, #393C45 1px, transparent 1px, transparent ${trackStore.pixelPerBar}px)`,
+              `linear-gradient(to right, #505567 1px, transparent 1px)`,
+              `linear-gradient(to right, #393C45 1px, transparent 1px)`,
               trackStore.subDivision > 1
-                ? `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${trackStore.pixelPerBar / trackStore.subDivision}px)`
+                ? `linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px)`
                 : ''
-            ].filter(Boolean).join(','),
-            backgroundSize: '100% 100%'
+            ].filter(Boolean).join(', '),
+            backgroundSize: [
+              `${trackStore.pixelPerBar * 4}px 100%`,
+              `${trackStore.pixelPerBar}px 100%`,
+              trackStore.subDivision > 1
+                ? `${trackStore.pixelPerBar / trackStore.subDivision}px 100%`
+                : ''
+            ].filter(Boolean).join(', ')
           }"
         ></div>
 
@@ -1194,7 +1254,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
         >
           <!-- 왼쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
-            v-if="!isMaster"
+            v-if="!isMaster && !clip.isLocked && !isAiLocked(clip)"
             class="group absolute left-0 top-0 bottom-0 w-3 z-20 cursor-w-resize flex items-center justify-center rounded-l-md transition-colors hover:bg-white/20"
             :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'left')"
@@ -1217,7 +1277,6 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
             />
           </div>
 
-          <!-- 우측 상단 잠금 표시 아이콘 (진하고 명확하게 강조) -->
           <div 
             v-if="clip.isLocked && !isMaster" 
             class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-red-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
@@ -1225,6 +1284,28 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           >
             <Lock class="h-3 w-3" />
           </div>
+
+          <!-- AI 잠금 배경 패턴 -->
+          <div 
+            v-if="!clip.isLocked && isAiLocked(clip) && !isMaster"
+            class="absolute inset-0 z-20 flex items-center justify-evenly overflow-hidden pointer-events-none bg-blue-500/10"
+          >
+            <Sparkles 
+              v-for="i in Math.max(1, Math.ceil(clip.duration / 2))" 
+              :key="'ai-lock-pattern-'+i"
+              class="h-10 w-10 text-white/20 shrink-0" 
+            />
+          </div>
+
+          <!-- 우측 상단 AI 잠금 표시 아이콘 -->
+          <div 
+            v-if="!clip.isLocked && isAiLocked(clip) && !isMaster" 
+            class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-blue-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
+            title="AI 분석/수정 대기 중입니다 (해결 전까지 조작 불가)"
+          >
+            <Sparkles class="h-3 w-3" />
+          </div>
+
           <div 
             v-if="!isMaster"
             aria-hidden="true"
@@ -1241,7 +1322,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
 
           <!-- 오른쪽 리사이즈 핸들 (마스터에선 숨김) - 반투명 배경 + 6-dot 그립 아이콘 -->
           <div 
-            v-if="!isMaster"
+            v-if="!isMaster && !clip.isLocked && !isAiLocked(clip)"
             class="group absolute right-0 top-0 bottom-0 w-3 z-20 cursor-e-resize flex items-center justify-center rounded-r-md transition-colors hover:bg-white/20"
             :style="{ backgroundColor: `${clip.color}40` }"
             @pointerdown.stop="onResizePointerDown($event, clip, 'right')"
@@ -1257,7 +1338,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
       v-if="!isMaster"
   :track-id="String(track.trackId)"
   :track-name="track.name"
-  :total-bar-count="trackStore.projectInfo.totalBarCount"
+  :total-bar-count="trackStore.displayBarCount"
   :pixel-per-bar="trackStore.pixelPerBar"
   :sub-division="trackStore.subDivision"
   :timeline-width="trackStore.totalTimelineWidth"

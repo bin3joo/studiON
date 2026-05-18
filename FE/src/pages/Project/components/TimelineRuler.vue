@@ -24,7 +24,7 @@ const updatePlayhead = (clientX: number) => {
   const rect = timelineCanvasRef.value.getBoundingClientRect();
 
   //마우스의 절대 좌표에서 도화지의 왼쪽 시작점을 빼서 '도화지 내부의 X 픽셀을 구함'
-  const xPositionPx = clientX - rect.left;
+  const xPositionPx = (clientX - rect.left) / trackStore.workspaceZoom;
 
   //픽셀을 다시 마디로 전환(예 120px 위치 / 1 마디당 120px = 1마디)
   let newPositionBar = xPositionPx / trackStore.pixelPerBar;
@@ -128,7 +128,7 @@ const handleWheel = (e: WheelEvent) => {
 
     // 1. 마우스의 컨테이너 내 상대적 X 픽셀 위치
     const rect = container.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
+    const mouseX = (e.clientX - rect.left) / trackStore.workspaceZoom;
 
     // 2. 줌하기 전의 스크롤 위치와 마디당 픽셀 가져오기
     const oldScrollLeft = container.scrollLeft;
@@ -184,7 +184,7 @@ onUnmounted(() => {
         class="relative h-full w-full"
       >
         <div 
-          v-for="bar in trackStore.projectInfo.totalBarCount" 
+          v-for="bar in trackStore.displayBarCount" 
           :key="bar"
           class="absolute top-0 h-full border-l border-white/5"
           :style="{ left: `${(bar - 1) * trackStore.pixelPerBar}px` }"

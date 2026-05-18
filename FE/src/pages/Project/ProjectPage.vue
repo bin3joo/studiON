@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -724,9 +724,8 @@ function handlePanelAddReply(parentCommentId: number, content: string) {
 
 const {
   aiAnalyzing,
-  aiConflict,
-  activeAiAnalysisCurrentIndex,
-  aiAnalysisTotalCount,
+  activeAiAnalysisId,
+  aiAnalysisItems,
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
@@ -739,11 +738,15 @@ const {
   handleRequestAiEqRevision,
   handleApplyClippingIssue,
   handleDismissClippingIssue,
-  goNextAiAnalysis,
-  goPrevAiAnalysis,
-  isActiveClippingApplied,
-  activeClippingAppliedInfo,
+  setActiveAiAnalysis,
+  checkIsClippingApplied,
+  getClippingAppliedInfo,
+  aiSuccessMessage,
 } = useProjectAiWorkflow(Number(projectId))
+
+provide('aiAnalysisItems', aiAnalysisItems)
+provide('activeAiAnalysisId', activeAiAnalysisId)
+provide('aiAnalyzing', aiAnalyzing)
 
 function handleAddEqBand(payload: {
   frequencyHz: number
@@ -933,16 +936,10 @@ function handleBackgroundPointerDown(e: PointerEvent) {
   trackStore.deselectAll();
 }
 
-type AiBubblePosition =
-  | {
-      mode: 'absolute'
-      top: number
-    }
-  | {
-      mode: 'fixed'
-      left: number
-      bottom: number
-    }
+type AiBubblePosition = {
+  mode: 'absolute'
+  top: number
+}
 
 function getElementContentTop(container: HTMLElement, targetEl: HTMLElement) {
   const containerRect = container.getBoundingClientRect()
@@ -962,24 +959,9 @@ function getAiBubblePosition(conflict: any): AiBubblePosition {
   }
 
   if (conflict.kind === 'CLIPPING') {
-    const containerRect = container.getBoundingClientRect()
-    const masterRect = masterTrackWrapperRef.value?.getBoundingClientRect()
-
-    const left = Math.min(
-      Math.max(
-        containerRect.left + conflict.endPx - container.scrollLeft + 8,
-        containerRect.left + 280,
-      ),
-      window.innerWidth - 390,
-    )
-
     return {
-      mode: 'fixed',
-      left,
-      bottom: Math.max(
-        0,
-        window.innerHeight - (masterRect?.bottom ?? window.innerHeight),
-      ),
+      mode: 'absolute',
+      top: 12,
     }
   }
 
@@ -1041,34 +1023,6 @@ function scrollToAiConflict(conflict: any) {
   })
 }
 
-async function handleNextAiAnalysis() {
-  goNextAiAnalysis()
-  await nextTick()
-
-  if (aiConflict.value) {
-    scrollToAiConflict(aiConflict.value)
-  }
-}
-
-async function handlePrevAiAnalysis() {
-  goPrevAiAnalysis()
-  await nextTick()
-
-  if (aiConflict.value) {
-    scrollToAiConflict(aiConflict.value)
-  }
-}
-
-const aiBubblePosition = computed<AiBubblePosition>(() => {
-  if (!aiConflict.value) {
-    return {
-      mode: 'absolute',
-      top: 12,
-    }
-  }
-
-  return getAiBubblePosition(aiConflict.value)
-})
 
 const PROJECT_GUIDE_STORAGE_KEY = 'studion-project-guide-seen'
 
@@ -1174,7 +1128,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
     <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
-      <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div 
+        class="relative flex-1 flex flex-col min-h-0 overflow-hidden"
+        :style="{ zoom: trackStore.workspaceZoom }"
+      >
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
@@ -1188,22 +1145,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
           <TimelineRuler />
         </div>
      
-        <AiConflictOverlay
-          v-if="aiConflict"
-          :conflict="aiConflict"
-          :bubble-position="aiBubblePosition"
-          :current-index="activeAiAnalysisCurrentIndex"
-          :total-count="aiAnalysisTotalCount"
-          :is-clipping-applied="isActiveClippingApplied"
-          :clipping-applied-info="activeClippingAppliedInfo"
-          @next="handleNextAiAnalysis"
-          @prev="handlePrevAiAnalysis"
-          @apply-clipping="handleApplyClippingIssue"
-          @dismiss-clipping="handleDismissClippingIssue"
-        />
+
      
         <!--  [세로 스크롤] -->
-        <div class="w-max min-w-full pb-4 flex-1">
+        <div class="w-max min-w-full pb-4 relative">
   <TrackList
     :hovered-measure="hoveredMeasure"
     :hovered-track-id="hoveredTrackId"
@@ -1212,7 +1157,21 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     @submit-inline-comment="handleSubmitInlineComment"
     @resolve-comment="handleResolveComment"
     @delete-comment="handleDeleteComment"
-  />
+  >
+    <template #overlays>
+      <AiConflictOverlay
+        v-for="conflict in aiAnalysisItems"
+        :key="conflict.id"
+        :conflict="conflict"
+        :bubble-position="getAiBubblePosition(conflict)"
+        :is-clipping-applied="checkIsClippingApplied(conflict)"
+        :clipping-applied-info="getClippingAppliedInfo(conflict)"
+        @open="setActiveAiAnalysis(conflict.id)"
+        @apply-clipping="handleApplyClippingIssue(conflict)"
+        @dismiss-clipping="handleDismissClippingIssue(conflict)"
+      />
+    </template>
+  </TrackList>
 </div>
   <DefaultTrackDropGuide
     v-if="shouldShowDefaultTrackGuide"
@@ -1221,7 +1180,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
   <div
   ref="masterTrackWrapperRef"
-  class="mt-auto shrink-0 sticky bottom-0 z-[70] w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
+  class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
 >
         <!-- 마스터 트랙 -->
           <TrackItem
@@ -1239,6 +1198,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
       </div>
       </div>
       <ProjectEqPanel
+        :style="{ zoom: trackStore.workspaceZoom }"
         :selected-track="selectedEqTrack"
         :ai-analyzing="aiAnalyzing"
         :ai-analyzed="shouldShowAiEqRevisionPanel"
@@ -1292,6 +1252,21 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         <button @click="isInvalidDropModalOpen = false" class="mt-4 w-full rounded-md bg-primary py-2 text-sm font-semibold text-black hover:bg-primary/80 transition-colors">
           확인
         </button>
+      </div>
+    </div>
+
+    <!-- AI 성공 메시지 모달 -->
+    <div v-if="aiSuccessMessage" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
+      <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
+        <div class="rounded-full bg-emerald-500/20 p-3">
+          <svg class="h-6 w-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <div class="text-center">
+          <h3 class="text-base font-semibold text-white">AI 분석 적용 완료</h3>
+          <p class="mt-2 text-sm text-gray-400">{{ aiSuccessMessage }}</p>
+        </div>
       </div>
     </div>
   </div>

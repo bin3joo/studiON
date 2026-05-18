@@ -150,6 +150,7 @@ export const useTrackStore = defineStore('track', () => {
     let cachedClientWidth = 0;
 
     const isAutoScrollActive = ref(true); // 수동 스크롤 시 자동 스크롤 일시 정지용
+    const workspaceZoom = ref(0.75); // 타임라인 워크스페이스 배율 (기본 90%)
 
     const setTimelineContainer = (el: HTMLElement | null) => {
         if (timelineContainer) {
@@ -629,12 +630,20 @@ export const useTrackStore = defineStore('track', () => {
     //화면에서 클립 길이나 재생바 위치를 px로 바꿀때 사용
     const pixelPerBar = computed(() => 120 * zoomlevel.value);
 
-    //전체 타임라인의 가로 픽셀 길이(총 마디 수 * 1마디 픽셀)
-    const totalTimelineWidth = computed(() => projectInfo.value.totalBarCount * pixelPerBar.value);
+    // 화면 너비(최대 4000px 기준)를 채우기 위해 필요한 최소 마디 수 계산
+    const displayBarCount = computed(() => {
+        const minRequiredBars = Math.ceil(4000 / pixelPerBar.value);
+        return Math.max(projectInfo.value.totalBarCount, minRequiredBars);
+    });
+
+    //전체 타임라인의 가로 픽셀 길이(화면에 표시할 마디 수 * 1마디 픽셀)
+    const totalTimelineWidth = computed(() => displayBarCount.value * pixelPerBar.value);
 
     //스크롤 축소 할때 숫자를 표시할 마디 간격 계산 (1,4,8)
     const barNumberStep = computed(() => {
-        if (zoomlevel.value <= 0.5) return 8; //많이 축소할때 1, 9 ,17 ...
+        if (zoomlevel.value <= 0.15) return 32; // 매우 많이 축소할때 1, 33, 65 ... (100마디 보기 대응)
+        if (zoomlevel.value <= 0.3) return 16;  // 더 축소할때 1, 17, 33 ...
+        if (zoomlevel.value <= 0.5) return 8;   // 많이 축소할때 1, 9, 17 ...
         if (zoomlevel.value < 1.0) return 4; //약간 축소할때 1, 5, 9 ...
         return 1; //기본 1칸씩
     })
@@ -725,12 +734,12 @@ export const useTrackStore = defineStore('track', () => {
         trackAnalyzers.delete(trackId)
     }
 
-    function createTrackEqNodes(track: TrackUIState): TrackEqNode[] {
+    function createTrackEqNodes(track: TrackUIState, customBands?: TrackEqBandState[]): TrackEqNode[] {
         disposeTrackEqNodes(track.trackId)
 
-        const eq = getTrackEq(track)
+        const bands = customBands ?? getTrackEq(track).bands;
 
-        const nodes = eq.bands.map(band => ({
+        const nodes = bands.map(band => ({
             bandOrder: band.bandOrder,
             filter: createToneFilterFromBand(band),
         }))
@@ -786,7 +795,7 @@ export const useTrackStore = defineStore('track', () => {
         })
     }
 
-    function rebuildTrackEqChain(trackId: number) {
+    function rebuildTrackEqChain(trackId: number, customBands?: TrackEqBandState[]) {
         const track = trackList.value.find(track => track.trackId === trackId)
         const volume = trackVolumes.get(trackId)
 
@@ -794,7 +803,7 @@ export const useTrackStore = defineStore('track', () => {
 
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
-        const eqNodes = createTrackEqNodes(track)
+        const eqNodes = createTrackEqNodes(track, customBands)
         const analyzer = new Tone.FFT(2048)
 
         trackAnalyzers.set(trackId, analyzer)
@@ -2485,7 +2494,7 @@ export const useTrackStore = defineStore('track', () => {
         const zoomStep = 0.1; //한 번 휠을 굴릴 때 변하는 배율(10%)
 
         if (deltaY > 0) {
-            zoomlevel.value = Math.max(0.5, zoomlevel.value - zoomStep);
+            zoomlevel.value = Math.max(0.1, zoomlevel.value - zoomStep);
         } else {
             zoomlevel.value = Math.min(3, zoomlevel.value + zoomStep);
         }
@@ -2958,6 +2967,7 @@ export const useTrackStore = defineStore('track', () => {
         pixelPerBar,
         totalTimelineWidth,
         subDivision,
+        displayBarCount,
         barNumberStep,
         manualLatencyOffset,
 
@@ -3033,5 +3043,7 @@ export const useTrackStore = defineStore('track', () => {
         updateTrackEqBand,
         removeTrackEqBand,
         getTrackSpectrum,
+        workspaceZoom,
+        rebuildTrackEqChain
     };
 });

@@ -107,6 +107,19 @@ public class S3StorageService {
         return DownloadPresignedUrlResult.of(downloadUrl, expiresAt);
     }
 
+    public void deleteObject(String objectKey) {
+        try {
+            DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(objectKey)
+                    .build();
+
+            s3Client.deleteObject(deleteObjectRequest);
+        } catch (S3Exception exception) {
+            throw new BusinessException(ErrorCode.AUDIO_DELETE_FAILED);
+        }
+    }
+
     // 한글 파일명도 S3 presigned download URL에서 안전하게 처리되도록 Content-Disposition 값을 생성하는 메서드
     private String buildDownloadContentDisposition(String downloadFileName) {
         String encodedFileName = URLEncoder.encode(downloadFileName, StandardCharsets.UTF_8)

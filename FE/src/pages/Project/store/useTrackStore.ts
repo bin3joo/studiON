@@ -37,7 +37,6 @@ export const useTrackStore = defineStore('track', () => {
 
     const trackEqNodes = new Map<number, TrackEqNode[]>()
     const trackAnalyzers = new Map<number, Tone.FFT>()
-    const trackPitchShifts = new Map<number, Tone.PitchShift>() // 트랙별 피치 시프트 노드 (키 변경 시 반음 단위 조정)
 
     const MAX_EQ_BANDS = 5
 
@@ -346,14 +345,6 @@ export const useTrackStore = defineStore('track', () => {
     const changeKey = (rootNote: string, mode: string) => {
         const oldNote = projectInfo.value.rootNote;
         if (oldNote === rootNote && projectInfo.value.mode === mode) return;
-
-        // 피치 시프트 적용: 이전 키에서 새 키까지의 반음 차이만큼 조정
-        const semitones = getSemitoneDiff(oldNote, rootNote);
-        if (semitones !== 0) {
-            trackPitchShifts.forEach(ps => {
-                ps.pitch += semitones;
-            });
-        }
 
         // 로컬 즉시 적용 (Optimistic UI)
         projectInfo.value.rootNote = rootNote;
@@ -799,17 +790,10 @@ export const useTrackStore = defineStore('track', () => {
 
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
-        // 기존 PitchShift 노드 해제
-        const oldPs = trackPitchShifts.get(trackId);
-        if (oldPs) { oldPs.dispose(); trackPitchShifts.delete(trackId); }
-
         const eqNodes = createTrackEqNodes(track)
         const analyzer = new Tone.FFT(2048)
-        // 피치 시프트 노드 생성 (Analyzer → PitchShift → Volume)
-        const pitchShift = new Tone.PitchShift({ pitch: 0, windowSize: 0.1 });
 
         trackAnalyzers.set(trackId, analyzer)
-        trackPitchShifts.set(trackId, pitchShift)
 
         if (eqNodes.length > 0) {
             for (let i = 0; i < eqNodes.length - 1; i += 1) {
@@ -817,12 +801,10 @@ export const useTrackStore = defineStore('track', () => {
             }
 
             eqNodes[eqNodes.length - 1].filter.connect(analyzer)
-            analyzer.connect(pitchShift)
-            pitchShift.connect(volume)
+            analyzer.connect(volume)
         }
         else {
-            analyzer.connect(pitchShift)
-            pitchShift.connect(volume)
+            analyzer.connect(volume)
         }
 
         reconnectTrackPlayers(trackId)
@@ -840,9 +822,6 @@ export const useTrackStore = defineStore('track', () => {
     function disposeTrackAudioChain(trackId: number) {
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
-        // PitchShift 노드도 함께 해제
-        const ps = trackPitchShifts.get(trackId);
-        if (ps) { ps.dispose(); trackPitchShifts.delete(trackId); }
     }
 
     // ==========================================
@@ -1013,14 +992,6 @@ export const useTrackStore = defineStore('track', () => {
 
         // 이미 같은 값이면 (내가 보낸 요청의 브로드캐스트 응답) 스킵
         if (projectInfo.value.rootNote === newNote && projectInfo.value.mode === newMode) return;
-
-        // 피치 시프트 적용: 현재 로컬 키와 새 키 사이의 반음 차이만큼 조정
-        const semitones = getSemitoneDiff(projectInfo.value.rootNote, newNote);
-        if (semitones !== 0) {
-            trackPitchShifts.forEach(ps => {
-                ps.pitch += semitones;
-            });
-        }
 
         // 다른 사용자가 변경한 키를 로컬에 적용
         projectInfo.value.rootNote = newNote;
@@ -2570,10 +2541,6 @@ export const useTrackStore = defineStore('track', () => {
         trackEqNodes.clear();
         trackAnalyzers.forEach(analyzer => analyzer.dispose());
         trackAnalyzers.clear();
-
-        // 피치 시프트 노드 정리
-        trackPitchShifts.forEach(ps => ps.dispose());
-        trackPitchShifts.clear();
 
        // console.log("========== [Audio Engine Cleanup End] ==========");
     };

@@ -13,6 +13,7 @@ public interface AudioMetadataRepository extends JpaRepository<AudioMetadata, In
         SELECT COALESCE(SUM(am.sizeBytes), 0)
         FROM AudioMetadata am
         WHERE am.createdBy = :userId
+          AND am.deletedAt IS NULL
     """)
     Long sumSizeBytesByCreatedBy(@Param("userId") Integer userId);
 }

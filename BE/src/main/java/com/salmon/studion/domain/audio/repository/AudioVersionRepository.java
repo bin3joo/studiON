@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface AudioVersionRepository extends JpaRepository<ProjectMasterAudioVersion, Integer> {
@@ -28,12 +29,23 @@ public interface AudioVersionRepository extends JpaRepository<ProjectMasterAudio
     @Query("""
             SELECT av
             FROM ProjectMasterAudioVersion av
-            JOIN FETCH av.audioMetadata
+            LEFT JOIN FETCH av.audioMetadata
             WHERE av.id = :versionId
               AND av.project.id = :projectId
             """)
-    java.util.Optional<ProjectMasterAudioVersion> findByIdAndProjectIdWithAudioMetadata(
+    Optional<ProjectMasterAudioVersion> findByIdAndProjectIdWithAudioMetadata(
             @Param("versionId") Integer versionId,
             @Param("projectId") Integer projectId
+    );
+
+    @Query("""
+            SELECT av
+            FROM ProjectMasterAudioVersion av
+            LEFT JOIN FETCH av.audioMetadata
+            JOIN FETCH av.project
+            WHERE av.id = :versionId
+            """)
+    Optional<ProjectMasterAudioVersion> findByIdWithProjectAndAudioMetadata(
+            @Param("versionId") Integer versionId
     );
 }

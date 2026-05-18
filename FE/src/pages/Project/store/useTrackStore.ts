@@ -222,6 +222,7 @@ export const useTrackStore = defineStore('track', () => {
     });
 
     const projectMembers = ref<{ userId: number; nickname: string; profileImageUrl: string | null; }[]>([]);
+    const currentTotalSizeBytes = ref<number>(0);
 
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
@@ -2846,6 +2847,7 @@ export const useTrackStore = defineStore('track', () => {
                     totalBarCount: Math.max(data.totalBarCount ?? 0, MIN_TOTAL_BAR_COUNT),
                 }
                 projectMembers.value = data.members || [];
+                currentTotalSizeBytes.value = data.currentTotalSizeBytes || 0;
                 bpm.value = data.tempo;
 
                 const eqBandsByTrackId = new Map<number, TrackEqBandState[]>()
@@ -3040,6 +3042,7 @@ export const useTrackStore = defineStore('track', () => {
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,
         projectMembers,
+        currentTotalSizeBytes,
         fetchAndCacheAudioBuffer,
         isAutoScrollActive,
 

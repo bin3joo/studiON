@@ -46,6 +46,7 @@ export interface ProjectDetailResponse {
       nickname: string;
       profileImageUrl: string | null;
     }[];
+    currentTotalSizeBytes: number;
   }
 }
 

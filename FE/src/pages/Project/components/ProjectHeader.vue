@@ -122,6 +122,18 @@ const projectLengthFormatted = computed(() => {
 
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 })
+
+function formatAudioSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${Math.round(mb)} MB`
+}
+
+const isNearLimit = computed(() => {
+  const MAX_STORAGE_BYTES = 50 * 1024 * 1024
+  return trackStore.currentTotalSizeBytes > MAX_STORAGE_BYTES * 0.9
+})
 </script>
 
 <template>
@@ -190,10 +202,19 @@ const projectLengthFormatted = computed(() => {
     <!-- 가운데 -->
     <div class="hidden items-center gap-2 lg:flex">
       
+      <!-- 오디오 사용량 -->
+      <div class="mr-2 flex items-center gap-1.5 rounded-lg bg-secondary/30 px-3 py-1.5 text-xs font-mono-tight text-foreground border border-border/50" title="최대 50MB까지 업로드 가능합니다.">
+        <span class="material-symbols-outlined text-[#FF3DCB] text-[13px] leading-none flex items-center" style="font-variation-settings: 'FILL' 1;">sd_card</span>
+        <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">사용량 :</span>
+        <span class="font-semibold mt-0.5" :class="isNearLimit ? 'text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.5)]' : 'text-primary/90'">
+          {{ formatAudioSize(trackStore.currentTotalSizeBytes) }} <span class="text-muted-foreground font-normal text-[10px]">/ 50 MB</span>
+        </span>
+      </div>
+
       <!-- 새로 추가된 프로젝트 재생 시간 (대시보드와 동일한 Length) -->
-      <div class="mr-2 flex items-center gap-2 rounded-lg bg-secondary/30 px-3 py-2 text-xs font-mono-tight text-foreground border border-border/50">
-        <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">총 재생 시간 :</span>
-        <span class="font-semibold text-primary/90">{{ projectLengthFormatted }}</span>
+      <div class="mr-2 flex items-center gap-1.5 rounded-lg bg-secondary/30 px-3 py-1.5 text-xs font-mono-tight text-foreground border border-border/50">
+        <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">총 재생 시간 :</span>
+        <span class="font-semibold text-primary/90 mt-0.5">{{ projectLengthFormatted }}</span>
       </div>
 
       <button

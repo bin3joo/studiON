@@ -550,7 +550,7 @@ public class TrackService {
     public TrackAddResponse addDefaultTrack(Integer projectId, Integer userId) {
         TrackAddRequest request = new TrackAddRequest();
         request.setProjectId(projectId);
-        request.setName("track 1");
+        request.setName("트랙 1");
         request.setType("audio");
 
         return addTrack(request, userId);

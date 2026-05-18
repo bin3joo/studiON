@@ -5,6 +5,7 @@ import com.salmon.studion.domain.audio.dto.response.AudioVersionCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionDeleteResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionDownloadUrlResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionListResponse;
+import com.salmon.studion.domain.audio.render.AudioVersionRenderWorker;
 import com.salmon.studion.domain.audio.service.AudioVersionService;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
 import lombok.RequiredArgsConstructor;
@@ -16,9 +17,14 @@ public class AudioVersionFacade {
 
     private final ProjectMemberService projectMemberService;
     private final AudioVersionService audioVersionService;
+    private final AudioVersionRenderWorker audioVersionRenderWorker;
 
     public AudioVersionCreateResponse createAudioVersion(Integer projectId, AudioVersionCreateRequest request, Integer userId) {
-        return null;
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        AudioVersionCreateResponse response = audioVersionService.createAudioVersion(projectId, request, userId);
+        audioVersionRenderWorker.renderAsync(response.getVersionId());
+        return response;
     }
 
     public AudioVersionListResponse getAudioVersionList(Integer projectId, Integer userId) {
@@ -28,7 +34,9 @@ public class AudioVersionFacade {
     }
 
     public AudioVersionDownloadUrlResponse getAudioVersionDownloadUrl(Integer projectId, Integer versionId, Integer userId) {
-        return null;
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        return audioVersionService.getAudioVersionDownloadUrl(projectId, versionId);
     }
 
     public AudioVersionDeleteResponse deleteAudioVersion(Integer projectId, Integer versionId, Integer userId) {

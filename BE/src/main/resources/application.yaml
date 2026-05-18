@@ -89,6 +89,9 @@ app:
     # TODO: 유저테스트 전용 임시 추가 (추후 삭제 필요 - 현재 100MB)
     temp-user-total-limit-bytes: ${TEMP_USER_TOTAL_AUDIO_LIMIT_BYTES:104857600}
 
+  audio-version:
+    ffmpeg-binary: ${AUDIO_VERSION_FFMPEG_BINARY:ffmpeg}
+
 ai:
   fastapi:
     base-url: ${FASTAPI_URL:http://localhost:8000/api/v1}

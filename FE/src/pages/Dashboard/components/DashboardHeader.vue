@@ -21,8 +21,8 @@ const navItems = [
   { label: '내 프로젝트', to: '/dashboard', active: true },
 ]
 
-function handleLogout() {
-  authStore.clearAccessToken()
+async function handleLogout() {
+  await authStore.logout()
   router.push('/onboarding')
 }
 </script>

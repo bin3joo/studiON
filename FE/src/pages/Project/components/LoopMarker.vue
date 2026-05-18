@@ -32,8 +32,8 @@ const updateLoopPosition = () => {
   const dx = ((currentClientX - dragState.value.startX) + (currentScrollLeft - dragState.value.startScrollLeft)) / trackStore.workspaceZoom;
   const dBar = dx / trackStore.pixelPerBar;
   
-  // 1박자 단위 스냅
-  const snapRes = 1 / (trackStore.projectInfo.timeSigNumerator || 4);
+  // 현재 설정된 그리드(SubDivision) 단위 스냅
+  const snapRes = 1 / (trackStore.subDivision || 4);
   
   if (dragState.value.type === 'start') {
     let newBar = dragState.value.initialStartBar + dBar;

@@ -2,6 +2,7 @@ package com.salmon.studion.domain.audio.repository;
 
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -16,4 +17,13 @@ public interface AudioMetadataRepository extends JpaRepository<AudioMetadata, In
           AND am.deletedAt IS NULL
     """)
     Long sumSizeBytesByCreatedBy(@Param("userId") Integer userId);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+        UPDATE AudioMetadata am
+        SET am.deletedAt = CURRENT_TIMESTAMP
+        WHERE am.id = :audioMetadataId
+          AND am.deletedAt IS NULL
+    """)
+    int softDeleteByIdIfActive(@Param("audioMetadataId") Integer audioMetadataId);
 }

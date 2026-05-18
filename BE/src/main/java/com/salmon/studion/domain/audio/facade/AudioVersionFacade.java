@@ -34,7 +34,9 @@ public class AudioVersionFacade {
     }
 
     public AudioVersionDownloadUrlResponse getAudioVersionDownloadUrl(Integer projectId, Integer versionId, Integer userId) {
-        return null;
+        projectMemberService.validateProjectMember(projectId, userId);
+
+        return audioVersionService.getAudioVersionDownloadUrl(projectId, versionId);
     }
 
     public AudioVersionDeleteResponse deleteAudioVersion(Integer projectId, Integer versionId, Integer userId) {

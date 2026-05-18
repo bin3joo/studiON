@@ -29,6 +29,7 @@ public class ProjectDetailResponse {
     private List<TrackResponse> tracks;
     private List<CommentsGetResponse.CommentDto> comments;
     private Long currentTotalSizeBytes;
+    private List<MemberResponse> members;
 
     public record MasterTrackResponse (
             Integer masterTrackId,
@@ -68,12 +69,19 @@ public class ProjectDetailResponse {
             Integer durationMs
     ) {}
 
+    public record MemberResponse (
+            Integer userId,
+            String nickname,
+            String profileImageUrl
+    ) {}
+
     public static ProjectDetailResponse of(
             Project project,
             MasterTrackResponse masterTrack,
             List<TrackResponse> tracks,
             List<CommentsGetResponse.CommentDto> comments,
-            Long currentTotalSizeBytes
+            Long currentTotalSizeBytes,
+            List<MemberResponse> members
     ) {
         return new ProjectDetailResponse(
                 project.getId(),
@@ -88,7 +96,8 @@ public class ProjectDetailResponse {
                 masterTrack,
                 tracks,
                 comments,
-                currentTotalSizeBytes
+                currentTotalSizeBytes,
+                members
         );
     }
 }

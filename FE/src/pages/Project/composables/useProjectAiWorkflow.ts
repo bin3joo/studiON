@@ -68,10 +68,13 @@ export function useProjectAiWorkflow(projectId: number) {
   const aiAnalyzing = ref(false)
 
   const aiAnalysisItems = ref<AiAnalysisItem[]>([])
-  const activeAiAnalysisIndex = ref(0)
+  const activeAiAnalysisId = ref<string | number | null>(null)
+  const aiSuccessMessage = ref<string | null>(null)
+
+
 
   const activeAiAnalysis = computed(() => {
-    return aiAnalysisItems.value[activeAiAnalysisIndex.value] ?? null
+    return aiAnalysisItems.value.find(item => item.id === activeAiAnalysisId.value) ?? null
   })
 
   // 기존 ProjectPage / Overlay 호환용
@@ -781,7 +784,7 @@ function hasAiEqSuggestion(statusResult: any) {
   try {
     aiAnalyzing.value = true
     aiAnalysisItems.value = []
-    activeAiAnalysisIndex.value = 0
+    activeAiAnalysisId.value = null
     aiAfterBands.value = []
     currentAiJobId.value = null
     selectedAiRegionId.value = null
@@ -866,7 +869,7 @@ if (mergedItems.length > 0) {
   return
 }
 
-activeAiAnalysisIndex.value = 0
+activeAiAnalysisId.value = mergedItems.length > 0 ? mergedItems[0].id : null
 
 syncSelectedRegionIdFromActiveItem()
 applyActiveAiAnalysisSelection()
@@ -947,6 +950,15 @@ function handleApplyAiEq() {
     item.id,
   ])
 
+  // 자동 삭제 및 모달 팝업
+  aiSuccessMessage.value = 'AI EQ 설정이 성공적으로 적용되었습니다.'
+  aiAnalysisItems.value = aiAnalysisItems.value.filter(i => i.id !== item.id)
+  if (activeAiAnalysisId.value === item.id) activeAiAnalysisId.value = null
+
+  setTimeout(() => {
+    aiSuccessMessage.value = null
+  }, 2500)
+
   const appliedTrack = trackStore.trackList.find(track =>
     Number(track.trackId) === Number(targetTrackId)
   )
@@ -960,7 +972,7 @@ function handleApplyAiEq() {
 
 function handleCancelAiEq() {
   aiAnalysisItems.value = []
-  activeAiAnalysisIndex.value = 0
+  activeAiAnalysisId.value = null
   selectedAiRegionId.value = null
   currentAiJobId.value = null
   aiBeforeBands.value = []
@@ -980,9 +992,7 @@ function isActionableClippingItem(item: AiAnalysisItem) {
   )
 }
 
-function getActiveClippingTrimAction(): AiSuggestionAction | null {
-  const item = activeAiAnalysis.value
-
+function getActiveClippingTrimAction(item: AiAnalysisItem): AiSuggestionAction | null {
   if (!item || item.kind !== 'CLIPPING') return null
 
   const action = item.actions.find(action =>
@@ -1002,9 +1012,8 @@ function getActiveClippingTrimAction(): AiSuggestionAction | null {
   }
 }
 
-async function handleApplyClippingIssue() {
+async function handleApplyClippingIssue(item: AiAnalysisItem) {
   if (aiAnalyzing.value) return
-  const item = activeAiAnalysis.value
 
   if (!item || item.kind !== 'CLIPPING') return
 
@@ -1013,7 +1022,7 @@ async function handleApplyClippingIssue() {
     return
   }
 
-  const action = getActiveClippingTrimAction()
+  const action = getActiveClippingTrimAction(item)
 
   if (!action || action.recommendedReductionDb == null) {
     alert('클리핑 적용값이 없습니다.')
@@ -1053,16 +1062,25 @@ async function handleApplyClippingIssue() {
     ])
 
     appliedClippingInfoMap.value = new Map([
-  ...appliedClippingInfoMap.value,
-  [
-    item.id,
-    {
-      reductionDb: Math.abs(recommendedReductionDb),
-      inputGainDb: savedLimiter.inputGainDb,
-      ceilingDbfs: savedLimiter.ceilingDbfs,
-    },
-  ],
-])
+      ...appliedClippingInfoMap.value,
+      [
+        item.id,
+        {
+          reductionDb: Math.abs(recommendedReductionDb),
+          inputGainDb: savedLimiter.inputGainDb,
+          ceilingDbfs: savedLimiter.ceilingDbfs,
+        },
+      ],
+    ])
+
+    // 자동 삭제 및 모달 팝업
+    aiSuccessMessage.value = '마스터 리미터에 클리핑 감소안이 반영되었습니다.'
+    aiAnalysisItems.value = aiAnalysisItems.value.filter(i => i.id !== item.id)
+    if (activeAiAnalysisId.value === item.id) activeAiAnalysisId.value = null
+
+    setTimeout(() => {
+      aiSuccessMessage.value = null
+    }, 2500)
 
    // goNextAiAnalysis()
   } catch (error: any) {
@@ -1086,14 +1104,12 @@ async function handleApplyClippingIssue() {
   }
 }
 
-function handleDismissClippingIssue() {
-  const item = activeAiAnalysis.value
-
-  if (import.meta.env.DEV) {
-   // console.debug('[AI clipping dismiss]', item)
+function handleDismissClippingIssue(item: AiAnalysisItem) {
+  aiAnalysisItems.value = aiAnalysisItems.value.filter(i => i.id !== item.id)
+  
+  if (activeAiAnalysisId.value === item.id) {
+    activeAiAnalysisId.value = null
   }
-
-  goNextAiAnalysis()
 }
 
 function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
@@ -1234,63 +1250,23 @@ function resetAiEqSuggestionOnNavigation() {
   aiAfterBands.value = []
 }
 
-function goNextAiAnalysis() {
-  if (aiAnalysisItems.value.length === 0) return
-
-  activeAiAnalysisIndex.value =
-    (activeAiAnalysisIndex.value + 1) % aiAnalysisItems.value.length
-
+function setActiveAiAnalysis(id: string | number) {
+  activeAiAnalysisId.value = id
   syncSelectedRegionIdFromActiveItem()
   resetAiEqSuggestionOnNavigation()
   applyActiveAiAnalysisSelection()
   syncAiPreviewBandsFromActiveItem()
 }
 
-function goPrevAiAnalysis() {
-  if (aiAnalysisItems.value.length === 0) return
-
-  activeAiAnalysisIndex.value =
-    activeAiAnalysisIndex.value === 0
-      ? aiAnalysisItems.value.length - 1
-      : activeAiAnalysisIndex.value - 1
-
-  syncSelectedRegionIdFromActiveItem()
-  resetAiEqSuggestionOnNavigation()
-  applyActiveAiAnalysisSelection()
-  syncAiPreviewBandsFromActiveItem()
-}
-
-const activeAiAnalysisCurrentIndex = computed(() => {
-  return activeAiAnalysisIndex.value
-})
-
-const aiAnalysisTotalCount = computed(() => {
-  return aiAnalysisItems.value.length
-})
-
-const shouldShowAiEqRevisionPanel = computed(() => {
-  const item = activeAiAnalysis.value
-
-  if (!item) return false
-
-  return item.uiMode === 'eq_ai' || item.markers.length > 0
-})
-
-const activeClippingAppliedInfo = computed(() => {
-  const item = activeAiAnalysis.value
-
+function getClippingAppliedInfo(item: AiAnalysisItem) {
   if (!item || item.kind !== 'CLIPPING') return null
-
   return appliedClippingInfoMap.value.get(item.id) ?? null
-})
+}
 
-const isActiveClippingApplied = computed(() => {
-  const item = activeAiAnalysis.value
-
+function checkIsClippingApplied(item: AiAnalysisItem) {
   if (!item || item.kind !== 'CLIPPING') return false
-
   return appliedClippingIssueIds.value.has(item.id)
-})
+}
 
 const activeAiMarkers = computed(() => {
   return activeAiAnalysis.value?.markers ?? []
@@ -1340,6 +1316,14 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     : null
 }
 
+  const shouldShowAiEqRevisionPanel = computed(() => {
+    const item = activeAiAnalysis.value
+
+    if (!item) return false
+
+    return item.uiMode === 'eq_ai' || item.markers.length > 0
+  })
+
   return {
     activeAiMarkers,
     aiAnalyzing,
@@ -1353,16 +1337,15 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     handleRequestAiEqRevision,
     handleApplyClippingIssue,
     handleDismissClippingIssue,
+    setActiveAiAnalysis,
     aiAnalysisItems,
+    activeAiAnalysisId,
     activeAiAnalysis,
-    activeAiAnalysisCurrentIndex,
-    aiAnalysisTotalCount,
     shouldShowAiEqRevisionPanel,
-    goNextAiAnalysis,
-    goPrevAiAnalysis,
-    isActiveClippingApplied,
-    activeClippingAppliedInfo,
+    checkIsClippingApplied,
+    getClippingAppliedInfo,
     activeAiUiMode,
     isActiveAiMarkerOnly,
+    aiSuccessMessage,
   }
 }

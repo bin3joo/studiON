@@ -32,19 +32,13 @@ function handleLoginClick() {
     <section class="flex-1 w-full pt-[64px] relative bg-[#131313]">
       <div class="relative min-h-[870px] w-full flex flex-col items-center justify-start pt-6 md:pt-8 px-4 md:px-10 overflow-hidden pb-32">
         <div class="relative z-10 max-w-4xl mx-auto flex flex-col items-center text-center space-y-8">
-          <!-- Eyebrow -->
-          <div class="inline-flex items-center px-3 py-1 rounded-full border border-[#FF3DCB]/30 bg-[#FF3DCB]/10 font-label-sm text-[#FF3DCB] tracking-widest backdrop-blur-md">
-            <span class="material-symbols-outlined text-[14px] mr-2" style="font-variation-settings: 'FILL' 1;">graphic_eq</span>
-            NEXT-GEN WEB DAW
-          </div>
-
           <!-- Main Headlines -->
           <h1 class="font-display-lg text-[#e5e2e1] drop-shadow-2xl md:text-[64px]">
             브라우저에서 만나는<br/>
             <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#FF3DCB] to-[#e3b5ff]">무한한 음악의 세계</span>
           </h1>
 
-          <h2 class="font-headline-md text-[#e5bcc5] max-w-2xl">
+          <h2 class="font-headline-md text-gray-400 max-w-2xl">
             실시간으로 연결되는 우리만의 스튜디오
           </h2>
         </div>
@@ -67,10 +61,14 @@ function handleLoginClick() {
               <span style="display: none;">Google 계정으로 로그인</span>
             </div>
           </button>
-          <div class="mt-6 font-label-sm text-[#e5bcc5]/70 text-center flex flex-col gap-1.5 bg-[#1c1b1b]/40 border border-white/5 p-4 rounded-xl backdrop-blur-sm">
-            <p>+) 파일 용량은 계정 당 100MB, 1회 업로드 시 최대 50MB입니다.</p>
-            <p>+) 한 프로젝트에 최대 참여 가능 인원 수는 6명입니다.</p>
-            <p>+) 그 외에 오디오 트랙만 생성 가능 등의 일부 제한이 있습니다. 양해 부탁드립니다!</p>
+          <div class="mt-8 font-body-md text-gray-300 text-center flex flex-col gap-2.5 bg-[#1c1b1b]/60 border border-white/10 p-6 rounded-2xl backdrop-blur-md max-w-lg shadow-2xl">
+            <div class="flex items-center justify-center gap-2 mb-2">
+              <span class="material-symbols-outlined text-[20px] text-[#00dce6]" style="font-variation-settings: 'FILL' 1;">info</span>
+              <span class="text-white font-bold text-[15px]">베타 서비스 이용 안내</span>
+            </div>
+            <p class="text-[14px] leading-relaxed tracking-wide">계정 당 총 <strong class="text-[#00dce6]">100MB</strong>, 1회 최대 <strong class="text-[#00dce6]">50MB</strong>의 오디오를 업로드할 수 있습니다.</p>
+            <p class="text-[14px] leading-relaxed tracking-wide">원활한 동기화를 위해 프로젝트당 최대 <strong class="text-[#00dce6]">6명</strong>까지 동시 참여를 권장합니다.</p>
+            <p class="text-[13px] leading-relaxed text-gray-500 mt-1">현재 베타 버전은 오디오 트랙 생성 위주로 지원되며, 더 많은 기능이 곧 추가될 예정입니다.</p>
           </div>
         </div>
 
@@ -95,9 +93,8 @@ function handleLoginClick() {
               </div>
               <div class="relative z-10 flex-1">
                 <h3 class="font-headline-md text-[20px] text-[#e5e2e1] mb-3">실시간 동시 편집</h3>
-                <p class="font-body-md text-[15px] text-[#e5bcc5]">
+                <p class="font-body-md text-[15px] text-gray-400 leading-relaxed">
                   팀원들과 함께 동일한 프로젝트에 접속하여 딜레이 없는 실시간 공동 작업을 경험하세요. 커서 위치부터 파라미터 변경까지
-                  <br>
                   즉각적으로 동기화됩니다.
                 </p>
               </div>
@@ -111,12 +108,9 @@ function handleLoginClick() {
               </div>
               <div class="relative z-10 flex-1">
                 <h3 class="font-headline-md text-[20px] text-[#e5e2e1] mb-3">별도 설치 없는 웹 기반 DAW</h3>
-                <p class="font-body-md text-[15px] text-[#e5bcc5]">
+                <p class="font-body-md text-[15px] text-gray-400 leading-relaxed">
                   무거운 설치 파일이나 복잡한 설정은 그만. 
-                  <br>
-                  인터넷이 연결된 브라우저만 있다면 
-                  <br>
-                  어디서나 스튜디오 환경이 펼쳐집니다.
+                  인터넷이 연결된 브라우저만 있다면 어디서나 스튜디오 환경이 펼쳐집니다.
                 </p>
               </div>
             </div>
@@ -129,7 +123,7 @@ function handleLoginClick() {
               </div>
               <div class="relative z-10 flex-1">
                 <h3 class="font-headline-md text-[20px] text-[#e5e2e1] mb-3"> AI 분석을 통한 오디오 믹싱</h3>
-                <p class="font-body-md text-[15px] text-[#e5bcc5]">
+                <p class="font-body-md text-[15px] text-gray-400 leading-relaxed">
                   AI가 주파수 충돌 구간을 자동으로 분석하여 작곡에만 집중할 수 있도록 도와드립니다.
                 </p>
               </div>

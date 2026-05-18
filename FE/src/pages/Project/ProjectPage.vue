@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, onUnmounted, nextTick, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
@@ -674,6 +674,7 @@ function handleSubmitInlineComment(payload: {
   measure: number
   content: string
   parentCommentId?: number | null
+  mentionedUserIds: number[]
 }) {
   const trimmed = payload.content.trim()
 
@@ -693,7 +694,7 @@ function handleSubmitInlineComment(payload: {
     parentCommentId: payload.parentCommentId || null,
     content: trimmed,
     location: payload.measure,
-    mentionedUserIds: [],
+    mentionedUserIds: payload.mentionedUserIds || [],
   })
 
   trackEvent('comment_created', {
@@ -709,7 +710,7 @@ function handlePanelResolveComment(commentId: number) {
   })
 }
 
-function handlePanelAddReply(parentCommentId: number, content: string) {
+function handlePanelAddReply(parentCommentId: number, content: string, mentionedUserIds: number[]) {
   const parent = commentStore.comments.find(c => c.commentId === parentCommentId);
   if (!parent) return;
 
@@ -718,15 +719,14 @@ function handlePanelAddReply(parentCommentId: number, content: string) {
     parentCommentId,
     content: content.trim(),
     location: parent.location,
-    mentionedUserIds: [],
+    mentionedUserIds: mentionedUserIds || [],
   })
 }
 
 const {
   aiAnalyzing,
-  aiConflict,
-  activeAiAnalysisCurrentIndex,
-  aiAnalysisTotalCount,
+  activeAiAnalysisId,
+  aiAnalysisItems,
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
@@ -739,11 +739,15 @@ const {
   handleRequestAiEqRevision,
   handleApplyClippingIssue,
   handleDismissClippingIssue,
-  goNextAiAnalysis,
-  goPrevAiAnalysis,
-  isActiveClippingApplied,
-  activeClippingAppliedInfo,
+  setActiveAiAnalysis,
+  checkIsClippingApplied,
+  getClippingAppliedInfo,
+  aiSuccessMessage,
 } = useProjectAiWorkflow(Number(projectId))
+
+provide('aiAnalysisItems', aiAnalysisItems)
+provide('activeAiAnalysisId', activeAiAnalysisId)
+provide('aiAnalyzing', aiAnalyzing)
 
 function handleAddEqBand(payload: {
   frequencyHz: number
@@ -933,16 +937,10 @@ function handleBackgroundPointerDown(e: PointerEvent) {
   trackStore.deselectAll();
 }
 
-type AiBubblePosition =
-  | {
-      mode: 'absolute'
-      top: number
-    }
-  | {
-      mode: 'fixed'
-      left: number
-      bottom: number
-    }
+type AiBubblePosition = {
+  mode: 'absolute'
+  top: number
+}
 
 function getElementContentTop(container: HTMLElement, targetEl: HTMLElement) {
   const containerRect = container.getBoundingClientRect()
@@ -962,24 +960,9 @@ function getAiBubblePosition(conflict: any): AiBubblePosition {
   }
 
   if (conflict.kind === 'CLIPPING') {
-    const containerRect = container.getBoundingClientRect()
-    const masterRect = masterTrackWrapperRef.value?.getBoundingClientRect()
-
-    const left = Math.min(
-      Math.max(
-        containerRect.left + conflict.endPx - container.scrollLeft + 8,
-        containerRect.left + 280,
-      ),
-      window.innerWidth - 390,
-    )
-
     return {
-      mode: 'fixed',
-      left,
-      bottom: Math.max(
-        0,
-        window.innerHeight - (masterRect?.bottom ?? window.innerHeight),
-      ),
+      mode: 'absolute',
+      top: 12,
     }
   }
 
@@ -1041,34 +1024,6 @@ function scrollToAiConflict(conflict: any) {
   })
 }
 
-async function handleNextAiAnalysis() {
-  goNextAiAnalysis()
-  await nextTick()
-
-  if (aiConflict.value) {
-    scrollToAiConflict(aiConflict.value)
-  }
-}
-
-async function handlePrevAiAnalysis() {
-  goPrevAiAnalysis()
-  await nextTick()
-
-  if (aiConflict.value) {
-    scrollToAiConflict(aiConflict.value)
-  }
-}
-
-const aiBubblePosition = computed<AiBubblePosition>(() => {
-  if (!aiConflict.value) {
-    return {
-      mode: 'absolute',
-      top: 12,
-    }
-  }
-
-  return getAiBubblePosition(aiConflict.value)
-})
 
 const PROJECT_GUIDE_STORAGE_KEY = 'studion-project-guide-seen'
 
@@ -1174,7 +1129,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
     <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
-      <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div 
+        class="relative flex-1 flex flex-col min-h-0 overflow-hidden"
+        :style="{ zoom: trackStore.workspaceZoom }"
+      >
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
@@ -1188,22 +1146,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
           <TimelineRuler />
         </div>
      
-        <AiConflictOverlay
-          v-if="aiConflict"
-          :conflict="aiConflict"
-          :bubble-position="aiBubblePosition"
-          :current-index="activeAiAnalysisCurrentIndex"
-          :total-count="aiAnalysisTotalCount"
-          :is-clipping-applied="isActiveClippingApplied"
-          :clipping-applied-info="activeClippingAppliedInfo"
-          @next="handleNextAiAnalysis"
-          @prev="handlePrevAiAnalysis"
-          @apply-clipping="handleApplyClippingIssue"
-          @dismiss-clipping="handleDismissClippingIssue"
-        />
+
      
         <!--  [세로 스크롤] -->
-        <div class="w-max min-w-full pb-4 flex-1">
+        <div class="w-max min-w-full pb-4 relative">
   <TrackList
     :hovered-measure="hoveredMeasure"
     :hovered-track-id="hoveredTrackId"
@@ -1212,7 +1158,21 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     @submit-inline-comment="handleSubmitInlineComment"
     @resolve-comment="handleResolveComment"
     @delete-comment="handleDeleteComment"
-  />
+  >
+    <template #overlays>
+      <AiConflictOverlay
+        v-for="conflict in aiAnalysisItems"
+        :key="conflict.id"
+        :conflict="conflict"
+        :bubble-position="getAiBubblePosition(conflict)"
+        :is-clipping-applied="checkIsClippingApplied(conflict)"
+        :clipping-applied-info="getClippingAppliedInfo(conflict)"
+        @open="setActiveAiAnalysis(conflict.id)"
+        @apply-clipping="handleApplyClippingIssue(conflict)"
+        @dismiss-clipping="handleDismissClippingIssue(conflict)"
+      />
+    </template>
+  </TrackList>
 </div>
   <DefaultTrackDropGuide
     v-if="shouldShowDefaultTrackGuide"
@@ -1221,7 +1181,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
   <div
   ref="masterTrackWrapperRef"
-  class="mt-auto shrink-0 sticky bottom-0 z-[70] w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
+  class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
 >
         <!-- 마스터 트랙 -->
           <TrackItem
@@ -1239,6 +1199,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
       </div>
       </div>
       <ProjectEqPanel
+        :style="{ zoom: trackStore.workspaceZoom }"
         :selected-track="selectedEqTrack"
         :ai-analyzing="aiAnalyzing"
         :ai-analyzed="shouldShowAiEqRevisionPanel"
@@ -1280,8 +1241,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->
-    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div class="flex flex-col items-center gap-4 rounded-xl bg-[#1E1E21] p-6 shadow-2xl border border-white/10 w-[320px]">
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="isInvalidDropModalOpen = false">
+      <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
         <div class="rounded-full bg-red-500/20 p-3">
           <AlertTriangle class="h-6 w-6 text-red-400" />
         </div>
@@ -1294,6 +1255,21 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         </button>
       </div>
     </div>
+
+    <!-- AI 성공 메시지 모달 -->
+    <div v-if="aiSuccessMessage" class="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
+      <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
+        <div class="rounded-full bg-emerald-500/20 p-3">
+          <svg class="h-6 w-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <div class="text-center">
+          <h3 class="text-base font-semibold text-white">AI 분석 적용 완료</h3>
+          <p class="mt-2 text-sm text-gray-400">{{ aiSuccessMessage }}</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <ProjectGuideOverlay
@@ -1304,33 +1280,33 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 </template>
 
 <style scoped>
-/*  1. 핵심: 세로 스크롤바는 두께 0으로 완벽 삭제, 가로는 12px 유지 */
+/* 1. 가로/세로 스크롤바 공간 할당 */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 0px !important;  /* 세로 스크롤바 공간 자체를 할당하지 않음! */
-  height: 12px !important; /* 가로 스크롤바는 두께 유지 */
+  width: 12px !important;  /* 세로 스크롤바 두께 */
+  height: 12px !important; /* 가로 스크롤바 두께 */
 }
 
-/* 2. 가로 스크롤바 배경(트랙) */
-.custom-scrollbar::-webkit-scrollbar-track:horizontal {
+/* 2. 스크롤바 배경(트랙) */
+.custom-scrollbar::-webkit-scrollbar-track {
   background: #131313;
   border-radius: 8px;
 }
 
-/* 3. 가로 스크롤바 손잡이(썸) */
-.custom-scrollbar::-webkit-scrollbar-thumb:horizontal {
-  background-color: #FF8F1A;
+/* 3. 스크롤바 손잡이(썸) - 회색으로 변경 */
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #52525b;
   border-radius: 8px;
   border: 3px solid #131313; /* 배경색으로 테두리를 깎아서 얇게 만듦 */
 }
 
 /* 4. 마우스 올렸을 때 살짝 밝아짐 */
-.custom-scrollbar::-webkit-scrollbar-thumb:horizontal:hover {
-  background-color: #ff9f3b;
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #71717a;
 }
 
-/* 파이어폭스(Firefox) 대응 - 파이어폭스는 0px 조절이 안되어서 얇게 렌더링 */
+/* 파이어폭스(Firefox) 대응 - 파이어폭스는 두께 픽셀 조절이 안되어서 얇게 렌더링 */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #FF8F1A #131313;
+  scrollbar-color: #52525b #131313;
 }
 </style>

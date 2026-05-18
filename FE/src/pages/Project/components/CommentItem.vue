@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { CommentDto } from '../types/comment.types'
-import { Check, ArrowUpCircle } from 'lucide-vue-next'
+import { Check, ArrowUpCircle, CornerDownRight } from 'lucide-vue-next'
 
 const props = defineProps<{
   comment: CommentDto
@@ -56,11 +56,12 @@ const highlightMentions = (text: string) => {
     <div v-if="comment.replies && comment.replies.length > 0" class="mb-4 flex flex-col gap-4">
       <div v-for="reply in comment.replies" :key="reply.commentId" class="flex flex-col gap-1">
         <div v-if="reply.author" class="flex items-center gap-2">
+          <CornerDownRight class="h-3.5 w-3.5 shrink-0 text-gray-500" />
           <img v-if="reply.author.profileImgUrl" :src="reply.author.profileImgUrl" class="h-5 w-5 rounded-full object-cover" />
           <div v-else class="h-5 w-5 rounded-full bg-blue-500"></div>
           <span class="font-medium text-white text-xs">{{ reply.author.nickname }}</span>
         </div>
-        <div class="text-sm pl-7 leading-relaxed" v-html="highlightMentions(reply.content)"></div>
+        <div class="text-sm pl-11 leading-relaxed" v-html="highlightMentions(reply.content)"></div>
       </div>
     </div>
 

@@ -1280,8 +1280,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->
-    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div class="flex flex-col items-center gap-4 rounded-xl bg-[#1E1E21] p-6 shadow-2xl border border-white/10 w-[320px]">
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="isInvalidDropModalOpen = false">
+      <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
         <div class="rounded-full bg-red-500/20 p-3">
           <AlertTriangle class="h-6 w-6 text-red-400" />
         </div>
@@ -1304,33 +1304,33 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 </template>
 
 <style scoped>
-/*  1. 핵심: 세로 스크롤바는 두께 0으로 완벽 삭제, 가로는 12px 유지 */
+/* 1. 가로/세로 스크롤바 공간 할당 */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 0px !important;  /* 세로 스크롤바 공간 자체를 할당하지 않음! */
-  height: 12px !important; /* 가로 스크롤바는 두께 유지 */
+  width: 12px !important;  /* 세로 스크롤바 두께 */
+  height: 12px !important; /* 가로 스크롤바 두께 */
 }
 
-/* 2. 가로 스크롤바 배경(트랙) */
-.custom-scrollbar::-webkit-scrollbar-track:horizontal {
+/* 2. 스크롤바 배경(트랙) */
+.custom-scrollbar::-webkit-scrollbar-track {
   background: #131313;
   border-radius: 8px;
 }
 
-/* 3. 가로 스크롤바 손잡이(썸) */
-.custom-scrollbar::-webkit-scrollbar-thumb:horizontal {
-  background-color: #FF8F1A;
+/* 3. 스크롤바 손잡이(썸) - 회색으로 변경 */
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #52525b;
   border-radius: 8px;
   border: 3px solid #131313; /* 배경색으로 테두리를 깎아서 얇게 만듦 */
 }
 
 /* 4. 마우스 올렸을 때 살짝 밝아짐 */
-.custom-scrollbar::-webkit-scrollbar-thumb:horizontal:hover {
-  background-color: #ff9f3b;
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #71717a;
 }
 
-/* 파이어폭스(Firefox) 대응 - 파이어폭스는 0px 조절이 안되어서 얇게 렌더링 */
+/* 파이어폭스(Firefox) 대응 - 파이어폭스는 두께 픽셀 조절이 안되어서 얇게 렌더링 */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #FF8F1A #131313;
+  scrollbar-color: #52525b #131313;
 }
 </style>

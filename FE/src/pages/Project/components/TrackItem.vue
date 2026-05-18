@@ -701,13 +701,16 @@ const handleVolumeInput = (e: Event) => {
   isDraggingVolume.value = true;
   const val = Number((e.target as HTMLInputElement).value);
   localVolume.value = parseFloat(trackStore.getVolumeFromPercent(val).toFixed(1));
+  // 실시간 로컬 오디오 업데이트 (소켓 전송 안함)
+  trackStore.setTrackVolume(props.track.trackId, localVolume.value, false);
 };
 
 const handleVolumeChange = (e: Event) => {
   isDraggingVolume.value = false;
   const val = Number((e.target as HTMLInputElement).value);
   const finalVolume = parseFloat(trackStore.getVolumeFromPercent(val).toFixed(1));
-  trackStore.setTrackVolume(props.track.trackId, finalVolume);
+  // 변경 완료 시 소켓 전송
+  trackStore.setTrackVolume(props.track.trackId, finalVolume, true);
 };
 
 // 패닝 슬라이더 드래그 로직
@@ -721,12 +724,15 @@ const displayPan = computed(() => {
 const handlePanInput = (e: Event) => {
   isDraggingPan.value = true;
   localPan.value = Number((e.target as HTMLInputElement).value);
+  // 실시간 로컬 오디오 업데이트 (소켓 전송 안함)
+  trackStore.setTrackPan(props.track.trackId, localPan.value, false);
 };
 
 const handlePanChange = (e: Event) => {
   isDraggingPan.value = false;
   const pan = Number((e.target as HTMLInputElement).value);
-  trackStore.setTrackPan(props.track.trackId, pan);
+  // 변경 완료 시 소켓 전송
+  trackStore.setTrackPan(props.track.trackId, pan, true);
 };
 
 const isEditingVolume = ref(false);
@@ -989,9 +995,9 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           <!-- 1. 볼륨 커스텀 슬라이더 (드래그 조작용) -->
           <div class="relative h-1.5 flex-1 rounded-full bg-black/60 flex items-center">
             <!-- 게이지 -->
-            <div class="absolute left-0 h-full rounded-full bg-[#ff9800] shadow-[0_0_8px_#ff9800]" :style="{ width: `${trackStore.getVolumePercent(displayVolume)}%` }"></div>
+            <div class="absolute left-0 h-full rounded-full bg-[#9ca3af] shadow-[0_0_8px_rgba(156,163,175,0.6)]" :style="{ width: `${trackStore.getVolumePercent(displayVolume)}%` }"></div>
             <!-- 핸들 -->
-            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#ff9800] bg-[#1c1c1c] pointer-events-none" :style="{ left: `${trackStore.getVolumePercent(displayVolume)}%` }"></div>
+            <div class="absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-[#9ca3af] bg-[#1c1c1c] pointer-events-none" :style="{ left: `${trackStore.getVolumePercent(displayVolume)}%` }"></div>
             <!-- 투명 인풋 (마우스 드래그 조작 담당) -->
             <input 
               type="range" min="0" max="100" step="0.1" 

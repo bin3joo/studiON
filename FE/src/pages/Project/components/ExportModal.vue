@@ -13,7 +13,6 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-const isMono = ref(false)
 const isExporting = ref(false)
 const errorMessage = ref('')
 const { exportMasterAudio } = useAudioExport()
@@ -36,7 +35,7 @@ const expectedSizeMB = computed(() => {
   // 여유 공간(Reverb/Delay Tail 등) 1초 반영
   const renderDurationSec = maxDurationBar * secondsPerBar + 1.0
   const sampleRate = 48000
-  const channels = isMono.value ? 1 : 2
+  const channels = 2 // 스테레오 고정
   const bytesPerSample = 3 // 24-bit
 
   const dataSize = renderDurationSec * sampleRate * channels * bytesPerSample
@@ -47,7 +46,7 @@ const expectedSizeMB = computed(() => {
 
 async function handleExport() {
   errorMessage.value = ''
-  const suggestedFilename = `${props.projectName || 'project'}_master${isMono.value ? '_mono' : ''}.wav`
+  const suggestedFilename = `${props.projectName || 'project'}_master.wav`
   let fileHandle: any = null
 
   try {
@@ -70,8 +69,8 @@ async function handleExport() {
 
     isExporting.value = true
 
-    // 무거운 믹스다운 비동기 작업 수행
-    const blob = await exportMasterAudio(isMono.value)
+    // 무거운 믹스다운 비동기 작업 수행 (스테레오 고정: false 파라미터 전달)
+    const blob = await exportMasterAudio(false)
     
     if (fileHandle) {
       const writable = await fileHandle.createWritable()
@@ -104,13 +103,13 @@ async function handleExport() {
 <template>
   <div
     v-if="isOpen"
-    class="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+    class="fixed inset-0 z-[999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in"
     @click.self="!isExporting && emit('close')"
   >
-    <div class="w-[480px] rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-2xl shadow-black/50 overflow-hidden relative">
+    <div class="relative w-full max-w-md rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all">
       <div class="mb-6 flex items-center justify-between">
         <h2 class="text-xl font-bold text-white flex items-center gap-2">
-          <Download class="w-5 h-5 text-indigo-400" />
+          <Download class="w-5 h-5 text-zinc-300" />
           오디오 다운로드
         </h2>
         <button
@@ -140,24 +139,7 @@ async function handleExport() {
             </div>
             <div class="flex items-center justify-between">
               <span class="text-sm text-zinc-400">채널 모드</span>
-              <div class="flex gap-2">
-                <button 
-                  type="button" 
-                  class="rounded px-2.5 py-1 text-xs font-medium transition-colors border"
-                  :class="!isMono ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-transparent text-zinc-500 border-white/10 hover:text-zinc-300'"
-                  @click="isMono = false"
-                >
-                  스테레오
-                </button>
-                <button 
-                  type="button" 
-                  class="rounded px-2.5 py-1 text-xs font-medium transition-colors border"
-                  :class="isMono ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-transparent text-zinc-500 border-white/10 hover:text-zinc-300'"
-                  @click="isMono = true"
-                >
-                  모노
-                </button>
-              </div>
+              <span class="text-sm font-medium text-white">스테레오 (고정)</span>
             </div>
             <div class="flex items-center justify-between">
               <span class="text-sm text-zinc-400">샘플레이트</span>
@@ -169,7 +151,7 @@ async function handleExport() {
             </div>
             <div class="flex items-center justify-between mt-2 pt-3 border-t border-white/10">
               <span class="text-sm font-medium text-zinc-300">용량</span>
-              <span class="text-sm font-bold text-indigo-400">{{ expectedSizeMB }} MB</span>
+              <span class="text-sm font-bold text-white">{{ expectedSizeMB }} MB</span>
             </div>
           </div>
         </div>
@@ -183,7 +165,7 @@ async function handleExport() {
         <button
           @click="handleExport"
           :disabled="isExporting"
-          class="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-8 py-3 text-sm font-medium text-white transition-all hover:bg-indigo-500 disabled:bg-indigo-600/50 disabled:text-white/70 w-full shadow-lg shadow-indigo-900/20"
+          class="flex items-center justify-center gap-2 rounded-lg bg-zinc-200 px-8 py-3 text-sm font-medium text-black transition-all hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500 w-full shadow-lg shadow-black/20"
         >
           <template v-if="isExporting">
             <Loader2 class="h-4 w-4 animate-spin" />

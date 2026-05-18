@@ -203,7 +203,7 @@ onUnmounted(() => {
               class="absolute bottom-0 border-l border-white/5"
               :style="{ 
                 left: `${(sub * trackStore.pixelPerBar) / trackStore.subDivision}px`,
-                height: sub % (trackStore.subDivision / 4) === 0 ? '40%' : '20%' // 정박자 눈금은 조금 더 길게
+                height: sub % (trackStore.subDivision / trackStore.projectInfo.timeSigNumerator) === 0 ? '40%' : '20%'
               }"
             ></div>
           </template>

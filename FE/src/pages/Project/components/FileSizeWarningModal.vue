@@ -8,15 +8,19 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+const handleClose = () => {
+  emit('close')
+}
 </script>
 
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-100 grid place-items-center bg-background/80 px-4 backdrop-blur-sm animate-fade-in"
-    @click.self="emit('close')"
+    class="fixed inset-0 z-[100] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in"
+    @click.self="handleClose"
   >
-    <div class="relative w-full max-w-sm rounded-2xl border border-destructive/40 bg-card p-7 shadow-neon">      <div class="mb-6 flex flex-col items-center gap-3 text-center">
+    <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all">      <div class="mb-6 flex flex-col items-center gap-3 text-center">
         <div class="grid h-12 w-12 place-items-center rounded-full bg-destructive/10 text-destructive shadow-neon-sm">
           <AlertCircle class="h-6 w-6" />
         </div>

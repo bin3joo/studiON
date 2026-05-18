@@ -55,8 +55,14 @@ const buttonRef = ref<HTMLElement | null>(null)
 const popupStyle = ref<{ top: string; left: string; transform?: string }>({ top: '0px', left: '0px' })
 let rafId: number | null = null
 
+// 드래그 상태 관리
+const isDragged = ref(false)
+const isDragging = ref(false)
+const dragOffset = { x: 0, y: 0 }
+
 const updatePopupPosition = () => {
   if (!open.value || !buttonRef.value) return
+  if (isDragged.value) return // 사용자가 드래그한 경우 위치 추적 중단
   
   const rect = buttonRef.value.getBoundingClientRect()
   
@@ -77,14 +83,78 @@ const updatePopupPosition = () => {
     transform
   }
   
-  rafId = requestAnimationFrame(updatePopupPosition)
+  if (!isDragged.value) {
+    rafId = requestAnimationFrame(updatePopupPosition)
+  }
+}
+
+const onDrag = (e: PointerEvent) => {
+  if (!isDragging.value) return
+  e.preventDefault()
+  
+  let newTop = e.clientY - dragOffset.y
+  let newLeft = e.clientX - dragOffset.x
+
+  // 화면 밖으로 나가지 않도록 (특히 위쪽으로 가서 헤더를 못 잡게 되는 상황 방지)
+  if (newTop < 0) newTop = 0 // 상단 이탈 방지
+  if (newTop > window.innerHeight - 40) newTop = window.innerHeight - 40 // 하단 이탈 방지
+  
+  // 좌우 이탈 방지 (팝업 가로 크기 420px 기준, 최소 50px은 화면에 남도록)
+  if (newLeft < -370) newLeft = -370
+  if (newLeft > window.innerWidth - 50) newLeft = window.innerWidth - 50
+
+  popupStyle.value = {
+    top: `${newTop}px`,
+    left: `${newLeft}px`,
+    transform: 'none' // 드래그 시 중앙 정렬 해제
+  }
+}
+
+const endDrag = () => {
+  isDragging.value = false
+  window.removeEventListener('pointermove', onDrag)
+  window.removeEventListener('pointerup', endDrag)
+}
+
+const startDrag = (e: PointerEvent) => {
+  if (!open.value) return
+  isDragged.value = true
+  isDragging.value = true
+
+  // 기존 팝업 위치 파싱
+  const currentTop = parseFloat(popupStyle.value.top) || 0
+  const currentLeft = parseFloat(popupStyle.value.left) || 0
+  
+  // 만약 transform(translateX(-50%))가 적용된 상태라면, 실제 좌상단 X좌표를 계산하여 보정해야 함
+  let adjustedLeft = currentLeft
+  if (popupStyle.value.transform === 'translateX(-50%)') {
+    adjustedLeft -= 210 // 팝업 넓이(420px)의 절반
+  } else if (popupStyle.value.transform === 'translateX(-16px)') {
+    adjustedLeft -= 16
+  }
+
+  dragOffset.x = e.clientX - adjustedLeft
+  dragOffset.y = e.clientY - currentTop
+
+  // 즉시 보정된 위치 적용 (포인터가 튀지 않도록)
+  popupStyle.value = {
+    top: `${currentTop}px`,
+    left: `${adjustedLeft}px`,
+    transform: 'none'
+  }
+
+  window.addEventListener('pointermove', onDrag)
+  window.addEventListener('pointerup', endDrag)
 }
 
 watch(open, (newVal) => {
   if (newVal) {
+    isDragged.value = false // 다시 열릴 때 초기 위치로 리셋
+    isDragging.value = false
     updatePopupPosition()
   } else {
     if (rafId) cancelAnimationFrame(rafId)
+    endDrag() // 안전을 위해 드래그 종료
   }
 })
 
@@ -115,10 +185,11 @@ const issueLabel = () => {
 }
 
 
-const TIMELINE_TRACK_HEADER_WIDTH = 256
+const TIMELINE_TRACK_HEADER_WIDTH = 224
 
 const dynamicStartPx = computed(() => {
-  const startBarFloat = props.conflict.startMs / (trackStore.secondsPerBar * 1000)
+  // 에러가 시작하는 가장 처음 마디(measure)의 정초점(grid)에 버튼이 위치하도록 내림(Math.floor) 처리
+  const startBarFloat = Math.floor(props.conflict.startMs / (trackStore.secondsPerBar * 1000))
   return TIMELINE_TRACK_HEADER_WIDTH + (startBarFloat * trackStore.pixelPerBar)
 })
 
@@ -128,12 +199,27 @@ const trackIndex = computed(() => {
   return index >= 0 ? index : 0
 })
 
+const formatBarBeat = (ms: number) => {
+  // 백엔드/AI에서 넘어온 정확한 밀리초(ms) 데이터를 기반으로 마디(Bar)와 박자(Beat)를 계산합니다.
+  const startBarFloat = ms / (trackStore.secondsPerBar * 1000)
+  const numerator = trackStore.projectInfo.timeSigNumerator || 4
+  const bar = Math.floor(startBarFloat) + 1
+  const beat = Math.floor((startBarFloat - Math.floor(startBarFloat)) * numerator) + 1
+  return `${String(bar).padStart(2, '0')}.${beat}`
+}
+
+const barLabel = computed(() => {
+  const startStr = formatBarBeat(props.conflict.startMs)
+  const endStr = formatBarBeat(props.conflict.endMs)
+  return `${startStr} 마디 ~ ${endStr} 마디`
+})
+
 const bubbleWrapperStyle = computed<StyleValue>(() => {
   const topOffset = (trackIndex.value * 100) + 12
   return {
     position: 'absolute',
     top: `${topOffset}px`,
-    left: '12px',
+    left: '4px',
   }
 })
 
@@ -172,13 +258,17 @@ const dynamicWidthPx = computed(() => {
       <Teleport to="body">
         <div
           v-if="open"
-          class="fixed z-9999 w-[360px] rounded-lg p-px shadow-2xl backdrop-blur-md"
+          class="fixed z-9999 w-[420px] rounded-lg p-px shadow-2xl backdrop-blur-md"
           :style="popupStyle"
         >
           <div class="absolute inset-0 rounded-lg bg-[linear-gradient(135deg,#8B5CF6,#3B82F6,#06B6D4,#22C55E,#F59E0B,#EC4899)] opacity-80" />
         
         <div class="relative h-full w-full rounded-[7px] bg-[#171717]/95">
-          <div class="flex items-center justify-between border-b border-white/10 px-4 py-3 rounded-t-[7px]">
+          <div
+            class="flex items-center justify-between border-b border-white/10 px-4 py-3 rounded-t-[7px] select-none"
+            :class="{ 'cursor-grab': !isDragging, 'cursor-grabbing': isDragging }"
+            @pointerdown.stop="startDrag"
+          >
             <div class="flex items-center gap-2 text-[11px] font-bold tracking-[0.18em] text-white">
               <span class="grid h-5 w-5 place-items-center rounded-full bg-[conic-gradient(from_180deg,#8B5CF6,#38BDF8,#22C55E,#F59E0B,#EC4899,#8B5CF6)]">
                 <span class="absolute h-4 w-4 rounded-full bg-[#171717]" />
@@ -186,6 +276,9 @@ const dynamicWidthPx = computed(() => {
               </span>
               <span class="bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent uppercase mt-0.5">
                 AI ANALYSIS
+              </span>
+              <span class="ml-1 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white/90">
+                {{ barLabel }}
               </span>
             </div>
 
@@ -198,6 +291,7 @@ const dynamicWidthPx = computed(() => {
                 type="button"
                 class="ml-2 text-sm text-white/50 hover:text-white transition"
                 @click.stop="toggleMinimize"
+                @pointerdown.stop
                 title="최소화"
               >
                 <Minus class="w-4 h-4" />
@@ -207,6 +301,7 @@ const dynamicWidthPx = computed(() => {
                 type="button"
                 class="ml-1 text-sm text-white/50 hover:text-white transition"
                 @click.stop="close"
+                @pointerdown.stop
                 title="닫기"
               >
                 ×

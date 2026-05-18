@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.salmon.studion.domain.audio.dto.request.AudioMetadataCreateRequest;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.repository.AudioMetadataRepository;
+import com.salmon.studion.domain.audio.service.AudioCleanupService;
 import com.salmon.studion.domain.audio.service.AudioService;
 import com.salmon.studion.domain.clip.dto.ClipState;
 import com.salmon.studion.domain.clip.dto.request.*;
@@ -51,6 +52,7 @@ public class ClipService {
     private final ClipEventRepository clipEventRepository;
     private final TrackRepository trackRepository;
     private final AudioMetadataRepository audioMetadataRepository;
+    private final AudioCleanupService audioCleanupService;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
@@ -914,7 +916,14 @@ public class ClipService {
         List<Integer> deletedIds = deletedIdStrs.stream()
                 .map(Integer::parseInt)
                 .toList();
+        List<Clip> deletedClips = clipRepository.findAllByIdInWithAudioMetadata(deletedIds);
+        Set<Integer> audioMetadataIds = deletedClips.stream()
+                .map(Clip::getAudioMetadata)
+                .map(AudioMetadata::getId)
+                .collect(Collectors.toSet());
         clipRepository.deleteAllById(deletedIds);
+        clipRepository.flush();
+        audioMetadataIds.forEach(audioCleanupService::cleanupIfUnreferenced);
     }
 
     // Redis의 deleted_clips 키 삭제 (DB 커밋 성공 후)
@@ -970,8 +979,6 @@ public class ClipService {
         String deletedSetKey = String.format(DELETED_CLIPS_KEY, projectId);
 
         Map<Object, Object> entries = redisTemplate.opsForHash().entries(clipHashKey);
-        if (entries.isEmpty()) return;
-
         List<Object> keysToDelete = new ArrayList<>();
         List<String> idsToAdd = new ArrayList<>();
 
@@ -983,8 +990,16 @@ public class ClipService {
             }
         }
 
+        clipRepository.findAllByTrackIdWithAudioMetadata(trackId).stream()
+                .map(Clip::getId)
+                .map(String::valueOf)
+                .filter(id -> !idsToAdd.contains(id))
+                .forEach(idsToAdd::add);
+
         if (!keysToDelete.isEmpty()) {
             redisTemplate.opsForHash().delete(clipHashKey, keysToDelete.toArray());
+        }
+        if (!idsToAdd.isEmpty()) {
             redisTemplate.opsForSet().add(deletedSetKey, idsToAdd.toArray(new String[0]));
         }
     }

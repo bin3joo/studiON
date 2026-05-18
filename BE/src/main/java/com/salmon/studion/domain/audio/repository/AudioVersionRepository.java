@@ -48,4 +48,6 @@ public interface AudioVersionRepository extends JpaRepository<ProjectMasterAudio
     Optional<ProjectMasterAudioVersion> findByIdWithProjectAndAudioMetadata(
             @Param("versionId") Integer versionId
     );
+
+    long countByAudioMetadata_Id(Integer audioMetadataId);
 }

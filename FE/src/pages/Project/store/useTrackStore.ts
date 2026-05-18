@@ -734,12 +734,12 @@ export const useTrackStore = defineStore('track', () => {
         trackAnalyzers.delete(trackId)
     }
 
-    function createTrackEqNodes(track: TrackUIState): TrackEqNode[] {
+    function createTrackEqNodes(track: TrackUIState, customBands?: TrackEqBandState[]): TrackEqNode[] {
         disposeTrackEqNodes(track.trackId)
 
-        const eq = getTrackEq(track)
+        const bands = customBands ?? getTrackEq(track).bands;
 
-        const nodes = eq.bands.map(band => ({
+        const nodes = bands.map(band => ({
             bandOrder: band.bandOrder,
             filter: createToneFilterFromBand(band),
         }))
@@ -795,7 +795,7 @@ export const useTrackStore = defineStore('track', () => {
         })
     }
 
-    function rebuildTrackEqChain(trackId: number) {
+    function rebuildTrackEqChain(trackId: number, customBands?: TrackEqBandState[]) {
         const track = trackList.value.find(track => track.trackId === trackId)
         const volume = trackVolumes.get(trackId)
 
@@ -803,7 +803,7 @@ export const useTrackStore = defineStore('track', () => {
 
         disposeTrackEqNodes(trackId)
         disposeTrackAnalyzer(trackId)
-        const eqNodes = createTrackEqNodes(track)
+        const eqNodes = createTrackEqNodes(track, customBands)
         const analyzer = new Tone.FFT(2048)
 
         trackAnalyzers.set(trackId, analyzer)
@@ -3043,6 +3043,7 @@ export const useTrackStore = defineStore('track', () => {
         updateTrackEqBand,
         removeTrackEqBand,
         getTrackSpectrum,
-        workspaceZoom
+        workspaceZoom,
+        rebuildTrackEqChain
     };
 });

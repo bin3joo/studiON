@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Play, Sparkles, Wand2, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { Play, Square, Sparkles, Wand2, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import type { TrackUIState, TrackEqBandState } from '../types'
 import EqGraph from './EqGraph.vue'
 import { useTrackStore } from '../store/useTrackStore'
@@ -167,6 +167,40 @@ watch(
     spectrumData.value = []
   },
 )
+
+const isPreviewPlaying = ref<'before' | 'after' | null>(null)
+
+async function togglePreview(type: 'before' | 'after') {
+  if (!props.selectedTrack) return
+
+  if (isPreviewPlaying.value === type) {
+    trackStore.stopPlay()
+    return
+  }
+
+  trackStore.stopPlay()
+
+  if (type === 'before') {
+    trackStore.rebuildTrackEqChain(props.selectedTrack.trackId)
+  } else {
+    trackStore.rebuildTrackEqChain(props.selectedTrack.trackId, props.aiAfterBands)
+  }
+
+  isPreviewPlaying.value = type
+  trackStore.togglePlay()
+}
+
+watch(
+  () => trackStore.isPlaying,
+  (playing) => {
+    if (!playing && isPreviewPlaying.value !== null) {
+      isPreviewPlaying.value = null
+      if (props.selectedTrack) {
+        trackStore.rebuildTrackEqChain(props.selectedTrack.trackId)
+      }
+    }
+  }
+)
 </script>
 
 <template>
@@ -242,9 +276,12 @@ watch(
       </span>
 
       <button
-        class="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-white transition hover:border-[#FF8F1A] hover:text-[#FF8F1A]"
+        @click="togglePreview('before')"
+        class="grid h-7 w-7 place-items-center rounded-full border text-white transition"
+        :class="isPreviewPlaying === 'before' ? 'border-[#FF8F1A] text-[#FF8F1A] bg-[#FF8F1A]/10' : 'border-white/15 hover:border-[#FF8F1A] hover:text-[#FF8F1A]'"
       >
-        <Play class="h-3 w-3 fill-current" />
+        <Square v-if="isPreviewPlaying === 'before'" class="h-3 w-3 fill-current" />
+        <Play v-else class="h-3 w-3 fill-current" />
       </button>
     </div>
 
@@ -261,10 +298,12 @@ watch(
       </span>
 
       <button
-        v-if="hasAiSuggestion"
-        class="grid h-7 w-7 place-items-center rounded-full border border-white/15 text-white transition hover:border-[#FF8F1A] hover:text-[#FF8F1A]"
+        @click="togglePreview('after')"
+        class="grid h-7 w-7 place-items-center rounded-full border text-white transition"
+        :class="isPreviewPlaying === 'after' ? 'border-[#FF8F1A] text-[#FF8F1A] bg-[#FF8F1A]/10' : 'border-white/15 hover:border-[#FF8F1A] hover:text-[#FF8F1A]'"
       >
-        <Play class="h-3 w-3 fill-current" />
+        <Square v-if="isPreviewPlaying === 'after'" class="h-3 w-3 fill-current" />
+        <Play v-else class="h-3 w-3 fill-current" />
       </button>
 
       <div class="ml-auto flex items-center gap-2">

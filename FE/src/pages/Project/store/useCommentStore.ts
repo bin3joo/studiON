@@ -9,6 +9,7 @@ export const useCommentStore = defineStore('commentStore', () => {
   
   // 패널 필터 상태
   const isResolvedFilter = ref(false)
+  const isMentionedFilter = ref(false)
   const selectedTrackId = ref<number | undefined>(undefined)
   
   // 알림 (빨간 점) 상태
@@ -37,6 +38,7 @@ export const useCommentStore = defineStore('commentStore', () => {
     comments,
     isLoading,
     isResolvedFilter,
+    isMentionedFilter,
     selectedTrackId,
     hasNewComment,
     setHasNewComment,

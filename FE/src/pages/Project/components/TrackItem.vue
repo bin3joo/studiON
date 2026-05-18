@@ -872,6 +872,8 @@ const emit = defineEmits<{
     trackName: string
     measure: number
     content: string
+    parentCommentId?: number | null
+    mentionedUserIds: number[]
   }]
   'resolve-comment': [payload: {
     trackId: string

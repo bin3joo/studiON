@@ -6,6 +6,8 @@ import { useCommentStore } from '../store/useCommentStore'
 import { useTrackStore } from '../store/useTrackStore'
 import { useAudioVersionStore } from '../store/useAudioVersionStore'
 import CommentItem from './CommentItem.vue'
+import { computed } from 'vue'
+import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 
 // 기본 props 설정 
 const route = useRoute()
@@ -14,6 +16,45 @@ const projectId = Number(route.params.projectId)
 const commentStore = useCommentStore()
 const trackStore = useTrackStore()
 const audioVersionStore = useAudioVersionStore()
+const authStore = useAuthStore()
+
+const currentUserNickname = computed(() => {
+  if (!authStore.accessToken) return null
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
+    // JWT의 subject(sub)가 userId입니다.
+    const userId = Number(payload.sub)
+    if (!userId) return null
+    
+    // projectMembers에서 내 정보 찾기
+    const me = trackStore.projectMembers.find(m => m.userId === userId)
+    return me ? me.nickname : null
+  } catch(e) {
+    return null
+  }
+})
+
+// 프론트엔드 단에서 멘션 필터링 처리
+const filteredComments = computed(() => {
+  if (!commentStore.isMentionedFilter) return commentStore.comments
+  
+  const myNickname = currentUserNickname.value
+  if (!myNickname) return []
+  
+  const mentionPattern = `@${myNickname}`
+  
+  return commentStore.comments.filter(comment => {
+    // 1. 코멘트 본문에 멘션이 포함되어 있는지
+    const hasMentionInContent = comment.content.includes(mentionPattern)
+    
+    // 2. 대댓글 중 하나라도 멘션이 포함되어 있는지
+    const hasMentionInReplies = comment.replies && comment.replies.some((reply: any) => 
+      reply.content.includes(mentionPattern)
+    )
+    
+    return hasMentionInContent || hasMentionInReplies
+  })
+})
 
 // 1. 타입을 먼저 선언
 type PanelType = 'comments' | 'history' | 'ai'
@@ -27,7 +68,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'resolve-comment', commentId: number): void
-  (e: 'add-reply', parentCommentId: number, content: string): void
+  (e: 'add-reply', parentCommentId: number, content: string, mentionedUserIds: number[]): void
 }>()
 
 // 사이드 패널이 열리거나 필터(탭, 트랙선택)가 변경될 때마다 API 재호출
@@ -148,23 +189,34 @@ const handleDeleteVersion = async (versionId: number) => {
 
       <!-- Filter Dropdown -->
       <div class="border-b border-white/10 p-4">
-        <div class="relative">
-          <Filter class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <select
-            v-model="commentStore.selectedTrackId"
-            class="w-full appearance-none rounded-md border border-white/10 bg-[#1c1c1c] py-2 pl-9 pr-8 text-xs text-gray-300 outline-none focus:border-white/30"
-          >
-            <option :value="undefined">모든 트랙</option>
-            <!-- trackStore에서 트랙 목록 가져와 렌더링 -->
-            <option v-for="track in trackStore.trackList" :key="track.trackId" :value="track.trackId">
-              {{ track.name }}
-            </option>
-          </select>
-          <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
-            <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <Filter class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <select
+              v-model="commentStore.selectedTrackId"
+              class="w-full appearance-none rounded-md border border-white/10 bg-[#1c1c1c] py-2 pl-9 pr-8 text-xs text-gray-300 outline-none focus:border-white/30"
+            >
+              <option :value="undefined">모든 트랙</option>
+              <!-- trackStore에서 트랙 목록 가져와 렌더링 -->
+              <option v-for="track in trackStore.trackList" :key="track.trackId" :value="track.trackId">
+                {{ track.name }}
+              </option>
+            </select>
+            <div class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+              <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
+          
+          <button
+            class="flex items-center gap-1.5 whitespace-nowrap rounded-md border py-2 px-3 text-xs transition"
+            :class="commentStore.isMentionedFilter ? 'border-primary text-primary bg-primary/10' : 'border-white/10 text-gray-400 hover:text-white hover:border-white/30'"
+            @click="commentStore.isMentionedFilter = !commentStore.isMentionedFilter"
+            title="나를 멘션한 코멘트만 보기"
+          >
+            <span class="font-bold text-[13px] leading-none">@</span> 언급됨
+          </button>
         </div>
       </div>
 
@@ -178,12 +230,12 @@ const handleDeleteVersion = async (versionId: number) => {
         </div>
         <template v-else>
           <CommentItem
-            v-for="comment in commentStore.comments"
+            v-for="comment in filteredComments"
             :key="comment.commentId"
             :comment="comment"
             :track-name="getTrackName(comment.trackId)"
             @resolve="emit('resolve-comment', $event)"
-            @add-reply="(parent, content) => emit('add-reply', parent, content)"
+            @add-reply="(parent, content, ids) => emit('add-reply', parent, content, ids)"
           />
         </template>
       </div>

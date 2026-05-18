@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import type { CommentDto } from '../types/comment.types'
 import { Check, ArrowUpCircle, CornerDownRight } from 'lucide-vue-next'
 
@@ -10,15 +10,119 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'resolve', commentId: number): void
-  (e: 'add-reply', parentCommentId: number, content: string): void
+  (e: 'add-reply', parentCommentId: number, content: string, mentionedUserIds: number[]): void
 }>()
+
+import { useTrackStore } from '../store/useTrackStore'
+
+const trackStore = useTrackStore()
+const projectMembers = computed(() => trackStore.projectMembers || [])
 
 const replyContent = ref('')
 
+const mentionDropdownActive = ref(false)
+const mentionQuery = ref('')
+const selectedMentionIndex = ref(0)
+const inputRef = ref<HTMLInputElement | null>(null)
+
+const filteredMembers = computed(() => {
+  if (!mentionQuery.value) return projectMembers.value
+  const q = mentionQuery.value.toLowerCase()
+  return projectMembers.value.filter(m => m.nickname.toLowerCase().includes(q))
+})
+
+const userColors = ['#00D06C', '#FFD700', '#FF3DCB', '#00E5FF', '#FF5722', '#B400FF']
+function getAuthorColor(authorName: string) {
+  if (!authorName) return userColors[0]
+  let hash = 0
+  for (let i = 0; i < authorName.length; i++) {
+    hash = authorName.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return userColors[Math.abs(hash) % userColors.length]
+}
+
+function handleInput(e: Event) {
+  const target = e.target as HTMLInputElement
+  const val = target.value
+  const cursorP = target.selectionStart || 0
+  
+  const textBeforeCursor = val.slice(0, cursorP)
+  const match = textBeforeCursor.match(/@(\S*)$/)
+  
+  if (match) {
+    mentionDropdownActive.value = true
+    mentionQuery.value = match[1]
+    selectedMentionIndex.value = 0
+  } else {
+    mentionDropdownActive.value = false
+  }
+}
+
+function insertMention(member: { nickname: string }) {
+  if (!mentionDropdownActive.value) return
+  
+  const activeInput = inputRef.value
+  const cursorP = activeInput?.selectionStart || 0
+  
+  const textBeforeCursor = replyContent.value.slice(0, cursorP)
+  const textAfterCursor = replyContent.value.slice(cursorP)
+  
+  const match = textBeforeCursor.match(/@(\S*)$/)
+  if (match) {
+    const startIdx = textBeforeCursor.lastIndexOf('@')
+    const beforeAt = replyContent.value.slice(0, startIdx)
+    const newText = beforeAt + '@' + member.nickname + ' ' + textAfterCursor
+    replyContent.value = newText
+    mentionDropdownActive.value = false
+    
+    nextTick(() => {
+      const newCursorP = startIdx + member.nickname.length + 2
+      if (activeInput) {
+        activeInput.focus()
+        activeInput.setSelectionRange(newCursorP, newCursorP)
+      }
+    })
+  }
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (!mentionDropdownActive.value) return
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedMentionIndex.value = (selectedMentionIndex.value + 1) % filteredMembers.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedMentionIndex.value = (selectedMentionIndex.value - 1 + filteredMembers.value.length) % filteredMembers.value.length
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (filteredMembers.value.length > 0) {
+      insertMention(filteredMembers.value[selectedMentionIndex.value])
+    }
+  } else if (e.key === 'Escape') {
+    mentionDropdownActive.value = false
+  }
+}
+
 const handleSubmitReply = () => {
-  if (!replyContent.value.trim()) return
-  emit('add-reply', props.comment.commentId, replyContent.value)
+  const trimmed = replyContent.value.trim()
+  if (!trimmed) return
+  if (mentionDropdownActive.value) return
+
+  const mentionedUserIds: number[] = []
+  const matches = trimmed.match(/@([^\s]+)/g) || []
+  const uniqueNicknames = [...new Set(matches.map(m => m.slice(1)))]
+  
+  uniqueNicknames.forEach(nick => {
+    const found = projectMembers.value.find(m => m.nickname === nick)
+    if (found && !mentionedUserIds.includes(found.userId)) {
+      mentionedUserIds.push(found.userId)
+    }
+  })
+
+  emit('add-reply', props.comment.commentId, trimmed, mentionedUserIds)
   replyContent.value = ''
+  mentionDropdownActive.value = false
 }
 
 const highlightMentions = (text: string) => {
@@ -71,8 +175,11 @@ const highlightMentions = (text: string) => {
       <div class="h-5 w-5 shrink-0 rounded-full bg-green-500"></div>
       <div class="relative flex-1">
         <input
+          ref="inputRef"
           v-model="replyContent"
-          @keyup.enter="handleSubmitReply"
+          @keydown.enter.prevent="handleSubmitReply"
+          @input="handleInput"
+          @keydown="handleKeydown"
           type="text"
           placeholder="댓글 추가"
           class="w-full rounded-md border border-white/10 bg-[#1c1c1c] py-1.5 pl-3 pr-8 text-xs text-white placeholder-gray-500 focus:border-white/30 focus:outline-none"
@@ -83,6 +190,24 @@ const highlightMentions = (text: string) => {
         >
           <ArrowUpCircle class="h-4 w-4" />
         </button>
+
+        <!-- 멘션 자동완성 드롭다운 -->
+        <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar z-[100]">
+          <button
+            v-for="(member, index) in filteredMembers"
+            :key="member.userId"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
+            :class="{ 'bg-white/10': index === selectedMentionIndex }"
+            @click.prevent="insertMention(member)"
+            @mousedown.prevent
+          >
+            <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
+              <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
+              <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
+            </div>
+            <span class="text-white">{{ member.nickname }}</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

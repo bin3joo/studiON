@@ -16,14 +16,16 @@ const isCreating = ref(false)
 const showFeedbackModal = ref(false)
 const neverShowAgain = ref(false)
 const searchQuery = ref('')
+const currentTotalSizeBytes = ref(0)
+const MAX_STORAGE_BYTES = 50 * 1024 * 1024
 
 // Slider State
 const currentSlide = ref(0)
 const slideInterval = ref<number | undefined>(undefined)
 
 const slides = [
-  { id: 1, image: '/banner.png', title: '피드백 참여하기', desc: 'StudiON에서 피드백을 남기고 커피쿠폰 받자!' },
   { id: 2, image: '/Open.png', title: 'StudiON 전격 오픈!', desc: 'AI 기반의 충돌 분석과 실시간 협업을 경험해 보세요!' },
+  { id: 1, image: '/banner.png', title: '피드백 참여하기', desc: 'StudiON에서 피드백을 남기고 커피쿠폰 받자!' },
   { id: 3, image: '/SSAFY16.png', title: 'SSAFY 16기', desc: '싸피 16기 여러분들의 뜨거운 열정과 도전을 응원합니다!', bg: 'bg-gradient-to-br from-[#FF3DCB]/20 to-[#65002e]/80' },
 ]
 
@@ -147,6 +149,7 @@ async function loadProjects() {
   try {
     const response = await fetchProjects()
     projects.value = response.data?.projects ?? []
+    currentTotalSizeBytes.value = response.data?.currentTotalSizeBytes ?? 0
   }
   catch (error) {
     errorMessage.value = error instanceof Error
@@ -238,6 +241,20 @@ onUnmounted(() => {
               <span class="text-[18px] font-normal text-[#e5bcc5]/80 bg-[#2a2a2a] px-3 py-0.5 rounded-full">{{ projects.length }}</span>
             </h1>
             <p class="font-body-lg text-[16px] text-[#e5bcc5] mt-2 opacity-80">최근 작업 중인 트랙들을 확인하고 관리하세요.</p>
+            
+            <!-- 오디오 사용량 프로그레스 바 -->
+            <div class="mt-4 flex items-center gap-4 max-w-md w-full bg-[#1c1b1b] p-3.5 rounded-2xl border border-white/10 shadow-lg">
+              <span class="text-[14px] text-white uppercase tracking-wider shrink-0 font-bold flex items-center gap-2">
+                <span class="material-symbols-outlined text-[#FF3DCB] text-[20px]" style="font-variation-settings: 'FILL' 1;">sd_card</span>
+                사용량
+              </span>
+              <div class="flex-1 h-3 bg-[#2a2a2a] rounded-full overflow-hidden relative shadow-inner">
+                <div class="absolute inset-y-0 left-0 bg-gradient-to-r from-[#FF3DCB] to-[#00dce6] transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(255,61,203,0.5)]" :style="{ width: `${Math.min(100, (currentTotalSizeBytes / MAX_STORAGE_BYTES) * 100)}%` }"></div>
+              </div>
+              <span class="text-[14px] font-bold shrink-0 font-mono" :class="currentTotalSizeBytes > MAX_STORAGE_BYTES * 0.9 ? 'text-red-400' : 'text-[#00dce6]'">
+                {{ formatAudioSize(currentTotalSizeBytes) }} <span class="text-white/50 text-[12px] font-normal">/ 50 MB</span>
+              </span>
+            </div>
           </div>
 
           <div class="flex flex-col sm:flex-row justify-end items-center gap-4 w-full md:w-auto">

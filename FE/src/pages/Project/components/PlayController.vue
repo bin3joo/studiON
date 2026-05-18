@@ -11,7 +11,7 @@ const trackStore = useTrackStore();
 // 1. 마디(Bar)와 박자(Beat) 변환 로직 (반응성 제거 - DOM 직접 업데이트)
 const playheadBar = ref('01');
 const playheadBeat = ref('1');
-const totalBars = computed(() => String(trackStore.projectInfo.totalBarCount).padStart(2, '0'));
+const totalBars = computed(() => String(trackStore.displayBarCount).padStart(2, '0'));
 
 // 2. 키(Key) 관련 상태 및 배열
 const isKeyPickerOpen = ref(false);

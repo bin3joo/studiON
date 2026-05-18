@@ -1164,13 +1164,19 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           class="pointer-events-none absolute inset-0 z-0"
           :style="{
             backgroundImage: [
-              `repeating-linear-gradient(to right, #505567 0px, #505567 1px, transparent 1px, transparent ${trackStore.pixelPerBar * 4}px)`,
-              `repeating-linear-gradient(to right, #393C45 0px, #393C45 1px, transparent 1px, transparent ${trackStore.pixelPerBar}px)`,
+              `linear-gradient(to right, #505567 1px, transparent 1px)`,
+              `linear-gradient(to right, #393C45 1px, transparent 1px)`,
               trackStore.subDivision > 1
-                ? `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${trackStore.pixelPerBar / trackStore.subDivision}px)`
+                ? `linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px)`
                 : ''
-            ].filter(Boolean).join(','),
-            backgroundSize: '100% 100%'
+            ].filter(Boolean).join(', '),
+            backgroundSize: [
+              `${trackStore.pixelPerBar * 4}px 100%`,
+              `${trackStore.pixelPerBar}px 100%`,
+              trackStore.subDivision > 1
+                ? `${trackStore.pixelPerBar / trackStore.subDivision}px 100%`
+                : ''
+            ].filter(Boolean).join(', ')
           }"
         ></div>
 
@@ -1332,7 +1338,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
       v-if="!isMaster"
   :track-id="String(track.trackId)"
   :track-name="track.name"
-  :total-bar-count="trackStore.projectInfo.totalBarCount"
+  :total-bar-count="trackStore.displayBarCount"
   :pixel-per-bar="trackStore.pixelPerBar"
   :sub-division="trackStore.subDivision"
   :timeline-width="trackStore.totalTimelineWidth"

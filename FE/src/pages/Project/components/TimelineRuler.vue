@@ -184,7 +184,7 @@ onUnmounted(() => {
         class="relative h-full w-full"
       >
         <div 
-          v-for="bar in trackStore.projectInfo.totalBarCount" 
+          v-for="bar in trackStore.displayBarCount" 
           :key="bar"
           class="absolute top-0 h-full border-l border-white/5"
           :style="{ left: `${(bar - 1) * trackStore.pixelPerBar}px` }"

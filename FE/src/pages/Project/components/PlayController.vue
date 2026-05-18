@@ -4,6 +4,7 @@ import { useTrackStore } from '../store/useTrackStore';
 import { Play, Pause, Square, Sparkles, ChevronDown, Copy, Scissors, ClipboardPaste, CopyPlus, Split, Trash2, ListPlus, MessageSquarePlus, Upload, Repeat } from 'lucide-vue-next';
 import * as Tone from 'tone';
 import { trackEvent } from '@/shared/utils/analytics'
+import SpinnerGradient from '@/shared/ui/spinner/SpinnerGradient.vue'
 
 const trackStore = useTrackStore();
 
@@ -318,16 +319,25 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
       >
         <span class="absolute h-4 w-4 rounded-full bg-[#171717]" />
 
+        <SpinnerGradient
+          v-if="props.aiAnalyzing"
+          class="relative z-10"
+          size-class="h-3 w-3"
+        />
         <Sparkles
+          v-else
           class="relative z-10 h-3 w-3 text-white"
-          :class="props.aiAnalyzing ? 'animate-pulse' : ''"
           aria-hidden="true"
         />
       </span>
 
       <span
+        v-if="false"
         class="bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent"
       >
+        {{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}
+      </span>
+      <span class="bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent">
         {{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}
       </span>
     </span>

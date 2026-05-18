@@ -35,6 +35,7 @@ public class AudioVersionService {
     private final AudioVersionRenderSnapshotService audioVersionRenderSnapshotService;
     private final AudioVersionRenderSnapshotSerializer audioVersionRenderSnapshotSerializer;
     private final S3StorageService s3StorageService;
+    private final AudioCleanupService audioCleanupService;
 
     public AudioVersionCreateResponse createAudioVersion(
             Integer projectId,
@@ -111,8 +112,9 @@ public class AudioVersionService {
         AudioMetadata audioMetadata = audioVersion.getAudioMetadata();
 
         audioVersionRepository.delete(audioVersion);
+        audioVersionRepository.flush();
         if (audioMetadata != null) {
-            audioMetadataRepository.delete(audioMetadata);
+            audioCleanupService.cleanupIfUnreferenced(audioMetadata.getId());
         }
 
         return new AudioVersionDeleteResponse(versionId, true);

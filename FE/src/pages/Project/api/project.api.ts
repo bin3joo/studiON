@@ -41,6 +41,11 @@ export interface ProjectDetailResponse {
       pan: number;
     };
     tracks: TrackDto[];
+    members: {
+      userId: number;
+      nickname: string;
+      profileImageUrl: string | null;
+    }[];
   }
 }
 

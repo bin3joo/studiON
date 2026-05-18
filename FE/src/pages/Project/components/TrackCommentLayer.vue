@@ -43,6 +43,7 @@ const emit = defineEmits<{
     measure: number
     content: string
     parentCommentId?: number | null
+    mentionedUserIds: number[]
   }]
   'resolve-comment': [payload: {
     trackId: string
@@ -61,6 +62,83 @@ const expandedMeasure = ref<number | null>(null)
 const expandedCellLeft = ref(0)
 const expandedPlacement = ref<Placement>('bottom')
 const rootRef = ref<HTMLElement | null>(null)
+
+const mentionDropdownActive = ref(false)
+const mentionQuery = ref('')
+const selectedMentionIndex = ref(0)
+const inputRef1 = ref<HTMLInputElement | null>(null)
+const inputRef2 = ref<HTMLInputElement | null>(null)
+
+const projectMembers = computed(() => trackStore.projectMembers || [])
+
+const filteredMembers = computed(() => {
+  if (!mentionQuery.value) return projectMembers.value
+  const q = mentionQuery.value.toLowerCase()
+  return projectMembers.value.filter(m => m.nickname.toLowerCase().includes(q))
+})
+
+function handleInput(e: Event) {
+  const target = e.target as HTMLInputElement
+  const val = target.value
+  const cursorP = target.selectionStart || 0
+  
+  const textBeforeCursor = val.slice(0, cursorP)
+  const match = textBeforeCursor.match(/@(\S*)$/)
+  
+  if (match) {
+    mentionDropdownActive.value = true
+    mentionQuery.value = match[1]
+    selectedMentionIndex.value = 0
+  } else {
+    mentionDropdownActive.value = false
+  }
+}
+
+function insertMention(member: { nickname: string }) {
+  if (!mentionDropdownActive.value) return
+  
+  const activeInput = inputRef1.value?.contains(document.activeElement) ? inputRef1.value : inputRef2.value
+  const cursorP = activeInput?.selectionStart || 0
+  
+  const textBeforeCursor = draftComment.value.slice(0, cursorP)
+  const textAfterCursor = draftComment.value.slice(cursorP)
+  
+  const match = textBeforeCursor.match(/@(\S*)$/)
+  if (match) {
+    const startIdx = textBeforeCursor.lastIndexOf('@')
+    const beforeAt = draftComment.value.slice(0, startIdx)
+    const newText = beforeAt + '@' + member.nickname + ' ' + textAfterCursor
+    draftComment.value = newText
+    mentionDropdownActive.value = false
+    
+    nextTick(() => {
+      const newCursorP = startIdx + member.nickname.length + 2
+      if (activeInput) {
+        activeInput.focus()
+        activeInput.setSelectionRange(newCursorP, newCursorP)
+      }
+    })
+  }
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (!mentionDropdownActive.value) return
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedMentionIndex.value = (selectedMentionIndex.value + 1) % filteredMembers.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedMentionIndex.value = (selectedMentionIndex.value - 1 + filteredMembers.value.length) % filteredMembers.value.length
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (filteredMembers.value.length > 0) {
+      insertMention(filteredMembers.value[selectedMentionIndex.value])
+    }
+  } else if (e.key === 'Escape') {
+    mentionDropdownActive.value = false
+  }
+}
 
 const COMMENT_BOX_HEIGHT = 280
 const VIEWPORT_MARGIN = 24
@@ -199,6 +277,7 @@ function closeCommentBox() {
   expandedMeasure.value = null
   draftComment.value = ''
   activeCellLocation.value = null
+  mentionDropdownActive.value = false
   emit('hover-measure', { trackId: null, measure: null })
   emit('comment-expanded', false)
 }
@@ -207,6 +286,21 @@ function submitComment(measure: number) {
   const trimmed = draftComment.value.trim()
 
   if (!trimmed) return
+
+  if (mentionDropdownActive.value) {
+      return // 드롭다운에서 Enter키를 눌러 멘션이 적용된 경우 실제 전송 방지
+  }
+
+  const mentionedUserIds: number[] = []
+  const matches = trimmed.match(/@([^\s]+)/g) || []
+  const uniqueNicknames = [...new Set(matches.map(m => m.slice(1)))]
+  
+  uniqueNicknames.forEach(nick => {
+    const found = projectMembers.value.find(m => m.nickname === nick)
+    if (found && !mentionedUserIds.includes(found.userId)) {
+      mentionedUserIds.push(found.userId)
+    }
+  })
 
   const group = getCommentGroup(measure)
   const parentCommentId = group && group.comments.length > 0 ? Number(group.comments[0].id) : null
@@ -217,9 +311,11 @@ function submitComment(measure: number) {
     measure,
     content: trimmed,
     parentCommentId,
+    mentionedUserIds
   })
 
   draftComment.value = ''
+  mentionDropdownActive.value = false
 }
 
 function requestDeleteComment(commentId: string | number) {
@@ -483,11 +579,14 @@ function parseMentions(content: string) {
             <span v-else class="text-[9px] font-bold text-white/90">나</span>
           </div>
           <input
+            ref="inputRef1"
             v-model="draftComment"
             type="text"
             placeholder="댓글 추가"
             class="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/40"
             @keydown.enter.prevent="submitComment(expandedMeasure)"
+            @input="handleInput"
+            @keydown="handleKeydown"
           />
           <button
             class="shrink-0 transition hover:scale-110 disabled:opacity-50"
@@ -555,11 +654,14 @@ function parseMentions(content: string) {
             </div>
             <div class="flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
               <input
+                ref="inputRef2"
                 v-model="draftComment"
                 type="text"
                 placeholder="댓글 추가"
                 class="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/40"
                 @keydown.enter.prevent="submitComment(expandedMeasure)"
+                @input="handleInput"
+                @keydown="handleKeydown"
               />
               <button
                 class="shrink-0 transition hover:scale-110 disabled:opacity-50"
@@ -570,6 +672,24 @@ function parseMentions(content: string) {
               </button>
             </div>
           </div>
+        </div>
+        
+        <!-- 멘션 자동완성 드롭다운 -->
+        <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar">
+          <button
+            v-for="(member, index) in filteredMembers"
+            :key="member.userId"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
+            :class="{ 'bg-white/10': index === selectedMentionIndex }"
+            @click.prevent="insertMention(member)"
+            @mousedown.prevent
+          >
+            <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
+              <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
+              <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
+            </div>
+            <span class="text-white">{{ member.nickname }}</span>
+          </button>
         </div>
       </div>
     </div>

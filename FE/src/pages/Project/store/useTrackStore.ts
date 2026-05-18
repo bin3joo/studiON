@@ -221,6 +221,8 @@ export const useTrackStore = defineStore('track', () => {
         totalBarCount: 32
     });
 
+    const projectMembers = ref<{ userId: number; nickname: string; profileImageUrl: string | null; }[]>([]);
+
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
     const manualLatencyOffset = ref(0.15); // 사용자 수동 레이턴시 보정값 (초 단위, 예: 0.1 = 100ms 추가 지연)
@@ -2843,6 +2845,7 @@ export const useTrackStore = defineStore('track', () => {
                     // 핵심: 백엔드가 0을 내려줘도 화면 작업 영역은 최소 100마디 확보
                     totalBarCount: Math.max(data.totalBarCount ?? 0, MIN_TOTAL_BAR_COUNT),
                 }
+                projectMembers.value = data.members || [];
                 bpm.value = data.tempo;
 
                 const eqBandsByTrackId = new Map<number, TrackEqBandState[]>()
@@ -3036,6 +3039,7 @@ export const useTrackStore = defineStore('track', () => {
 
         // [최적화] 파형 컴포넌트(WaveformWebGL)가 스토어 캐시에 접근하기 위한 인터페이스
         getAudioBufferCache,
+        projectMembers,
         fetchAndCacheAudioBuffer,
         isAutoScrollActive,
 

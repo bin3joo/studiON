@@ -674,6 +674,7 @@ function handleSubmitInlineComment(payload: {
   measure: number
   content: string
   parentCommentId?: number | null
+  mentionedUserIds: number[]
 }) {
   const trimmed = payload.content.trim()
 
@@ -693,7 +694,7 @@ function handleSubmitInlineComment(payload: {
     parentCommentId: payload.parentCommentId || null,
     content: trimmed,
     location: payload.measure,
-    mentionedUserIds: [],
+    mentionedUserIds: payload.mentionedUserIds || [],
   })
 
   trackEvent('comment_created', {
@@ -709,7 +710,7 @@ function handlePanelResolveComment(commentId: number) {
   })
 }
 
-function handlePanelAddReply(parentCommentId: number, content: string) {
+function handlePanelAddReply(parentCommentId: number, content: string, mentionedUserIds: number[]) {
   const parent = commentStore.comments.find(c => c.commentId === parentCommentId);
   if (!parent) return;
 
@@ -718,7 +719,7 @@ function handlePanelAddReply(parentCommentId: number, content: string) {
     parentCommentId,
     content: content.trim(),
     location: parent.location,
-    mentionedUserIds: [],
+    mentionedUserIds: mentionedUserIds || [],
   })
 }
 
@@ -1240,7 +1241,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->
-    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="isInvalidDropModalOpen = false">
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="isInvalidDropModalOpen = false">
       <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
         <div class="rounded-full bg-red-500/20 p-3">
           <AlertTriangle class="h-6 w-6 text-red-400" />
@@ -1256,7 +1257,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     </div>
 
     <!-- AI 성공 메시지 모달 -->
-    <div v-if="aiSuccessMessage" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
+    <div v-if="aiSuccessMessage" class="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
       <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
         <div class="rounded-full bg-emerald-500/20 p-3">
           <svg class="h-6 w-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

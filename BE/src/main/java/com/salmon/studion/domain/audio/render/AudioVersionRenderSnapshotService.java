@@ -33,7 +33,7 @@ public class AudioVersionRenderSnapshotService {
     private final com.salmon.studion.domain.eq.service.TrackEqService trackEqService;
     private final MasterLimiterService masterLimiterService;
 
-    @Transactional(readOnly = true)
+    @Transactional
     public AudioVersionRenderSnapshot createSnapshot(Integer projectId, Integer userId) {
         Project project = projectService.getProjectOrThrow(projectId);
 

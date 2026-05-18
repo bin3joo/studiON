@@ -87,7 +87,8 @@ const dynamicWidthPx = computed(() => {
 
 <template>
   <div
-    class="pointer-events-none absolute top-[34px] bottom-0 z-50 border-x border-red-500 bg-red-500/20"
+    class="pointer-events-none absolute top-[34px] bottom-0 z-50"
+    :class="{ 'border-x border-red-500 bg-red-500/20': open }"
     :style="{
       left: `${dynamicStartPx}px`,
       width: `${dynamicWidthPx}px`,

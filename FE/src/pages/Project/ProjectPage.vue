@@ -933,16 +933,10 @@ function handleBackgroundPointerDown(e: PointerEvent) {
   trackStore.deselectAll();
 }
 
-type AiBubblePosition =
-  | {
-      mode: 'absolute'
-      top: number
-    }
-  | {
-      mode: 'fixed'
-      left: number
-      bottom: number
-    }
+type AiBubblePosition = {
+  mode: 'absolute'
+  top: number
+}
 
 function getElementContentTop(container: HTMLElement, targetEl: HTMLElement) {
   const containerRect = container.getBoundingClientRect()
@@ -1159,7 +1153,10 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
     <main class="relative flex flex-1 flex-col overflow-hidden bg-[#131313]">
 
-      <div class="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div 
+        class="relative flex-1 flex flex-col min-h-0 overflow-hidden"
+        :style="{ zoom: trackStore.workspaceZoom }"
+      >
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
@@ -1224,6 +1221,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
       </div>
       </div>
       <ProjectEqPanel
+        :style="{ zoom: trackStore.workspaceZoom }"
         :selected-track="selectedEqTrack"
         :ai-analyzing="aiAnalyzing"
         :ai-analyzed="shouldShowAiEqRevisionPanel"

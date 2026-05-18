@@ -150,6 +150,7 @@ export const useTrackStore = defineStore('track', () => {
     let cachedClientWidth = 0;
 
     const isAutoScrollActive = ref(true); // 수동 스크롤 시 자동 스크롤 일시 정지용
+    const workspaceZoom = ref(0.75); // 타임라인 워크스페이스 배율 (기본 90%)
 
     const setTimelineContainer = (el: HTMLElement | null) => {
         if (timelineContainer) {
@@ -3033,5 +3034,6 @@ export const useTrackStore = defineStore('track', () => {
         updateTrackEqBand,
         removeTrackEqBand,
         getTrackSpectrum,
+        workspaceZoom
     };
 });

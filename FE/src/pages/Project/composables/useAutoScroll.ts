@@ -1,4 +1,5 @@
 import { onUnmounted } from 'vue';
+import { useTrackStore } from '../store/useTrackStore';
 
 export function useAutoScroll() {
   let scrollContainer: HTMLElement | null = null;
@@ -35,7 +36,8 @@ export function useAutoScroll() {
       }
       
       // 왼쪽 스크롤 (왼쪽 패널 사이즈 224px 고려)
-      if (currentClientX < 224 + edgeThreshold) {
+      const trackStore = useTrackStore();
+      if (currentClientX < 224 * trackStore.workspaceZoom + edgeThreshold) {
         scrollContainer.scrollLeft -= scrollSpeed;
         scrolled = true;
       }

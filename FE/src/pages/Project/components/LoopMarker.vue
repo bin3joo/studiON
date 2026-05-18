@@ -29,7 +29,7 @@ const updateLoopPosition = () => {
   const currentScrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
   // 마우스의 이동 거리 + 화면(스크롤)의 이동 거리 합산
-  const dx = currentClientX - dragState.value.startX + (currentScrollLeft - dragState.value.startScrollLeft);
+  const dx = (currentClientX - dragState.value.startX) / trackStore.workspaceZoom + (currentScrollLeft - dragState.value.startScrollLeft);
   const dBar = dx / trackStore.pixelPerBar;
   
   // 1박자 단위 스냅

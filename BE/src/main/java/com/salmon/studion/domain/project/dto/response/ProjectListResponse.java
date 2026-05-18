@@ -15,6 +15,7 @@ import java.util.List;
 public class ProjectListResponse {
 
     private List<ProjectSummary> projects;
+    private Long currentTotalSizeBytes;
 
     public record ProjectSummary (
             Integer projectId,

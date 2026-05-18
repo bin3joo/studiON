@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { MessageSquare, X, Filter } from 'lucide-vue-next'
+import { MessageSquare, X, Filter, Download, Trash2, History } from 'lucide-vue-next'
 import { useCommentStore } from '../store/useCommentStore'
 import { useTrackStore } from '../store/useTrackStore'
+import { useAudioVersionStore } from '../store/useAudioVersionStore'
 import CommentItem from './CommentItem.vue'
 
 // 기본 props 설정 
@@ -12,6 +13,7 @@ const projectId = Number(route.params.projectId)
 
 const commentStore = useCommentStore()
 const trackStore = useTrackStore()
+const audioVersionStore = useAudioVersionStore()
 
 // 1. 타입을 먼저 선언
 type PanelType = 'comments' | 'history' | 'ai'
@@ -30,10 +32,14 @@ const emit = defineEmits<{
 
 // 사이드 패널이 열리거나 필터(탭, 트랙선택)가 변경될 때마다 API 재호출
 watch(
-  [() => props.open, () => commentStore.isResolvedFilter, () => commentStore.selectedTrackId],
-  ([isOpen]) => {
-    if (isOpen && props.type === 'comments') {
-      commentStore.fetchComments(projectId)
+  [() => props.open, () => props.type, () => commentStore.isResolvedFilter, () => commentStore.selectedTrackId],
+  ([isOpen, currentType]) => {
+    if (isOpen) {
+      if (currentType === 'comments') {
+        commentStore.fetchComments(projectId)
+      } else if (currentType === 'history') {
+        audioVersionStore.fetchVersions(projectId)
+      }
     }
   },
   { immediate: true }
@@ -55,6 +61,43 @@ const getTrackName = (trackId: number) => {
   const track = trackStore.trackList.find(t => t.trackId === trackId)
   return track ? track.name : `트랙 ${trackId}`
 }
+
+// 유틸리티 포맷 함수
+const formatDuration = (ms: number) => {
+  if (!ms) return '0:00'
+  const totalSeconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+const formatSize = (bytes: number) => {
+  if (!bytes) return '0 MB'
+  const mb = bytes / (1024 * 1024)
+  return `${mb.toFixed(2)} MB`
+}
+
+const formatDate = (dateString: string) => {
+  if (!dateString) return ''
+  const d = new Date(dateString)
+  return d.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const handleDownloadVersion = async (versionId: number, name: string) => {
+  await audioVersionStore.downloadVersion(projectId, versionId, name)
+}
+
+const handleDeleteVersion = async (versionId: number) => {
+  if (confirm('정말로 이 버전을 삭제하시겠습니까?')) {
+    await audioVersionStore.removeVersion(projectId, versionId)
+  }
+}
 </script>
 
 <template>
@@ -65,10 +108,10 @@ const getTrackName = (trackId: number) => {
   >
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-white/10 px-4 py-4 text-white">
-      <MessageSquare v-if="type === 'comments'" class="h-4 w-4" />
-      <div v-else class="h-4 w-4"></div>
-      
-      <div class="text-xs font-semibold">
+      <div class="flex items-center gap-2 text-xs font-semibold">
+        <MessageSquare v-if="type === 'comments'" class="h-4 w-4" />
+        <History v-else-if="type === 'history'" class="h-4 w-4" />
+        <div v-else class="h-4 w-4"></div>
         {{ panelTitleMap[type] }}
       </div>
 
@@ -143,6 +186,55 @@ const getTrackName = (trackId: number) => {
             @add-reply="(parent, content) => emit('add-reply', parent, content)"
           />
         </template>
+      </div>
+    </template>
+
+    <!-- 버전 기록 패널 내용 -->
+    <template v-else-if="type === 'history'">
+      <div class="flex-1 overflow-y-auto p-4 custom-scrollbar">
+        <div v-if="audioVersionStore.isLoading" class="text-center text-xs text-gray-500 mt-10">
+          불러오는 중...
+        </div>
+        <div v-else-if="!audioVersionStore.versions || audioVersionStore.versions.length === 0" class="text-center text-xs text-gray-500 mt-10">
+          저장된 버전 기록이 없습니다.
+        </div>
+        <div v-else class="space-y-3">
+          <div
+            v-for="version in audioVersionStore.versions"
+            :key="version.versionId"
+            class="rounded-lg border border-white/10 bg-[#262626] p-3 transition hover:border-primary/50"
+          >
+            <div class="mb-1 flex items-start justify-between">
+              <h4 class="text-sm font-semibold text-white break-all pr-2">{{ version.name }}</h4>
+              <div class="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  class="rounded p-1.5 text-gray-400 hover:bg-primary/20 hover:text-primary transition"
+                  title="다운로드"
+                  @click="handleDownloadVersion(version.versionId, version.name)"
+                >
+                  <Download class="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  class="rounded p-1.5 text-gray-400 hover:bg-destructive/20 hover:text-destructive transition"
+                  title="삭제"
+                  @click="handleDeleteVersion(version.versionId)"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+            
+            <p v-if="version.memo" class="mb-2 text-xs text-gray-400 line-clamp-2">{{ version.memo }}</p>
+            
+            <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500">
+              <span class="flex items-center gap-1"><History class="h-3 w-3" /> {{ formatDate(version.createdAt) }}</span>
+              <span>{{ formatDuration(version.durationMs) }}</span>
+              <span>{{ formatSize(version.sizeBytes) }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </template>
 

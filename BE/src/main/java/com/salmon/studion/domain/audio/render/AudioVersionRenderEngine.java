@@ -217,6 +217,8 @@ public class AudioVersionRenderEngine {
                     .append(",asetpts=PTS-STARTPTS")
                     .append(",aformat=sample_rates=44100:channel_layouts=stereo")
                     .append(",adelay=").append(clip.getTimelineStartMs()).append("|").append(clip.getTimelineStartMs())
+                    .append(",apad")
+                    .append(",atrim=duration=").append(formatSeconds(snapshot.getRenderDurationMs() / 1000.0d))
                     .append("[").append(clipOutputLabel).append("];")
                     .append(System.lineSeparator());
         }
@@ -242,7 +244,7 @@ public class AudioVersionRenderEngine {
                         .append(System.lineSeparator());
             } else {
                 builder.append(mixedTrackInputs)
-                        .append("amix=inputs=").append(trackClips.size()).append(":normalize=0")
+                        .append("amix=inputs=").append(trackClips.size()).append(":duration=longest:normalize=0")
                         .append("[").append(mixedTrackLabel).append("];")
                         .append(System.lineSeparator());
             }
@@ -267,7 +269,7 @@ public class AudioVersionRenderEngine {
                     .append(System.lineSeparator());
         } else {
             builder.append(String.join("", trackOutputLabels))
-                    .append("amix=inputs=").append(trackOutputLabels.size()).append(":normalize=0")
+                    .append("amix=inputs=").append(trackOutputLabels.size()).append(":duration=longest:normalize=0")
                     .append("[mix_out];")
                     .append(System.lineSeparator());
         }

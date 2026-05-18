@@ -126,11 +126,11 @@ const displayedCode = computed(() => {
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-9999 grid place-items-center bg-background/80 px-4 backdrop-blur-sm animate-fade-in"
+    class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in"
     @click.self="handleClose"
   >
     <div
-      class="relative w-full max-w-md rounded-2xl border border-primary/40 bg-card p-7 shadow-neon"
+      class="relative w-full max-w-md rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all"
     >
       <button
         type="button"

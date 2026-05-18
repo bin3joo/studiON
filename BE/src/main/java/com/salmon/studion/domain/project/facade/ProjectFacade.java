@@ -77,7 +77,9 @@ public class ProjectFacade {
 
         long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
 
-        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments, currentTotalSizeBytes);
+        List<ProjectMember> members = projectMemberService.getMembersWithUserByProjectIds(List.of(projectId));
+
+        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments, currentTotalSizeBytes, members);
     }
 
     @Transactional(readOnly = true)
@@ -186,7 +188,8 @@ public class ProjectFacade {
             List<Track> tracks,
             List<Clip> clips,
             List<CommentsGetResponse.CommentDto> comments,
-            Long currentTotalSizeBytes
+            Long currentTotalSizeBytes,
+            List<ProjectMember> members
     ) {
         Map<Integer, List<Clip>> clipsByTrackId = clips.stream()
                 .collect(Collectors.groupingBy(clip -> clip.getTrack().getId()));
@@ -197,7 +200,15 @@ public class ProjectFacade {
                 .map(track -> toTrackResponse(track, clipsByTrackId.getOrDefault(track.getId(), List.of())))
                 .toList();
 
-        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments, currentTotalSizeBytes);
+        List<ProjectDetailResponse.MemberResponse> memberResponses = members.stream()
+                .map(pm -> new ProjectDetailResponse.MemberResponse(
+                        pm.getUser().getId(),
+                        pm.getUser().getNickname(),
+                        pm.getUser().getProfileImgUrl()
+                ))
+                .toList();
+
+        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments, currentTotalSizeBytes, memberResponses);
     }
 
     private ProjectDetailResponse.MasterTrackResponse toMasterTrackResponse(MasterTrack masterTrack) {

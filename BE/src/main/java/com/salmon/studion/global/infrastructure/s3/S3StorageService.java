@@ -2,16 +2,23 @@ package com.salmon.studion.global.infrastructure.s3;
 
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
+import com.salmon.studion.global.infrastructure.s3.dto.DownloadPresignedUrlResult;
 import com.salmon.studion.global.infrastructure.s3.dto.PresignedUrlResult;
+import com.salmon.studion.global.infrastructure.s3.dto.UploadedObjectResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.io.File;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDateTime;
 
 
 @Service
@@ -49,6 +56,63 @@ public class S3StorageService {
                 .toString();
 
         return PresignedUrlResult.of(objectKey, storedName, uploadUrl);
+    }
+
+    public UploadedObjectResult uploadMasterAudioFile(
+            Integer projectId,
+            File file,
+            String originalName,
+            String contentType
+    ) {
+        String storedName = s3ObjectKeyGenerator.createStoredName(originalName);
+        String objectKey = s3ObjectKeyGenerator.createMasterAudioObjectKey(projectId, storedName);
+
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(objectKey)
+                .contentType(contentType)
+                .contentLength(file.length())
+                .build();
+
+        try {
+            s3Client.putObject(putObjectRequest, file.toPath());
+        } catch (S3Exception exception) {
+            throw new BusinessException(ErrorCode.AUDIO_UPLOAD_FAILED);
+        }
+
+        return UploadedObjectResult.of(objectKey, storedName, file.length());
+    }
+
+    public DownloadPresignedUrlResult createDownloadUrl(String objectKey, String downloadFileName) {
+        Duration expiration = Duration.ofMinutes(uploadUrlExpirationMinutes);
+        LocalDateTime expiresAt = LocalDateTime.now().plus(expiration);
+
+        GetObjectRequest.Builder getObjectRequestBuilder = GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(objectKey);
+
+        if (downloadFileName != null && !downloadFileName.isBlank()) {
+            getObjectRequestBuilder.responseContentDisposition(buildDownloadContentDisposition(downloadFileName));
+        }
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(expiration)
+                .getObjectRequest(getObjectRequestBuilder.build())
+                .build();
+
+        String downloadUrl = s3Presigner.presignGetObject(presignRequest)
+                .url()
+                .toString();
+
+        return DownloadPresignedUrlResult.of(downloadUrl, expiresAt);
+    }
+
+    // 한글 파일명도 S3 presigned download URL에서 안전하게 처리되도록 Content-Disposition 값을 생성하는 메서드
+    private String buildDownloadContentDisposition(String downloadFileName) {
+        String encodedFileName = URLEncoder.encode(downloadFileName, StandardCharsets.UTF_8)
+                .replace("+", "%20");
+
+        return "attachment; filename=\"audio-version\"; filename*=UTF-8''" + encodedFileName;
     }
 
     public void validateUploadedObject(String objectKey, Integer expectedSizeBytes, String expectedContentType) {

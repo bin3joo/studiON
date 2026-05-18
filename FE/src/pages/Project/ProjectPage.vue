@@ -23,6 +23,7 @@ import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
 import { useCommentStore } from './store/useCommentStore'
 import ExportModal from './components/ExportModal.vue';
+import VersionSaveModal from './components/VersionSaveModal.vue';
 import { useProjectAiWorkflow } from './composables/useProjectAiWorkflow'
 import { useProjectCollaboration } from './composables/useProjectCollaboration'
 import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
@@ -185,6 +186,21 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
 
   // Ctrl 키(또는 Mac의 Cmd 키)와 함께 누른 경우
   if (e.ctrlKey || e.metaKey) {
+    if (e.code === 'KeyZ') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        trackStore.redo();
+      } else {
+        trackStore.undo();
+      }
+      return;
+    }
+    if (e.code === 'KeyY') {
+      e.preventDefault();
+      trackStore.redo();
+      return;
+    }
+
     switch (e.code) {
       case 'KeyS': // 저장
         e.preventDefault();
@@ -323,6 +339,7 @@ onMounted(async () => {
   if(projectId){
     const numericProjectId = Number(projectId)
     await trackStore.fetchProject(Number(projectId))
+    commentStore.fetchComments(numericProjectId)
 
     trackEvent('project_opened', {
     project_id: numericProjectId,
@@ -376,6 +393,8 @@ onUnmounted(()=>{
   disconnectProjectSocket()
   // 프로젝트 페이지를 벗어날 때 오디오 재생 즉시 중지
   trackStore.stopPlay();
+  // 프로젝트를 나갈 때 코멘트 모드 상태 초기화
+  trackStore.isCommentMode = false;
 })
 
 
@@ -551,22 +570,74 @@ function handleDeleteComment(payload: {
 
 const commentGroups = ref<TrackMeasureCommentGroup[]>([])
 
+watch(
+  () => commentStore.comments,
+  (newComments) => {
+    const newGroups = new Map<string, TrackMeasureCommentGroup>()
+
+    newComments.forEach((rootComment) => {
+      const trackIdStr = String(rootComment.trackId)
+      // 마스터 트랙은 인라인 코멘트를 지원하지 않으므로 무시
+      if (trackStore.masterTrack && trackIdStr === String(trackStore.masterTrack.trackId)) return;
+
+      const key = `${trackIdStr}-${rootComment.location}`
+      
+      const newComment: TimelineComment = {
+        id: String(rootComment.commentId),
+        author: rootComment.author?.nickname || 'Unknown',
+        content: rootComment.content,
+        color: '#d93ce6',
+        profileImageUrl: rootComment.author?.profileImgUrl,
+      }
+      
+      const replyComments: TimelineComment[] = (rootComment.replies || []).map(reply => ({
+        id: String(reply.commentId),
+        author: reply.author?.nickname || 'Unknown',
+        content: reply.content,
+        color: '#d93ce6',
+        profileImageUrl: reply.author?.profileImgUrl,
+      }))
+      
+      if (newGroups.has(key)) {
+        const group = newGroups.get(key)!
+        group.comments.push(newComment, ...replyComments)
+        if (rootComment.isResolved === false) {
+          group.resolved = false
+        }
+      } else {
+        newGroups.set(key, {
+          trackId: trackIdStr,
+          trackName: findTrackName(trackIdStr),
+          measure: rootComment.location,
+          resolved: rootComment.isResolved,
+          comments: [newComment, ...replyComments],
+        })
+      }
+    })
+
+    commentGroups.value = Array.from(newGroups.values())
+  },
+  { immediate: true, deep: true }
+)
+
 const isExportModalOpen = ref(false)
 
 function handleExport() {
   isExportModalOpen.value = true
 }
 
+const isVersionSaveModalOpen = ref(false)
+
 function handleSaveVersion() {
- // console.log('버전 저장')
+  isVersionSaveModalOpen.value = true
 }
 
 function handleUndo() {
- // console.log('undo')
+  trackStore.undo()
 }
 
 function handleRedo() {
- // console.log('redo')
+  trackStore.redo()
 }
 
 function handleOpenInvite() {
@@ -602,6 +673,7 @@ function handleSubmitInlineComment(payload: {
   trackName: string
   measure: number
   content: string
+  parentCommentId?: number | null
 }) {
   const trimmed = payload.content.trim()
 
@@ -618,7 +690,7 @@ function handleSubmitInlineComment(payload: {
 
   socketService.publish('COMMENT_ADD', {
     trackId,
-    parentCommentId: null,
+    parentCommentId: payload.parentCommentId || null,
     content: trimmed,
     location: payload.measure,
     mentionedUserIds: [],
@@ -658,6 +730,8 @@ const {
   shouldShowAiEqRevisionPanel,
   aiBeforeBands,
   aiAfterBands,
+  activeAiMarkers,
+  activeAiUiMode,
   selectedEqTrack,
   runAiAnalysis,
   handleApplyAiEq,
@@ -668,7 +742,7 @@ const {
   goNextAiAnalysis,
   goPrevAiAnalysis,
   isActiveClippingApplied,
-activeClippingAppliedInfo,
+  activeClippingAppliedInfo,
 } = useProjectAiWorkflow(Number(projectId))
 
 function handleAddEqBand(payload: {
@@ -1005,19 +1079,34 @@ const isProjectGuideOpen = ref(false)
 
 const projectGuideSteps = [
   {
+    selector: '[data-guide="timeline"]',
+    title: '작업 영역 (타임라인)',
+    description: '타임라인 빈 공간에 오디오 파일(.mp3, .wav)을 드래그 앤 드롭하여 새 트랙을 추가해 보세요.',
+  },
+  {
+    selector: '[data-guide="play-controls"]',
+    title: '재생 및 제어',
+    description: '스페이스바를 누르거나 재생 버튼을 클릭해 음악을 들어보세요.',
+  },
+  {
     selector: '[data-guide="version-save"]',
     title: '버전 저장',
-    description: '현재 작업 상태를 새 버전으로 저장해 변경 이력을 관리할 수 있어요.',
+    description: '현재 작업 상태를 버전으로 저장하세요. 버전기록된 음원을 항상 다운 받을 수 있습니다.',
   },
   {
     selector: '[data-guide="comment"]',
-    title: '코멘트',
-    description: '프로젝트에 남겨진 코멘트를 확인하고 팀원과 피드백을 주고받을 수 있어요.',
+    title: '코멘트 모드',
+    description: '단축키 \'C\'를 누르거나 이 버튼을 눌러 코멘트 모드를 켜세요. 특정 트랙과 마디에 피드백을 남길 수 있습니다.',
   },
   {
     selector: '[data-guide="ai-analysis"]',
-    title: 'AI 분석',
-    description: 'AI가 오디오를 분석해 충돌 구간과 개선 포인트를 알려줘요.',
+    title: 'AI 오디오 분석',
+    description: 'AI가 오디오를 분석해 주파수 충돌(Frequency Masking), 위상 캔슬링(Phase Cancellation), 볼륨 불균형 등 믹싱 에러를 시각적으로 짚어주고 해결책을 제시합니다.',
+  },
+  {
+    selector: '[data-guide="export"]',
+    title: '음원 추출',
+    description: '작업이 모두 끝났다면 프로젝트를 오디오 파일로 내보내기(Export) 해보세요!',
   },
 ]
 
@@ -1047,6 +1136,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   :project-name="projectName"
   :online-users="onlineUsers"
   :last-saved-at="lastSavedTime"
+  :can-undo="trackStore.undoStack.length > 0"
+  :can-redo="trackStore.redoStack.length > 0"
   @rename="handleRename"
   @export="handleExport"
   @save-version="handleSaveVersion"
@@ -1087,11 +1178,13 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         <div 
           ref="timelineContainerRef" 
           class="flex-1 overflow-x-scroll overflow-y-auto relative flex flex-col custom-scrollbar bg-[#131313]"
-        @pointerdown.stop="handleBackgroundPointerDown"
-        @scroll="handleHorizontalScroll"
-      >
+          :class="trackStore.isCommentMode ? 'comment-mode-active' : ''"
+          data-guide="timeline"
+          @pointerdown.stop="handleBackgroundPointerDown"
+          @scroll="handleHorizontalScroll"
+        >
         <!-- 눈금자 -->
-        <div class="sticky top-0 z-40 w-max min-w-full bg-[#1c1c1c] border-b border-white/5" style="will-change: transform;">
+        <div class="sticky top-0 z-50 w-max min-w-full bg-[#1c1c1c] border-b border-white/5">
           <TimelineRuler />
         </div>
      
@@ -1128,8 +1221,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
   <div
   ref="masterTrackWrapperRef"
-  class="mt-auto shrink-0 sticky bottom-0 z-70 w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
-  style="will-change: transform;"
+  class="mt-auto shrink-0 sticky bottom-0 z-[70] w-max min-w-full shadow-[0_-16px_24px_rgba(0,0,0,0.5)] bg-[#1c1c1c]"
 >
         <!-- 마스터 트랙 -->
           <TrackItem
@@ -1152,6 +1244,8 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         :ai-analyzed="shouldShowAiEqRevisionPanel"
         :ai-before-bands="aiBeforeBands"
         :ai-after-bands="aiAfterBands"
+        :ai-markers="activeAiMarkers"
+        :active-ai-ui-mode="activeAiUiMode"
         @apply-ai-eq="handleApplyAiEq"
         @cancel-ai-eq="handleCancelAiEq"
         @request-ai-eq-revision="handleRequestAiEqRevision"
@@ -1159,7 +1253,6 @@ function closeProjectGuide(doNotShowAgain: boolean) {
         @update-eq-band="handleUpdateEqBand"
         @remove-eq-band="handleRemoveEqBand"
       />
-    <!-- <ProjectPlaybar @open-ai-panel="handleOpenAiPanel" /> -->
     
     <ProjectSidePanel
       class="z-50"
@@ -1178,6 +1271,12 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   :project-id="projectId"
   :project-name="projectName"
   @close="isInviteModalOpen = false"
+    />
+    
+    <VersionSaveModal
+      :open="isVersionSaveModalOpen"
+      :project-id="Number(projectId)"
+      @close="isVersionSaveModalOpen = false"
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->

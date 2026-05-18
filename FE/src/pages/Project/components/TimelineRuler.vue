@@ -2,6 +2,7 @@
 import {ref, onMounted, onUnmounted} from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import * as Tone from 'tone';
+import LoopMarker from './LoopMarker.vue';
 
 // 트랙 스토어에서 타임라인 상태와 픽셀 계산 사용
 const trackStore = useTrackStore();
@@ -207,6 +208,9 @@ onUnmounted(() => {
             ></div>
           </template>
         </div>
+
+        <!-- 구간 반복(Loop) 마커 (분리된 컴포넌트 사용) -->
+        <LoopMarker />
 
         <div 
           aria-label="현재 재생 위치 표시 바"

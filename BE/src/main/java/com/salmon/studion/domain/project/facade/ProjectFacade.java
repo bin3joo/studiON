@@ -1,12 +1,14 @@
 package com.salmon.studion.domain.project.facade;
 
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
+import com.salmon.studion.domain.audio.service.AudioService;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.clip.service.ClipService;
 import com.salmon.studion.domain.comment.dto.response.CommentsGetResponse;
 import com.salmon.studion.domain.comment.facade.CommentFacade;
+import com.salmon.studion.domain.limiter.service.MasterLimiterService;
 import com.salmon.studion.domain.project.dto.request.ProjectCreateRequest;
 import com.salmon.studion.domain.project.dto.response.ProjectCreateResponse;
 import com.salmon.studion.domain.project.dto.response.ProjectDetailResponse;
@@ -39,10 +41,12 @@ public class ProjectFacade {
     private final ProjectMemberService projectMemberService;
     private final ProjectSaveService projectSaveService;
     private final MasterTrackService masterTrackService;
+    private final MasterLimiterService masterLimiterService;
     private final UserService userService;
     private final TrackService trackService;
     private final ClipService clipService;
     private final CommentFacade commentFacade;
+    private final AudioService audioService;
     private final CdnUrlService cdnUrlService;
 
     @Transactional(readOnly = true)
@@ -71,7 +75,9 @@ public class ProjectFacade {
         List<CommentsGetResponse.CommentDto> comments =
                 commentFacade.getCommentsForProjectDetail(projectId, userId);
 
-        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments);
+        long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
+
+        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments, currentTotalSizeBytes);
     }
 
     @Transactional(readOnly = true)
@@ -114,13 +120,16 @@ public class ProjectFacade {
                 })
                 .toList();
 
-        return new ProjectListResponse(projectSummaries);
+        long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
+
+        return new ProjectListResponse(projectSummaries, currentTotalSizeBytes);
     }
 
     @Transactional
     public ProjectCreateResponse createProject(ProjectCreateRequest projectCreateRequest, Integer userId) {
         Project project = projectService.createProject(projectCreateRequest);
         MasterTrack masterTrack = masterTrackService.createMasterTrack(project);
+        masterLimiterService.createIfAbsent(project.getId());
 
         User user = userService.getUserByUserId(userId);
         projectMemberService.createProjectMember(project, user);
@@ -176,7 +185,8 @@ public class ProjectFacade {
             MasterTrack masterTrack,
             List<Track> tracks,
             List<Clip> clips,
-            List<CommentsGetResponse.CommentDto> comments
+            List<CommentsGetResponse.CommentDto> comments,
+            Long currentTotalSizeBytes
     ) {
         Map<Integer, List<Clip>> clipsByTrackId = clips.stream()
                 .collect(Collectors.groupingBy(clip -> clip.getTrack().getId()));
@@ -187,7 +197,7 @@ public class ProjectFacade {
                 .map(track -> toTrackResponse(track, clipsByTrackId.getOrDefault(track.getId(), List.of())))
                 .toList();
 
-        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments);
+        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments, currentTotalSizeBytes);
     }
 
     private ProjectDetailResponse.MasterTrackResponse toMasterTrackResponse(MasterTrack masterTrack) {

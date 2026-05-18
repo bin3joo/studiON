@@ -8,6 +8,7 @@ public class TrackEqRedisKeys {
     private static final String LOCK_KEY_PATTERN = "project:%d:track-eq:%d:lock";
     private static final String DRAFT_KEY_PATTERN = "project:%d:track-eq:%d:draft";
     private static final String CURRENT_KEY_PATTERN = "project:%d:track:%d:eq:current";
+    private static final String DELETED_TRACK_EQS_KEY_PATTERN = "project:%d:deleted_track_eq_tracks";
 
     private TrackEqRedisKeys() {
 
@@ -23,5 +24,9 @@ public class TrackEqRedisKeys {
 
     public static String currentKey(Integer projectId, Integer trackId) {
         return String.format(CURRENT_KEY_PATTERN, projectId, trackId);
+    }
+
+    public static String deletedTrackEqsKey(Integer projectId) {
+        return String.format(DELETED_TRACK_EQS_KEY_PATTERN, projectId);
     }
 }

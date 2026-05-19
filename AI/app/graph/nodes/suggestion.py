@@ -119,8 +119,8 @@ def approve_plan(state: WorkflowState) -> WorkflowState:
 
 def build_issue_payloads(state: WorkflowState) -> WorkflowState:
     payload = {
-        "groupTitle": "Workflow suggestion group",
-        "groupSummary": "Unified issue navigation payload",
+        "groupTitle": "워크플로우 제안 그룹",
+        "groupSummary": "통합 이슈 탐색 페이로드",
         "activeIssueId": None,
         "navigationOrder": [],
         "issues": [],
@@ -245,9 +245,11 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             "startMs": int(selected_region.get("start_ms") or 0),
             "endMs": int(selected_region.get("end_ms") or 0),
             "trackId": selected_region.get("track_id"),
+            "bandOverlapSubtype": selected_region.get("band_overlap_subtype"),
+            "bandFocusLabel": selected_region.get("band_focus_label"),
             "bubbleTarget": "track",
             "uiMode": "eq_ai",
-            "summary": plan_payload.get("summary") or "Planner-generated summary",
+            "summary": plan_payload.get("summary") or "플래너가 생성한 수정 요약",
             "explanation": plan_payload.get("explanation"),
             "previewBands": [preview_band_spec],
             "actions": [deepcopy(action)],
@@ -255,7 +257,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         },
         suggestion={
             "rank": 1,
-            "summary": plan_payload.get("summary") or "Planner-generated summary",
+            "summary": plan_payload.get("summary") or "플래너가 생성한 수정 요약",
             "explanation": plan_payload.get("explanation"),
             "previewBands": [preview_band_spec],
         },
@@ -273,6 +275,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
             payload={
                 "selectedRegionId": int(selected_region["id"]),
                 "issueType": selected_region.get("issue_type"),
+                "bandOverlapSubtype": selected_region.get("band_overlap_subtype"),
                 "preserveClipId": state.get("preserve_clip_id"),
                 "planPayload": {
                     **deepcopy(plan_payload),
@@ -284,7 +287,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
     )
     mongo_artifact_ids.append(execution_plan_artifact_id)
     latest_artifact_id = execution_plan_artifact_id
-    notes.append("Materialized band_overlap planner output into unified suggestion payload.")
+    notes.append("band_overlap 플래너 결과를 통합 suggestion payload로 구체화했습니다.")
     return workflow_update(
         state,
         node="materialize_execution_plan",
@@ -375,6 +378,7 @@ def _build_clip_context(
             {
                 "clip_id": clip_id,
                 "track_id": track_id,
+                "track_name": _track_name(state, track_id),
                 "start_ms": clip.get("start_ms"),
                 "end_ms": clip.get("end_ms"),
                 "is_preserve_target": clip_id == preserve_clip_id,
@@ -395,12 +399,22 @@ def _build_selection_context(
         for track_id in involved_track_ids
         if preserve_track_id is None or track_id != preserve_track_id
     ]
+    track_name_map = {
+        int(track_id): _track_name(state, int(track_id))
+        for track_id in involved_track_ids
+    }
     return {
         "selectedTrackId": preserve_track_id,
         "preserveTrackId": preserve_track_id,
         "selectedTrackIsProtected": preserve_track_id is not None,
         "selectedClipId": preserve_clip_id,
         "preserveClipId": preserve_clip_id,
+        "primaryTrackId": region.get("track_id"),
+        "secondaryTrackId": region.get("secondary_track_id"),
+        "bandOverlapSubtype": region.get("band_overlap_subtype"),
+        "bandFocusLabel": region.get("band_focus_label"),
+        "trackBodyContributions": deepcopy(region.get("track_body_contributions") or {}),
+        "trackNameMap": track_name_map,
         "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
     }
 
@@ -428,6 +442,7 @@ def _normalize_plan_payload(
     candidate["preserveClipId"] = preserve_clip_id
 
     action["targetScope"] = "TRACK"
+    action["targetClipId"] = None
     action["params"] = action.get("params") or {}
     candidate["targetTrackId"] = action.get("targetTrackId")
     candidate["action"] = action
@@ -451,6 +466,8 @@ def _build_preview_band_spec(
         raise ValueError("preview band spec requires integer targetTrackId")
     if not isinstance(gain_delta_db, int | float):
         raise ValueError("preview band spec requires numeric gainDeltaDb")
+    if abs(float(gain_delta_db)) > 9.0:
+        raise ValueError("preview band spec requires gainDeltaDb within 9 dB for band_overlap")
 
     frequency_hz, q = _resolve_eq_band_values(action)
     base_time = state.get("heartbeat_at")
@@ -526,8 +543,8 @@ def _build_non_llm_issue(
             "trackId": region.get("track_id"),
             "bubbleTarget": "master",
             "uiMode": "master_limiter",
-            "summary": region.get("summary") or "Track clipping detected",
-            "explanation": "Apply a conservative true-peak limiter on the master bus to control clipping without editing individual track EQ.",
+            "summary": region.get("summary") or "트랙 클리핑이 감지되었습니다.",
+            "explanation": "개별 트랙 EQ를 직접 수정하지 않고, 마스터 버스에서 보수적인 true-peak limiter로 클리핑을 제어합니다.",
             "previewBands": [],
             "actions": [_build_master_limiter_action(state, region)],
             "markers": [],
@@ -541,8 +558,8 @@ def _build_non_llm_issue(
             "trackId": None,
             "bubbleTarget": "master",
             "uiMode": "master_limiter",
-            "summary": region.get("summary") or "Master clipping detected",
-            "explanation": "Apply a conservative true-peak limiter on the master bus to control the detected clipping region.",
+            "summary": region.get("summary") or "마스터 클리핑이 감지되었습니다.",
+            "explanation": "감지된 클리핑 구간을 제어하기 위해 마스터 버스에 보수적인 true-peak limiter를 적용합니다.",
             "previewBands": [],
             "actions": [_build_master_limiter_action(state, region)],
             "markers": [],
@@ -556,8 +573,8 @@ def _build_non_llm_issue(
             "trackId": region.get("track_id"),
             "bubbleTarget": "track",
             "uiMode": "marker_only",
-            "summary": region.get("summary") or "High-band harshness detected",
-            "explanation": "Show the band focus as a marker only. No execution action is generated.",
+            "summary": region.get("summary") or "고역 harshness가 감지되었습니다.",
+            "explanation": "문제 대역을 마커로만 표시하며, 실행 액션은 생성하지 않습니다.",
             "previewBands": [],
             "actions": [],
             "markers": [
@@ -581,8 +598,8 @@ def _build_non_llm_issue(
             "trackId": region.get("track_id"),
             "bubbleTarget": "track",
             "uiMode": "eq_ai",
-            "summary": region.get("summary") or "Sibilance detected",
-            "explanation": "Deterministic EQ guidance was generated without using the planner loop.",
+            "summary": region.get("summary") or "치찰음이 감지되었습니다.",
+            "explanation": "플래너 루프 없이 규칙 기반 EQ 가이드를 생성했습니다.",
             "previewBands": [],
             "actions": [deepcopy(action)],
             "markers": [],
@@ -602,10 +619,12 @@ def _build_initial_issue(
             "startMs": int(region.get("start_ms") or 0),
             "endMs": int(region.get("end_ms") or 0),
             "trackId": region.get("track_id"),
+            "bandOverlapSubtype": region.get("band_overlap_subtype"),
+            "bandFocusLabel": region.get("band_focus_label"),
             "bubbleTarget": "track",
             "uiMode": "eq_ai",
-            "summary": region.get("summary") or "Band overlap detected",
-            "explanation": "Planner input is required before preview bands and EQ actions are materialized.",
+            "summary": region.get("summary") or "대역 충돌이 감지되었습니다.",
+            "explanation": "preview band와 EQ action을 구체화하기 전에 플래너 입력이 필요합니다.",
             "previewBands": [],
             "actions": [],
             "markers": [],
@@ -623,8 +642,8 @@ def _merge_issue_payload(
     group_summary: object | None = None,
 ) -> dict[str, object]:
     merged = deepcopy(payload)
-    merged.setdefault("groupTitle", "Workflow suggestion group")
-    merged.setdefault("groupSummary", "Unified issue navigation payload")
+    merged.setdefault("groupTitle", "워크플로우 제안 그룹")
+    merged.setdefault("groupSummary", "통합 이슈 탐색 페이로드")
     merged.setdefault("activeIssueId", None)
     merged.setdefault("navigationOrder", [])
     merged.setdefault("issues", [])
@@ -669,6 +688,13 @@ def _resolve_recommended_reduction_db(region: dict[str, object]) -> float:
     explicit = region.get("recommended_reduction_db")
     if isinstance(explicit, int | float):
         return round(float(explicit), 3)
+    subtype = str(region.get("band_overlap_subtype") or "")
+    if subtype == "low_mid_overlap":
+        return 3.4
+    if subtype == "body_overlap":
+        return 2.8
+    if subtype == "presence_overlap":
+        return 1.8
     current_true_peak = region.get("current_true_peak_dbtp")
     target_ceiling = region.get("target_ceiling_dbtp")
     if isinstance(current_true_peak, int | float):
@@ -717,6 +743,7 @@ def _build_region_action(
     issue = region.get("issue_type")
     if issue == "band_overlap":
         target_track_id = _resolve_overlap_target_track(state, region, preserve_clip_id)
+        gain_delta_db = -_resolve_recommended_reduction_db(region)
         return build_action(
             state,
             index=index,
@@ -726,7 +753,7 @@ def _build_region_action(
             end_ms=region["end_ms"],
             band_low_hz=region.get("band_low_hz"),
             band_high_hz=region.get("band_high_hz"),
-            gain_delta_db=-2.4,
+            gain_delta_db=gain_delta_db,
             params={"threshold": -19, "ratio": 2.0},
         )
     if issue == "sibilance":
@@ -830,6 +857,14 @@ def _resolve_clip_track_id(state: WorkflowState, clip_id: int | None) -> int | N
     for clip in state.get("clip_index", []):
         if int(clip.get("clip_id") or 0) == int(clip_id):
             return int(clip["track_id"])
+    return None
+
+
+def _track_name(state: WorkflowState, track_id: int) -> str | None:
+    track_name_map = state.get("track_name_map") or {}
+    track_name = track_name_map.get(int(track_id))
+    if isinstance(track_name, str) and track_name.strip():
+        return track_name.strip()
     return None
 
 

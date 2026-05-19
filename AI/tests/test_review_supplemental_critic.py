@@ -196,3 +196,34 @@ def test_supplemental_critic_revises_presence_overlap_over_4db() -> None:
 
     assert result == "REVISE"
     assert "4dB" in note
+
+
+def test_supplemental_critic_revises_upper_mid_overlap_over_6db() -> None:
+    result, note = _supplement_critic_decision(
+        state={
+            "user_feedback_message": "Keep the lead clear and just tame the upper-mid layer.",
+            "preserve_clip_id": 50005,
+        },
+        region={
+            "start_ms": 1600,
+            "end_ms": 2500,
+            "band_low_hz": 1280,
+            "band_high_hz": 1820,
+            "band_overlap_subtype": "upper_mid_overlap",
+        },
+        plan_payload={
+            "candidate": {
+                "action": {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetTrackId": 71,
+                    "targetClipId": None,
+                    "bandLowHz": 1320,
+                    "bandHighHz": 1780,
+                    "gainDeltaDb": -6.4,
+                }
+            }
+        },
+    )
+
+    assert result == "REVISE"
+    assert "6dB" in note

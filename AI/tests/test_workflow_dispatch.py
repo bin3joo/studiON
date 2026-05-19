@@ -1457,6 +1457,7 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     assert overlap_projection["band_overlap_subtype"] in {
         "low_mid_overlap",
         "body_overlap",
+        "upper_mid_overlap",
         "presence_overlap",
     }
     assert body["projections"]["suggestion_group"] is not None

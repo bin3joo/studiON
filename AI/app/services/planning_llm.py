@@ -183,6 +183,7 @@ def _planner_system_prompt() -> str:
         "keep gainDeltaDb conservative and subtype-aware. "
         "For low_mid_overlap, prefer about -2.5 to -4.5 dB and allow stronger cuts only for clearly sustained masking; never exceed -9 dB. "
         "For body_overlap, prefer about -2.0 to -3.5 dB and keep stronger cuts within -7 dB. "
+        "For upper_mid_overlap, prefer about -1.5 to -3.0 dB, keep the band fairly tight, and allow stronger cuts only for clearly sustained masking; never exceed -6 dB. "
         "For presence_overlap, prefer about -1.0 to -2.5 dB, keep the band narrow, and never exceed -4 dB. "
         "keep the explanation concrete by naming the target track, the band focus, and why the preserve target stays untouched. "
         f"Allowed actionType values: {', '.join(ALLOWED_ACTION_TYPES)}. "

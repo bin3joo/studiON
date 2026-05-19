@@ -53,6 +53,7 @@ MASTER_CLIPPING_DISTRIBUTED_TOP_SCORE = 0.5
 BAND_RANGES = {
     "low_mid": (180, 420),
     "body": (250, 1200),
+    "upper_mid": (1200, 2000),
     "presence": (2500, 5000),
     "harshness": (4500, 9000),
     "sibilance": (6000, 8500),
@@ -97,6 +98,20 @@ BAND_OVERLAP_SUBTYPE_CONFIG = {
         "refine_band": BAND_RANGES["body"],
         "summary": "겹치는 트랙들 사이에서 바디 대역 혼잡이 감지되었습니다.",
         "ranking_adjustment": 0.0,
+    },
+    "upper_mid_overlap": {
+        "focus_energy_key": "upper_mid_energy",
+        "support_energy_key": "body_energy",
+        "min_track_energy": 0.12,
+        "min_support_energy": 0.08,
+        "min_focus_sum": 0.28,
+        "min_support_sum": 0.26,
+        "min_active_tracks": 2,
+        "min_centroid_hz": 900,
+        "fallback_band": BAND_RANGES["upper_mid"],
+        "refine_band": BAND_RANGES["upper_mid"],
+        "summary": "중고역 명료도가 서로 부딪히며 앞선 감이 강하게 겹칩니다.",
+        "ranking_adjustment": -0.015,
     },
     "presence_overlap": {
         "focus_energy_key": "presence_energy",
@@ -1000,6 +1015,10 @@ def _compute_track_frame_summary(signal: np.ndarray) -> tuple[list[dict[str, obj
                     _band_ratio(frame_power, freqs, *BAND_RANGES["body"], total_energy),
                     3,
                 ),
+                "upper_mid_energy": round(
+                    _band_ratio(frame_power, freqs, *BAND_RANGES["upper_mid"], total_energy),
+                    3,
+                ),
                 "presence_energy": round(
                     _band_ratio(frame_power, freqs, *BAND_RANGES["presence"], total_energy),
                     3,
@@ -1582,7 +1601,7 @@ def _build_band_overlap_subtype_candidate(
     primary_track_id = sorted_tracks[0][0]
     involved_track_ids = [track_id for track_id, _ in sorted_tracks]
     track_body_contributions = {
-        str(track_id): round(float(window.get("body_energy", 0.0)), 3)
+        str(track_id): round(float(window.get(focus_energy_key, 0.0)), 3)
         for track_id, window in sorted_tracks
     }
     reference_window = sorted_tracks[0][1]
@@ -2363,6 +2382,9 @@ def _project_region_timeline(
 
 
 def _band_focus_label_for_subtype(subtype: str) -> str:
+    if subtype == "upper_mid_overlap":
+        return "중고역"
+        return "?ì¤‘ê³ ì—­"
     return {
         "low_mid_overlap": "저중역",
         "body_overlap": "바디",
@@ -2377,6 +2399,12 @@ def _default_band_overlap_reduction_db(subtype: str, score: float) -> float:
         if score >= 0.78:
             return 4.2
         return 3.2
+    if subtype == "upper_mid_overlap":
+        if score >= 0.95:
+            return 6.0
+        if score >= 0.68:
+            return 3.0
+        return 2.2
     if subtype == "presence_overlap":
         if score >= 0.74:
             return 2.5

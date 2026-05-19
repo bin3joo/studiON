@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +49,7 @@ public class TrackService {
     private final TrackEventRepository trackEventRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     //////////////////////// RDB ////////////////////////
 
@@ -354,7 +355,7 @@ public class TrackService {
                     .trackId(request.getTrackId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .before(TrackReorderEventDocument.TrackPosition.builder()
                             .preTrackId(beforePreTrackId)
                             .postTrackId(beforePostTrackId)
@@ -416,7 +417,7 @@ public class TrackService {
                     .trackId(request.getTrackId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .beforeTrackName(beforeName)
                     .afterTrackName(request.getName())
                     .undoable(true)
@@ -692,7 +693,7 @@ public class TrackService {
                 .trackId(newTrackId)
                 .userId(userId)
                 .sequenceNo(sequenceNo)
-                .timestamp(LocalDateTime.now())
+                .timestamp(clock.instant())
                 .preTrackId(preTrackId)
                 .postTrackId(postTrackId)
                 .undoable(true)

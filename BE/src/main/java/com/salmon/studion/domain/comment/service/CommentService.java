@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -36,6 +36,7 @@ public class CommentService {
     private final TrackRepository trackRepository;
     private final UserRepository userRepository;
     private final ProjectDirtyStateService projectDirtyStateService;
+    private final Clock clock;
 
     @Transactional
     public CommentState  createComment(
@@ -48,7 +49,7 @@ public class CommentService {
             List<Integer> mentionedUserIds
     ) {
         Integer commentId = commentRedisRepository.nextCommentId();
-        LocalDateTime now = LocalDateTime.now();
+        java.time.Instant now = clock.instant();
 
         CommentState commentState = CommentState.create(
                 commentId,
@@ -134,7 +135,7 @@ public class CommentService {
 
     @Transactional
     public CommentState changeResolved(CommentState commentState) {
-        CommentState updatedState = CommentState.toggleResolved(commentState, LocalDateTime.now());
+        CommentState updatedState = CommentState.toggleResolved(commentState, clock.instant());
 
         commentRedisRepository.save(updatedState);
         return updatedState;
@@ -142,12 +143,12 @@ public class CommentService {
 
     @Transactional
     public void deleteCommentsByTrack(Integer projectId, Integer trackId) {
-        commentRedisRepository.markDeletedByTrack(projectId, trackId, LocalDateTime.now());
+        commentRedisRepository.markDeletedByTrack(projectId, trackId, clock.instant());
     }
 
     @Transactional
     public void deleteComment(Integer projectId, Integer commentId) {
-        commentRedisRepository.markDeletedCascadeByParent(projectId, commentId, LocalDateTime.now());
+        commentRedisRepository.markDeletedCascadeByParent(projectId, commentId, clock.instant());
     }
 
     @Transactional(readOnly = true)

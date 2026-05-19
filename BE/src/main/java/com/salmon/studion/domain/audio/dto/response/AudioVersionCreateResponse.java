@@ -5,7 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @NoArgsConstructor
@@ -14,5 +14,5 @@ public class AudioVersionCreateResponse {
     private Integer versionId;
     private String name;
     private AudioVersionStatus status;
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 }

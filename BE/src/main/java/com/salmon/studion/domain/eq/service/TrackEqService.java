@@ -26,7 +26,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -47,6 +48,7 @@ public class TrackEqService {
     private final RedisTemplate<String, String> redisTemplate;
     private final TrackEqBandService trackEqBandService;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     public TrackEqListResponse getProjectTrackEqList(Integer projectId, Integer userId) {
         projectService.getProjectOrThrow(projectId);
@@ -138,7 +140,7 @@ public class TrackEqService {
                 .projectId(trackEq.getProjectId())
                 .trackEqId(trackEq.getId())
                 .updatedBy(userId)
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(clock.instant())
                 .version(nextVersion(currentDraft))
                 .bands(nextBands)
                 .build();
@@ -159,7 +161,7 @@ public class TrackEqService {
                 .projectId(trackEq.getProjectId())
                 .trackEqId(trackEq.getId())
                 .updatedBy(userId)
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(clock.instant())
                 .version(nextVersion(currentDraft))
                 .bands(List.of())
                 .build();
@@ -379,7 +381,7 @@ public class TrackEqService {
                     .projectId(projectId)
                     .trackId(trackId)
                     .trackEqId(null)
-                    .updatedAt(LocalDateTime.now())
+                    .updatedAt(clock.instant())
                     .source("COMMITTED")
                     .bands(List.of())
                     .build();
@@ -420,7 +422,7 @@ public class TrackEqService {
                 .projectId(trackEq.getProjectId())
                 .trackId(trackEq.getTrackId())
                 .trackEqId(trackEq.getId())
-                .updatedAt(draftState.getUpdatedAt() != null ? draftState.getUpdatedAt() : LocalDateTime.now())
+                .updatedAt(draftState.getUpdatedAt() != null ? draftState.getUpdatedAt() : clock.instant())
                 .source("DRAFT")
                 .bands(draftState.getBands().stream()
                         .sorted(Comparator.comparing(TrackEqDraftState.DraftBand::getBandOrder))
@@ -447,7 +449,7 @@ public class TrackEqService {
                 .projectId(trackEq.getProjectId())
                 .trackId(trackEq.getTrackId())
                 .trackEqId(trackEq.getId())
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(clock.instant())
                 .source("COMMITTED")
                 .bands(draftBands.stream()
                         .sorted(Comparator.comparing(TrackEqDraftState.DraftBand::getBandOrder))
@@ -474,7 +476,7 @@ public class TrackEqService {
                 .projectId(trackEq.getProjectId())
                 .trackId(trackEq.getTrackId())
                 .trackEqId(trackEq.getId())
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(clock.instant())
                 .source("COMMITTED")
                 .bands(bands.stream()
                         .sorted(Comparator.comparing(TrackEqCurrentState.CurrentBand::getBandOrder))

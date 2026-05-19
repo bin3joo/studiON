@@ -17,8 +17,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import java.io.File;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
-import java.time.LocalDateTime;
 
 
 @Service
@@ -28,6 +28,7 @@ public class S3StorageService {
     private final S3Presigner s3Presigner;
     private final S3Client s3Client;
     private final S3ObjectKeyGenerator s3ObjectKeyGenerator;
+    private final Clock clock;
 
     @Value("${cloud.aws.s3.bucket}")
     private String bucket;
@@ -85,7 +86,7 @@ public class S3StorageService {
 
     public DownloadPresignedUrlResult createDownloadUrl(String objectKey, String downloadFileName) {
         Duration expiration = Duration.ofMinutes(uploadUrlExpirationMinutes);
-        LocalDateTime expiresAt = LocalDateTime.now().plus(expiration);
+        java.time.Instant expiresAt = clock.instant().plus(expiration);
 
         GetObjectRequest.Builder getObjectRequestBuilder = GetObjectRequest.builder()
                 .bucket(bucket)

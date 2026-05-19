@@ -4,7 +4,7 @@ import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.comment.dto.redis.CommentState;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record CommentCreateResponse(
@@ -18,7 +18,7 @@ public record CommentCreateResponse(
 
         UserSummary author,
         List<UserSummary> mentionedUsers,
-        LocalDateTime createdAt
+        Instant createdAt
 ) {
     public record UserSummary(
             Integer userId,

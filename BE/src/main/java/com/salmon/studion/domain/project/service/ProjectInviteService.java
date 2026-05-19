@@ -9,8 +9,9 @@ import com.salmon.studion.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
@@ -22,6 +23,7 @@ public class ProjectInviteService {
 
     private final ProjectInviteRedisRepository projectInviteRedisRepository;
     private final ProjectInviteCodeGenerator projectInviteCodeGenerator;
+    private final Clock clock;
 //    private final ProjectInviteRateLimiter projectInviteRateLimiter;
 //    private final ProjectInviteLockManager projectInviteLockManager;
 
@@ -29,7 +31,7 @@ public class ProjectInviteService {
         projectInviteRedisRepository.deleteActiveInviteByProjectId(projectId);
 
         String inviteCode = generateUniqueInviteCode();
-        LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(INVITE_CODE_EXPIRATION_MINUTES);
+        Instant expiresAt = clock.instant().plusSeconds(INVITE_CODE_EXPIRATION_MINUTES * 60L);
         Duration ttl = Duration.ofMinutes(INVITE_CODE_TTL_MINUTES);
 
         ProjectInviteRedisValue value = new ProjectInviteRedisValue(projectId, inviteCode, userId, expiresAt);
@@ -43,7 +45,7 @@ public class ProjectInviteService {
         ProjectInviteRedisValue invitation  = projectInviteRedisRepository.findByInviteCode(inviteCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PROJECT_INVITE_CODE_INVALID));
 
-        if (invitation.isExpired()) {
+        if (invitation.isExpired(clock.instant())) {
             throw new BusinessException(ErrorCode.PROJECT_INVITE_CODE_EXPIRED);
         }
 

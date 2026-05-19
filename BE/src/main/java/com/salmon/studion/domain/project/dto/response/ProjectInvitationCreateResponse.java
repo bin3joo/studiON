@@ -4,19 +4,19 @@ import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class ProjectInvitationCreateResponse {
     private Integer projectId;
     private String inviteCode;
-    private LocalDateTime expiresAt;
+    private Instant expiresAt;
 
     public static ProjectInvitationCreateResponse of(
             Integer projectId,
             String inviteCode,
-            LocalDateTime expiresAt
+            Instant expiresAt
     ) {
         return new ProjectInvitationCreateResponse(projectId, inviteCode, expiresAt);
     }

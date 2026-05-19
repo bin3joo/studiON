@@ -4,7 +4,7 @@ import com.salmon.studion.global.common.enums.ProjectSaveTrigger;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @AllArgsConstructor
@@ -12,9 +12,9 @@ public class ProjectSnapshotSaveResponse {
 
     private Integer projectId;
     private String trigger;
-    private LocalDateTime saveAt;
+    private Instant saveAt;
 
-    public static ProjectSnapshotSaveResponse of(Integer projectId, ProjectSaveTrigger trigger) {
-        return new ProjectSnapshotSaveResponse(projectId, trigger.name(), LocalDateTime.now());
+    public static ProjectSnapshotSaveResponse of(Integer projectId, ProjectSaveTrigger trigger, Instant saveAt) {
+        return new ProjectSnapshotSaveResponse(projectId, trigger.name(), saveAt);
     }
 }

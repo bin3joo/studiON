@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Getter
@@ -17,7 +17,7 @@ public class TrackEqDraftState {
     private Integer projectId;
     private Integer trackEqId;
     private Integer updatedBy;
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
     private Long version;
     private List<DraftBand> bands;
 

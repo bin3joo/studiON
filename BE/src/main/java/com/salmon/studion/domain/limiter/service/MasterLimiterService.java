@@ -22,7 +22,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -37,6 +37,7 @@ public class MasterLimiterService {
     private final ProjectMemberService projectMemberService;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     @Transactional
     public MasterLimiterCurrentState getProjectMasterLimiter(Integer projectId, Integer userId) {
@@ -110,7 +111,7 @@ public class MasterLimiterService {
                 .projectId(request.getProjectId())
                 .masterLimiterId(limiter.getId())
                 .updatedBy(userId)
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(clock.instant())
                 .version(nextVersion(currentDraft))
                 .isEnabled(resolvedValues.isEnabled())
                 .thresholdDb(resolvedValues.thresholdDb())
@@ -358,7 +359,7 @@ public class MasterLimiterService {
         return MasterLimiterCurrentState.builder()
                 .projectId(limiter.getProjectId())
                 .masterLimiterId(limiter.getId())
-                .updatedAt(draftState.getUpdatedAt() != null ? draftState.getUpdatedAt() : LocalDateTime.now())
+                .updatedAt(draftState.getUpdatedAt() != null ? draftState.getUpdatedAt() : clock.instant())
                 .source("DRAFT")
                 .isEnabled(draftState.getIsEnabled())
                 .thresholdDb(draftState.getThresholdDb())
@@ -378,7 +379,7 @@ public class MasterLimiterService {
         return MasterLimiterCurrentState.builder()
                 .projectId(limiter.getProjectId())
                 .masterLimiterId(limiter.getId())
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(clock.instant())
                 .source("COMMITTED")
                 .isEnabled(limiter.getIsEnabled())
                 .thresholdDb(limiter.getThresholdDb())

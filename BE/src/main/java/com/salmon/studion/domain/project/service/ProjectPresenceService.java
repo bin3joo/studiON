@@ -14,7 +14,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.UncheckedIOException;
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.Comparator;
 import java.util.List;
 
@@ -26,12 +26,13 @@ public class ProjectPresenceService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     public ProjectPresenceRegistration registerProjectUser(Integer projectId, User user) {
         HashOperations<String, Object, Object> hashOperations = redisTemplate.opsForHash();
         String key = presenceKey(projectId);
         String field = String.valueOf(user.getId());
-        ProjectPresenceUserInfo presenceUserInfo = ProjectPresenceUserInfo.from(user, LocalDateTime.now());
+        ProjectPresenceUserInfo presenceUserInfo = ProjectPresenceUserInfo.from(user, clock.instant());
         String serializedValue = serialize(presenceUserInfo);
 
         Boolean inserted = hashOperations.putIfAbsent(key, field, serializedValue);

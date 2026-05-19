@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.List;
 
 @Slf4j
@@ -25,6 +26,7 @@ public class ProjectSnapshotService {
     private final CommentService commentService;
     private final TrackEqService trackEqService;
     private final ProjectStatisticsService projectStatisticsService;
+    private final Clock clock;
 
     /*
         DB 작업만 수행
@@ -62,6 +64,6 @@ public class ProjectSnapshotService {
 
         log.info("[프로젝트 스냅샷 생성 완료] - projectId={} trigger={}", projectId, trigger);
 
-        return ProjectSnapshotSaveResponse.of(projectId, trigger);
+        return ProjectSnapshotSaveResponse.of(projectId, trigger, clock.instant());
     }
 }

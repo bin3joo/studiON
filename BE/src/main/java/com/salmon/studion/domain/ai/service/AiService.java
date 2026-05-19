@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,13 +46,14 @@ public class AiService {
     private final ProjectMemberService projectMemberService;
     private final TrackEqService trackEqService;
     private final MasterLimiterService masterLimiterService;
+    private final Clock clock;
 
     public AiJobStartResponse startWorkflow(AiJobStartApiRequest request, Integer requestedBy) {
         Integer userId = requireUserId(requestedBy);
         projectMemberService.validateProjectMember(request.getProjectId(), userId);
 
         AiAnalysisJob aiAnalysisJob = aiAnalysisJobRepository.save(
-                AiAnalysisJob.create(request.getProjectId(), userId)
+                AiAnalysisJob.create(request.getProjectId(), userId, clock.instant())
         );
 
         Integer jobId = aiAnalysisJob.getId();
@@ -91,12 +93,13 @@ public class AiService {
         } catch (BusinessException e) {
             aiAnalysisJob.markDispatchFailed(
                     e.getErrorCode().getCode(),
-                    e.getMessage()
+                    e.getMessage(),
+                    clock.instant()
             );
             aiAnalysisJobRepository.save(aiAnalysisJob);
             throw e;
         } catch (RuntimeException e) {
-            aiAnalysisJob.markDispatchFailed("AI_UNKNOWN", e.getMessage());
+            aiAnalysisJob.markDispatchFailed("AI_UNKNOWN", e.getMessage(), clock.instant());
             aiAnalysisJobRepository.save(aiAnalysisJob);
             throw e;
         }

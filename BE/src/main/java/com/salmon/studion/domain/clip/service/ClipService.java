@@ -25,7 +25,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +53,7 @@ public class ClipService {
     private final AudioMetadataRepository audioMetadataRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     //////////////////////// RDB ////////////////////////
 
@@ -230,7 +231,7 @@ public class ClipService {
                     .clipId(request.getClipId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .isLocked(request.getIsLocked())
                     .build());
         } catch (Exception e) {
@@ -298,7 +299,7 @@ public class ClipService {
                     .clipId(clipId)
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .trackId(request.getTrackId())
                     .audioMetadataId(audioMetadata.getId())
                     .startBar(request.getStartBar())
@@ -367,7 +368,7 @@ public class ClipService {
                     .clipId(request.getClipId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .before(ClipMoveEventDocument.ClipPosition.builder()
                             .trackId(beforeTrackId)
                             .startBar(beforeStartBar)
@@ -462,7 +463,7 @@ public class ClipService {
                     .clipId(request.getClipId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .before(ClipResizeEventDocument.ClipSize.builder()
                             .startBar(beforeStart)
                             .length(beforeDuration)
@@ -523,7 +524,7 @@ public class ClipService {
                     .clipId(request.getClipId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .undoable(true)
                     .undone(false)
                     .build());
@@ -607,7 +608,7 @@ public class ClipService {
                     .clipId(request.getClipId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .splitBar(splitBar)
                     .newClipId(newClipId)
                     .undoable(true)
@@ -745,7 +746,7 @@ public class ClipService {
                     .clipId(newClipId)
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .targetTrackId(request.getTargetTrackId())
                     .targetStartBar(request.getTargetStartBar())
                     .undoable(true)
@@ -841,7 +842,7 @@ public class ClipService {
                     .clipId(request.getClipId())
                     .userId(userId)
                     .sequenceNo(sequenceNo)
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(clock.instant())
                     .newClipId(newClipId)
                     .targetTrackId(targetTrackId)
                     .targetStartBar(targetStartBar)

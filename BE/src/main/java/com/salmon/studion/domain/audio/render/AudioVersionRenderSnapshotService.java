@@ -15,7 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +32,7 @@ public class AudioVersionRenderSnapshotService {
     private final ClipService clipService;
     private final com.salmon.studion.domain.eq.service.TrackEqService trackEqService;
     private final MasterLimiterService masterLimiterService;
+    private final Clock clock;
 
     @Transactional
     public AudioVersionRenderSnapshot createSnapshot(Integer projectId, Integer userId) {
@@ -94,7 +95,7 @@ public class AudioVersionRenderSnapshotService {
                 .clips(renderClips)
                 .trackEqs(toRenderTrackEqs(trackEqPayloads))
                 .masterLimiter(toRenderMasterLimiter(limiterState))
-                .requestedAt(LocalDateTime.now())
+                .requestedAt(clock.instant())
                 .build();
     }
 

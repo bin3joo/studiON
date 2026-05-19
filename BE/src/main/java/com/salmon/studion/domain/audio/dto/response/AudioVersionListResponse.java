@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Getter
@@ -21,7 +21,7 @@ public class AudioVersionListResponse {
             String memo,
             Integer durationMs,
             Integer sizeBytes,
-            LocalDateTime createdAt
+            Instant createdAt
     ) {
     }
 }

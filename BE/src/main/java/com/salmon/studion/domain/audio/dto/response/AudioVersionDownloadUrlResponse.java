@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @NoArgsConstructor
@@ -12,6 +12,6 @@ import java.time.LocalDateTime;
 public class AudioVersionDownloadUrlResponse {
     private Integer versionId;
     private String downloadUrl;
-    private LocalDateTime expiresAt;
+    private Instant expiresAt;
 
 }

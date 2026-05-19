@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @Builder
@@ -16,7 +16,7 @@ public class MasterLimiterDraftState {
     private Integer projectId;
     private Integer masterLimiterId;
     private Integer updatedBy;
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
     private Long version;
     private Boolean isEnabled;
     private Double thresholdDb;

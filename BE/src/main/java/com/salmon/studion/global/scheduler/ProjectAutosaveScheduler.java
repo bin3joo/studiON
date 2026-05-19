@@ -10,6 +10,7 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -27,17 +28,20 @@ public class ProjectAutosaveScheduler {
     private final TaskScheduler autosaveTaskScheduler;
     private final ProjectDirtyStateService projectDirtyStateService;
     private final ProjectSaveService projectSaveService;
+    private final Clock clock;
 
     private final Map<Integer, ScheduledFuture<?>> pendingIdleTasks = new ConcurrentHashMap<>();
 
     public ProjectAutosaveScheduler(
             @Qualifier("autosaveTaskScheduler") TaskScheduler autosaveTaskScheduler,
             ProjectDirtyStateService projectDirtyStateService,
-            ProjectSaveService projectSaveService
+            ProjectSaveService projectSaveService,
+            Clock clock
     ) {
         this.autosaveTaskScheduler = autosaveTaskScheduler;
         this.projectDirtyStateService = projectDirtyStateService;
         this.projectSaveService = projectSaveService;
+        this.clock = clock;
     }
 
     @PostConstruct
@@ -61,7 +65,7 @@ public class ProjectAutosaveScheduler {
                     pendingIdleTasks.remove(projectId);
                     projectSaveService.saveIfDirty(projectId, ProjectSaveTrigger.AUTOSAVE_IDLE);
                 },
-                Instant.now().plus(IDLE_DELAY)
+                Instant.now(clock).plus(IDLE_DELAY)
         );
 
         pendingIdleTasks.put(projectId, future);

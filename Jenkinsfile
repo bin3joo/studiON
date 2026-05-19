@@ -123,7 +123,7 @@ pipeline {
             steps {
                 sshagent(credentials: ['studion-ec2-ssh']) {
                     sh '''
-                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml up -d"
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml up -d --remove-orphans"
                     '''
                 }
             }

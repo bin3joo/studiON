@@ -2826,6 +2826,23 @@ export const useTrackStore = defineStore('track', () => {
             // 새 프로젝트 방에 들어올 때 기존 오디오 엔진의 찌꺼기(유령 플레이어)를 모두 파기
             disposeAllAudio();
 
+            // 기존 상태(트랙 목록, 프로젝트 정보 등)를 초기화하여
+            // 새 프로젝트 렌더링 전에 이전 프로젝트의 잔여 트랙이 표시되는 버그(Race Condition)를 완벽히 차단합니다.
+            trackList.value = [];
+            projectInfo.value = {
+                projectId: projectId,
+                name: '프로젝트',
+                tempo: 120.0,
+                rootNote: 'C',
+                mode: 'major',
+                timeSigNumerator: 4,
+                timeSigDenominator: 4,
+                totalBarCount: 100
+            };
+            projectMembers.value = [];
+            currentTotalSizeBytes.value = 0;
+            bpm.value = 120;
+
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
 

@@ -7,12 +7,18 @@ class SocketService {
 
   private ws: WebSocket | null = null;
   private currentProjectId: number | null = null;
+  private disconnectTimer: number | null = null;
   // 페이지 전환 시 초기화되는 임시 리스너 (컴포넌트용)
   private listeners: Map<string, EventHandler[]> = new Map();
   // 페이지 전환에도 절대 지워지지 않는 영구 보존 리스너 (Pinia 스토어용)
   private persistentListeners: Map<string, EventHandler[]> = new Map();
 
   connect(projectId: number) {
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+
     if (
   this.ws &&
   (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) &&
@@ -116,14 +122,20 @@ class SocketService {
       return;
     }
 
+    // 프론트엔드 상태 업데이트 지연(Race Condition)으로 인해 이전 프로젝트의 projectId가 전송되는 것을 방지합니다.
+    let finalPayload = payload;
+    if (payload && typeof payload === 'object' && 'projectId' in payload) {
+      finalPayload = { ...payload, projectId: this.currentProjectId };
+    }
+
     // 🌟 백엔드의 WsMessage 객체 구조({ event: "...", payload: {...} })에 정확히 맞춥니다!
     const message = {
       event: eventType,
-      payload: payload
+      payload: finalPayload
     };
 
     this.ws.send(JSON.stringify(message));
-    //console.log(`[Socket 📤] 발신 [${eventType}]:`, payload);
+    //console.log(`[Socket 📤] 발신 [${eventType}]:`, finalPayload);
   }
 
 disconnect() {
@@ -133,11 +145,17 @@ disconnect() {
     //console.log('[Socket] PROJECT_LEFT 전송 시도')
     this.publish('PROJECT_LEFT', {})
 
-    setTimeout(() => {
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+
+    this.disconnectTimer = window.setTimeout(() => {
       this.ws?.close()
       this.ws = null
       this.listeners.clear()
       this.currentProjectId = null
+      this.disconnectTimer = null
       //console.log('[Socket] 🔴 웹소켓 수동 연결 해제 완료')
     }, 100)
 

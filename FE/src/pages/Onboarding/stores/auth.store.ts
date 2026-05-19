@@ -15,18 +15,30 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = null
   }
 
+  let silentRefreshPromise: Promise<boolean> | null = null
+
   async function silentRefresh() {
-    try {
-      const response = await reissueAccessToken()
-      if (response && response.data && response.data.accessToken) {
-        setAccessToken(response.data.accessToken)
-        return true
-      }
-      return false
-    } catch (error) {
-      clearAccessToken()
-      return false
+    if (silentRefreshPromise) {
+      return silentRefreshPromise
     }
+
+    silentRefreshPromise = (async () => {
+      try {
+        const response = await reissueAccessToken()
+        if (response && response.data && response.data.accessToken) {
+          setAccessToken(response.data.accessToken)
+          return true
+        }
+        return false
+      } catch (error) {
+        clearAccessToken()
+        return false
+      } finally {
+        silentRefreshPromise = null
+      }
+    })()
+
+    return silentRefreshPromise
   }
 
   async function logout() {

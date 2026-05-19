@@ -338,8 +338,12 @@ onMounted(async () => {
   //id가 존재할 때만 트랙 정보 불러오기
   if(projectId){
     const numericProjectId = Number(projectId)
-    await trackStore.fetchProject(Number(projectId))
-    commentStore.fetchComments(numericProjectId)
+    
+    // 비동기 요청들을 병렬로 처리하고 모두 완료될 때까지 대기
+    await Promise.all([
+      trackStore.fetchProject(numericProjectId),
+      commentStore.fetchComments(numericProjectId)
+    ])
 
     trackEvent('project_opened', {
     project_id: numericProjectId,

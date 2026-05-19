@@ -26,20 +26,20 @@ services:
       - .env.prod
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USERNAME}
+      MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - default-timezome=+09:00
+      - --default-time-zone=+09:00
     restart: on-failure:2
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USERNAME\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -62,7 +62,7 @@ services:
     volumes:
       - "mongodb_data:/data/db"
     healthcheck:
-      test: ["CMD_SHELL", "mongosh --quiet --username \"$$MONGO_USERNAME\" --password \"$$MONGO_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1" ]
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_USERNAME\" --password \"$$MONGO_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1" ]
       interval: 10s
       timeout: 5s
       retries: 10

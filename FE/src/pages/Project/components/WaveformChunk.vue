@@ -9,6 +9,7 @@ const props = defineProps<{
   chunkLeft: number;
   chunkWidth: number;
   audioData: { channels: Float32Array[]; sampleRate: number };
+  audioKey: string;
 }>();
 
 const trackStore = useTrackStore();
@@ -78,7 +79,7 @@ const renderWaveform = async () => {
   
   const requests = props.audioData.channels.map((_, index) => {
     return waveformRendererPool.requestRender({
-      audioKey: props.clip.audio?.cdnUrl || 'unknown',
+      audioKey: props.audioKey,
       color: '#D4CED2',
       width: props.chunkWidth,
       height: channelHeight,
@@ -136,7 +137,7 @@ const handleVisibilityChange = () => {
 
 // 줌이나 데이터가 변경될 때 다시 그리기 (리사이즈 시 렉 방지를 위한 디바운스)
 watch(
-  () => [trackStore.pixelPerBar, props.clip.duration, props.chunkWidth],
+  () => [trackStore.pixelPerBar, props.clip.duration, props.chunkWidth, props.audioKey],
   () => {
     requestRenderDebounced();
   }

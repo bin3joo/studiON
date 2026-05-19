@@ -3,7 +3,7 @@ const audioCache = new Map<string, { channels: Float32Array[], sampleRate: numbe
 </script>
 
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, watch } from 'vue';
+import { computed, onMounted, shallowRef, watch, ref } from 'vue';
 import { useTrackStore } from '../store/useTrackStore';
 import type { ClipUIState } from '../types';
 import WaveformChunk from './WaveformChunk.vue';
@@ -16,8 +16,8 @@ const props = defineProps<{
 
 const trackStore = useTrackStore();
 
-// 오디오 데이터를 담을 반응형 변수 (shallowRef로 대용량 데이터 성능 최적화)
 const audioData = shallowRef<{ channels: Float32Array[], sampleRate: number } | null>(null);
+const audioKey = ref(props.clip.audio?.cdnUrl || 'unknown');
 
 // 브라우저 렌더링 한계치를 피하기 위한 최대 캔버스 너비 (안전하게 8000픽셀로 설정)
 // [최적화] 기존 8000에서 2000으로 대폭 축소.
@@ -78,6 +78,7 @@ const loadAudioData = async () => {
   // [최적화] 메인 스레드 렌더링 병목을 없애기 위해 오디오 로드 시점에 전체 워커 풀에 배열을 단 1회 브로드캐스트 캐싱합니다.
   waveformRendererPool.broadcastCacheAudio(audioUrl, cached!.channels);
   
+  audioKey.value = audioUrl;
   audioData.value = cached;
 };
 
@@ -89,12 +90,11 @@ onMounted(() => {
 // cdnUrl이 비동기로 나중에 채워지는 경우(다른 사용자의 CLIP_CREATE 수신 시)
 // URL이 빈 문자열 → 실제 URL로 변경될 때 파형 데이터를 다시 로딩
 watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
- // console.log('[Waveform 🔍] watch 감지! clipId:', props.clip.clipId, 'oldUrl:', oldUrl || '(없음)', 'newUrl:', newUrl || '(없음)', 'audioData 있음?:', !!audioData.value);
   if (newUrl && newUrl !== oldUrl && !audioData.value) {
-   // console.log('[Waveform 🔍] → loadAudioData 재호출!');
     loadAudioData();
   }
 });
+
 </script>
 
 <template>
@@ -104,14 +104,15 @@ watch(() => props.clip.audio?.cdnUrl, (newUrl, oldUrl) => {
          class="absolute inset-0 h-full w-full mix-blend-screen"
          style="mask-image: linear-gradient(to right, rgba(0,0,0,1) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px)), rgba(0,0,0,0.4) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px))); -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px)), rgba(0,0,0,0.4) calc(var(--playhead-px, 0px) - var(--clip-left-px, 0px)));"
     >
-      <WaveformChunk
-        v-for="chunk in chunks"
-        :key="chunk.id"
-        :clip="clip"
-        :audio-data="audioData"
-        :chunk-left="chunk.left"
-        :chunk-width="chunk.width"
-      />
+    <WaveformChunk
+      v-for="chunk in chunks"
+      :key="chunk.id"
+      :clip="clip"
+      :audio-data="audioData"
+      :audio-key="audioKey"
+      :chunk-left="chunk.left"
+      :chunk-width="chunk.width"
+    />
     </div>
     
     <!-- 로딩 스피너 영역 (독립적인 스타일, 높은 z-index) -->

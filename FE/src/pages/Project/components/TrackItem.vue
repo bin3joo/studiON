@@ -528,12 +528,10 @@ const menuState = ref({
 // 1. 트랙(빈 공간) 우클릭
 const onTrackRightClick = (e: MouseEvent, trackId: number) => {
   if(props.isMaster) return; // 마스터 트랙에선 아무것도 못하게 막기
-  // 현재 스크롤 위치와 왼쪽 패널 너비(224px)를 계산하여, 마우스가 위치한 '마디(Bar)'를 역산
-  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
-  const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
   
-  // 마우스 X좌표 - 패널너비 + 스크롤량 = 타임라인 내부의 절대 픽셀 좌표 (zoom 반영)
-  const absoluteX = ((e.clientX + scrollLeft) / trackStore.workspaceZoom) - 224; 
+  const target = e.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  const absoluteX = (e.clientX - rect.left) / trackStore.workspaceZoom;
   
   // 스냅 해상도(subDivision)에 맞춰서 위치 보정
   let targetBar = absoluteX / trackStore.pixelPerBar;
@@ -584,7 +582,7 @@ const handleDuplicate = () => {
 
 //복사
 const handleCopy = () => {
-  if (menuState.value.targetClip) trackStore.copyClip(menuState.value.targetClip);
+  if (menuState.value.targetClip) trackStore.copyClip(menuState.value.targetClip, menuState.value.targetTrackId);
   closeMenu();
 };
 
@@ -706,10 +704,10 @@ const onDrop = (e: DragEvent) => {
   }
 
   // 3. 마우스를 떨어뜨린 X 좌표를 마디(Bar)로 변환
-  const scrollContainer = document.querySelector('.custom-scrollbar') as HTMLElement;
-  const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+  const target = e.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  const absoluteX = (e.clientX - rect.left) / trackStore.workspaceZoom;
   
-  const absoluteX = (e.clientX / trackStore.workspaceZoom) - 224 + scrollLeft; // 224는 왼쪽 컨트롤 패널 너비
   let targetBar = absoluteX / trackStore.pixelPerBar;
   
   // 스냅 해상도에 맞춰 위치 보정

@@ -209,8 +209,8 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
 
       case 'KeyC': // 복사
         e.preventDefault();
-        if (trackStore.selectedClip) {
-          trackStore.copyClip(trackStore.selectedClip);
+        if (trackStore.selectedClip && trackStore.selectedTrackId) {
+          trackStore.copyClip(trackStore.selectedClip, trackStore.selectedTrackId);
         }
         break;
         
@@ -231,38 +231,14 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
         
       case 'KeyV': // 붙여넣기
         e.preventDefault();
-        // 붙여넣기는 '현재 선택된 트랙'의 '현재 재생바 위치'에 붙여넣기 된다.
-        // 클립을 선택한 상태라면 그 트랙에, 아니면 1번 트랙을 기본으로 넣기
-      if (trackStore.clipboardClip) {
-          // 1. 기본 타겟: 선택된 트랙 또는 1번 트랙
-          let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
-
-          // 2. 마우스가 위치한 곳의 트랙 ID 감지
-          const elementsUnderMouse = document.elementsFromPoint(currentMouseX, currentMouseY);
-          const targetTrackEl = elementsUnderMouse.find((el) => el.hasAttribute('data-track-id'));
-
-          if (targetTrackEl) {
-            targetTrackId = Number(targetTrackEl.getAttribute('data-track-id'));
-          }
-
+        if (trackStore.clipboardClip) {
+          // 복사했던 트랙 또는 1번 트랙
+          const targetTrackId = trackStore.clipboardTrackId || trackStore.trackList[0]?.trackId;
+          
           if (targetTrackId) {
-            //3. 마우스 X 좌표를 마디(Bar) 단위로 역산
-            let targetBar = trackStore.playheadPosition; // 혹시라도 마우스 위치 계산에 실패하면 재생바로 폴백(Fallback)
-
-            if (timelineContainerRef.value) {
-              const scrollLeft = timelineContainerRef.value.scrollLeft;
-              
-              // 현재 마우스 X 좌표에서 왼쪽 컨트롤 패널 너비(224px)를 빼고, 스크롤된 양을 더함 = 절대 픽셀 위치
-              const absoluteX = currentMouseX - 224 + scrollLeft; 
-              
-              // 픽셀을 마디(Bar)로 변환
-              let calculatedBar = absoluteX / trackStore.pixelPerBar;
-              
-              // 현재 스냅(1/4 박자, 1/8 박자 등) 설정에 맞춰서 깔끔하게 자석처럼 붙게 반올림
-              const snap = trackStore.subDivision;
-              targetBar = Math.max(0, Math.round(calculatedBar * snap) / snap); // 0마디 이하 뚫고 나가지 않게 방지
-            }
-
+            // 위치는 무조건 현재 재생바(playhead) 위치로 통일
+            const targetBar = trackStore.playheadPosition;
+            
             // 계산된 최종 위치(targetBar)에 붙여넣기 실행!
             trackStore.pasteClip(targetTrackId, targetBar);
           }
@@ -800,8 +776,8 @@ const unlockAudioEngine = async () => {
 
 // 툴바 액션 핸들러
 function handleActionCopy() {
-  if (trackStore.selectedClip) {
-    trackStore.copyClip(trackStore.selectedClip);
+  if (trackStore.selectedClip && trackStore.selectedTrackId) {
+    trackStore.copyClip(trackStore.selectedClip, trackStore.selectedTrackId);
   }
 }
 
@@ -847,8 +823,8 @@ async function handleToolbarFileUpload(event: Event) {
 
 function handleActionPaste() {
   if (trackStore.clipboardClip) {
-    let targetTrackId = trackStore.selectedTrackId || trackStore.trackList[0]?.trackId;
-    let targetBar = trackStore.playheadPosition;
+    const targetTrackId = trackStore.clipboardTrackId || trackStore.trackList[0]?.trackId;
+    const targetBar = trackStore.playheadPosition;
 
     if (targetTrackId) {
       trackStore.pasteClip(targetTrackId, targetBar);

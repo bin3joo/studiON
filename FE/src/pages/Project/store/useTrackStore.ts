@@ -1605,9 +1605,10 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
     // 1. 복사
-    const copyClip = (clip: ClipUIState) => {
+    const copyClip = (clip: ClipUIState, trackId: number) => {
         // 프론트 클립보드 저장
         clipboardClip.value = JSON.parse(JSON.stringify(clip));
+        clipboardTrackId.value = trackId;
         isCutAction.value = false;
         // 서버 클립보드 동기화
         socketService.publish('CLIP_COPY', {

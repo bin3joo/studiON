@@ -227,3 +227,82 @@ def test_supplemental_critic_revises_upper_mid_overlap_over_6db() -> None:
 
     assert result == "REVISE"
     assert "6dB" in note
+
+
+def test_plan_critic_normalizes_presence_deadlock_reject_to_revise(
+    monkeypatch,
+) -> None:
+    class _FakeCriticClient:
+        def review_plan(self, **kwargs) -> PlanCriticLLMResponse:
+            return PlanCriticLLMResponse(
+                result="REJECT",
+                note=(
+                    "Policy deadlock: presence_overlap with 2.5 kHz-wide band cannot safely deliver "
+                    "the requested aggressiveness. Narrow band selection first."
+                ),
+            )
+
+    captured_artifact = {}
+
+    class _FakeArtifactStore:
+        def upsert_artifact(self, artifact) -> None:
+            captured_artifact["artifact"] = artifact
+
+    monkeypatch.setattr(
+        "app.graph.nodes.review.get_plan_critic_llm_client",
+        lambda: _FakeCriticClient(),
+    )
+    monkeypatch.setattr(
+        "app.graph.nodes.review.get_workflow_artifact_store",
+        lambda: _FakeArtifactStore(),
+    )
+
+    result = plan_critic(
+        {
+            "job_id": 990002,
+            "selected_region_id": 1701,
+            "preserve_clip_id": 50006,
+            "user_feedback_message": "Make it more aggressive but keep the lead intact.",
+            "plan_revision_notes": [],
+            "revise_count": 1,
+            "max_revise_count": 5,
+            "analysis_regions": [
+                {
+                    "id": 1701,
+                    "issue_type": "band_overlap",
+                    "track_id": 60,
+                    "secondary_track_id": 61,
+                    "start_ms": 1800,
+                    "end_ms": 3200,
+                    "band_low_hz": 2500,
+                    "band_high_hz": 5000,
+                    "band_overlap_subtype": "presence_overlap",
+                    "involved_track_ids": [60, 61],
+                    "track_body_contributions": {"60": 0.18, "61": 0.34},
+                }
+            ],
+            "clip_index": [
+                {"clip_id": 50006, "track_id": 60},
+                {"clip_id": 61001, "track_id": 61},
+            ],
+            "track_name_map": {60: "Lead", 61: "Bright Layer"},
+            "plan_payload": {
+                "candidate": {
+                    "action": {
+                        "actionType": "DYNAMIC_EQ",
+                        "targetTrackId": 61,
+                        "targetClipId": None,
+                        "bandLowHz": 2500,
+                        "bandHighHz": 5000,
+                        "gainDeltaDb": -2.5,
+                    }
+                }
+            },
+            "transition_log": [],
+            "mongo_artifact_ids": [],
+        }
+    )
+
+    assert result["critic_result"] == "REVISE"
+    assert "3 to 4.5 kHz" in result["plan_revision_notes"][-1]
+    assert captured_artifact["artifact"].payload["result"] == "REVISE"

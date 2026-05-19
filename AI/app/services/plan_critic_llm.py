@@ -189,6 +189,8 @@ def _critic_system_prompt() -> str:
         "Selection context may include bandOverlapSubtype and bandFocusLabel; use them to calibrate severity. "
         "For upper_mid_overlap, prefer fairly tight bands and revise plans above -6 dB. "
         "For presence_overlap, be stricter about overreach: prefer narrower bands and revise plans above -4 dB. "
+        "If a presence_overlap plan uses a wide band span, prefer REVISE over REJECT on the first pass and ask for a narrower pocket before asking for stronger gain. "
+        "When the current presence_overlap band span is roughly 1200 Hz or wider, ask to keep gain around -2.5 dB or lower until the band is narrowed, rather than escalating gain across the full wide band. "
         "For low_mid_overlap, stronger cuts can still be acceptable when the masking is sustained, but do not allow unsafe overreaction. "
         "Action-type stability: words like only, exact, local, pocket, exact phrase, or touch only usually mean tighten time, band, or gain first. "
         "However, if those local-pocket words appear and the selected region itself is a short pocket of about 900 ms or less with a band span of about 700 Hz or less, do not PASS DYNAMIC_EQ by default. Prefer EQ_CUT unless the region still behaves like a sustained phrase. "

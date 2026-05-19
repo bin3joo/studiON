@@ -117,6 +117,14 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
             critic_note = _merge_critic_notes(critic_note, supplemental_note)
         raw_critic_text = _dump_critic_text(result, critic_note)
 
+    result, critic_note = _normalize_presence_deadlock_decision(
+        state=state,
+        region=selected_region,
+        result=result,
+        critic_note=critic_note,
+    )
+    raw_critic_text = _dump_critic_text(result, critic_note)
+
     mode_override = decide_validation_result(state, mode_key="critic_mode")
     if mode_override != "PASS":
         result = mode_override
@@ -434,3 +442,50 @@ def _band_overlap_gain_limit_db(subtype: str) -> float | None:
     if subtype in {"low_mid_overlap", "body_overlap", ""}:
         return 9.0
     return None
+
+
+def _normalize_presence_deadlock_decision(
+    *,
+    state: WorkflowState,
+    region: dict[str, object],
+    result: str,
+    critic_note: str,
+) -> tuple[str, str]:
+    if result != "REJECT":
+        return result, critic_note
+    if str(region.get("band_overlap_subtype") or "") != "presence_overlap":
+        return result, critic_note
+    if not _looks_presence_deadlock_note(critic_note):
+        return result, critic_note
+    band_low_hz = region.get("band_low_hz")
+    band_high_hz = region.get("band_high_hz")
+    if not isinstance(band_low_hz, int) or not isinstance(band_high_hz, int):
+        return result, critic_note
+    if (band_high_hz - band_low_hz) < 1200:
+        return result, critic_note
+    revise_count = int(state.get("revise_count") or 0)
+    max_revise_count = int(state.get("max_revise_count") or 5)
+    if revise_count >= max(max_revise_count - 1, 0):
+        return result, critic_note
+    return (
+        "REVISE",
+        (
+            "Keep the current action type and target track fixed. "
+            "Narrow the presence band first toward the densest pocket, preferably around 3 to 4.5 kHz when supported by the region evidence, "
+            "and keep gainDeltaDb at or below -2.5 dB until the band span is materially reduced."
+        ),
+    )
+
+
+def _looks_presence_deadlock_note(note: str) -> bool:
+    lowered = note.lower()
+    keywords = (
+        "deadlock",
+        "no convergence",
+        "cannot safely",
+        "narrow band selection",
+        "narrow band",
+        "wide band",
+        "band width",
+    )
+    return any(keyword in lowered for keyword in keywords)

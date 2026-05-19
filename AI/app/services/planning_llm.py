@@ -185,6 +185,8 @@ def _planner_system_prompt() -> str:
         "For body_overlap, prefer about -2.0 to -3.5 dB and keep stronger cuts within -7 dB. "
         "For upper_mid_overlap, prefer about -1.5 to -3.0 dB, keep the band fairly tight, and allow stronger cuts only for clearly sustained masking; never exceed -6 dB. "
         "For presence_overlap, prefer about -1.0 to -2.5 dB, keep the band narrow, and never exceed -4 dB. "
+        "For presence_overlap with a wide band span, do not answer user aggressiveness by widening the cut or pushing gain first. Narrow the band first toward the densest pocket, often around 3 to 4.5 kHz when the region evidence supports it. "
+        "If a presence_overlap band span is roughly 1200 Hz or wider, keep gainDeltaDb at or below about -2.5 dB until the band has been materially narrowed. "
         "keep the explanation concrete by naming the target track, the band focus, and why the preserve target stays untouched. "
         f"Allowed actionType values: {', '.join(ALLOWED_ACTION_TYPES)}. "
         "Selection context may include bandOverlapSubtype and bandFocusLabel; use them directly when present. "

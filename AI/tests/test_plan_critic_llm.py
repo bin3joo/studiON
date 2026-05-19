@@ -115,3 +115,5 @@ def test_critic_system_prompt_mentions_presence_overlap_guardrail() -> None:
     assert "above -6 dB" in prompt
     assert "presence_overlap" in prompt
     assert "above -4 dB" in prompt
+    assert "prefer REVISE over REJECT on the first pass" in prompt
+    assert "keep gain around -2.5 dB or lower" in prompt

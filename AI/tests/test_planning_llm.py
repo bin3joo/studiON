@@ -132,4 +132,6 @@ def test_planner_system_prompt_includes_band_overlap_subtype_gain_policy() -> No
     assert "For upper_mid_overlap, prefer about -1.5 to -3.0 dB" in prompt
     assert "never exceed -6 dB" in prompt
     assert "For presence_overlap, prefer about -1.0 to -2.5 dB" in prompt
+    assert "Narrow the band first toward the densest pocket" in prompt
+    assert "roughly 1200 Hz or wider" in prompt
     assert "bandOverlapSubtype" in prompt

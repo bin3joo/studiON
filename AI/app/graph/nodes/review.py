@@ -233,8 +233,13 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
     subtype = str(selected_region.get("band_overlap_subtype") or "")
     if isinstance(gain_delta_db, int | float) and abs(float(gain_delta_db)) > 9.0:
         return "Band-overlap preview actions must keep gainDeltaDb within 9 dB."
-    if subtype == "presence_overlap" and isinstance(gain_delta_db, int | float) and abs(float(gain_delta_db)) > 4.0:
-        return "Presence-overlap plans must keep gainDeltaDb within 4 dB."
+    subtype_limit = _band_overlap_gain_limit_db(subtype)
+    if (
+        subtype_limit is not None
+        and isinstance(gain_delta_db, int | float)
+        and abs(float(gain_delta_db)) > subtype_limit
+    ):
+        return f"{subtype} plans must keep gainDeltaDb within {subtype_limit:.0f} dB."
 
     params = action.get("params")
     if not isinstance(params, dict):
@@ -343,7 +348,7 @@ def _supplement_critic_decision(
     gain_delta_db = action.get("gainDeltaDb")
     subtype = str(region.get("band_overlap_subtype") or "")
     if isinstance(gain_delta_db, int | float):
-        subtype_limit = 4.0 if subtype == "presence_overlap" else 9.0
+        subtype_limit = _band_overlap_gain_limit_db(subtype) or 9.0
         if abs(float(gain_delta_db)) > subtype_limit:
             return "REVISE", f"GainDeltaDb가 과합니다. 이 subtype에서는 {subtype_limit:.0f}dB 이내로 줄이세요."
 
@@ -418,4 +423,14 @@ def _track_name(state: WorkflowState, track_id: int) -> str | None:
     track_name = track_name_map.get(int(track_id))
     if isinstance(track_name, str) and track_name.strip():
         return track_name.strip()
+    return None
+
+
+def _band_overlap_gain_limit_db(subtype: str) -> float | None:
+    if subtype == "presence_overlap":
+        return 4.0
+    if subtype == "upper_mid_overlap":
+        return 6.0
+    if subtype in {"low_mid_overlap", "body_overlap", ""}:
+        return 9.0
     return None

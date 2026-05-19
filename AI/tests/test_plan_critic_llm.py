@@ -111,5 +111,7 @@ def test_critic_system_prompt_mentions_presence_overlap_guardrail() -> None:
     prompt = _critic_system_prompt()
 
     assert "bandOverlapSubtype" in prompt
+    assert "upper_mid_overlap" in prompt
+    assert "above -6 dB" in prompt
     assert "presence_overlap" in prompt
     assert "above -4 dB" in prompt

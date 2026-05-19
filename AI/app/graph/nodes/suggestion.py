@@ -225,6 +225,7 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         )
 
     try:
+        action["bandOverlapSubtype"] = selected_region.get("band_overlap_subtype")
         action = _build_application_eq_action(state, action=action)
         preview_band_spec = _build_preview_band_spec(state, action=action)
     except ValueError as exc:
@@ -468,6 +469,12 @@ def _build_preview_band_spec(
         raise ValueError("preview band spec requires numeric gainDeltaDb")
     if abs(float(gain_delta_db)) > 9.0:
         raise ValueError("preview band spec requires gainDeltaDb within 9 dB for band_overlap")
+    subtype = str(action.get("bandOverlapSubtype") or "")
+    subtype_limit = _band_overlap_gain_limit_db(subtype)
+    if subtype_limit is not None and abs(float(gain_delta_db)) > subtype_limit:
+        raise ValueError(
+            f"preview band spec requires gainDeltaDb within {subtype_limit:.0f} dB for {subtype}"
+        )
 
     frequency_hz, q = _resolve_eq_band_values(action)
     base_time = state.get("heartbeat_at")
@@ -693,6 +700,8 @@ def _resolve_recommended_reduction_db(region: dict[str, object]) -> float:
         return 3.4
     if subtype == "body_overlap":
         return 2.8
+    if subtype == "upper_mid_overlap":
+        return 2.2
     if subtype == "presence_overlap":
         return 1.8
     current_true_peak = region.get("current_true_peak_dbtp")
@@ -744,7 +753,7 @@ def _build_region_action(
     if issue == "band_overlap":
         target_track_id = _resolve_overlap_target_track(state, region, preserve_clip_id)
         gain_delta_db = -_resolve_recommended_reduction_db(region)
-        return build_action(
+        action = build_action(
             state,
             index=index,
             action_type="DYNAMIC_EQ",
@@ -756,6 +765,8 @@ def _build_region_action(
             gain_delta_db=gain_delta_db,
             params={"threshold": -19, "ratio": 2.0},
         )
+        action["bandOverlapSubtype"] = region.get("band_overlap_subtype")
+        return action
     if issue == "sibilance":
         return build_action(
             state,
@@ -865,6 +876,16 @@ def _track_name(state: WorkflowState, track_id: int) -> str | None:
     track_name = track_name_map.get(int(track_id))
     if isinstance(track_name, str) and track_name.strip():
         return track_name.strip()
+    return None
+
+
+def _band_overlap_gain_limit_db(subtype: str) -> float | None:
+    if subtype == "presence_overlap":
+        return 4.0
+    if subtype == "upper_mid_overlap":
+        return 6.0
+    if subtype in {"low_mid_overlap", "body_overlap", ""}:
+        return 9.0
     return None
 
 

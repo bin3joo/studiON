@@ -49,13 +49,16 @@ const emit = defineEmits<{
   'add-eq-band': [payload: {
     frequencyHz: number
     gainDeltaDb: number
+    isAiEq?: boolean
   }]
   'update-eq-band': [payload: {
     bandOrder: number
     patch: Partial<TrackEqBandState>
+    isAiEq?: boolean
   }]
   'remove-eq-band': [payload: {
     bandOrder: number
+    isAiEq?: boolean
   }]
 }>()
 
@@ -211,9 +214,19 @@ async function togglePreview(type: 'before' | 'after') {
   const analysis = activeAiAnalysis.value
   if (analysis) {
     trackStore.isLoopActive = true
-    trackStore.loopStartBar = analysis.barStart - 1
-    trackStore.loopEndBar = analysis.barEnd
-    trackStore.playheadPosition = analysis.barStart - 1
+    
+    // 밀리초(ms) 데이터를 기반으로 정확한 마디 단위(소수점 포함) 계산
+    const exactStartBar = analysis.startMs / (trackStore.secondsPerBar * 1000)
+    
+    // 루프가 너무 짧아 오디오가 튀는 현상을 막기 위해 최소 1박자(0.25마디) 길이는 보장
+    const exactEndBar = Math.max(
+      analysis.endMs / (trackStore.secondsPerBar * 1000),
+      exactStartBar + 0.25
+    )
+
+    trackStore.loopStartBar = exactStartBar
+    trackStore.loopEndBar = exactEndBar
+    trackStore.playheadPosition = exactStartBar
   }
 
   trackStore.togglePlay()
@@ -453,10 +466,7 @@ watch(
   :ai-markers="aiMarkers"
   :after="true"
   :loading="aiAnalyzing"
-  :interactive="!!selectedTrack"
-  @add-band="emit('add-eq-band', $event)"
-  @update-band="emit('update-eq-band', $event)"
-  @remove-band="emit('remove-eq-band', $event)"
+  :interactive="false"
 />
   </div>
 </div>

@@ -133,8 +133,7 @@ pipeline {
             steps {
                 sshagent(credentials: ['studion-ec2-ssh']) {
                     sh '''
-                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} 'for i in $(seq 1 30); do curl -fsS
-                        http://127.0.0.1:'"${TARGET_BACKEND_PORT}"'/actuator/health | grep -q UP && exit 0; sleep 5; done; exit 1'
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} 'for i in $(seq 1 30); do curl -fsS http://127.0.0.1:'"${TARGET_BACKEND_PORT}"'/actuator/health | grep -q UP && exit 0; sleep 5; done; exit 1'
                     '''
                 }
             }

@@ -113,7 +113,7 @@ pipeline {
             steps {
                 sshagent(credentials: ['studion-ec2-ssh']) {
                     sh '''
-                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.prod.yaml up -d redis && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml build"
+                        ssh ${DEPLOY_USER}@${DEPLOY_HOST} "cd ${DEPLOY_DIR} && docker compose --env-file .env.prod -f compose.prod.yaml up -d redis mysql mongodb && for c in redis mysql mongodb; do for i in \$(seq 1 30); do [ \"\$(docker inspect -f '{{.State.Health.Status}}' \"\$c\" 2>/dev/null)\" = healthy ] && break; sleep 5; done; [ \"\$(docker inspect -f '{{.State.Health.Status}}' \"\$c\")\" = healthy ] || exit 1; done && docker compose --env-file .env.prod -f compose.${TARGET_COLOR}.yaml build"
                     '''
                 }
             }

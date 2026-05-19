@@ -188,8 +188,8 @@ const issueLabel = () => {
 const TIMELINE_TRACK_HEADER_WIDTH = 224
 
 const dynamicStartPx = computed(() => {
-  // 에러가 시작하는 가장 처음 마디(measure)의 정초점(grid)에 버튼이 위치하도록 내림(Math.floor) 처리
-  const startBarFloat = Math.floor(props.conflict.startMs / (trackStore.secondsPerBar * 1000))
+  // 실제 에러 발생 시작점(밀리초) 기준으로 정확히 버튼을 위치시킴
+  const startBarFloat = props.conflict.startMs / (trackStore.secondsPerBar * 1000)
   return TIMELINE_TRACK_HEADER_WIDTH + (startBarFloat * trackStore.pixelPerBar)
 })
 

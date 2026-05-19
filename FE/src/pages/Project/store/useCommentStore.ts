@@ -23,7 +23,7 @@ export const useCommentStore = defineStore('commentStore', () => {
     try {
       isLoading.value = true
       const response = await projectApi.getComments(projectId, {
-        isResolved: isResolvedFilter.value,
+        // 백엔드의 isResolved 필터 로직 우회: 프론트엔드에서 모든 데이터를 받아 직접 필터링합니다.
         trackId: selectedTrackId.value,
       })
       comments.value = response

@@ -2,7 +2,7 @@
 //데이터 창고 피니아
 import { defineStore } from 'pinia';
 //화면이 바뀌아도 자동으로 다시그리게 함 반응형
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 //트랙과 클립의 타입
 import type { TrackUIState, ClipUIState, TrackEqState, TrackEqBandState, } from '../types';
 //음원 처리를 위한 lib
@@ -110,7 +110,7 @@ export const useTrackStore = defineStore('track', () => {
 
             // [최적화] Web Audio API 버퍼 할당 병목(JIT Compile Freeze) 사전 제거
             // 거대한 AudioBuffer가 처음 할당될 때 브라우저가 멈추는 현상을 막기 위해
-            // 오디오 다운로드 직후 백그라운드에서 한 번 빈 재생을 강제하여 캐싱을 유도합니다.
+            // ?�디???�운로드 직후 백그?�운?�에????�?�??�생??강제?�여 캐싱???�도?�니??
             try {
                 const warmupSource = audioCtx.createBufferSource();
                 warmupSource.buffer = audioBuffer;
@@ -150,7 +150,7 @@ export const useTrackStore = defineStore('track', () => {
     let cachedClientWidth = 0;
 
     const isAutoScrollActive = ref(true); // 수동 스크롤 시 자동 스크롤 일시 정지용
-    const workspaceZoom = ref(0.75); // 타임라인 워크스페이스 배율 (기본 90%)
+    const workspaceZoom = ref(0.9); // 타임라인 워크스페이스 배율 (기본 90%)
 
     const setTimelineContainer = (el: HTMLElement | null) => {
         if (timelineContainer) {
@@ -1930,7 +1930,7 @@ export const useTrackStore = defineStore('track', () => {
             const vol = trackVolumes.get(t.trackId);
             if (vol) {
                 if (isAnySoloed) {
-                    // 솔로 모드일 때: 현재 트랙이 솔로가 아니거나, 혹은 솔로더라도 명시적으로 음소거된 상태면 소리를 끕니다.
+                    // ?�로 모드???? ?�재 ?�랙???�로가 ?�니거나, ?��? ?�로?�라??명시?�으�??�소거된 ?�태�??�리�??�니??
                     vol.mute = !t.isSoloed || t.isMuted;
                 } else {
                     // 솔로 모드가 아닐 때: 트랙의 음소거 상태를 그대로 따릅니다.
@@ -2396,7 +2396,7 @@ export const useTrackStore = defineStore('track', () => {
         hardwareLatency += manualLatencyOffset.value;
 
         // 레이턴시 보정: 출력 지연 시간만큼 재생바를 뒤로 늦춥니다.
-        // 처음 시작 위치보다 재생바가 뒤로 점프하는 것을 방지하기 위해 하한값을 설정합니다.
+        // 처음 ?�작 ?�치보다 ?�생바�? ?�로 ?�프?�는 것을 방�??�기 ?�해 ?�한값을 ?�정?�니??
         const compensatedSeconds = Math.max(playbackStartTransportSec, currentSeconds - hardwareLatency);
 
         const currentPositionBar = compensatedSeconds / secondsPerBar.value;
@@ -2821,10 +2821,29 @@ export const useTrackStore = defineStore('track', () => {
     }
 
     // 비동기 함수를 선언 ref 반응형
+    const isLoading = ref(true);
     const fetchProject = async (projectId: number) => {
         try {
+            isLoading.value = true;
             // 새 프로젝트 방에 들어올 때 기존 오디오 엔진의 찌꺼기(유령 플레이어)를 모두 파기
             disposeAllAudio();
+
+            // 기존 상태(트랙 목록, 프로젝트 정보 등)를 초기화하여
+            // 새 프로젝트 렌더링 전에 이전 프로젝트의 잔여 트랙이 표시되는 버그(Race Condition)를 완벽히 차단합니다.
+            trackList.value = [];
+            projectInfo.value = {
+                projectId: projectId,
+                name: '프로젝트',
+                tempo: 120.0,
+                rootNote: 'C',
+                mode: 'major',
+                timeSigNumerator: 4,
+                timeSigDenominator: 4,
+                totalBarCount: 100
+            };
+            projectMembers.value = [];
+            currentTotalSizeBytes.value = 0;
+            bpm.value = 120;
 
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
             const data = await projectApi.getProjectDetail(projectId);
@@ -2897,10 +2916,19 @@ export const useTrackStore = defineStore('track', () => {
                 });
 
                 checkAndExpandTimeline(maxClipEnd);
-                setupAudioEngine(trackList.value);
+
+                // nextTick???�용??DOM ?�데?�트�?보장?????�디???�진???�정?�여 ?�더�?꼬임??방�?
+                await nextTick();
+                try {
+                    setupAudioEngine(trackList.value);
+                } catch (audioError) {
+                    console.warn('[AudioEngine] setupAudioEngine failed, but track loaded.', audioError);
+                }
             }
         } catch (error) {
             //  console.error("프로젝트 로딩 실패:", error);
+        } finally {
+            isLoading.value = false;
         }
     };
 
@@ -2978,6 +3006,7 @@ export const useTrackStore = defineStore('track', () => {
 
         // Actions
         fetchProject,
+        isLoading,
         togglePlay,
         updateZoom,
         moveClipToTrack,
@@ -3054,3 +3083,5 @@ export const useTrackStore = defineStore('track', () => {
         rebuildTrackEqChain
     };
 });
+
+

@@ -34,16 +34,19 @@ const currentUserNickname = computed(() => {
   }
 })
 
-// 프론트엔드 단에서 멘션 필터링 처리
 const filteredComments = computed(() => {
-  if (!commentStore.isMentionedFilter) return commentStore.comments
+  // 1. 백엔드에서 모든 코멘트를 가져오므로, 프론트엔드에서 isResolved 상태를 직접 필터링합니다.
+  let result = commentStore.comments.filter(comment => comment.isResolved === commentStore.isResolvedFilter)
+
+  // 2. 멘션 필터링
+  if (!commentStore.isMentionedFilter) return result
   
   const myNickname = currentUserNickname.value
   if (!myNickname) return []
   
   const mentionPattern = `@${myNickname}`
   
-  return commentStore.comments.filter(comment => {
+  return result.filter(comment => {
     // 1. 코멘트 본문에 멘션이 포함되어 있는지
     const hasMentionInContent = comment.content.includes(mentionPattern)
     

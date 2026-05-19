@@ -18,7 +18,7 @@ import {socketService} from '../../core/services/socket.service'; //웹 소켓 �
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
 import type { TrackEqBandState } from './types'
-import { AlertTriangle } from 'lucide-vue-next';
+import { AlertTriangle, Loader2 } from 'lucide-vue-next';
 import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
 import { useCommentStore } from './store/useCommentStore'
@@ -278,9 +278,9 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
           trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
         } else if (trackStore.selectedTrackId) {
           // 2. 선택된 클립이 없다면, 선택된 트랙이 있는지 확인하고 해당 트랙의 클립만 분할
-          const track = trackStore.trackList.find(t => t.trackId === trackStore.selectedTrackId);
+          const track = trackStore.trackList.find((t: any) => t.trackId === trackStore.selectedTrackId);
           if (track) {
-            const clipUnderPlayhead = track.clips.find(c => 
+            const clipUnderPlayhead = track.clips.find((c: any) => 
               currentBar > c.start && currentBar < c.start + c.duration
             );
             if (clipUnderPlayhead) {
@@ -339,6 +339,7 @@ onMounted(async () => {
   if(projectId){
     const numericProjectId = Number(projectId)
     await trackStore.fetchProject(Number(projectId))
+    await nextTick() // fetchProject 직후 상태가 DOM에 반영될 시간을 확보
     commentStore.fetchComments(numericProjectId)
 
     trackEvent('project_opened', {
@@ -481,7 +482,7 @@ function findTrackName(trackId: string) {
     return trackStore.masterTrack.name
   }
 
-  return trackStore.trackList.find(track =>
+  return trackStore.trackList.find((track: any) =>
     track.trackId === numericTrackId
   )?.name ?? `트랙 ${trackId}`
 }
@@ -867,9 +868,9 @@ function handleActionSplit() {
   if (trackStore.selectedClip && trackStore.selectedTrackId) {
     trackStore.splitClip(trackStore.selectedClip.clipId, trackStore.selectedTrackId);
   } else if (trackStore.selectedTrackId) {
-    const track = trackStore.trackList.find(t => t.trackId === trackStore.selectedTrackId);
+    const track = trackStore.trackList.find((t: any) => t.trackId === trackStore.selectedTrackId);
     if (track) {
-      const clipUnderPlayhead = track.clips.find(c => 
+      const clipUnderPlayhead = track.clips.find((c: any) => 
         currentBar > c.start && currentBar < c.start + c.duration
       );
       if (clipUnderPlayhead) {
@@ -1075,7 +1076,13 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 </script>
 
 <template>
-  <!--플랙스, 플랙스 콜 -> 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
+  <!-- 로딩 오버레이 -->
+  <div v-if="trackStore.isLoading" class="fixed inset-0 z-100 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm transition-all duration-300">
+    <Loader2 class="h-10 w-10 animate-spin text-orange-400 mb-4" />
+    <p class="text-zinc-300 font-medium animate-pulse">프로젝트를 불러오는 중입니다...</p>
+  </div>
+
+  <!--트랙과 트랙목록 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
   
   <div 
     class="flex h-screen flex-col overflow-hidden bg-background text-foreground"

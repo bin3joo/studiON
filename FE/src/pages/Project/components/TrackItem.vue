@@ -1237,7 +1237,8 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           :class="[
             isMaster ? 'pointer-events-none' : 'cursor-grab border-2 active:cursor-grabbing',
             clip.isDragging ? 'opacity-95 brightness-75 shadow-2xl !z-50' : '',
-            clip.isSelected && !clip.isDragging && !isMaster ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : ''
+            clip.isSelected && !clip.isDragging && !isMaster ? 'brightness-75 shadow-lg ring-2 ring-white/70 ring-offset-2 ring-offset-[#1c1c1c] z-40' : '',
+            (clip.isLocked || isAiLocked(clip)) && !isMaster ? 'grayscale opacity-75 pointer-events-none' : ''
           ]"
           :style="{ 
             left: `${clip.start * trackStore.pixelPerBar}px`,
@@ -1267,45 +1268,17 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
             <GripVertical class="h-4 w-4 text-white/50 group-hover:text-white/80 transition-colors" />
           </div>
 
-          <!-- 반복되는 반투명 잠금 배경 패턴 -->
+          <!-- 중앙 잠금 아이콘 (클립 락 & AI 락 공통) -->
           <div 
-            v-if="clip.isLocked && !isMaster"
-            class="absolute inset-0 z-20 flex items-center justify-evenly overflow-hidden pointer-events-none bg-red-500/10"
+            v-if="(clip.isLocked || isAiLocked(clip)) && !isMaster"
+            class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none"
           >
-            <Lock 
-              v-for="i in Math.max(1, Math.ceil(clip.duration / 2))" 
-              :key="'lock-pattern-'+i"
-              class="h-10 w-10 text-white/20 shrink-0" 
-            />
-          </div>
-
-          <div 
-            v-if="clip.isLocked && !isMaster" 
-            class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-red-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
-            title="다른 사용자가 편집 중입니다 (이동 및 수정 불가)"
-          >
-            <Lock class="h-3 w-3" />
-          </div>
-
-          <!-- AI 잠금 배경 패턴 -->
-          <div 
-            v-if="!clip.isLocked && isAiLocked(clip) && !isMaster"
-            class="absolute inset-0 z-20 flex items-center justify-evenly overflow-hidden pointer-events-none bg-blue-500/10"
-          >
-            <Sparkles 
-              v-for="i in Math.max(1, Math.ceil(clip.duration / 2))" 
-              :key="'ai-lock-pattern-'+i"
-              class="h-10 w-10 text-white/20 shrink-0" 
-            />
-          </div>
-
-          <!-- 우측 상단 AI 잠금 표시 아이콘 -->
-          <div 
-            v-if="!clip.isLocked && isAiLocked(clip) && !isMaster" 
-            class="absolute right-1.5 top-1.5 z-30 flex items-center justify-center rounded-full bg-blue-500/90 p-1 text-white shadow-md ring-1 ring-white/50"
-            title="AI 분석/수정 대기 중입니다 (해결 전까지 조작 불가)"
-          >
-            <Sparkles class="h-3 w-3" />
+            <div 
+              class="flex items-center justify-center rounded-full bg-black/40 p-2 text-white shadow-md backdrop-blur-sm ring-1 ring-white/20"
+              :title="clip.isLocked ? '다른 사용자가 편집 중입니다 (이동 및 수정 불가)' : 'AI 작업 대기 중입니다 (조작 불가)'"
+            >
+              <Lock class="h-5 w-5 opacity-90" />
+            </div>
           </div>
 
           <div 

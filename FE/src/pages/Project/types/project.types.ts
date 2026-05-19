@@ -107,6 +107,7 @@ export interface ProjectListItem {
 export interface FetchProjectsData {
   projects: ProjectListItem[]
   currentTotalSizeBytes: number
+  maxTotalSizeBytes: number
 }
 
 export interface FetchProjectsResponse {

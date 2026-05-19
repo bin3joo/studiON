@@ -545,7 +545,7 @@ function parseMentions(content: string) {
       <!-- 확장 댓글 박스 -->
       <div
         v-if="expandedMeasure !== null"
-        class="track-comment-box pointer-events-auto absolute z-[120] w-[300px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-3"
+        class="track-comment-box pointer-events-auto absolute z-[120] w-[360px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-4"
         :class="expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]'"
         :style="{ left: `calc(${expandedCellLeft}px + 13px)` }"
         @mousedown.stop
@@ -559,7 +559,7 @@ function parseMentions(content: string) {
 
         <!-- 공통 헤더: 트랙 이름 & 마디 수 -->
         <div class="mb-2.5 flex items-center justify-between border-b border-white/10 pb-2">
-          <span class="text-[11px] font-semibold text-white/50">
+          <span class="text-[13px] font-semibold text-white/50">
             {{ trackStore.masterTrack.trackId === Number(props.trackId) ? trackStore.masterTrack.name : (trackStore.trackList.find(t => String(t.trackId) === props.trackId)?.name || `트랙 ${props.trackId}`) }} · {{ expandedMeasure }}마디
           </span>
           <!-- 닫기 버튼 -->
@@ -568,22 +568,22 @@ function parseMentions(content: string) {
             @click.stop="closeCommentBox"
             title="닫기"
           >
-            <X class="h-3.5 w-3.5 text-white/40 hover:text-white" />
+            <X class="h-4 w-4 text-white/40 hover:text-white" />
           </button>
         </div>
 
         <!-- 새 댓글 달기 (Empty State) -->
         <div v-if="!getCommentGroup(expandedMeasure)" class="relative z-10 flex items-center gap-2">
-          <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
+          <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
             <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
-            <span v-else class="text-[9px] font-bold text-white/90">나</span>
+            <span v-else class="text-[10px] font-bold text-white/90">나</span>
           </div>
           <input
             ref="inputRef1"
             v-model="draftComment"
             type="text"
             placeholder="댓글 추가"
-            class="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/40"
+            class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
             @keydown.enter.prevent="submitComment(expandedMeasure)"
             @input="handleInput"
             @keydown="handleKeydown"
@@ -593,7 +593,7 @@ function parseMentions(content: string) {
             :disabled="!draftComment.trim()"
             @click="submitComment(expandedMeasure)"
           >
-            <ArrowUpCircle class="h-4 w-4 text-white/40 hover:text-white" />
+            <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
           </button>
         </div>
 
@@ -609,12 +609,12 @@ function parseMentions(content: string) {
             >
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2" :class="{ 'ml-4': idx > 0 }">
-                  <CornerDownRight v-if="idx > 0" class="h-3.5 w-3.5 shrink-0 text-white/40" />
-                  <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: comment.profileImageUrl ? 'transparent' : (comment.color || getAuthorColor(comment.author)) }">
+                  <CornerDownRight v-if="idx > 0" class="h-4 w-4 shrink-0 text-white/40" />
+                  <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: comment.profileImageUrl ? 'transparent' : (comment.color || getAuthorColor(comment.author)) }">
                     <img v-if="comment.profileImageUrl" :src="comment.profileImageUrl || undefined" class="h-full w-full object-cover" />
-                    <span v-else class="text-[9px] font-bold text-white/90">{{ comment.author.slice(0, 2) }}</span>
+                    <span v-else class="text-[10px] font-bold text-white/90">{{ comment.author.slice(0, 2) }}</span>
                   </div>
-                  <span class="text-[11px] font-medium text-white/60">{{ comment.author }}</span>
+                  <span class="text-[13px] font-medium text-white/60">{{ comment.author }}</span>
                 </div>
                 <div class="flex items-center gap-1">
                   <button
@@ -622,7 +622,7 @@ function parseMentions(content: string) {
                     @click.stop="requestDeleteComment(comment.id)"
                     title="삭제"
                   >
-                    <Trash2 class="h-3.5 w-3.5 text-white/40 hover:text-red-400" />
+                    <Trash2 class="h-4 w-4 text-white/40 hover:text-red-400" />
                   </button>
                   <button
                     v-if="idx === 0"
@@ -635,8 +635,8 @@ function parseMentions(content: string) {
                   </button>
                 </div>
               </div>
-              <div class="pl-[18px]" :class="{ 'ml-9': idx > 0 }">
-                <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-white">
+              <div class="pl-[32px]" :class="{ 'ml-10': idx > 0 }">
+                <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-white">
                   <template v-for="(part, i) in parseMentions(comment.mention ? comment.mention + ' \n' + comment.content : comment.content)" :key="i">
                     <span v-if="part.isMention" class="font-medium text-[#FF3DCB]">{{ part.text }}</span>
                     <span v-else>{{ part.text }}</span>
@@ -648,9 +648,9 @@ function parseMentions(content: string) {
 
           <!-- 댓글 입력 줄 -->
           <div class="mt-3 flex items-center gap-2">
-            <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
+            <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
               <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
-              <span v-else class="text-[9px] font-bold text-white/90">나</span>
+              <span v-else class="text-[10px] font-bold text-white/90">나</span>
             </div>
             <div class="flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
               <input
@@ -658,7 +658,7 @@ function parseMentions(content: string) {
                 v-model="draftComment"
                 type="text"
                 placeholder="댓글 추가"
-                class="flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/40"
+                class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
                 @keydown.enter.prevent="submitComment(expandedMeasure)"
                 @input="handleInput"
                 @keydown="handleKeydown"
@@ -668,7 +668,7 @@ function parseMentions(content: string) {
                 :disabled="!draftComment.trim()"
                 @click="submitComment(expandedMeasure)"
               >
-                <ArrowUpCircle class="h-4 w-4 text-white/40 hover:text-white" />
+                <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
               </button>
             </div>
           </div>

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, inject } from 'vue'
+import type { Ref } from 'vue'
 import { Play, Square, Sparkles, Wand2, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import type { TrackUIState, TrackEqBandState } from '../types'
+import type { AiAnalysisItem } from '../composables/useProjectAiWorkflow'
 import EqGraph from './EqGraph.vue'
 import { useTrackStore } from '../store/useTrackStore'
 
@@ -170,6 +172,16 @@ watch(
 
 const isPreviewPlaying = ref<'before' | 'after' | null>(null)
 
+const aiAnalysisItems = inject<Ref<AiAnalysisItem[]>>('aiAnalysisItems')
+const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId')
+
+const activeAiAnalysis = computed(() => {
+  if (!aiAnalysisItems?.value || !activeAiAnalysisId?.value) return null
+  return aiAnalysisItems.value.find(item => item.id === activeAiAnalysisId.value) || null
+})
+
+let previousLoopState = { active: false, start: 0, end: 4 }
+
 async function togglePreview(type: 'before' | 'after') {
   if (!props.selectedTrack) return
 
@@ -186,7 +198,24 @@ async function togglePreview(type: 'before' | 'after') {
     trackStore.rebuildTrackEqChain(props.selectedTrack.trackId, props.aiAfterBands)
   }
 
+  if (isPreviewPlaying.value === null) {
+    previousLoopState = {
+      active: trackStore.isLoopActive,
+      start: trackStore.loopStartBar,
+      end: trackStore.loopEndBar
+    }
+  }
+
   isPreviewPlaying.value = type
+
+  const analysis = activeAiAnalysis.value
+  if (analysis) {
+    trackStore.isLoopActive = true
+    trackStore.loopStartBar = analysis.barStart - 1
+    trackStore.loopEndBar = analysis.barEnd
+    trackStore.playheadPosition = analysis.barStart - 1
+  }
+
   trackStore.togglePlay()
 }
 
@@ -198,6 +227,10 @@ watch(
       if (props.selectedTrack) {
         trackStore.rebuildTrackEqChain(props.selectedTrack.trackId)
       }
+
+      trackStore.isLoopActive = previousLoopState.active
+      trackStore.loopStartBar = previousLoopState.start
+      trackStore.loopEndBar = previousLoopState.end
     }
   }
 )

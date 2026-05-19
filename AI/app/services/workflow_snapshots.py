@@ -95,6 +95,7 @@ class TimelineSnapshotDocument(BaseModel):
     created_at: str
     duration_ms: int
     track_ids: list[int] = Field(default_factory=list)
+    track_name_map: dict[str, str | None] = Field(default_factory=dict)
     bpm: float
     numerator: int
     denominator: int
@@ -108,6 +109,7 @@ class TimelineSnapshotDocument(BaseModel):
 class SnapshotRuntimeContext:
     duration_ms: int
     track_ids: list[int]
+    track_name_map: dict[int, str | None]
     bpm: float
     numerator: int
     denominator: int
@@ -184,6 +186,10 @@ def build_snapshot_runtime_context(snapshot: ProjectSnapshot | dict) -> Snapshot
     return SnapshotRuntimeContext(
         duration_ms=snapshot.duration_ms,
         track_ids=sorted({track.track_id for track in snapshot.tracks}),
+        track_name_map={
+            int(track.track_id): track.name.strip() if isinstance(track.name, str) and track.name.strip() else None
+            for track in snapshot.tracks
+        },
         bpm=round(snapshot.bpm, 6),
         numerator=snapshot.numerator,
         denominator=snapshot.denominator,
@@ -215,6 +221,10 @@ def build_timeline_snapshot_document(
         created_at=utc_now(),
         duration_ms=context.duration_ms,
         track_ids=context.track_ids,
+        track_name_map={
+            str(track_id): track_name
+            for track_id, track_name in context.track_name_map.items()
+        },
         bpm=context.bpm,
         numerator=context.numerator,
         denominator=context.denominator,

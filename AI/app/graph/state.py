@@ -72,6 +72,7 @@ class WorkflowState(TypedDict, total=False):
     clip_index: list[dict]
     track_eq_map: dict[int, list[dict]]
     track_ids: list[int]
+    track_name_map: dict[int, str | None]
     sampled_clip_ids: list[int]
     track_representative_specs: list[dict]
     role_candidate_track_ids: list[int]
@@ -192,6 +193,7 @@ def build_workflow_initial_state(
         "clip_index": [],
         "track_eq_map": {},
         "track_ids": [],
+        "track_name_map": {},
         "sampled_clip_ids": [],
         "track_representative_specs": [],
         "role_candidate_track_ids": [],

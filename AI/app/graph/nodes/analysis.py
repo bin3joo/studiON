@@ -71,6 +71,48 @@ BAND_OVERLAP_FRAME_MIN_LOW_MID_ENERGY = 0.04
 BAND_OVERLAP_FRAME_MIN_ACTIVE_TRACKS = 2
 BAND_OVERLAP_FRAME_MIN_BODY_SUM = 1.05
 BAND_OVERLAP_FRAME_MIN_LOW_MID_SUM = 0.12
+BAND_OVERLAP_SUBTYPE_CONFIG = {
+    "low_mid_overlap": {
+        "focus_energy_key": "low_mid_energy",
+        "support_energy_key": "body_energy",
+        "min_track_energy": 0.04,
+        "min_support_energy": 0.18,
+        "min_focus_sum": 0.12,
+        "min_support_sum": 0.78,
+        "min_active_tracks": 2,
+        "fallback_band": BAND_RANGES["low_mid"],
+        "refine_band": BAND_RANGES["low_mid"],
+        "summary": "겹치는 트랙들 사이에서 저중역 겹침이 감지되었습니다.",
+        "ranking_adjustment": 0.035,
+    },
+    "body_overlap": {
+        "focus_energy_key": "body_energy",
+        "support_energy_key": "low_mid_energy",
+        "min_track_energy": 0.18,
+        "min_support_energy": 0.04,
+        "min_focus_sum": 1.05,
+        "min_support_sum": 0.12,
+        "min_active_tracks": 2,
+        "fallback_band": BAND_RANGES["body"],
+        "refine_band": BAND_RANGES["body"],
+        "summary": "겹치는 트랙들 사이에서 바디 대역 혼잡이 감지되었습니다.",
+        "ranking_adjustment": 0.0,
+    },
+    "presence_overlap": {
+        "focus_energy_key": "presence_energy",
+        "support_energy_key": "high_band_ratio",
+        "min_track_energy": 0.1,
+        "min_support_energy": 0.12,
+        "min_focus_sum": 0.34,
+        "min_support_sum": 0.3,
+        "min_active_tracks": 2,
+        "min_centroid_hz": 2200,
+        "fallback_band": BAND_RANGES["presence"],
+        "refine_band": BAND_RANGES["presence"],
+        "summary": "겹치는 트랙들 사이에서 프레즌스 대역 충돌이 감지되었습니다.",
+        "ranking_adjustment": -0.04,
+    },
+}
 REFINEMENT_SMOOTHING_BINS = 5
 REFINEMENT_CLUSTER_PEAK_RATIO = 0.6
 REFINEMENT_CLUSTER_FLOOR = 1e-4
@@ -519,7 +561,15 @@ def ranking_score(region: dict[str, object]) -> float:
     base = float(region.get("score", 0.0))
     weighted = base * severity_weight.get(region.get("severity", "MEDIUM"), 1.0)
     issue_weight = issue_priority_weight.get(str(region.get("issue_type", "")), 0.0)
-    return round(weighted + duration_weight + issue_weight, 3)
+    subtype_adjustment = 0.0
+    if region.get("issue_type") == "band_overlap":
+        subtype_adjustment = float(
+            BAND_OVERLAP_SUBTYPE_CONFIG.get(
+                str(region.get("band_overlap_subtype") or ""),
+                {},
+            ).get("ranking_adjustment", 0.0)
+        )
+    return round(weighted + duration_weight + issue_weight + subtype_adjustment, 3)
 
 
 def _candidate_ranking_sort_key(region: dict[str, object]) -> tuple[float, float, int]:
@@ -1264,14 +1314,21 @@ def _refine_band_overlap_region(
     artifact: dict[str, Any],
     region: dict[str, object],
 ) -> dict[str, object]:
+    subtype = str(region.get("band_overlap_subtype") or "body_overlap")
+    config = BAND_OVERLAP_SUBTYPE_CONFIG.get(
+        subtype,
+        BAND_OVERLAP_SUBTYPE_CONFIG["body_overlap"],
+    )
+    fallback_low_hz, fallback_high_hz = config["fallback_band"]
+    refine_low_hz, refine_high_hz = config["refine_band"]
     involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
     freqs = _artifact_frequency_bins(artifact)
     if len(involved_track_ids) < 2 or freqs.size == 0:
         return _apply_refined_band(
             region,
             None,
-            fallback_low_hz=int(region.get("band_low_hz") or BAND_RANGES["body"][0]),
-            fallback_high_hz=int(region.get("band_high_hz") or BAND_RANGES["body"][1]),
+            fallback_low_hz=int(region.get("band_low_hz") or fallback_low_hz),
+            fallback_high_hz=int(region.get("band_high_hz") or fallback_high_hz),
         )
     normalized_spectra: list[np.ndarray] = []
     for track_id in involved_track_ids:
@@ -1289,8 +1346,8 @@ def _refine_band_overlap_region(
         return _apply_refined_band(
             region,
             None,
-            fallback_low_hz=int(region.get("band_low_hz") or BAND_RANGES["body"][0]),
-            fallback_high_hz=int(region.get("band_high_hz") or BAND_RANGES["body"][1]),
+            fallback_low_hz=int(region.get("band_low_hz") or fallback_low_hz),
+            fallback_high_hz=int(region.get("band_high_hz") or fallback_high_hz),
         )
     overlap_score = np.zeros_like(normalized_spectra[0], dtype=np.float64)
     for left_index in range(len(normalized_spectra)):
@@ -1302,14 +1359,14 @@ def _refine_band_overlap_region(
     refinement = _extract_peak_cluster(
         freqs,
         _smooth_score_map(overlap_score),
-        min_hz=BAND_RANGES["body"][0],
-        max_hz=BAND_RANGES["presence"][1],
+        min_hz=refine_low_hz,
+        max_hz=refine_high_hz,
     )
     return _apply_refined_band(
         region,
         refinement,
-        fallback_low_hz=int(region.get("band_low_hz") or BAND_RANGES["body"][0]),
-        fallback_high_hz=int(region.get("band_high_hz") or BAND_RANGES["body"][1]),
+        fallback_low_hz=int(region.get("band_low_hz") or fallback_low_hz),
+        fallback_high_hz=int(region.get("band_high_hz") or fallback_high_hz),
     )
 
 
@@ -1467,67 +1524,90 @@ def _find_band_overlap_regions(state: WorkflowState) -> list[dict[str, object]]:
     if len(track_ids) < 2:
         return []
 
-    candidates: list[dict[str, object]] = []
     frame_count = min(len(track_frames_by_id[track_id]) for track_id in track_ids)
-    # band overlap은 두 트랙 pair를 전부 비교하기보다, 먼저 "과밀한 시간 프레임"을 찾고
-    # 그 프레임에 실제로 body/low-mid 대역을 차지하는 트랙 묶음을 region으로 승격한다.
+    candidates: list[dict[str, object]] = []
     for frame_index in range(frame_count):
-        active_tracks: list[tuple[int, dict[str, object]]] = []
-        for track_id in track_ids:
-            window = track_frames_by_id[track_id][frame_index]
-            if (
-                window["window_energy"] < BAND_OVERLAP_FRAME_MIN_WINDOW_ENERGY
-                or window["body_energy"] < BAND_OVERLAP_FRAME_MIN_BODY_ENERGY
-                or window["low_mid_energy"] < BAND_OVERLAP_FRAME_MIN_LOW_MID_ENERGY
-            ):
-                continue
-            active_tracks.append((track_id, window))
-
-        if len(active_tracks) < BAND_OVERLAP_FRAME_MIN_ACTIVE_TRACKS:
-            continue
-
-        body_sum = sum(float(window["body_energy"]) for _, window in active_tracks)
-        low_mid_sum = sum(float(window["low_mid_energy"]) for _, window in active_tracks)
-        if (
-            body_sum < BAND_OVERLAP_FRAME_MIN_BODY_SUM
-            or low_mid_sum < BAND_OVERLAP_FRAME_MIN_LOW_MID_SUM
-        ):
-            continue
-
-        sorted_tracks = sorted(
-            active_tracks,
-            key=lambda item: (float(item[1]["body_energy"]), float(item[1]["low_mid_energy"])),
-            reverse=True,
-        )
-        primary_track_id = sorted_tracks[0][0]
-        involved_track_ids = [track_id for track_id, _ in sorted_tracks]
-        track_body_contributions = {
-            str(track_id): round(float(window["body_energy"]), 3)
-            for track_id, window in sorted_tracks
+        frame_windows = {
+            track_id: track_frames_by_id[track_id][frame_index]
+            for track_id in track_ids
         }
-        reference_window = sorted_tracks[0][1]
-        score = round(
-            (body_sum * 0.45)
-            + (low_mid_sum * 0.2)
-            + (min(len(involved_track_ids) / 4.0, 1.0) * 0.35),
-            3,
-        )
-        candidates.append(
-            {
-                "track_id": primary_track_id,
-                "secondary_track_id": None,
-                "involved_track_ids": involved_track_ids,
-                "track_body_contributions": track_body_contributions,
-                "start_ms": reference_window["start_ms"],
-                "end_ms": reference_window["end_ms"],
-                "band_low_hz": BAND_RANGES["body"][0],
-                "band_high_hz": BAND_RANGES["body"][1],
-                "score": score,
-                "summary": "Detected congested low-mid body region across overlapping tracks.",
-            }
-        )
+        for subtype, config in BAND_OVERLAP_SUBTYPE_CONFIG.items():
+            candidate = _build_band_overlap_subtype_candidate(
+                subtype=subtype,
+                config=config,
+                frame_windows=frame_windows,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
     merged = _merge_candidate_windows("band_overlap", candidates)
     return [_refine_band_overlap_region(artifact, candidate) for candidate in merged]
+
+
+def _build_band_overlap_subtype_candidate(
+    *,
+    subtype: str,
+    config: dict[str, object],
+    frame_windows: dict[int, dict[str, object]],
+) -> dict[str, object] | None:
+    focus_energy_key = str(config["focus_energy_key"])
+    support_energy_key = str(config["support_energy_key"])
+    active_tracks: list[tuple[int, dict[str, object]]] = []
+    for track_id, window in frame_windows.items():
+        if float(window.get("window_energy", 0.0)) < BAND_OVERLAP_FRAME_MIN_WINDOW_ENERGY:
+            continue
+        if float(window.get(focus_energy_key, 0.0)) < float(config["min_track_energy"]):
+            continue
+        if float(window.get(support_energy_key, 0.0)) < float(config["min_support_energy"]):
+            continue
+        min_centroid_hz = config.get("min_centroid_hz")
+        if min_centroid_hz is not None and float(window.get("spectral_centroid_hz", 0.0)) < float(min_centroid_hz):
+            continue
+        active_tracks.append((track_id, window))
+    if len(active_tracks) < int(config["min_active_tracks"]):
+        return None
+
+    focus_sum = sum(float(window.get(focus_energy_key, 0.0)) for _, window in active_tracks)
+    support_sum = sum(float(window.get(support_energy_key, 0.0)) for _, window in active_tracks)
+    if focus_sum < float(config["min_focus_sum"]) or support_sum < float(config["min_support_sum"]):
+        return None
+
+    sorted_tracks = sorted(
+        active_tracks,
+        key=lambda item: (
+            float(item[1].get(focus_energy_key, 0.0)),
+            float(item[1].get(support_energy_key, 0.0)),
+        ),
+        reverse=True,
+    )
+    primary_track_id = sorted_tracks[0][0]
+    involved_track_ids = [track_id for track_id, _ in sorted_tracks]
+    track_body_contributions = {
+        str(track_id): round(float(window.get("body_energy", 0.0)), 3)
+        for track_id, window in sorted_tracks
+    }
+    reference_window = sorted_tracks[0][1]
+    band_low_hz, band_high_hz = config["fallback_band"]
+    score = round(
+        (focus_sum * 0.46)
+        + (support_sum * 0.2)
+        + (min(len(involved_track_ids) / 4.0, 1.0) * 0.34),
+        3,
+    )
+    return {
+        "track_id": primary_track_id,
+        "secondary_track_id": None,
+        "involved_track_ids": involved_track_ids,
+        "track_body_contributions": track_body_contributions,
+        "band_overlap_subtype": subtype,
+        "band_focus_label": _band_focus_label_for_subtype(subtype),
+        "start_ms": reference_window["start_ms"],
+        "end_ms": reference_window["end_ms"],
+        "band_low_hz": band_low_hz,
+        "band_high_hz": band_high_hz,
+        "score": score,
+        "summary": str(config["summary"]),
+        "recommended_reduction_db": _default_band_overlap_reduction_db(subtype, score),
+    }
 
 
 def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]]:
@@ -1556,7 +1636,7 @@ def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]
                     "start_ms": window["start_ms"],
                     "end_ms": window["end_ms"],
                     "score": score,
-                    "summary": "Detected track clipping candidate near the digital ceiling.",
+                    "summary": "디지털 ceiling 근처의 트랙 클리핑 후보가 감지되었습니다.",
                     "recommended_reduction_db": round(max(peak_near_ceiling + 0.9, 1.0), 3),
                     "current_true_peak_dbtp": round(true_peak_dbfs, 3),
                     "target_ceiling_dbtp": -1.0,
@@ -1599,9 +1679,7 @@ def _find_high_band_harshness_regions(state: WorkflowState) -> list[dict[str, ob
                         "band_low_hz": BAND_RANGES["harshness"][0],
                         "band_high_hz": BAND_RANGES["harshness"][1],
                         "score": score,
-                    "summary": (
-                        "Detected harsh high-band region that may require role-aware refinement."
-                    ),
+                    "summary": "역할 구분을 고려해 추가 확인이 필요한 고역 harshness 구간이 감지되었습니다.",
                     }
                 )
     merged = _merge_candidate_windows("high_band_harshness", candidates)
@@ -1660,7 +1738,7 @@ def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
                         "band_low_hz": BAND_RANGES["sibilance"][0],
                         "band_high_hz": BAND_RANGES["sibilance"][1],
                         "score": score,
-                        "summary": "Detected sibilance candidate after role-aware high-band pass.",
+                        "summary": "역할 인식 기반 고역 검사 이후 치찰음 후보가 감지되었습니다.",
                     }
                 )
     merged = _merge_candidate_windows("sibilance", candidates)
@@ -1687,6 +1765,7 @@ def _merge_candidate_windows(
             candidate["track_id"],
             candidate.get("secondary_track_id"),
             tuple(candidate.get("involved_track_ids", [])),
+            candidate.get("band_overlap_subtype"),
             candidate.get("band_low_hz"),
             candidate["start_ms"],
         ),
@@ -1700,6 +1779,7 @@ def _merge_candidate_windows(
             previous["track_id"] == candidate["track_id"]
             and previous.get("secondary_track_id") == candidate.get("secondary_track_id")
             and previous.get("involved_track_ids") == candidate.get("involved_track_ids")
+            and previous.get("band_overlap_subtype") == candidate.get("band_overlap_subtype")
             and previous.get("band_low_hz") == candidate.get("band_low_hz")
             and previous.get("band_high_hz") == candidate.get("band_high_hz")
         )
@@ -1841,9 +1921,7 @@ def _find_master_clipping_candidate_regions(state: WorkflowState) -> list[dict[s
                 "start_ms": window["start_ms"],
                 "end_ms": window["end_ms"],
                 "score": score,
-                "summary": (
-                    "Detected master true-peak overflow candidate before contributor routing."
-                ),
+                "summary": "기여 트랙 분석 전 단계에서 마스터 true-peak overflow 후보가 감지되었습니다.",
                 "true_peak_dbfs": true_peak_dbfs,
                 "mix_peak_dbfs": float(window["peak_dbfs"]),
                 "clip_ratio": float(window["clip_ratio"]),
@@ -2000,9 +2078,7 @@ def _promote_master_contributors(
                 "start_ms": candidate["start_ms"],
                 "end_ms": candidate["end_ms"],
                 "score": max(float(candidate["score"]), score),
-                "summary": (
-                    "Promoted track clipping fix from master true-peak contributor analysis."
-                ),
+                "summary": "마스터 true-peak 기여도 분석을 통해 트랙 클리핑 보정 대상으로 승격되었습니다.",
                 "recommended_reduction_db": round(max(float(candidate.get("true_peak_dbfs", 0.0)) + 1.0, 1.0), 3),
                 "current_true_peak_dbtp": round(float(candidate.get("true_peak_dbfs", 0.0)), 3),
                 "target_ceiling_dbtp": -1.0,
@@ -2044,9 +2120,9 @@ def _build_residual_master_region(
     contributor: dict[str, object] | None,
     promoted_tracks: list[dict[str, object]],
 ) -> dict[str, object]:
-    summary = "Detected residual master clipping after contributor-aware track routing."
+    summary = "기여 트랙 라우팅 이후에도 잔여 마스터 클리핑이 감지되었습니다."
     if promoted_tracks:
-        summary = "Detected residual master clipping that still requires master protection."
+        summary = "기여 트랙 보정 이후에도 마스터 보호가 필요한 잔여 클리핑이 감지되었습니다."
     region = {
         "track_id": None,
         "start_ms": candidate["start_ms"],
@@ -2113,6 +2189,8 @@ def _materialize_regions(
                 "secondary_track_id": region.get("secondary_track_id"),
                 "involved_track_ids": region.get("involved_track_ids", []),
                 "track_body_contributions": region.get("track_body_contributions", {}),
+                "band_overlap_subtype": region.get("band_overlap_subtype"),
+                "band_focus_label": region.get("band_focus_label"),
                 "band_low_hz": region.get("band_low_hz"),
                 "band_high_hz": region.get("band_high_hz"),
                 "center_hz": region.get("center_hz"),
@@ -2157,6 +2235,8 @@ def _materialize_regions(
                     "contributingTrackIds": region.get("contributing_track_ids", []),
                     "trackContributionScores": region.get("track_contribution_scores", {}),
                     "contributorBandHints": region.get("contributor_band_hints", {}),
+                    "bandOverlapSubtype": region.get("band_overlap_subtype"),
+                    "bandFocusLabel": region.get("band_focus_label"),
                     "bandLowHz": region.get("band_low_hz"),
                     "bandHighHz": region.get("band_high_hz"),
                     "centerHz": region.get("center_hz"),
@@ -2196,6 +2276,7 @@ def _analysis_region_dedup_key(region: dict[str, object]) -> tuple[object, ...]:
         region.get("track_id"),
         region.get("secondary_track_id"),
         tuple(region.get("involved_track_ids", [])),
+        region.get("band_overlap_subtype"),
         region.get("band_low_hz"),
         region.get("band_high_hz"),
         region.get("center_hz"),
@@ -2279,3 +2360,27 @@ def _project_region_timeline(
         "measure_end": int(overlapped_measures[-1]["measure_no"]),
         "affected_clip_ids": affected_clip_ids,
     }
+
+
+def _band_focus_label_for_subtype(subtype: str) -> str:
+    return {
+        "low_mid_overlap": "저중역",
+        "body_overlap": "바디",
+        "presence_overlap": "프레즌스",
+    }.get(subtype, "바디")
+
+
+def _default_band_overlap_reduction_db(subtype: str, score: float) -> float:
+    if subtype == "low_mid_overlap":
+        if score >= 1.0:
+            return 6.4
+        if score >= 0.78:
+            return 4.2
+        return 3.2
+    if subtype == "presence_overlap":
+        if score >= 0.74:
+            return 2.5
+        return 1.8
+    if score >= 1.0:
+        return 3.5
+    return 2.8

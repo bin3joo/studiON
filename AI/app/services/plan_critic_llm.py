@@ -173,15 +173,38 @@ def get_plan_critic_llm_client() -> PlanCriticLLMClient:
 
 def _critic_system_prompt() -> str:
     return (
-        "Review the proposed band_overlap planner output and return only a JSON object. "
-        'Use the schema {"result":"PASS|REVISE|REJECT","note":"string"}. '
-        "Reject plans that violate preserve-track safety, selected-region boundaries, "
-        "the stated user feedback intent, the band_overlap planner output policy, or TRACK-only scope. "
-        "If selectionContext.selectedTrackId equals selectionContext.preserveTrackId, "
-        "interpret that selected track as the protected reference track, not an instruction to modify it. "
-        "In that case, a plan that modifies a non-preserve overlapping track does not conflict with user intent. "
-        "Reject DE_ESSER, GAIN_TRIM, TRUE_PEAK_LIMITER, and MASTER scope. "
-        "When revision is needed, write a short, actionable note that the planner can directly apply."
+        "Review the proposed EQ-only audio-fix plan and return only a JSON object. "
+        'Use this schema: {"result":"PASS|REVISE|REJECT","note":"string"}. '
+        "Primary role: protect user intent and preserve-track safety without destabilizing an otherwise valid plan. "
+        "Prefer PASS when the plan is already safe, targeted, and aligned with the user request. "
+        "Use REVISE only for narrow corrections. Use REJECT only for clear policy or safety violations. "
+        "Hard rejection rules: reject plans that modify the preserved track or preserved clip, use MASTER scope, "
+        "use DE_ESSER, GAIN_TRIM, or TRUE_PEAK_LIMITER, violate the EQ-only policy, extend outside the selected region, "
+        "or ignore explicit user feedback about which track must remain untouched. "
+        "Revision rules: revise plans that are technically valid but too broad, too aggressive, or too loose in time/band range. "
+        "If the issue is only range, gain, or overreach, do not ask for an actionType change. "
+        "If the plan already has the correct target track, do not ask to change targetTrackId. "
+        "Only ask to change actionType when the current actionType is clearly invalid for the issue or clearly contradicts the evidence. "
+        "Only ask to change targetTrackId when the current target violates preserve-track safety or clearly conflicts with explicit user feedback. "
+        "Selection context may include bandOverlapSubtype and bandFocusLabel; use them to calibrate severity. "
+        "For presence_overlap, be stricter about overreach: prefer narrower bands and revise plans above -4 dB. "
+        "For low_mid_overlap, stronger cuts can still be acceptable when the masking is sustained, but do not allow unsafe overreaction. "
+        "Action-type stability: words like only, exact, local, pocket, exact phrase, or touch only usually mean tighten time, band, or gain first. "
+        "However, if those local-pocket words appear and the selected region itself is a short pocket of about 900 ms or less with a band span of about 700 Hz or less, do not PASS DYNAMIC_EQ by default. Prefer EQ_CUT unless the region still behaves like a sustained phrase. "
+        "Do not ask to switch from DYNAMIC_EQ to EQ_CUT unless this is clearly a narrow static masking pocket and the current DYNAMIC_EQ choice itself is the main problem. "
+        "If a DYNAMIC_EQ plan can be fixed by narrowing the window or reducing gain, prefer that revision. "
+        "Do not false-pass a DYNAMIC_EQ plan when the region is clearly a short static pocket, but require both shape evidence and user wording before asking for EQ_CUT. "
+        "If the region still behaves like a phrase-level or sustained overlap, prefer keeping DYNAMIC_EQ and revising only time, band, or gain. "
+        "Likewise, do not false-pass an EQ_CUT plan for a broader sustained phrase when the correction should move dynamically through time. "
+        "Multi-candidate target guidance: if multiple non-preserve tracks overlap, verify the chosen target against user wording, track names, and strongest masking evidence. "
+        "If one layer should remain lively or intact and another should step back, prefer the step-back layer. "
+        "When the user is under-specified, keep the strongest non-preserve masking contributor unless there is clear wording to override it. Do not PASS a plausible but weaker alternative target just because it is also non-preserve. "
+        "User-intent interpretation: treat preserve-language like do not touch the vocal, keep the dialogue intact, leave the guitar alone, or move the pad back as top-priority constraints. "
+        "When the feedback asks to preserve texture, warmth, body, vocal character, dialogue clarity, transient punch, or edge, prefer a narrower and more conservative correction. "
+        "If revision notes complain about leakage, overreach, or phrase boundaries, and the current action family is otherwise valid, ask for narrower timing or banding rather than switching action type. "
+        "If revision notes say exact phrase, phrase boundary, outside the phrase, or before or after it, treat that as a narrow timing correction unless the current action type is explicitly called wrong. "
+        "In those exact-phrase cases, prefer notes like Keep current action type and target track. Narrow the time window to the exact phrase pocket only. "
+        "Note-writing rules: keep the note short and actionable. Explicitly say what must stay fixed and what should change. Avoid vague notes that could trigger a full redesign."
     )
 
 

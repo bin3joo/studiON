@@ -51,6 +51,7 @@ class AnalysisRegionProjection(BaseModel):
     requires_user_action: bool = True
     track_id: int | None = None
     secondary_track_id: int | None = None
+    band_overlap_subtype: str | None = None
     band_low_hz: int | None = None
     band_high_hz: int | None = None
     center_hz: int | None = None
@@ -293,6 +294,7 @@ def _build_analysis_regions(state: WorkflowState) -> list[AnalysisRegionProjecti
             requires_user_action=bool(region.get("requires_user_action", True)),
             track_id=region.get("track_id"),
             secondary_track_id=region.get("secondary_track_id"),
+            band_overlap_subtype=region.get("band_overlap_subtype"),
             band_low_hz=region.get("band_low_hz"),
             band_high_hz=region.get("band_high_hz"),
             center_hz=region.get("center_hz"),
@@ -437,7 +439,7 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
         end_ms=selected_region.get("end_ms") if selected_region else None,
         measure_start=selected_region.get("measure_start") if selected_region else None,
         measure_end=selected_region.get("measure_end") if selected_region else None,
-        title=payload.get("groupTitle", "Workflow suggestion group"),
+        title=payload.get("groupTitle", "워크플로우 제안 그룹"),
         summary=payload.get("groupSummary"),
         suggestions=suggestions,
     )

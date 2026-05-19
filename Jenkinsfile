@@ -24,6 +24,15 @@ pipeline {
             }
         }
 
+        stage('CI - Docker Check') {
+            steps {
+                sh '''
+                    docker version
+                    docker compose version
+                '''
+            }
+        }
+
         stage('CI - Backend Build') {
             steps {
                 dir('BE') {

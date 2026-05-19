@@ -686,6 +686,52 @@ def test_plan_rule_validator_rejects_presence_overlap_gain_over_4db() -> None:
     assert any("within 4 dB" in note for note in result["plan_revision_notes"])
 
 
+def test_plan_rule_validator_rejects_upper_mid_overlap_gain_over_6db() -> None:
+    state = build_workflow_initial_state(
+        job_id=100433,
+        project_id=200433,
+        analysis_regions=[
+            {
+                "id": 1,
+                "issue_type": "band_overlap",
+                "band_overlap_subtype": "upper_mid_overlap",
+                "start_ms": 0,
+                "end_ms": 400,
+                "track_id": 8,
+                "band_low_hz": 1280,
+                "band_high_hz": 1820,
+            }
+        ],
+        selected_region_id=1,
+        preserve_clip_id=1,
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetScope": "TRACK",
+                    "targetTrackId": 8,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": 1280,
+                    "bandHighHz": 1820,
+                    "gainDeltaDb": -6.3,
+                    "params": {"threshold": -18},
+                }
+            },
+        },
+    )
+
+    result = nodes.plan_rule_validator(state)
+
+    assert result["validator_result"] == "REJECT"
+    assert any("within 6 dB" in note for note in result["plan_revision_notes"])
+
+
 def test_materialize_execution_plan_rejects_master_scope_preview_action() -> None:
     state = build_workflow_initial_state(
         job_id=10044,
@@ -1272,6 +1318,7 @@ def test_workflow_response_contains_unified_projections() -> None:
     assert overlap_projection["band_overlap_subtype"] in {
         "low_mid_overlap",
         "body_overlap",
+        "upper_mid_overlap",
         "presence_overlap",
     }
     assert response["projections"]["user_action_required"] is True
@@ -2653,6 +2700,97 @@ def test_detect_band_overlap_adds_presence_subtype_and_refines_high_band_cluster
     assert presence_region["band_low_hz"] >= 2500
     assert presence_region["band_high_hz"] <= 5000
     assert 3000 <= presence_region["center_hz"] <= 4300
+
+
+def test_detect_band_overlap_adds_upper_mid_subtype_and_refines_band() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-band-upper-mid",
+            job_id=100266,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [300, 700, 1100, 1300, 1500, 1700, 1900, 2400, 3200],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "body_energy": 0.14,
+                            "low_mid_energy": 0.03,
+                            "upper_mid_energy": 0.18,
+                            "presence_energy": 0.04,
+                            "high_band_ratio": 0.05,
+                            "spectral_centroid_hz": 1450,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "body_energy": 0.15,
+                            "low_mid_energy": 0.03,
+                            "upper_mid_energy": 0.19,
+                            "presence_energy": 0.04,
+                            "high_band_ratio": 0.05,
+                            "spectral_centroid_hz": 1480,
+                            "window_energy": 0.1,
+                        },
+                    ],
+                    "20": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "body_energy": 0.13,
+                            "low_mid_energy": 0.02,
+                            "upper_mid_energy": 0.17,
+                            "presence_energy": 0.05,
+                            "high_band_ratio": 0.05,
+                            "spectral_centroid_hz": 1500,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "body_energy": 0.14,
+                            "low_mid_energy": 0.02,
+                            "upper_mid_energy": 0.18,
+                            "presence_energy": 0.05,
+                            "high_band_ratio": 0.05,
+                            "spectral_centroid_hz": 1520,
+                            "window_energy": 0.1,
+                        },
+                    ],
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.01, 0.02, 0.08, 0.42, 0.86, 0.74, 0.38, 0.06, 0.02],
+                        [0.01, 0.02, 0.08, 0.39, 0.82, 0.71, 0.36, 0.05, 0.02],
+                    ],
+                    "20": [
+                        [0.01, 0.02, 0.07, 0.4, 0.81, 0.72, 0.35, 0.06, 0.02],
+                        [0.01, 0.02, 0.07, 0.41, 0.83, 0.73, 0.36, 0.06, 0.02],
+                    ],
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100266,
+        project_id=200266,
+        issue_types=["band_overlap"],
+        clip_feature_artifact_id="artifact-band-upper-mid",
+    )
+
+    regions = nodes.detect_band_overlap(state)["analysis_regions"]
+    upper_mid_region = next(
+        region for region in regions if region["band_overlap_subtype"] == "upper_mid_overlap"
+    )
+
+    assert upper_mid_region["issue_type"] == "band_overlap"
+    assert 1200 <= upper_mid_region["band_low_hz"] <= 1700
+    assert 1500 <= upper_mid_region["band_high_hz"] <= 2000
+    assert 1350 <= upper_mid_region["center_hz"] <= 1850
 
 
 def test_detect_band_overlap_keeps_different_subtypes_unmerged() -> None:

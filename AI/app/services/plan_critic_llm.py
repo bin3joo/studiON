@@ -187,6 +187,7 @@ def _critic_system_prompt() -> str:
         "Only ask to change actionType when the current actionType is clearly invalid for the issue or clearly contradicts the evidence. "
         "Only ask to change targetTrackId when the current target violates preserve-track safety or clearly conflicts with explicit user feedback. "
         "Selection context may include bandOverlapSubtype and bandFocusLabel; use them to calibrate severity. "
+        "For upper_mid_overlap, prefer fairly tight bands and revise plans above -6 dB. "
         "For presence_overlap, be stricter about overreach: prefer narrower bands and revise plans above -4 dB. "
         "For low_mid_overlap, stronger cuts can still be acceptable when the masking is sustained, but do not allow unsafe overreaction. "
         "Action-type stability: words like only, exact, local, pocket, exact phrase, or touch only usually mean tighten time, band, or gain first. "

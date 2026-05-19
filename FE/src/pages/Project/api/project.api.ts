@@ -47,6 +47,7 @@ export interface ProjectDetailResponse {
       profileImageUrl: string | null;
     }[];
     currentTotalSizeBytes: number;
+    maxTotalSizeBytes: number;
   }
 }
 

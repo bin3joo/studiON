@@ -223,6 +223,7 @@ export const useTrackStore = defineStore('track', () => {
 
     const projectMembers = ref<{ userId: number; nickname: string; profileImageUrl: string | null; }[]>([]);
     const currentTotalSizeBytes = ref<number>(0);
+    const maxTotalSizeBytes = ref<number>(50 * 1024 * 1024);
 
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
@@ -2844,6 +2845,7 @@ export const useTrackStore = defineStore('track', () => {
             };
             projectMembers.value = [];
             currentTotalSizeBytes.value = 0;
+            maxTotalSizeBytes.value = 50 * 1024 * 1024;
             bpm.value = 120;
 
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
@@ -2868,6 +2870,7 @@ export const useTrackStore = defineStore('track', () => {
                 }
                 projectMembers.value = data.members || [];
                 currentTotalSizeBytes.value = data.currentTotalSizeBytes || 0;
+                maxTotalSizeBytes.value = data.maxTotalSizeBytes || (50 * 1024 * 1024);
                 bpm.value = data.tempo;
 
                 const eqBandsByTrackId = new Map<number, TrackEqBandState[]>()
@@ -3128,6 +3131,7 @@ export const useTrackStore = defineStore('track', () => {
         getAudioBufferCache,
         projectMembers,
         currentTotalSizeBytes,
+        maxTotalSizeBytes,
         fetchAndCacheAudioBuffer,
         isAutoScrollActive,
 

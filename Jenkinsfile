@@ -49,21 +49,21 @@ pipeline {
             }
         }
 
-        stage('CI - AI Build') {
+        // stage('CI - AI Build') {
 
-            agent {
-                label 'ai-server'
-            }
-            steps {
-                sh '''
-                cd /home/ec2-user/deploy/S14P31A205
-                git fetch origin release
-                git checkout release
-                git pull --ff-only origin release
-                docker compose --env-file .env.ai -f compose.ai.yaml build
-                '''
-            }
-        }
+        //     agent {
+        //         label 'ai-server'
+        //     }
+        //     steps {
+        //         sh '''
+        //         cd /home/ec2-user/deploy/S14P31A205
+        //         git fetch origin release
+        //         git checkout release
+        //         git pull --ff-only origin release
+        //         docker compose --env-file .env.ai -f compose.ai.yaml build
+        //         '''
+        //     }
+        // }
         
         stage('Prepare Env') {
             steps {
@@ -159,22 +159,22 @@ pipeline {
             }
         }
         
-        stage('CD - Deploy AI') {
-            when {
-                beforeAgent true
-                branch 'release'
-            }
-            agent {
-                label 'ai-server'
-            }
-            steps {
-                sh '''
-                cd /home/ec2-user/deploy/S14P31A205
-                docker compose --env-file .env.ai -f compose.ai.yaml up -d --scale ai-worker=3
-                docker compose --env-file .env.ai -f compose.ai.yaml ps
-                '''
-            }
-        }
+        // stage('CD - Deploy AI') {
+        //     when {
+        //         beforeAgent true
+        //         branch 'release'
+        //     }
+        //     agent {
+        //         label 'ai-server'
+        //     }
+        //     steps {
+        //         sh '''
+        //         cd /home/ec2-user/deploy/S14P31A205
+        //         docker compose --env-file .env.ai -f compose.ai.yaml up -d --scale ai-worker=3
+        //         docker compose --env-file .env.ai -f compose.ai.yaml ps
+        //         '''
+        //     }
+        // }
         
         stage('CD - Status App') {
             steps {

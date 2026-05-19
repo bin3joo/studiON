@@ -23,6 +23,12 @@ services:
     environment:
       SERVER_FORWARD_HEADERS_STRATEGY: framework
       SERVER_PORT: 8080
+      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&useUnicode=true&characterEncoding=utf8
+      DB_USERNAME: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      MONGODB_DB: ${MONGO_DB}
+      MONGODB_PORT: 27017
+      MONGODB_URI: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@mongodb:27017/${MONGO_DB}?authSource=admin
       REDIS_HOST: redis
       REDIS_PORT: 6379
     ports:

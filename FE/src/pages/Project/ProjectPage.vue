@@ -800,7 +800,11 @@ async function handleToolbarFileUpload(event: Event) {
   if (!file) return
 
   const selectedTrackId = trackStore.selectedTrackId
-  if (!selectedTrackId) return
+  if (!selectedTrackId) {
+    alert("오디오를 업로드할 트랙을 먼저 선택해 주세요.");
+    target.value = '';
+    return;
+  }
 
   try {
     await trackStore.uploadAndAddAudioClip(

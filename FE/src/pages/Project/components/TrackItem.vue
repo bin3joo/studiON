@@ -602,7 +602,11 @@ const handlePaste = () => {
 
 //삭제
 const handleDelete = () => {
-  if (menuState.value.targetClip) trackStore.deleteClip(menuState.value.targetClip.clipId, menuState.value.targetTrackId);
+  if (menuState.value.type === 'clip' && menuState.value.targetClip) {
+    trackStore.deleteClip(menuState.value.targetClip.clipId, menuState.value.targetTrackId);
+  } else if (menuState.value.type === 'track') {
+    trackStore.deleteTrack(menuState.value.targetTrackId);
+  }
   closeMenu();
 };
 
@@ -1434,11 +1438,12 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
 
       <button 
         @click="handleDelete"
-        class="flex w-full items-center justify-between px-4 py-1.5"
-        :class="menuState.type === 'clip' ? 'hover:bg-red-500/20 text-red-400' : 'opacity-40 cursor-not-allowed'"
-        :disabled="menuState.type !== 'clip'"
+        class="flex w-full items-center justify-between px-4 py-1.5 hover:bg-red-500/20 text-red-400"
       >
-        <span class="flex items-center gap-2"><TrashIcon class="h-4 w-4" /> 삭제</span>
+        <span class="flex items-center gap-2">
+          <TrashIcon class="h-4 w-4" /> 
+          {{ menuState.type === 'clip' ? '클립 삭제' : '트랙 삭제' }}
+        </span>
         <span class="text-[10px] text-gray-500">DEL</span>
       </button>
     </div>

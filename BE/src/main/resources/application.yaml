@@ -98,10 +98,10 @@ app:
         # 100MB
         max-total-size-bytes: ${AUDIO_BASIC_MAX_TOTAL_SIZE_BYTES:104857600}
       admin:
-        # 2047MB (2GB)
-        max-file-size-bytes: ${AUDIO_ADMIN_MAX_FILE_SIZE_BYTES:2146435072}
-        # 10240MB(10GB)
-        max-total-size-bytes: ${AUDIO_ADMIN_MAX_TOTAL_SIZE_BYTES:10737418240}
+        # 150MB
+        max-file-size-bytes: ${AUDIO_ADMIN_MAX_FILE_SIZE_BYTES:157286400}
+        # 1024MB(1GB)
+        max-total-size-bytes: ${AUDIO_ADMIN_MAX_TOTAL_SIZE_BYTES:1073741824}
 
   audio-version:
     ffmpeg-binary: ${AUDIO_VERSION_FFMPEG_BINARY:ffmpeg}

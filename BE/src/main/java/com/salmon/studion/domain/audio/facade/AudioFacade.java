@@ -9,18 +9,17 @@ import com.salmon.studion.domain.audio.dto.response.AudioMetadataCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioUploadUrlResponse;
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.service.AudioService;
+import com.salmon.studion.domain.audio.service.AudioUploadLimitService;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.clip.entity.Clip;
 import com.salmon.studion.domain.project.service.ProjectMemberService;
-import com.salmon.studion.global.common.enums.UserRole;
 import com.salmon.studion.global.common.response.ErrorCode;
 import com.salmon.studion.global.exception.BusinessException;
 import com.salmon.studion.global.infrastructure.cdn.CdnUrlService;
 import com.salmon.studion.global.infrastructure.s3.S3StorageService;
 import com.salmon.studion.global.infrastructure.s3.dto.PresignedUrlResult;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -34,18 +33,7 @@ public class AudioFacade {
     private final S3StorageService s3StorageService;
     private final CdnUrlService cdnUrlService;
     private final ProjectMemberService projectMemberService;
-
-    @Value("${app.audio.upload-limit.basic.max-file-size-bytes}")
-    private Integer basicMaxFileSizeBytes;
-
-    @Value("${app.audio.upload-limit.basic.max-total-size-bytes}")
-    private Long basicMaxTotalSizeBytes;
-
-    @Value("${app.audio.upload-limit.admin.max-file-size-bytes}")
-    private Integer adminMaxFileSizeBytes;
-
-    @Value("${app.audio.upload-limit.admin.max-total-size-bytes}")
-    private Long adminMaxTotalSizeBytes;
+    private final AudioUploadLimitService audioUploadLimitService;
 
     public AudioUploadUrlResponse getAudioUploadUrl(Integer projectId, AudioUploadUrlRequest audioUploadUrlRequest, Integer userId) {
         projectMemberService.validateProjectMember(projectId, userId);
@@ -108,7 +96,7 @@ public class AudioFacade {
     }
 
     private void validateAudioUploadLimit(User user, Integer requestedSizeBytes) {
-        AudioUploadLimit limit = resolveAudioUploadLimit(user.getRole());
+        AudioUploadLimitService.AudioUploadLimit limit = audioUploadLimitService.getLimit(user.getRole());
 
         if (requestedSizeBytes > limit.maxFileSizeBytes()) {
             throw new BusinessException(
@@ -126,16 +114,5 @@ public class AudioFacade {
                     "현재 사용자에게 허용된 전체 오디오 업로드 용량을 초과했습니다."
             );
         }
-    }
-
-    private AudioUploadLimit resolveAudioUploadLimit(UserRole role) {
-        if (role == UserRole.ADMIN) {
-            return new AudioUploadLimit(adminMaxFileSizeBytes, adminMaxTotalSizeBytes);
-        }
-
-        return new AudioUploadLimit(basicMaxFileSizeBytes, basicMaxTotalSizeBytes);
-    }
-
-    private record AudioUploadLimit(Integer maxFileSizeBytes, Long maxTotalSizeBytes) {
     }
 }

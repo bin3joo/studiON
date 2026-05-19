@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import json
-
 from app.graph.nodes.common import artifact_id, decide_validation_result, workflow_update
 from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
@@ -98,20 +97,35 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
             }
         )
 
+    original_result = critic_response.result
     result = critic_response.result
+    critic_note = critic_response.note
     current_artifact_id = artifact_id(state, "plan-critic")
     raw_critic_text = critic_response.raw_text or _dump_critic_text(critic_response.result, critic_response.note)
     revision_notes = [*state.get("plan_revision_notes", [])]
-    if critic_response.note:
-        revision_notes.append(critic_response.note)
+
+    supplemental_result, supplemental_note = _supplement_critic_decision(
+        state=state,
+        region=selected_region,
+        plan_payload=state.get("plan_payload") or {},
+    )
+    if supplemental_result is not None:
+        result = supplemental_result
+        if original_result == "PASS" and supplemental_result != "PASS":
+            critic_note = supplemental_note
+        else:
+            critic_note = _merge_critic_notes(critic_note, supplemental_note)
+        raw_critic_text = _dump_critic_text(result, critic_note)
 
     mode_override = decide_validation_result(state, mode_key="critic_mode")
     if mode_override != "PASS":
         result = mode_override
-    if result == "REVISE" and critic_response.note == "":
-        revision_notes.append("Plan critic requested a semantic revision.")
-    if result == "REJECT" and critic_response.note == "":
-        revision_notes.append("Plan critic rejected the strategy.")
+    if result == "REVISE" and critic_note == "":
+        critic_note = "Plan critic requested a semantic revision."
+    if result == "REJECT" and critic_note == "":
+        critic_note = "Plan critic rejected the strategy."
+    if result != "PASS" and critic_note:
+        revision_notes.append(critic_note)
     if result != "PASS":
         logger.warning(
             "plan critic result | job_id=%s selected_region_id=%s result=%s note=%s",
@@ -130,7 +144,7 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
                 "selectedRegionId": int(selected_region["id"]),
                 "preserveClipId": int(preserve_clip_id),
                 "result": result,
-                "note": critic_response.note,
+                "note": critic_note,
                 "rawText": raw_critic_text,
                 "planPayload": state.get("plan_payload") or {},
             },
@@ -216,6 +230,11 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
         return "Plan action gainDeltaDb must be numeric when present."
     if isinstance(gain_delta_db, int | float) and abs(float(gain_delta_db)) > 12.0:
         return "Plan action gainDeltaDb exceeded the allowed safety range."
+    subtype = str(selected_region.get("band_overlap_subtype") or "")
+    if isinstance(gain_delta_db, int | float) and abs(float(gain_delta_db)) > 9.0:
+        return "Band-overlap preview actions must keep gainDeltaDb within 9 dB."
+    if subtype == "presence_overlap" and isinstance(gain_delta_db, int | float) and abs(float(gain_delta_db)) > 4.0:
+        return "Presence-overlap plans must keep gainDeltaDb within 4 dB."
 
     params = action.get("params")
     if not isinstance(params, dict):
@@ -281,11 +300,122 @@ def _build_selection_context(
         for track_id in involved_track_ids
         if preserve_track_id is None or track_id != preserve_track_id
     ]
+    track_name_map = {
+        int(track_id): _track_name(state, int(track_id))
+        for track_id in involved_track_ids
+    }
     return {
         "selectedTrackId": preserve_track_id,
         "preserveTrackId": preserve_track_id,
         "selectedTrackIsProtected": preserve_track_id is not None,
         "selectedClipId": preserve_clip_id,
         "preserveClipId": preserve_clip_id,
+        "primaryTrackId": region.get("track_id"),
+        "secondaryTrackId": region.get("secondary_track_id"),
+        "bandOverlapSubtype": region.get("band_overlap_subtype"),
+        "bandFocusLabel": region.get("band_focus_label"),
+        "trackBodyContributions": region.get("track_body_contributions") or {},
+        "trackNameMap": track_name_map,
         "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
     }
+
+
+def _supplement_critic_decision(
+    *,
+    state: WorkflowState,
+    region: dict[str, object],
+    plan_payload: dict[str, object],
+) -> tuple[str | None, str]:
+    candidate = plan_payload.get("candidate")
+    if not isinstance(candidate, dict):
+        return None, ""
+    action = candidate.get("action")
+    if not isinstance(action, dict):
+        return None, ""
+
+    target_clip_id = action.get("targetClipId")
+    if target_clip_id is not None:
+        preserve_clip_id = state.get("preserve_clip_id")
+        if preserve_clip_id is not None and int(target_clip_id) == int(preserve_clip_id):
+            return "REJECT", "TargetClipId가 preserve clip을 가리킵니다. preserve clip은 직접 수정하지 마세요."
+        return "REVISE", "TargetClipId를 null로 유지하고 트랙 단위 EQ 계획만 남기세요."
+
+    gain_delta_db = action.get("gainDeltaDb")
+    subtype = str(region.get("band_overlap_subtype") or "")
+    if isinstance(gain_delta_db, int | float):
+        subtype_limit = 4.0 if subtype == "presence_overlap" else 9.0
+        if abs(float(gain_delta_db)) > subtype_limit:
+            return "REVISE", f"GainDeltaDb가 과합니다. 이 subtype에서는 {subtype_limit:.0f}dB 이내로 줄이세요."
+
+    user_feedback = str(state.get("user_feedback_message") or "")
+    action_type = str(action.get("actionType") or "")
+    if (
+        action_type == "DYNAMIC_EQ"
+        and _looks_local_static_request(user_feedback)
+        and _region_supports_static_local_cut(region)
+    ):
+        return (
+            "REVISE",
+            "Keep the current target track fixed. This is a short static pocket, so switch the actionType to EQ_CUT and keep the cut tightly inside the exact masking pocket.",
+        )
+    if _looks_local_static_request(user_feedback) and str(action.get("actionType") or "") == "DYNAMIC_EQ":
+        band_low_hz = action.get("bandLowHz")
+        band_high_hz = action.get("bandHighHz")
+        region_low_hz = region.get("band_low_hz")
+        region_high_hz = region.get("band_high_hz")
+        if (
+            isinstance(band_low_hz, int)
+            and isinstance(band_high_hz, int)
+            and isinstance(region_low_hz, int)
+            and isinstance(region_high_hz, int)
+            and (band_high_hz - band_low_hz) >= max((region_high_hz - region_low_hz) - 20, 1)
+        ):
+            return "REVISE", "현재 actionType과 targetTrackId는 유지하고, 정확한 pocket만 남도록 start/end와 band를 더 좁히세요. action family를 바꾸기보다 timing, band, gain만 보수적으로 줄이세요."
+
+    return None, ""
+
+
+def _looks_local_static_request(user_feedback: str) -> bool:
+    lowered = user_feedback.lower()
+    keywords = (
+        "only",
+        "exact",
+        "local",
+        "pocket",
+        "exact phrase",
+        "touch only",
+        "딱",
+        "정확",
+        "부분만",
+        "로컬",
+    )
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _region_supports_static_local_cut(region: dict[str, object]) -> bool:
+    start_ms = region.get("start_ms")
+    end_ms = region.get("end_ms")
+    band_low_hz = region.get("band_low_hz")
+    band_high_hz = region.get("band_high_hz")
+    if not all(
+        isinstance(value, int)
+        for value in (start_ms, end_ms, band_low_hz, band_high_hz)
+    ):
+        return False
+    duration_ms = int(end_ms) - int(start_ms)
+    band_span_hz = int(band_high_hz) - int(band_low_hz)
+    return duration_ms <= 900 and band_span_hz <= 700
+
+
+def _merge_critic_notes(primary: str, supplemental: str) -> str:
+    if primary and supplemental:
+        return f"{primary} {supplemental}".strip()
+    return primary or supplemental
+
+
+def _track_name(state: WorkflowState, track_id: int) -> str | None:
+    track_name_map = state.get("track_name_map") or {}
+    track_name = track_name_map.get(int(track_id))
+    if isinstance(track_name, str) and track_name.strip():
+        return track_name.strip()
+    return None

@@ -916,8 +916,8 @@ def _merge_auto_preview_suggestions(
                     navigation_order.append(issue_id)
     if not existing_suggestions and not existing_issues:
         return merged
-    merged["groupTitle"] = merged.get("groupTitle") or "Workflow suggestion group"
-    merged["groupSummary"] = merged.get("groupSummary") or "Preview-ready EQ issue actions"
+    merged["groupTitle"] = merged.get("groupTitle") or "워크플로우 제안 그룹"
+    merged["groupSummary"] = merged.get("groupSummary") or "프리뷰 가능한 EQ 이슈 액션"
     merged["suggestions"] = existing_suggestions
     if existing_issues:
         merged["issues"] = existing_issues

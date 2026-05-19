@@ -82,6 +82,10 @@ def start_workflow_job(payload: WorkflowStartPayload) -> WorkflowDispatchAccepte
         timeline_snapshot_id=timeline_snapshot_id,
         project_duration_ms=snapshot_document.duration_ms,
         track_ids=snapshot_document.track_ids,
+        track_name_map={
+            int(track_id): track_name
+            for track_id, track_name in snapshot_document.track_name_map.items()
+        },
         bpm=snapshot_document.bpm,
         numerator=snapshot_document.numerator,
         denominator=snapshot_document.denominator,

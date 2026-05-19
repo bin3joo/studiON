@@ -12,6 +12,19 @@ from scripts.planner_critic_eval_support import evaluate_dataset, summarize_resu
         ("p2_three_track_instrumental", 5, 1, 0),
         ("p3_dense_edit", 5, 1, 0),
         ("p5_band_overlap_eq_cut", 5, 1, 0),
+        ("p7_critic_guardrail_stress", 6, 6, 0),
+        ("p8_recovery_dense_edit", 6, 6, 0),
+        ("p9_dialogue_intent_priority", 6, 6, 0),
+        ("p10_vocal_preserve_precision", 6, 6, 0),
+        ("p11_static_dynamic_boundary", 6, 6, 0),
+        ("p12_instrumental_priority", 6, 6, 0),
+        ("p13_recovery_revision_matrix", 10, 10, 0),
+        ("p14_dialogue_guardrail_matrix", 10, 10, 0),
+        ("p15_vocal_preserve_matrix", 10, 10, 0),
+        ("p16_boundary_priority_matrix", 10, 10, 0),
+        ("p17_instrumental_guardrail_matrix", 10, 10, 0),
+        ("p18_dialogue_bandwidth_intent", 6, 0, 0),
+        ("p19_vocal_bandwidth_intent", 6, 0, 0),
     ],
 )
 def test_eval_harness_expected_plans_pass_without_db(
@@ -45,6 +58,16 @@ def test_eval_harness_expected_plans_pass_without_db(
         "p2_three_track_instrumental",
         "p3_dense_edit",
         "p5_band_overlap_eq_cut",
+        "p8_recovery_dense_edit",
+        "p9_dialogue_intent_priority",
+        "p10_vocal_preserve_precision",
+        "p11_static_dynamic_boundary",
+        "p12_instrumental_priority",
+        "p13_recovery_revision_matrix",
+        "p14_dialogue_guardrail_matrix",
+        "p15_vocal_preserve_matrix",
+        "p16_boundary_priority_matrix",
+        "p17_instrumental_guardrail_matrix",
     ],
 )
 def test_eval_harness_seed_bad_plan_matches_fixture_review_without_db(dataset_id: str) -> None:
@@ -128,3 +151,25 @@ def test_eval_harness_band_overlap_eq_cut_dataset_tracks_action_metrics() -> Non
     assert summary.seed_bad_plan_validator_rejects == 0
     assert summary.seed_bad_plan_critic_rejects == 1
     assert summary.seed_bad_plan_full_rejects == 0
+
+
+def test_eval_harness_critic_guardrail_dataset_tracks_critic_only_rejections() -> None:
+    _results, summary = evaluate_dataset("p7_critic_guardrail_stress")
+
+    assert summary.expected_plan_cases == 6
+    assert summary.expected_plan_validator_passes == 6
+    assert summary.expected_plan_critic_passes == 6
+    assert summary.expected_plan_full_passes == 6
+    assert summary.expected_plan_planner_matches == 6
+    assert summary.expected_plan_action_type_matches == 6
+    assert summary.expected_plan_target_track_matches == 6
+    assert summary.expected_plan_time_range_matches == 6
+    assert summary.expected_plan_band_range_matches == 6
+    assert summary.expected_plan_dynamic_eq_cases == 4
+    assert summary.expected_plan_dynamic_eq_matches == 4
+    assert summary.expected_plan_eq_cut_cases == 2
+    assert summary.expected_plan_eq_cut_matches == 2
+    assert summary.seed_bad_plan_cases == 6
+    assert summary.seed_bad_plan_validator_rejects == 2
+    assert summary.seed_bad_plan_critic_rejects == 6
+    assert summary.seed_bad_plan_full_rejects == 2

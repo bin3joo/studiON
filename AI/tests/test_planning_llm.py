@@ -1,7 +1,11 @@
 import httpx
 import pytest
 
-from app.services.planning_llm import HTTPPlanningLLMClient, PlanningLLMError
+from app.services.planning_llm import (
+    HTTPPlanningLLMClient,
+    PlanningLLMError,
+    _planner_system_prompt,
+)
 
 
 def test_http_planning_llm_client_sends_gms_chat_completions_shape(
@@ -111,3 +115,19 @@ def test_http_planning_llm_client_rejects_invalid_json_payload(
         )
 
     assert exc_info.value.code == "PLANNING_LLM_INVALID_RESPONSE"
+
+
+def test_planner_system_prompt_marks_short_local_pockets_as_eq_cut_candidates() -> None:
+    prompt = _planner_system_prompt()
+
+    assert "short pocket of about 900 ms or less" in prompt
+    assert "prefer EQ_CUT over DYNAMIC_EQ" in prompt
+
+
+def test_planner_system_prompt_includes_band_overlap_subtype_gain_policy() -> None:
+    prompt = _planner_system_prompt()
+
+    assert "For low_mid_overlap, prefer about -2.5 to -4.5 dB" in prompt
+    assert "never exceed -9 dB" in prompt
+    assert "For presence_overlap, prefer about -1.0 to -2.5 dB" in prompt
+    assert "bandOverlapSubtype" in prompt

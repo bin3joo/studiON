@@ -485,7 +485,9 @@ def test_workflow_plan_loop_runs_for_band_overlap_and_clipping() -> None:
     assert execution_plan_artifact.artifact_type == "execution_plan"
     preview_band = execution_plan_artifact.payload["previewBandSpecs"][0]
     planned_issue = next(
-        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "band_overlap"
+        issue
+        for issue in result["suggestion_payload"]["issues"]
+        if issue["issueType"] == "band_overlap" and issue["actions"]
     )
     planned_action = planned_issue["actions"][0]
     assert preview_band["jobId"] == 10003
@@ -590,6 +592,98 @@ def test_plan_rule_validator_rejects_non_band_overlap_planning_issue() -> None:
 
     assert result["validator_result"] == "REJECT"
     assert any("only supports band_overlap" in note for note in result["plan_revision_notes"])
+
+
+def test_plan_rule_validator_rejects_band_overlap_gain_over_9db() -> None:
+    state = build_workflow_initial_state(
+        job_id=100431,
+        project_id=200431,
+        analysis_regions=[
+            {
+                "id": 1,
+                "issue_type": "band_overlap",
+                "band_overlap_subtype": "low_mid_overlap",
+                "start_ms": 0,
+                "end_ms": 400,
+                "track_id": 8,
+                "band_low_hz": 250,
+                "band_high_hz": 420,
+            }
+        ],
+        selected_region_id=1,
+        preserve_clip_id=1,
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetScope": "TRACK",
+                    "targetTrackId": 8,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": 250,
+                    "bandHighHz": 420,
+                    "gainDeltaDb": -9.5,
+                    "params": {"threshold": -18},
+                }
+            },
+        },
+    )
+
+    result = nodes.plan_rule_validator(state)
+
+    assert result["validator_result"] == "REJECT"
+    assert any("within 9 dB" in note for note in result["plan_revision_notes"])
+
+
+def test_plan_rule_validator_rejects_presence_overlap_gain_over_4db() -> None:
+    state = build_workflow_initial_state(
+        job_id=100432,
+        project_id=200432,
+        analysis_regions=[
+            {
+                "id": 1,
+                "issue_type": "band_overlap",
+                "band_overlap_subtype": "presence_overlap",
+                "start_ms": 0,
+                "end_ms": 400,
+                "track_id": 8,
+                "band_low_hz": 2800,
+                "band_high_hz": 4200,
+            }
+        ],
+        selected_region_id=1,
+        preserve_clip_id=1,
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetScope": "TRACK",
+                    "targetTrackId": 8,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": 2800,
+                    "bandHighHz": 4200,
+                    "gainDeltaDb": -4.3,
+                    "params": {"threshold": -18},
+                }
+            },
+        },
+    )
+
+    result = nodes.plan_rule_validator(state)
+
+    assert result["validator_result"] == "REJECT"
+    assert any("within 4 dB" in note for note in result["plan_revision_notes"])
 
 
 def test_materialize_execution_plan_rejects_master_scope_preview_action() -> None:
@@ -1166,6 +1260,20 @@ def test_workflow_response_contains_unified_projections() -> None:
         "BAND_OVERLAP",
         "SIBILANCE",
     }
+    overlap_projection = next(
+        (
+            region
+            for region in response["projections"]["analysis_regions"]
+            if region["issue_type"] == "BAND_OVERLAP"
+        ),
+        None,
+    )
+    assert overlap_projection is not None
+    assert overlap_projection["band_overlap_subtype"] in {
+        "low_mid_overlap",
+        "body_overlap",
+        "presence_overlap",
+    }
     assert response["projections"]["user_action_required"] is True
     assert response["projections"]["preview_required"] is True
     assert response["projections"]["auto_preview_generated"] is False
@@ -1369,6 +1477,7 @@ def test_workflow_analysis_regions_include_detector_metadata() -> None:
     assert overlap["secondary_track_id"] is None
     assert set(overlap["involved_track_ids"]) == {30, 31}
     assert 250 <= overlap["band_low_hz"] < overlap["band_high_hz"] < 1200
+    assert overlap["band_overlap_subtype"] in {"low_mid_overlap", "body_overlap"}
     assert overlap["center_hz"] is not None
     assert overlap["band_confidence"] is not None
     assert overlap["measure_start"] == 1
@@ -2364,10 +2473,14 @@ def test_detect_band_overlap_groups_congested_time_region_across_multiple_tracks
 
     regions = nodes.detect_band_overlap(state)["analysis_regions"]
 
-    assert len(regions) == 1
-    assert set(regions[0]["involved_track_ids"]) == {10, 20, 30}
-    assert regions[0]["track_id"] == 10
-    assert regions[0]["secondary_track_id"] is None
+    assert {region["band_overlap_subtype"] for region in regions} == {
+        "body_overlap",
+        "low_mid_overlap",
+    }
+    for region in regions:
+        assert set(region["involved_track_ids"]) == {10, 20, 30}
+        assert region["track_id"] == 10
+        assert region["secondary_track_id"] is None
 
 
 def test_detect_band_overlap_refines_region_to_actual_overlap_cluster() -> None:
@@ -2412,11 +2525,14 @@ def test_detect_band_overlap_refines_region_to_actual_overlap_cluster() -> None:
 
     regions = nodes.detect_band_overlap(state)["analysis_regions"]
 
-    assert len(regions) == 1
-    assert regions[0]["band_low_hz"] == 400
-    assert regions[0]["band_high_hz"] < 1200
-    assert 500 <= regions[0]["center_hz"] <= 700
-    assert regions[0]["band_confidence"] is not None
+    body_region = next(
+        region for region in regions if region["band_overlap_subtype"] == "body_overlap"
+    )
+
+    assert body_region["band_low_hz"] == 400
+    assert body_region["band_high_hz"] < 1200
+    assert 500 <= body_region["center_hz"] <= 700
+    assert body_region["band_confidence"] is not None
 
 
 def test_band_overlap_target_track_excludes_preserved_clip_track() -> None:
@@ -2425,6 +2541,7 @@ def test_band_overlap_target_track_excludes_preserved_clip_track() -> None:
         "track_id": 10,
         "involved_track_ids": [10, 20, 30],
         "track_body_contributions": {"10": 0.46, "20": 0.41, "30": 0.35},
+        "band_overlap_subtype": "body_overlap",
         "start_ms": 0,
         "end_ms": 240,
         "band_low_hz": 250,
@@ -2449,6 +2566,164 @@ def test_band_overlap_target_track_excludes_preserved_clip_track() -> None:
 
     assert action is not None
     assert action["targetTrackId"] == 20
+
+
+def test_detect_band_overlap_adds_presence_subtype_and_refines_high_band_cluster() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-band-presence",
+            job_id=100264,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "frequency_bins_hz": [250, 500, 900, 1800, 2600, 3200, 3800, 4600, 6000],
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "body_energy": 0.16,
+                            "low_mid_energy": 0.02,
+                            "presence_energy": 0.22,
+                            "high_band_ratio": 0.16,
+                            "spectral_centroid_hz": 3100,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "body_energy": 0.15,
+                            "low_mid_energy": 0.02,
+                            "presence_energy": 0.21,
+                            "high_band_ratio": 0.15,
+                            "spectral_centroid_hz": 3000,
+                            "window_energy": 0.1,
+                        },
+                    ],
+                    "20": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "body_energy": 0.14,
+                            "low_mid_energy": 0.02,
+                            "presence_energy": 0.18,
+                            "high_band_ratio": 0.15,
+                            "spectral_centroid_hz": 2950,
+                            "window_energy": 0.09,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "body_energy": 0.13,
+                            "low_mid_energy": 0.02,
+                            "presence_energy": 0.19,
+                            "high_band_ratio": 0.16,
+                            "spectral_centroid_hz": 3050,
+                            "window_energy": 0.09,
+                        },
+                    ],
+                },
+                "track_power_spectra": {
+                    "10": [
+                        [0.01, 0.01, 0.02, 0.03, 0.22, 0.76, 0.85, 0.34, 0.03],
+                        [0.01, 0.01, 0.02, 0.03, 0.2, 0.74, 0.82, 0.31, 0.03],
+                    ],
+                    "20": [
+                        [0.01, 0.01, 0.02, 0.03, 0.18, 0.7, 0.79, 0.32, 0.03],
+                        [0.01, 0.01, 0.02, 0.03, 0.19, 0.72, 0.81, 0.33, 0.03],
+                    ],
+                },
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100264,
+        project_id=200264,
+        issue_types=["band_overlap"],
+        clip_feature_artifact_id="artifact-band-presence",
+    )
+
+    regions = nodes.detect_band_overlap(state)["analysis_regions"]
+    presence_region = next(
+        region for region in regions if region["band_overlap_subtype"] == "presence_overlap"
+    )
+
+    assert presence_region["issue_type"] == "band_overlap"
+    assert presence_region["band_low_hz"] >= 2500
+    assert presence_region["band_high_hz"] <= 5000
+    assert 3000 <= presence_region["center_hz"] <= 4300
+
+
+def test_detect_band_overlap_keeps_different_subtypes_unmerged() -> None:
+    artifact_store = get_workflow_artifact_store()
+    artifact_store.reset()
+    artifact_store.upsert_artifact(
+        WorkflowArtifactDocument(
+            id="artifact-band-subtype-merge",
+            job_id=100265,
+            artifact_type="full_stft_frame_summary",
+            payload={
+                "track_frames": {
+                    "10": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "body_energy": 0.56,
+                            "low_mid_energy": 0.08,
+                            "presence_energy": 0.22,
+                            "high_band_ratio": 0.16,
+                            "spectral_centroid_hz": 3200,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "body_energy": 0.55,
+                            "low_mid_energy": 0.08,
+                            "presence_energy": 0.21,
+                            "high_band_ratio": 0.16,
+                            "spectral_centroid_hz": 3150,
+                            "window_energy": 0.1,
+                        },
+                    ],
+                    "20": [
+                        {
+                            "start_ms": 0,
+                            "end_ms": 120,
+                            "body_energy": 0.52,
+                            "low_mid_energy": 0.06,
+                            "presence_energy": 0.18,
+                            "high_band_ratio": 0.15,
+                            "spectral_centroid_hz": 3000,
+                            "window_energy": 0.1,
+                        },
+                        {
+                            "start_ms": 120,
+                            "end_ms": 240,
+                            "body_energy": 0.51,
+                            "low_mid_energy": 0.06,
+                            "presence_energy": 0.18,
+                            "high_band_ratio": 0.15,
+                            "spectral_centroid_hz": 3050,
+                            "window_energy": 0.1,
+                        },
+                    ],
+                }
+            },
+        )
+    )
+    state = build_workflow_initial_state(
+        job_id=100265,
+        project_id=200265,
+        issue_types=["band_overlap"],
+        clip_feature_artifact_id="artifact-band-subtype-merge",
+    )
+
+    regions = nodes.detect_band_overlap(state)["analysis_regions"]
+
+    assert len(regions) == 3
+    assert len({region["band_overlap_subtype"] for region in regions}) == 3
 
 
 def test_detect_high_band_harshness_refines_band_to_prominent_peak() -> None:

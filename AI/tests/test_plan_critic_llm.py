@@ -1,7 +1,11 @@
 import httpx
 import pytest
 
-from app.services.plan_critic_llm import HTTPPlanCriticLLMClient, PlanCriticLLMError
+from app.services.plan_critic_llm import (
+    HTTPPlanCriticLLMClient,
+    PlanCriticLLMError,
+    _critic_system_prompt,
+)
 
 
 def test_http_plan_critic_llm_client_sends_anthropic_shape(
@@ -94,3 +98,18 @@ def test_http_plan_critic_llm_client_rejects_invalid_json_payload(
         )
 
     assert exc_info.value.code == "PLAN_CRITIC_INVALID_RESPONSE"
+
+
+def test_critic_system_prompt_requires_eq_cut_for_short_local_pockets() -> None:
+    prompt = _critic_system_prompt()
+
+    assert "short pocket of about 900 ms or less" in prompt
+    assert "do not PASS DYNAMIC_EQ by default" in prompt
+
+
+def test_critic_system_prompt_mentions_presence_overlap_guardrail() -> None:
+    prompt = _critic_system_prompt()
+
+    assert "bandOverlapSubtype" in prompt
+    assert "presence_overlap" in prompt
+    assert "above -4 dB" in prompt

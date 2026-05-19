@@ -2674,20 +2674,22 @@ export const useTrackStore = defineStore('track', () => {
             player.unsync();
             player.stop();
 
-            // 새 secondsPerBar 기준으로 재계산
+            // BPM 변경 시 오디오 원본 재생 속도는 유지(1x)하고, 그리드 상의 차지하는 마디 수(duration)만 변환
+            const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            targetClip.duration = sourceAudioSec / secondsPerBar.value;
+
+            // 새 secondsPerBar 기준으로 시작점 재계산
             const exactStartTimeSec = targetClip.start * secondsPerBar.value;
             const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
-            const visualDurationSec = targetClip.duration * secondsPerBar.value;
-            // BPM에 따른 재생 속도 조절
-            const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            const visualDurationSec = sourceAudioSec; // 재생 시간은 항상 원본 길이와 같음
 
             (player as any).customOriginalOffset = audioOffsetSec;
             (player as any).customSourceAudioSec = sourceAudioSec;
 
-            const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
-            player.playbackRate = rate;
+            // 항상 원본 오디오 속도(1x) 유지
+            player.playbackRate = 1;
 
-            console.log(`[resyncAll] clipId=${clipId}, rate=${rate.toFixed(3)}, visualDur=${visualDurationSec.toFixed(2)}s, sourceDur=${sourceAudioSec.toFixed(2)}s`);
+            console.log(`[resyncAll] clipId=${clipId}, rate=1, visualDur=${visualDurationSec.toFixed(2)}s, sourceDur=${sourceAudioSec.toFixed(2)}s, newBarDur=${targetClip.duration.toFixed(2)}`);
 
             if (visualDurationSec > 0) {
                 player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);

@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.auth.entity;
 
 import com.salmon.studion.global.common.entity.BaseEntity;
+import com.salmon.studion.global.common.enums.UserRole;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -37,6 +38,10 @@ public class User extends BaseEntity {
     @Column(nullable = false, length = 20)
     private String nickname;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UserRole role = UserRole.BASIC;
+
     @Column(nullable = false)
     private LocalDateTime lastLoginAt;
 
@@ -50,6 +55,7 @@ public class User extends BaseEntity {
         this.providerId = providerId;
         this.profileImgUrl = profileImgUrl;
         this.nickname = nickname;
+        this.role = UserRole.BASIC;
         this.lastLoginAt = LocalDateTime.now();
     }
 

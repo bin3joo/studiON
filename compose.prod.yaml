@@ -19,9 +19,62 @@ services:
     networks:
       - studion-net
 
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    env_file:
+      - .env.prod
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - default-timezome=+09:00
+    restart: on-failure:2
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USERNAME\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - studion-net
+
+  mongodb:
+    image: mongo:8.0
+    container_name: mongodb
+    env_file:
+      - .env.prod
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
+    restart: on-failure:2
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - "mongodb_data:/data/db"
+    healthcheck:
+      test: ["CMD_SHELL", "mongosh --quiet --username \"$$MONGO_USERNAME\" --password \"$$MONGO_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - studion-net
+
 networks:
   studion-net:
     name: studion-net
 
 volumes:
   redis_data:
+  mysql_data:
+  mongodb_data:

@@ -2,16 +2,16 @@ package com.salmon.studion.domain.project.dto.websocket;
 
 import com.salmon.studion.domain.auth.entity.User;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record ProjectPresenceUserInfo(
         Integer userId,
         String nickname,
         String profileImageUrl,
-        LocalDateTime joinedAt
+        Instant joinedAt
 ) {
 
-    public static ProjectPresenceUserInfo from(User user, LocalDateTime joinedAt) {
+    public static ProjectPresenceUserInfo from(User user, Instant joinedAt) {
         return new ProjectPresenceUserInfo(
                 user.getId(),
                 user.getNickname(),

@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @Builder
@@ -15,7 +15,7 @@ public class MasterLimiterCurrentState {
 
     private Integer projectId;
     private Integer masterLimiterId;
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
     private String source;
     private Boolean isEnabled;
     private Double thresholdDb;

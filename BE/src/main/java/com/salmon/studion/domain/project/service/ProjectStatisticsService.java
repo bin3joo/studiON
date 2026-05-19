@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -23,6 +24,7 @@ public class ProjectStatisticsService {
     private final ProjectService projectService;
     private final TrackRepository trackRepository;
     private final ClipRepository clipRepository;
+    private final Clock clock;
 
     @Transactional
     public void refresh(Integer projectId) {
@@ -35,7 +37,7 @@ public class ProjectStatisticsService {
         int totalPlayTimeMs = calculateTotalPlayTimeMs(project, totalBarCount);
         long totalAudioSizeByte = calculateTotalAudioSizeByte(clips);
 
-        project.refreshSnapshotStatistics(trackCount, totalBarCount, totalPlayTimeMs, totalAudioSizeByte);
+        project.refreshSnapshotStatistics(trackCount, totalBarCount, totalPlayTimeMs, totalAudioSizeByte, clock.instant());
     }
 
     private int calculateTotalBarCount(List<Clip> clips) {

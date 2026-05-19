@@ -7,7 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Getter
@@ -23,10 +23,10 @@ public class CommentState {
     private BigDecimal location;
     private Boolean isResolved;
     private List<Integer> mentionedUserIds;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private Instant createdAt;
+    private Instant updatedAt;
     private Boolean deleted;
-    private LocalDateTime deletedAt;
+    private Instant deletedAt;
     private CommentDeleteReason deleteReason;
 
     public static CommentState create(
@@ -38,7 +38,7 @@ public class CommentState {
             String content,
             BigDecimal location,
             List<Integer> mentionedUserIds,
-            LocalDateTime now
+            Instant now
     ) {
         return new CommentState(
                 commentId,
@@ -60,7 +60,7 @@ public class CommentState {
 
     public static CommentState toggleResolved(
             CommentState commentState,
-            LocalDateTime updatedAt
+            Instant updatedAt
     ) {
         return new CommentState(
                 commentState.getCommentId(),
@@ -83,7 +83,7 @@ public class CommentState {
     public static CommentState markDeleted(
             CommentState commentState,
             CommentDeleteReason deleteReason,
-            LocalDateTime deletedAt
+            Instant deletedAt
     ) {
         return new CommentState(
                 commentState.getCommentId(),

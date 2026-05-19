@@ -4,16 +4,16 @@ import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class DownloadPresignedUrlResult {
 
     private String downloadUrl;
-    private LocalDateTime expiresAt;
+    private Instant expiresAt;
 
-    public static DownloadPresignedUrlResult of(String downloadUrl, LocalDateTime expiresAt) {
+    public static DownloadPresignedUrlResult of(String downloadUrl, Instant expiresAt) {
         return new DownloadPresignedUrlResult(downloadUrl, expiresAt);
     }
 }

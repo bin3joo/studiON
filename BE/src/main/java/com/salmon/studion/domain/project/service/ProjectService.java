@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.List;
 
 @Service
@@ -18,6 +19,7 @@ import java.util.List;
 public class ProjectService {
 
     private final ProjectRepository projectRepository;
+    private final Clock clock;
 
     public Project createProject(ProjectCreateRequest projectCreateRequest) {
         Project project = Project.create(
@@ -26,7 +28,8 @@ public class ProjectService {
                 projectCreateRequest.getProjectMode(),
                 projectCreateRequest.getTempo(),
                 projectCreateRequest.getTimeSigNumerator(),
-                projectCreateRequest.getTimeSigDenominator()
+                projectCreateRequest.getTimeSigDenominator(),
+                clock.instant()
         );
 
         return projectRepository.save(project);
@@ -47,7 +50,7 @@ public class ProjectService {
     @Transactional
     public String renameProject(Integer projectId, String name) {
         Project project = getProjectOrThrow(projectId);
-        project.rename(name);
+        project.rename(name, clock.instant());
         Project savedProject = projectRepository.save(project);
         return savedProject.getName();
     }
@@ -56,7 +59,7 @@ public class ProjectService {
     public Double changeTempo(Integer projectId, Double tempo) {
         if (tempo == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
         Project project = getProjectOrThrow(projectId);
-        project.changeTempo(tempo);
+        project.changeTempo(tempo, clock.instant());
         return projectRepository.save(project).getTempo();
     }
 
@@ -64,7 +67,7 @@ public class ProjectService {
     public Project changeKey(Integer projectId, RootNote rootNote, ProjectMode mode) {
         if (rootNote == null || mode == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
         Project project = getProjectOrThrow(projectId);
-        project.changeKey(rootNote, mode);
+        project.changeKey(rootNote, mode, clock.instant());
         return projectRepository.save(project);
     }
 
@@ -72,7 +75,7 @@ public class ProjectService {
     public Project changeTimeSignature(Integer projectId, Integer timeSigNumerator, Integer timeSigDenominator) {
         if (timeSigNumerator == null || timeSigDenominator == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
         Project project = getProjectOrThrow(projectId);
-        project.changeTimeSignature(timeSigNumerator, timeSigDenominator);
+        project.changeTimeSignature(timeSigNumerator, timeSigDenominator, clock.instant());
         return projectRepository.save(project);
     }
 }

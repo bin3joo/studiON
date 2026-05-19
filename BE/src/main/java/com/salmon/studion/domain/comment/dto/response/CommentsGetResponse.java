@@ -5,7 +5,7 @@ import com.salmon.studion.domain.comment.dto.redis.CommentState;
 import lombok.Getter;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Getter
@@ -26,7 +26,7 @@ public class CommentsGetResponse {
             Boolean isResolved,
             UserSummary user,
             List<UserSummary> mentionedUsers,
-            LocalDateTime createdAt,
+            Instant createdAt,
             List<CommentDto> replies
     ) {
         public static CommentDto from(

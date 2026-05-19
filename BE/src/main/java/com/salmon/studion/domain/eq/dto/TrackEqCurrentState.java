@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Getter
@@ -17,7 +17,7 @@ public class TrackEqCurrentState {
     private Integer projectId;
     private Integer trackId;
     private Integer trackEqId;
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
     private String source;
     @Builder.Default
     private List<CurrentBand> bands = List.of();

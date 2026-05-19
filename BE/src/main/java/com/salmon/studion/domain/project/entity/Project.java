@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.SQLRestriction;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @Entity
@@ -56,10 +56,10 @@ public class Project extends BaseEntity {
     private Long totalAudioSizeByte = 0L;
 
     @Column(name = "deleted_at")
-    private LocalDateTime deletedAt;
+    private Instant deletedAt;
 
     @Column(name = "last_update_at")
-    private LocalDateTime lastUpdateAt;
+    private Instant lastUpdateAt;
 
     public static Project create(
             String name,
@@ -67,7 +67,8 @@ public class Project extends BaseEntity {
             ProjectMode mode,
             Double tempo,
             Integer timeSigNumerator,
-            Integer timeSigDenominator
+            Integer timeSigDenominator,
+            Instant lastUpdateAt
     ) {
         Project project = new Project();
         project.name = name;
@@ -80,43 +81,44 @@ public class Project extends BaseEntity {
         project.totalPlayTimeMs = 0;
         project.trackCount = 0;
         project.totalAudioSizeByte = 0L;
-        project.lastUpdateAt = LocalDateTime.now();
+        project.lastUpdateAt = lastUpdateAt;
         return project;
     }
 
-    public void rename(String name) {
+    public void rename(String name, Instant lastUpdateAt) {
         this.name = name;
-        this.lastUpdateAt = LocalDateTime.now();
+        this.lastUpdateAt = lastUpdateAt;
     }
 
-    public void changeTempo(Double tempo) {
+    public void changeTempo(Double tempo, Instant lastUpdateAt) {
         this.tempo = tempo;
-        this.lastUpdateAt = LocalDateTime.now();
+        this.lastUpdateAt = lastUpdateAt;
     }
 
-    public void changeKey(RootNote rootNote, ProjectMode mode) {
+    public void changeKey(RootNote rootNote, ProjectMode mode, Instant lastUpdateAt) {
         this.rootNote = rootNote;
         this.mode = mode;
-        this.lastUpdateAt = LocalDateTime.now();
+        this.lastUpdateAt = lastUpdateAt;
     }
 
-    public void changeTimeSignature(Integer timeSigNumerator, Integer timeSigDenominator) {
+    public void changeTimeSignature(Integer timeSigNumerator, Integer timeSigDenominator, Instant lastUpdateAt) {
         this.timeSigNumerator = timeSigNumerator;
         this.timeSigDenominator = timeSigDenominator;
-        this.lastUpdateAt = LocalDateTime.now();
+        this.lastUpdateAt = lastUpdateAt;
     }
 
     public void refreshSnapshotStatistics(
             Integer trackCount,
             Integer totalBarCount,
             Integer totalPlayTimeMs,
-            Long totalAudioSizeByte
+            Long totalAudioSizeByte,
+            Instant lastUpdateAt
     ) {
         this.trackCount = trackCount;
         this.totalBarCount = totalBarCount;
         this.totalPlayTimeMs = totalPlayTimeMs;
         this.totalAudioSizeByte = totalAudioSizeByte;
-        this.lastUpdateAt = LocalDateTime.now();
+        this.lastUpdateAt = lastUpdateAt;
     }
 
 }

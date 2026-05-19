@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Getter
@@ -24,7 +24,7 @@ public class AudioVersionRenderSnapshot {
     private List<RenderClip> clips;
     private List<RenderTrackEq> trackEqs;
     private RenderMasterLimiter masterLimiter;
-    private LocalDateTime requestedAt;
+    private Instant requestedAt;
 
     @Getter
     @Builder

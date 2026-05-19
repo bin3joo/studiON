@@ -11,7 +11,7 @@ import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.SQLRestriction;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Table(name = "comment")
 @Entity
@@ -45,7 +45,7 @@ public class Comment extends BaseEntity {
     private Boolean isResolved = false;
 
     @Column(nullable = true)
-    private LocalDateTime deletedAt;
+    private Instant deletedAt;
 
     public static Comment create(
             Integer commentId,
@@ -55,7 +55,7 @@ public class Comment extends BaseEntity {
             String content,
             BigDecimal location,
             Boolean isResolved,
-            LocalDateTime deletedAt
+            Instant deletedAt
     ) {
         Comment comment = new Comment();
         comment.id = commentId;

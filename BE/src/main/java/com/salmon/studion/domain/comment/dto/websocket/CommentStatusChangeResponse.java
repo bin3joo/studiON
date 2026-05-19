@@ -2,7 +2,7 @@ package com.salmon.studion.domain.comment.dto.websocket;
 
 import com.salmon.studion.domain.comment.dto.redis.CommentState;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record CommentStatusChangeResponse(
         Integer projectId,
@@ -10,7 +10,7 @@ public record CommentStatusChangeResponse(
         Integer commentId,
         Integer parentCommentId,
         Boolean isResolved,
-        LocalDateTime updatedAt
+        Instant updatedAt
 ) {
     public static CommentStatusChangeResponse of(Integer projectId, CommentState commentState) {
         return new CommentStatusChangeResponse(

@@ -9,7 +9,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.SQLRestriction;
-import java.time.LocalDateTime;
+
+import java.time.Instant;
 
 @Table(name = "user")
 @Entity
@@ -43,26 +44,25 @@ public class User extends BaseEntity {
     private UserRole role = UserRole.BASIC;
 
     @Column(nullable = false)
-    private LocalDateTime lastLoginAt;
+    private Instant lastLoginAt;
 
     @Column(nullable = true)
-    private LocalDateTime deletedAt;
+    private Instant deletedAt;
 
     @Builder
-    private User(String email, String provider, String providerId, String profileImgUrl, String nickname) {
+    private User(String email, String provider, String providerId, String profileImgUrl, String nickname, Instant lastLoginAt) {
         this.email = email;
         this.provider = provider;
         this.providerId = providerId;
         this.profileImgUrl = profileImgUrl;
         this.nickname = nickname;
         this.role = UserRole.BASIC;
-        this.lastLoginAt = LocalDateTime.now();
+        this.lastLoginAt = lastLoginAt;
     }
 
     //마지막 로그인 일자 갱신
-    public void updateLastLoginAt(){
-        LocalDateTime today = LocalDateTime.now();
-        this.lastLoginAt = today;
+    public void updateLastLoginAt(Instant lastLoginAt){
+        this.lastLoginAt = lastLoginAt;
     }
 
     //닉네임 변경(db조회 중복검사 로직 추후 추가하기)

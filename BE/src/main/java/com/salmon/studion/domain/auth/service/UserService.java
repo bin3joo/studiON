@@ -20,6 +20,7 @@ import com.salmon.studion.global.exception.BusinessException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.util.List;
 
 @Service
@@ -31,6 +32,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final PositionDetailRepository positionDetailRepository;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     // 포지션 상세 조회
     public List<PositionDetailResponse> getPositions() {
@@ -78,6 +80,7 @@ public class UserService {
                         .providerId(pendingOAuthUserInfo.providerId())
                         .profileImgUrl(pendingOAuthUserInfo.profileImgUrl())
                         .nickname(pendingOAuthUserInfo.nickname())
+                        .lastLoginAt(clock.instant())
                         .build()
         );
 

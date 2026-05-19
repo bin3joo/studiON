@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Getter
 @Builder
@@ -19,6 +19,6 @@ public class TrackEqLockState {
     private String userName;
     private String sessionId;
     private String token;
-    private LocalDateTime lockedAt;
-    private LocalDateTime expiresAt;
+    private Instant lockedAt;
+    private Instant expiresAt;
 }

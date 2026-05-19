@@ -12,7 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -141,7 +141,7 @@ public class CommentRedisRepository {
             Integer projectId,
             Integer commentId,
             CommentDeleteReason deleteReason,
-            LocalDateTime deletedAt
+            Instant deletedAt
     ) {
         CommentState commentState = getOrLoad(projectId, commentId);
 
@@ -161,7 +161,7 @@ public class CommentRedisRepository {
     public void markDeletedCascadeByParent(
             Integer projectId,
             Integer parentCommentId,
-            LocalDateTime deletedAt
+            Instant deletedAt
     ) {
         List<CommentState> states = findAllOrLoadByProjectId(projectId);
 
@@ -185,7 +185,7 @@ public class CommentRedisRepository {
     public void markDeletedByTrack(
             Integer projectId,
             Integer trackId,
-            LocalDateTime deletedAt
+            Instant deletedAt
     ) {
         List<CommentState> states = findAllOrLoadByProjectId(projectId);
 
@@ -379,7 +379,7 @@ public class CommentRedisRepository {
         return Comparator
                 .comparing(CommentState::getTrackId, Comparator.nullsLast(Integer::compareTo))
                 .thenComparing(CommentState::getLocation, Comparator.nullsLast(java.math.BigDecimal::compareTo))
-                .thenComparing(CommentState::getCreatedAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                .thenComparing(CommentState::getCreatedAt, Comparator.nullsLast(Instant::compareTo))
                 .thenComparing(CommentState::getCommentId, Comparator.nullsLast(Integer::compareTo));
     }
 

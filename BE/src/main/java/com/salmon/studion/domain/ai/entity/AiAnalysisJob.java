@@ -13,8 +13,9 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Getter
 @Entity
@@ -54,10 +55,10 @@ public class AiAnalysisJob extends BaseEntity {
     private String timelineSnapshotId;
 
     @Column(name = "started_at")
-    private LocalDateTime startedAt;
+    private Instant startedAt;
 
     @Column(name = "completed_at")
-    private LocalDateTime completedAt;
+    private Instant completedAt;
 
     @Column(name = "error_code", length = 100)
     private String errorCode;
@@ -65,14 +66,14 @@ public class AiAnalysisJob extends BaseEntity {
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
 
-    public static AiAnalysisJob create(Integer projectId, Integer requestedBy) {
+    public static AiAnalysisJob create(Integer projectId, Integer requestedBy, Instant startedAt) {
         AiAnalysisJob job = new AiAnalysisJob();
         job.projectId = projectId;
         job.requestedBy = requestedBy;
         job.status = "QUEUED";
         job.phase = "DISPATCHING";
         job.progress = 0;
-        job.startedAt = LocalDateTime.now();
+        job.startedAt = startedAt;
         return job;
     }
 
@@ -98,24 +99,24 @@ public class AiAnalysisJob extends BaseEntity {
         this.errorMessage = response.getErrorMessage();
     }
 
-    public void markDispatchFailed(String errorCode, String errorMessage) {
+    public void markDispatchFailed(String errorCode, String errorMessage, Instant completedAt) {
         this.status = "FAILED";
         this.phase = "DISPATCH_FAILED";
         this.errorCode = errorCode;
         this.errorMessage = errorMessage;
-        this.completedAt = LocalDateTime.now();
+        this.completedAt = completedAt;
     }
 
-    private LocalDateTime parseDateTime(String value, LocalDateTime fallback) {
+    private Instant parseDateTime(String value, Instant fallback) {
         if (value == null || value.isBlank()) {
             return fallback;
         }
         try {
-            return OffsetDateTime.parse(value).toLocalDateTime();
+            return OffsetDateTime.parse(value).toInstant();
         } catch (RuntimeException ignored) {
         }
         try {
-            return LocalDateTime.parse(value);
+            return java.time.LocalDateTime.parse(value).toInstant(ZoneOffset.UTC);
         } catch (RuntimeException ignored) {
             return fallback;
         }

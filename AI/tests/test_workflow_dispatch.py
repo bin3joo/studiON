@@ -1445,6 +1445,20 @@ def test_job_status_api_returns_job_and_projections(monkeypatch: pytest.MonkeyPa
     assert body["projections"]["analysis_job"]["id"] == 20012
     assert "master_audio" not in body["projections"]
     assert body["projections"]["analysis_regions"][0]["measure_start"] == 1
+    overlap_projection = next(
+        (
+            region
+            for region in body["projections"]["analysis_regions"]
+            if region["issue_type"] == "BAND_OVERLAP"
+        ),
+        None,
+    )
+    assert overlap_projection is not None
+    assert overlap_projection["band_overlap_subtype"] in {
+        "low_mid_overlap",
+        "body_overlap",
+        "presence_overlap",
+    }
     assert body["projections"]["suggestion_group"] is not None
     assert body["projections"]["suggestion_group"]["suggestions"] == []
 

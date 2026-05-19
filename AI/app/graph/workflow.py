@@ -260,6 +260,7 @@ def run_workflow_graph(state: WorkflowState | dict) -> WorkflowState:
         context = build_snapshot_runtime_context(project_snapshot)
         raw_state.setdefault("project_duration_ms", context.duration_ms)
         raw_state.setdefault("track_ids", context.track_ids)
+        raw_state.setdefault("track_name_map", context.track_name_map)
         raw_state.setdefault("bpm", context.bpm)
         raw_state.setdefault("numerator", context.numerator)
         raw_state.setdefault("denominator", context.denominator)

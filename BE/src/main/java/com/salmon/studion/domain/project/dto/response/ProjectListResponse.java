@@ -16,6 +16,7 @@ public class ProjectListResponse {
 
     private List<ProjectSummary> projects;
     private Long currentTotalSizeBytes;
+    private Long maxTotalSizeBytes;
 
     public record ProjectSummary (
             Integer projectId,

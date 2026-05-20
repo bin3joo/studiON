@@ -29,6 +29,7 @@ public class ProjectDetailResponse {
     private List<TrackResponse> tracks;
     private List<CommentsGetResponse.CommentDto> comments;
     private Long currentTotalSizeBytes;
+    private Long maxTotalSizeBytes;
     private List<MemberResponse> members;
 
     public record MasterTrackResponse (
@@ -81,6 +82,7 @@ public class ProjectDetailResponse {
             List<TrackResponse> tracks,
             List<CommentsGetResponse.CommentDto> comments,
             Long currentTotalSizeBytes,
+            Long maxTotalSizeBytes,
             List<MemberResponse> members
     ) {
         return new ProjectDetailResponse(
@@ -97,6 +99,7 @@ public class ProjectDetailResponse {
                 tracks,
                 comments,
                 currentTotalSizeBytes,
+                maxTotalSizeBytes,
                 members
         );
     }

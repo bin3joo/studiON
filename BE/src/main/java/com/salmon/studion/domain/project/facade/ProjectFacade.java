@@ -2,6 +2,7 @@ package com.salmon.studion.domain.project.facade;
 
 import com.salmon.studion.domain.audio.entity.AudioMetadata;
 import com.salmon.studion.domain.audio.service.AudioService;
+import com.salmon.studion.domain.audio.service.AudioUploadLimitService;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
 import com.salmon.studion.domain.clip.entity.Clip;
@@ -47,6 +48,7 @@ public class ProjectFacade {
     private final ClipService clipService;
     private final CommentFacade commentFacade;
     private final AudioService audioService;
+    private final AudioUploadLimitService audioUploadLimitService;
     private final CdnUrlService cdnUrlService;
 
     @Transactional(readOnly = true)
@@ -75,11 +77,22 @@ public class ProjectFacade {
         List<CommentsGetResponse.CommentDto> comments =
                 commentFacade.getCommentsForProjectDetail(projectId, userId);
 
+        User user = userService.getUserByUserId(userId);
         long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
+        long maxTotalSizeBytes = audioUploadLimitService.getLimit(user.getRole()).maxTotalSizeBytes();
 
         List<ProjectMember> members = projectMemberService.getMembersWithUserByProjectIds(List.of(projectId));
 
-        return toProjectDetailResponse(project, masterTrack, tracks, clips, comments, currentTotalSizeBytes, members);
+        return toProjectDetailResponse(
+                project,
+                masterTrack,
+                tracks,
+                clips,
+                comments,
+                currentTotalSizeBytes,
+                maxTotalSizeBytes,
+                members
+        );
     }
 
     @Transactional(readOnly = true)
@@ -122,9 +135,11 @@ public class ProjectFacade {
                 })
                 .toList();
 
+        User user = userService.getUserByUserId(userId);
         long currentTotalSizeBytes = audioService.sumSizeBytesByCreatedBy(userId);
+        long maxTotalSizeBytes = audioUploadLimitService.getLimit(user.getRole()).maxTotalSizeBytes();
 
-        return new ProjectListResponse(projectSummaries, currentTotalSizeBytes);
+        return new ProjectListResponse(projectSummaries, currentTotalSizeBytes, maxTotalSizeBytes);
     }
 
     @Transactional
@@ -189,6 +204,7 @@ public class ProjectFacade {
             List<Clip> clips,
             List<CommentsGetResponse.CommentDto> comments,
             Long currentTotalSizeBytes,
+            Long maxTotalSizeBytes,
             List<ProjectMember> members
     ) {
         Map<Integer, List<Clip>> clipsByTrackId = clips.stream()
@@ -208,7 +224,15 @@ public class ProjectFacade {
                 ))
                 .toList();
 
-        return ProjectDetailResponse.of(project, masterTrackResponse, trackResponses, comments, currentTotalSizeBytes, memberResponses);
+        return ProjectDetailResponse.of(
+                project,
+                masterTrackResponse,
+                trackResponses,
+                comments,
+                currentTotalSizeBytes,
+                maxTotalSizeBytes,
+                memberResponses
+        );
     }
 
     private ProjectDetailResponse.MasterTrackResponse toMasterTrackResponse(MasterTrack masterTrack) {

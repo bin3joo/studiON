@@ -620,12 +620,12 @@ function handleCloseInvite() {
 }
 
 function handleOpenHistory() {
-  activeSidePanel.value = 'history'
+  activeSidePanel.value = activeSidePanel.value === 'history' ? null : 'history'
 }
 
 function handleOpenComments() {
   commentStore.setHasNewComment(false)
-  activeSidePanel.value = 'comments'
+  activeSidePanel.value = activeSidePanel.value === 'comments' ? null : 'comments'
 }
 
 function handleCloseSidePanel() {

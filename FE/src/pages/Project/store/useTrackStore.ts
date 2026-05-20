@@ -2572,6 +2572,9 @@ export const useTrackStore = defineStore('track', () => {
                 }
             }
         }
+        
+        // 초기 로딩 후 트랙의 mute, solo 상태를 Tone.Volume에 동기화
+        syncEffectiveMuteStates();
         // console.log("========== [Audio Engine Setup End] ==========");
     }
 

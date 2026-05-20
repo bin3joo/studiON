@@ -38,6 +38,8 @@ export type AiAnalysisItem = {
 
   targetType: AiIssueTargetType
   targetTrackId: number | null
+  involvedTrackIds: number[]
+  affectedClipIds: number[]
 
   startPercent: number
   endPercent: number
@@ -114,8 +116,14 @@ const appliedAiEqIssueIds = ref<Set<string | number>>(new Set())
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
+const AI_WORKFLOW_POLL_INTERVAL_MS = 2000
+const AI_WORKFLOW_POLL_TIMEOUT_MS = 10 * 60 * 1000
+const AI_WORKFLOW_POLL_MAX_TRY = Math.ceil(
+  AI_WORKFLOW_POLL_TIMEOUT_MS / AI_WORKFLOW_POLL_INTERVAL_MS,
+)
+
   async function pollAiWorkflow(jobId: number) {
-  const maxTry = 60
+  const maxTry = AI_WORKFLOW_POLL_MAX_TRY
 
   for (let i = 0; i < maxTry; i += 1) {
     const result = await getAiWorkflowStatus(jobId)
@@ -144,14 +152,14 @@ const appliedAiEqIssueIds = ref<Set<string | number>>(new Set())
       return result
     }
 
-    await sleep(2000)
+    await sleep(AI_WORKFLOW_POLL_INTERVAL_MS)
   }
 
   throw new Error('AI 분석 결과를 가져오지 못했습니다.')
 }
 
 async function pollAiFeedbackResult(jobId: number) {
-  const maxTry = 60
+  const maxTry = AI_WORKFLOW_POLL_MAX_TRY
 
   for (let i = 0; i < maxTry; i += 1) {
     const result = await getAiWorkflowStatus(jobId)
@@ -177,7 +185,7 @@ async function pollAiFeedbackResult(jobId: number) {
       return result
     }
 
-    await sleep(2000)
+    await sleep(AI_WORKFLOW_POLL_INTERVAL_MS)
   }
 
   throw new Error('AI 수정안을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.')
@@ -193,16 +201,34 @@ async function pollAiFeedbackResult(jobId: number) {
     )
   }
 
-  function getAudioDurationMs(clip: any, fallbackDurationMs: number): number {
-    return (
-      clip.audioDurationMs ??
+function getAudioDurationMs(clip: any, fallbackDurationMs: number): number {
+  return (
+    clip.audioDurationMs ??
       clip.audio_duration_ms ??
       clip.audio?.durationMs ??
       clip.audio?.duration_ms ??
       clip.audio?.audioDurationMs ??
-      fallbackDurationMs
-    )
-  }
+    fallbackDurationMs
+  )
+}
+
+function toNumericId(value: unknown): number | null {
+  const numericValue = Number(value)
+
+  return Number.isNaN(numericValue) ? null : numericValue
+}
+
+function normalizeTrackIds(trackIds: number[] | null | undefined): number[] {
+  return (trackIds ?? [])
+    .map(trackId => Number(trackId))
+    .filter(trackId => !Number.isNaN(trackId))
+}
+
+function normalizeClipIds(clipIds: number[] | null | undefined): number[] {
+  return (clipIds ?? [])
+    .map(clipId => Number(clipId))
+    .filter(clipId => !Number.isNaN(clipId))
+}
 
   function getMsPerBar() {
     const info = trackStore.projectInfo
@@ -329,7 +355,8 @@ function mapRegionToAnalysisItem(
   )
 
   const kind = mapIssueTypeToKind(region.issue_type)
-  const involvedTrackIds = region.involved_track_ids ?? []
+  const involvedTrackIds = normalizeTrackIds(region.involved_track_ids)
+  const affectedClipIds = normalizeClipIds(region.affected_clip_ids)
   const involvedTrackNamesText = formatTrackNames(involvedTrackIds)
   const clippingTrackName = getTrackDisplayName(region.track_id)
 
@@ -369,6 +396,7 @@ function mapRegionToAnalysisItem(
     region.id ??
     (region as any).region_id ??
     `${kind}-${startMs}-${endMs}`
+  const numericRegionId = toNumericId(regionId)
 
   const uiMode: AiIssueUiMode =
     kind === 'CLIPPING'
@@ -437,12 +465,14 @@ function mapRegionToAnalysisItem(
     uiMode,
 
     jobId: Number(region.job_id ?? currentAiJobId.value ?? null),
-    regionId: Number(regionId),
+    regionId: numericRegionId,
     startMs,
     endMs,
 
     targetType,
     targetTrackId,
+    involvedTrackIds,
+    affectedClipIds,
 
     startPercent,
     endPercent,
@@ -494,6 +524,7 @@ function mapPreviewBandsToEqBands(previewBands: any[] = []): TrackEqBandState[] 
 function mapSuggestionIssueToAnalysisItem(
   issue: AiSuggestionIssue,
   durationMs: number,
+  region: AiAnalysisRegion | null,
 ): AiAnalysisItem {
   const startMs = issue.startMs ?? 0
   const endMs = issue.endMs ?? startMs + 1
@@ -515,6 +546,8 @@ function mapSuggestionIssueToAnalysisItem(
   )
 
   const kind = mapIssueTypeToKind(issue.issueType)
+  const involvedTrackIds = normalizeTrackIds(region?.involved_track_ids)
+  const affectedClipIds = normalizeClipIds(region?.affected_clip_ids)
 
   const existingTrimAction = issue.actions?.find(action =>
     action.type === 'apply_master_gain_trim'
@@ -555,7 +588,8 @@ function mapSuggestionIssueToAnalysisItem(
   const targetTrackId =
     targetType === 'MASTER_TRACK'
       ? null
-      : issue.trackId ?? null
+      : issue.trackId ?? involvedTrackIds[0] ?? null
+  const numericRegionId = toNumericId(issue.issueId)
 
   const bullets =
     kind === 'HARSHNESS'
@@ -591,12 +625,14 @@ function mapSuggestionIssueToAnalysisItem(
     uiMode: issue.uiMode,
 
     jobId: currentAiJobId.value,
-    regionId: Number(issue.issueId),
+    regionId: numericRegionId,
     startMs,
     endMs,
 
     targetType,
     targetTrackId,
+    involvedTrackIds,
+    affectedClipIds,
 
     startPercent,
     endPercent,
@@ -640,7 +676,11 @@ function mapSuggestionIssueToAnalysisItem(
 function mapSuggestionPayloadToAnalysisItems(
   payload: AiSuggestionPayload,
   durationMs: number,
+  regions: AiAnalysisRegion[],
 ): AiAnalysisItem[] {
+  const regionMap = new Map(
+    regions.map(region => [String(region.id), region]),
+  )
   const issueMap = new Map(
     payload.issues.map(issue => [issue.issueId, issue]),
   )
@@ -653,7 +693,11 @@ function mapSuggestionPayloadToAnalysisItems(
       : payload.issues
 
   return orderedIssues.map(issue =>
-    mapSuggestionIssueToAnalysisItem(issue, durationMs),
+    mapSuggestionIssueToAnalysisItem(
+      issue,
+      durationMs,
+      regionMap.get(String(issue.issueId)) ?? null,
+    ),
   )
 }
 
@@ -838,6 +882,7 @@ const suggestionItems = suggestionPayload
   ? mapSuggestionPayloadToAnalysisItems(
       suggestionPayload,
       snapshot.duration_ms,
+      regions,
     )
   : []
 
@@ -1112,39 +1157,74 @@ function handleDismissClippingIssue(item: AiAnalysisItem) {
   }
 }
 
+function getValidRevisionTrackIds(
+  item: AiAnalysisItem,
+  selectedTrackIds: number[],
+) {
+  if (item.involvedTrackIds.length === 0) return []
+
+  const allowedTrackIds = new Set(item.involvedTrackIds.map(trackId => Number(trackId)))
+
+  return selectedTrackIds.filter(trackId => allowedTrackIds.has(Number(trackId)))
+}
+
+function findPreserveClipIdFromSelectedRegion(
+  item: AiAnalysisItem,
+  selectedTrackIds: number[],
+) {
+  const validTrackIds = getValidRevisionTrackIds(item, selectedTrackIds)
+
+  if (validTrackIds.length === 0 || item.affectedClipIds.length === 0) {
+    return null
+  }
+
+  const affectedClipIds = new Set(item.affectedClipIds.map(clipId => Number(clipId)))
+
+  for (const selectedTrackId of validTrackIds) {
+    const targetTrack = trackStore.trackList.find(track =>
+      Number(track.trackId) === Number(selectedTrackId),
+    )
+
+    if (!targetTrack) continue
+
+    const candidateClips = targetTrack.clips
+      .filter(clip => affectedClipIds.has(Number(clip.clipId)))
+      .sort((left, right) => {
+        const startDiff = Number(left.start) - Number(right.start)
+
+        if (startDiff !== 0) return startDiff
+
+        return Number(left.clipId) - Number(right.clipId)
+      })
+
+    const preserveClip = candidateClips[0]
+
+    if (!preserveClip) continue
+
+    const clipId = Number(preserveClip.clipId)
+
+    if (!Number.isNaN(clipId)) {
+      return clipId
+    }
+  }
+
+  return null
+}
+
+function hasValidRevisionMetadata(item: AiAnalysisItem) {
+  return (
+    item.regionId != null &&
+    item.involvedTrackIds.length > 0 &&
+    item.affectedClipIds.length > 0
+  )
+}
+
 function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
   const item = activeAiAnalysis.value
 
   if (!item) return null
 
-  const selectedTrackId =
-    selectedTrackIds[0] ??
-    item.targetTrackId ??
-    null
-
-  if (!selectedTrackId) return null
-
-  const targetTrack = trackStore.trackList.find(track =>
-    Number(track.trackId) === Number(selectedTrackId),
-  )
-
-  if (!targetTrack) return null
-
-  const issueStartBar = Math.max(0, item.barStart - 1)
-  const issueEndBar = Math.max(issueStartBar + 0.25, item.barEnd)
-
-  const overlappingClip = targetTrack.clips.find(clip => {
-    const clipStartBar = Number(clip.start)
-    const clipEndBar = clipStartBar + Number(clip.duration)
-
-    return clipStartBar < issueEndBar && clipEndBar > issueStartBar
-  })
-
-  if (!overlappingClip) return null
-
-  const clipId = Number(overlappingClip.clipId)
-
-  return Number.isNaN(clipId) ? null : clipId
+  return findPreserveClipIdFromSelectedRegion(item, selectedTrackIds)
 }
 async function handleRequestAiEqRevision(payload: {
   selectedTrackIds: number[]
@@ -1162,14 +1242,26 @@ async function handleRequestAiEqRevision(payload: {
     return
   }
 
-  const preserveClipId = findPreserveClipIdFromSelectedTrack(payload.selectedTrackIds)
+  if (!hasValidRevisionMetadata(item)) {
+    alert('현재 AI 이슈는 수정 요청 대상을 결정할 수 없어 다시 분석이 필요합니다.')
+    return
+  }
+
+  const validSelectedTrackIds = getValidRevisionTrackIds(item, payload.selectedTrackIds)
+
+  if (validSelectedTrackIds.length === 0) {
+    alert('현재 문제 구간과 직접 관련된 트랙만 선택해 수정 요청을 보낼 수 있습니다.')
+    return
+  }
+
+  const preserveClipId = findPreserveClipIdFromSelectedTrack(validSelectedTrackIds)
 
   if (preserveClipId == null) {
     alert('선택한 트랙에서 AI 분석 구간과 겹치는 클립을 찾지 못했습니다.')
     return
   }
 
-  const selectedTrackNamesText = formatTrackNames(payload.selectedTrackIds)
+  const selectedTrackNamesText = formatTrackNames(validSelectedTrackIds)
 
   const selectedTrackText =
     selectedTrackNamesText
@@ -1184,7 +1276,7 @@ async function handleRequestAiEqRevision(payload: {
       issue_id: String(item.id),
       action_type: 'preserve_clip',
       action_payload: {
-        selected_track_ids: payload.selectedTrackIds,
+        selected_track_ids: validSelectedTrackIds,
         preserve_clip_id: preserveClipId,
       },
       selected_region_id: item.regionId ?? selectedAiRegionId.value,
@@ -1224,11 +1316,7 @@ function syncSelectedRegionIdFromActiveItem() {
     return
   }
 
-  const numericRegionId = Number(item.id)
-
-  selectedAiRegionId.value = Number.isNaN(numericRegionId)
-    ? null
-    : numericRegionId
+  selectedAiRegionId.value = item.regionId
 }
 
 function applyActiveAiAnalysisSelection() {

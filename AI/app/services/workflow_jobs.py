@@ -87,8 +87,6 @@ COMPACT_STATE_KEYS = {
     "user_feedback_recorded_at",
     "clip_feature_artifact_id",
     "vocal_detected",
-    "clap_required",
-    "clap_artifact_id",
     "clipping_fix_applied",
     "clipping_fix_log_id",
     "sibilance_fix_applied",

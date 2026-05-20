@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount, type StyleValue } from 'vue'
+import { ref, watch, computed, onBeforeUnmount, inject, type Ref, type StyleValue } from 'vue'
 import { ChevronUp, ChevronDown, Sparkles, Minus } from 'lucide-vue-next'
 import { useTrackStore } from '../store/useTrackStore'
 
@@ -29,11 +29,11 @@ const props = defineProps<{
   }
 
   isClippingApplied?: boolean
-clippingAppliedInfo?: {
-  reductionDb: number
-  inputGainDb: number
-  ceilingDbfs: number
-} | null
+  clippingAppliedInfo?: {
+    reductionDb: number
+    inputGainDb: number
+    ceilingDbfs: number
+  } | null
 }>()
 
 const emit = defineEmits<{
@@ -42,13 +42,20 @@ const emit = defineEmits<{
   dismissClipping: []
 }>()
 
+// 상위에서 주입된 활성 AI 분석 ID와 설명창 상태 동기화
+const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId', ref(null))
 const open = ref(false)
 
 watch(
-  () => props.conflict.id,
-  () => {
-    open.value = true
+  () => activeAiAnalysisId.value,
+  (newId) => {
+    if (newId === props.conflict.id) {
+      open.value = true
+    } else {
+      open.value = false
+    }
   },
+  { immediate: true }
 )
 
 const buttonRef = ref<HTMLElement | null>(null)
@@ -163,7 +170,12 @@ onBeforeUnmount(() => {
 })
 
 const close = () => {
-  open.value = false
+  // 닫을 때 전역 활성 AI 분석 ID도 해제하여 일관성 유지
+  if (activeAiAnalysisId && activeAiAnalysisId.value === props.conflict.id) {
+    activeAiAnalysisId.value = null
+  } else {
+    open.value = false
+  }
 }
 
 const isMinimized = ref(false)
@@ -172,9 +184,13 @@ const toggleMinimize = () => {
 }
 
 const toggleOpen = () => {
-  open.value = !open.value
   if (open.value) {
+    close()
+  } else {
     emit('open')
+    if (activeAiAnalysisId) {
+      activeAiAnalysisId.value = props.conflict.id ?? null
+    }
   }
 }
 

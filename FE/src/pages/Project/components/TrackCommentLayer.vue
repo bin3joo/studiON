@@ -572,23 +572,43 @@ function parseMentions(content: string) {
             <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
             <span v-else class="text-[10px] font-bold text-white/90">나</span>
           </div>
-          <input
-            ref="inputRef1"
-            v-model="draftComment"
-            type="text"
-            placeholder="댓글 추가"
-            class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
-            @keydown.enter.prevent="submitComment(expandedMeasure)"
-            @input="handleInput"
-            @keydown="handleKeydown"
-          />
-          <button
-            class="shrink-0 transition hover:scale-110 disabled:opacity-50"
-            :disabled="!draftComment.trim()"
-            @click="submitComment(expandedMeasure)"
-          >
-            <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
-          </button>
+          <div class="relative flex-1 flex items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
+            <input
+              ref="inputRef1"
+              v-model="draftComment"
+              type="text"
+              placeholder="댓글 추가"
+              class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
+              @keydown.enter.prevent="submitComment(expandedMeasure)"
+              @input="handleInput"
+              @keydown="handleKeydown"
+            />
+            <button
+              class="shrink-0 transition hover:scale-110 disabled:opacity-50"
+              :disabled="!draftComment.trim()"
+              @click="submitComment(expandedMeasure)"
+            >
+              <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
+            </button>
+
+            <!-- 멘션 자동완성 드롭다운 (Empty State용) -->
+            <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar z-[130]">
+              <button
+                v-for="(member, index) in filteredMembers"
+                :key="member.userId"
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
+                :class="{ 'bg-white/10': index === selectedMentionIndex }"
+                @click.prevent="insertMention(member)"
+                @mousedown.prevent
+              >
+                <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
+                  <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
+                  <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
+                </div>
+                <span class="text-white">{{ member.nickname }}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- 댓글 목록 & 입력 (Populated State) -->
@@ -646,7 +666,7 @@ function parseMentions(content: string) {
               <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
               <span v-else class="text-[10px] font-bold text-white/90">나</span>
             </div>
-            <div class="flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
+            <div class="relative flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
               <input
                 ref="inputRef2"
                 v-model="draftComment"
@@ -664,26 +684,26 @@ function parseMentions(content: string) {
               >
                 <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
               </button>
+
+              <!-- 멘션 자동완성 드롭다운 (Populated State용) -->
+              <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar z-[130]">
+                <button
+                  v-for="(member, index) in filteredMembers"
+                  :key="member.userId"
+                  class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
+                  :class="{ 'bg-white/10': index === selectedMentionIndex }"
+                  @click.prevent="insertMention(member)"
+                  @mousedown.prevent
+                >
+                  <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
+                    <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
+                    <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
+                  </div>
+                  <span class="text-white">{{ member.nickname }}</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        
-        <!-- 멘션 자동완성 드롭다운 -->
-        <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar">
-          <button
-            v-for="(member, index) in filteredMembers"
-            :key="member.userId"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
-            :class="{ 'bg-white/10': index === selectedMentionIndex }"
-            @click.prevent="insertMention(member)"
-            @mousedown.prevent
-          >
-            <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
-              <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
-              <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
-            </div>
-            <span class="text-white">{{ member.nickname }}</span>
-          </button>
         </div>
       </div>
     </div>

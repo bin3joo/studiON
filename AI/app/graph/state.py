@@ -104,8 +104,6 @@ class WorkflowState(TypedDict, total=False):
     mix_power_spectra: list[list[float]]
     frequency_bins_hz: list[float]
     vocal_detected: bool
-    clap_required: bool
-    clap_artifact_id: str | None
     clipping_fix_applied: bool
     clipping_fix_log_id: str | None
     sibilance_fix_applied: bool
@@ -227,8 +225,6 @@ def build_workflow_initial_state(
         "dsp_scan_summary": {},
         **RAW_DSP_STATE_DEFAULTS,
         "vocal_detected": False,
-        "clap_required": False,
-        "clap_artifact_id": None,
         "clipping_fix_applied": False,
         "clipping_fix_log_id": None,
         "sibilance_fix_applied": False,

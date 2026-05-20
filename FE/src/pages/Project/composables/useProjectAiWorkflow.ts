@@ -65,7 +65,7 @@ export type AiAnalysisItem = {
 }
 
 export function useProjectAiWorkflow(projectId: number) {
-  const trackStore = useTrackStore()
+const trackStore = useTrackStore()
 
   const aiAnalyzing = ref(false)
 
@@ -98,7 +98,7 @@ export function useProjectAiWorkflow(projectId: number) {
 
 const appliedAiEqIssueIds = ref<Set<string | number>>(new Set())
 
-  const selectedEqTrack = computed(() => {
+const selectedEqTrack = computed(() => {
   if (trackStore.selectedTarget?.type === 'MASTER') {
     return trackStore.masterTrack
   }
@@ -1103,6 +1103,7 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
   appliedSuggestionId: null,
   sourceType: 'AI_SUGGESTION',
 })
+    trackStore.setMasterLimiterState(savedLimiter)
 
     appliedClippingIssueIds.value = new Set([
       ...appliedClippingIssueIds.value,

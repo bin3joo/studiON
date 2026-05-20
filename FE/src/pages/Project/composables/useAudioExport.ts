@@ -1,5 +1,6 @@
 import * as Tone from 'tone'
 import { useTrackStore } from '../store/useTrackStore'
+import type { MasterLimiterState } from '../api/projectLimiter.api'
 
 /**
  * DataView에 문자열을 ASCII 값으로 기록하는 헬퍼 함수
@@ -9,6 +10,37 @@ function writeString(view: DataView, offset: number, string: string) {
   for (let i = 0; i < string.length; i++) {
     view.setUint8(offset + i, string.charCodeAt(i))
   }
+}
+
+function dbToLinear(db: number) {
+  return Math.pow(10, db / 20)
+}
+
+function applyOfflineMasterLimiter(
+  destination: Tone.ToneAudioNode,
+  limiterState: MasterLimiterState | null,
+) {
+  if (!limiterState || !limiterState.isEnabled) {
+    return destination
+  }
+
+  const inputGain = new Tone.Gain(dbToLinear(limiterState.inputGainDb))
+  const limiter = new Tone.Compressor({
+    threshold: Math.max(-100, Math.min(0, limiterState.thresholdDb)),
+    ratio: 20,
+    attack: Math.max(0, limiterState.attackMs / 1000),
+    release: Math.max(0.001, limiterState.releaseMs / 1000),
+    knee: 0,
+  })
+  const outputGain = new Tone.Gain(
+    dbToLinear(limiterState.makeupGainDb + limiterState.ceilingDbfs),
+  )
+
+  inputGain.connect(limiter)
+  limiter.connect(outputGain)
+  outputGain.connect(destination)
+
+  return inputGain
 }
 
 /**
@@ -117,7 +149,12 @@ export function useAudioExport() {
 
     // Tone.Offline을 통해 가상 오디오 컨텍스트에서 렌더링
     const renderedBuffer = await Tone.Offline(async ({ transport }) => {
-      const masterVolume = new Tone.Volume(0).toDestination()
+      const masterVolume = new Tone.Volume(0)
+      const masterBusInput = applyOfflineMasterLimiter(
+        Tone.getDestination(),
+        trackStore.masterLimiterState,
+      )
+      masterVolume.connect(masterBusInput)
       
       const offlinePlayers: Tone.Player[] = []
 

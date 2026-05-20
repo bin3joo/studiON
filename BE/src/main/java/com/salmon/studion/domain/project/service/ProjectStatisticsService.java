@@ -33,30 +33,33 @@ public class ProjectStatisticsService {
         List<Clip> clips = clipRepository.findAllWithAudioMetadataByProjectId(projectId);
 
         int trackCount = tracks.size();
-        int totalBarCount = calculateTotalBarCount(clips);
-        int totalPlayTimeMs = calculateTotalPlayTimeMs(project, totalBarCount);
+        double maxEndBar = calculateMaxEndBar(clips);
+        int totalBarCount = calculateTotalBarCount(maxEndBar);
+        int totalPlayTimeMs = calculateTotalPlayTimeMs(project, maxEndBar);
         long totalAudioSizeByte = calculateTotalAudioSizeByte(clips);
 
         project.refreshSnapshotStatistics(trackCount, totalBarCount, totalPlayTimeMs, totalAudioSizeByte, clock.instant());
     }
 
-    private int calculateTotalBarCount(List<Clip> clips) {
-        return (int) Math.ceil(
-                clips.stream()
-                        .mapToDouble(clip -> clip.getStart() + clip.getDuration() - 1.0)
-                        .max()
-                        .orElse(0.0)
-        );
+    private double calculateMaxEndBar(List<Clip> clips) {
+        return clips.stream()
+                .mapToDouble(clip -> clip.getStart() + clip.getDuration())
+                .max()
+                .orElse(0.0);
     }
 
-    private int calculateTotalPlayTimeMs(Project project, int totalBarCount) {
-        if (totalBarCount <= 0) {
+    private int calculateTotalBarCount(double maxEndBar) {
+        return (int) Math.ceil(maxEndBar);
+    }
+
+    private int calculateTotalPlayTimeMs(Project project, double maxEndBar) {
+        if (maxEndBar <= 0) {
             return 0;
         }
 
         double msPerBeat = 60_000d / project.getTempo();
         double msPerBar = msPerBeat * project.getTimeSigNumerator();
-        return (int) Math.ceil(totalBarCount * msPerBar);
+        return (int) Math.ceil(maxEndBar * msPerBar);
     }
 
     private long calculateTotalAudioSizeByte(List<Clip> clips) {

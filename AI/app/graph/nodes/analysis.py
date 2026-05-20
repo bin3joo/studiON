@@ -83,7 +83,7 @@ BAND_OVERLAP_SUBTYPE_CONFIG = {
         "min_active_tracks": 2,
         "fallback_band": BAND_RANGES["low_mid"],
         "refine_band": BAND_RANGES["low_mid"],
-        "summary": "겹치는 트랙들 사이에서 저중역 겹침이 감지되었습니다.",
+        "summary": "트랙들이 겹치는 구간에서 저중역이 서로 부딪혀 답답하게 들릴 수 있습니다.",
         "ranking_adjustment": 0.035,
     },
     "body_overlap": {
@@ -96,7 +96,7 @@ BAND_OVERLAP_SUBTYPE_CONFIG = {
         "min_active_tracks": 2,
         "fallback_band": BAND_RANGES["body"],
         "refine_band": BAND_RANGES["body"],
-        "summary": "겹치는 트랙들 사이에서 바디 대역 혼잡이 감지되었습니다.",
+        "summary": "트랙들이 겹치는 구간에서 바디 대역이 몰려 소리가 두껍고 혼탁하게 들릴 수 있습니다.",
         "ranking_adjustment": 0.0,
     },
     "upper_mid_overlap": {
@@ -110,7 +110,7 @@ BAND_OVERLAP_SUBTYPE_CONFIG = {
         "min_centroid_hz": 900,
         "fallback_band": BAND_RANGES["upper_mid"],
         "refine_band": BAND_RANGES["upper_mid"],
-        "summary": "중고역 명료도가 서로 부딪히며 앞선 감이 강하게 겹칩니다.",
+        "summary": "중고역 존재감이 겹치면서 소리가 동시에 앞으로 튀어 들릴 수 있습니다.",
         "ranking_adjustment": -0.015,
     },
     "presence_overlap": {
@@ -124,7 +124,7 @@ BAND_OVERLAP_SUBTYPE_CONFIG = {
         "min_centroid_hz": 2200,
         "fallback_band": BAND_RANGES["presence"],
         "refine_band": BAND_RANGES["presence"],
-        "summary": "겹치는 트랙들 사이에서 프레즌스 대역 충돌이 감지되었습니다.",
+        "summary": "트랙들이 겹치는 구간에서 프레즌스 대역이 부딪혀 선명함이 과하게 경쟁하고 있습니다.",
         "ranking_adjustment": -0.04,
     },
 }
@@ -1653,7 +1653,7 @@ def _find_track_clipping_regions(state: WorkflowState) -> list[dict[str, object]
                     "start_ms": window["start_ms"],
                     "end_ms": window["end_ms"],
                     "score": score,
-                    "summary": "디지털 ceiling 근처의 트랙 클리핑 후보가 감지되었습니다.",
+                    "summary": "이 구간에서 트랙 레벨이 높아 클리핑이 생길 가능성이 있습니다.",
                     "recommended_reduction_db": round(max(peak_near_ceiling + 0.9, 1.0), 3),
                     "current_true_peak_dbtp": round(true_peak_dbfs, 3),
                     "target_ceiling_dbtp": -1.0,
@@ -1696,7 +1696,7 @@ def _find_high_band_harshness_regions(state: WorkflowState) -> list[dict[str, ob
                         "band_low_hz": BAND_RANGES["harshness"][0],
                         "band_high_hz": BAND_RANGES["harshness"][1],
                         "score": score,
-                    "summary": "역할 구분을 고려해 추가 확인이 필요한 고역 harshness 구간이 감지되었습니다.",
+                    "summary": "이 구간의 고역이 거칠게 튀어 들릴 수 있어 한 번 더 확인이 필요합니다.",
                     }
                 )
     merged = _merge_candidate_windows("high_band_harshness", candidates)
@@ -1755,7 +1755,7 @@ def _find_sibilance_regions(state: WorkflowState) -> list[dict[str, object]]:
                         "band_low_hz": BAND_RANGES["sibilance"][0],
                         "band_high_hz": BAND_RANGES["sibilance"][1],
                         "score": score,
-                        "summary": "역할 인식 기반 고역 검사 이후 치찰음 후보가 감지되었습니다.",
+                        "summary": "보컬 계열 트랙에서 치찰음이 도드라질 수 있는 구간이 감지되었습니다.",
                     }
                 )
     merged = _merge_candidate_windows("sibilance", candidates)
@@ -1938,7 +1938,7 @@ def _find_master_clipping_candidate_regions(state: WorkflowState) -> list[dict[s
                 "start_ms": window["start_ms"],
                 "end_ms": window["end_ms"],
                 "score": score,
-                "summary": "기여 트랙 분석 전 단계에서 마스터 true-peak overflow 후보가 감지되었습니다.",
+                "summary": "마스터 출력이 순간적으로 높아져 클리핑으로 이어질 수 있는 구간이 있습니다.",
                 "true_peak_dbfs": true_peak_dbfs,
                 "mix_peak_dbfs": float(window["peak_dbfs"]),
                 "clip_ratio": float(window["clip_ratio"]),
@@ -2095,7 +2095,7 @@ def _promote_master_contributors(
                 "start_ms": candidate["start_ms"],
                 "end_ms": candidate["end_ms"],
                 "score": max(float(candidate["score"]), score),
-                "summary": "마스터 true-peak 기여도 분석을 통해 트랙 클리핑 보정 대상으로 승격되었습니다.",
+                "summary": "마스터 클리핑에 크게 기여하는 트랙으로 보여 우선 보정 후보로 올렸습니다.",
                 "recommended_reduction_db": round(max(float(candidate.get("true_peak_dbfs", 0.0)) + 1.0, 1.0), 3),
                 "current_true_peak_dbtp": round(float(candidate.get("true_peak_dbfs", 0.0)), 3),
                 "target_ceiling_dbtp": -1.0,
@@ -2137,9 +2137,9 @@ def _build_residual_master_region(
     contributor: dict[str, object] | None,
     promoted_tracks: list[dict[str, object]],
 ) -> dict[str, object]:
-    summary = "기여 트랙 라우팅 이후에도 잔여 마스터 클리핑이 감지되었습니다."
+    summary = "기여 트랙을 추려도 마스터 클리핑 위험이 남아 있습니다."
     if promoted_tracks:
-        summary = "기여 트랙 보정 이후에도 마스터 보호가 필요한 잔여 클리핑이 감지되었습니다."
+        summary = "기여 트랙을 보정하더라도 마스터 보호가 더 필요해 보이는 구간입니다."
     region = {
         "track_id": None,
         "start_ms": candidate["start_ms"],

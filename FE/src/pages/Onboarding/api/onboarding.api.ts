@@ -1,10 +1,12 @@
 import { axiosInstance } from '@/shared/api/axiosInstance'
+import axios from 'axios'
 import type {
   ApiResponse,
   FetchPositionsResponse,
   OnboardingRequest,
   OnboardingResponse,
   TokenExchangeResponse,
+  CurrentUserResponse,
 } from '../types/onboarding.types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
@@ -47,6 +49,17 @@ export async function reissueAccessToken(): Promise<TokenExchangeResponse> {
   const { data } = await axiosInstance.post<TokenExchangeResponse>(
     '/api/v1/auth/reissue',
     undefined,
+    {
+      withCredentials: true,
+    },
+  )
+
+  return data
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
+  const { data } = await axios.get<CurrentUserResponse>(
+    `${API_BASE_URL}/api/v1/auth/me`,
     {
       withCredentials: true,
     },

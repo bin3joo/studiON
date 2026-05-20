@@ -8,5 +8,4 @@ import lombok.Getter;
 public class TokenResponse {
 
     private boolean isNewUser;
-    private String accessToken;
 }

@@ -9,13 +9,7 @@ const trackStore = useTrackStore();
 const authStore = useAuthStore()
 
 const currentUserProfileImageUrl = computed(() => {
-  if (!authStore.accessToken) return null
-  try {
-    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
-    return payload.profileImgUrl || null
-  } catch(e) {
-    return null
-  }
+  return authStore.currentUser?.profileImageUrl ?? null
 })
 
 type Placement = 'top' | 'bottom'

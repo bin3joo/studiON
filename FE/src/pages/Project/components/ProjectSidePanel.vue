@@ -19,19 +19,7 @@ const audioVersionStore = useAudioVersionStore()
 const authStore = useAuthStore()
 
 const currentUserNickname = computed(() => {
-  if (!authStore.accessToken) return null
-  try {
-    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
-    // JWT의 subject(sub)가 userId입니다.
-    const userId = Number(payload.sub)
-    if (!userId) return null
-    
-    // projectMembers에서 내 정보 찾기
-    const me = trackStore.projectMembers.find(m => m.userId === userId)
-    return me ? me.nickname : null
-  } catch(e) {
-    return null
-  }
+  return authStore.currentUser?.nickname ?? null
 })
 
 const filteredComments = computed(() => {

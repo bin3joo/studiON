@@ -1,5 +1,3 @@
-import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
-
 type EventHandler = (data: any) => void;
 
 class SocketService {
@@ -29,17 +27,6 @@ class SocketService {
 }
 
     this.currentProjectId = projectId;
-    const authStore = useAuthStore();
-    const token = authStore.accessToken;
-
-    // 🌟 추가된 디버깅 및 방어 코드 🌟
-    //console.log("[Socket] 현재 가져온 토큰:", token);
-
-    if (!token) {
-      //console.error("[Socket 🚨] 토큰이 없습니다! 소켓 연결을 중단합니다. (로그인 상태 확인 필요)");
-      return; // 토큰이 없으면 아예 연결 시도를 하지 않고 함수 종료
-    }
-
     // 🌟 1. baseUrl의 끝에 /ws를 빼고 순수 도메인까지만 잡습니다.
     let baseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8080';
     if (baseUrl.startsWith('http')) {
@@ -47,7 +34,7 @@ class SocketService {
     }
 
     // 🌟 2. 백엔드 엔드포인트(/ws/projects/{projectId})에 정확히 맞춥니다.
-    const wsUrl = `${baseUrl}/ws/projects/${projectId}?accessToken=${encodeURIComponent(token)}`
+    const wsUrl = `${baseUrl}/ws/projects/${projectId}`
     this.ws = new WebSocket(wsUrl);
 
     // 연결 성공 시

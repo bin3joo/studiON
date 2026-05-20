@@ -5,6 +5,7 @@ import com.salmon.studion.domain.auth.repository.UserRepository;
 import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.auth.JwtTokenProvider;
 import io.jsonwebtoken.JwtException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,6 +25,7 @@ import java.util.Map;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String TOKEN_TYPE_ACCESS = "ACCESS";
+    private static final String ACCESS_TOKEN_COOKIE = "ACCESS_TOKEN";
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserRepository userRepository;
@@ -33,15 +35,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-        String header = request.getHeader("Authorization");
+        String token = resolveAccessToken(request);
 
-        if(header == null || !header.startsWith("Bearer ")) {
+        if(token == null || token.isBlank()) {
             filterChain.doFilter(request, response);
             return;
         }
-
-        // "Bearer " 이후의 실제 JWT 문자열만 잘라냄
-        String token = header.substring(7);  // "Bearer " 이후
 
         try {
             String tokenType = jwtTokenProvider.getTokenType(token);
@@ -77,5 +76,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private String resolveAccessToken(HttpServletRequest request) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+
+        for (Cookie cookie : cookies) {
+            if (ACCESS_TOKEN_COOKIE.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+
+        return null;
     }
 }

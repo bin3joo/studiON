@@ -9,25 +9,7 @@ export const axiosInstance = axios.create({
   withCredentials: true,
 })
 
-// 2. 요청 가로채기(Request Interceptor)
-// 모든 요청이 나가기 전에 메모리에 저장된 accessToken을 Authorization 헤더에 추가
-axiosInstance.interceptors.request.use(
-  (config) => {
-    const authStore = useAuthStore()
-    const token = authStore.accessToken
-
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-
-    return config
-  },
-  (error) => {
-    return Promise.reject(error)
-  },
-)
-
-// 3. 응답 가로채기(Response Interceptor)
+// 2. 응답 가로채기(Response Interceptor)
 // 백엔드 공통 응답에서 isSuccess가 false면 에러로 처리
 axiosInstance.interceptors.response.use(
   (response) => {
@@ -54,12 +36,11 @@ axiosInstance.interceptors.response.use(
       const authStore = useAuthStore()
       const success = await authStore.silentRefresh()
       
-      if (success && authStore.accessToken) {
-        originalRequest.headers.Authorization = `Bearer ${authStore.accessToken}`
+      if (success) {
         return axiosInstance(originalRequest)
       } else {
-        // Refresh failed, clear token
-        authStore.clearAccessToken()
+        // Refresh failed, clear auth state
+        authStore.clearAuthState()
       }
     }
 

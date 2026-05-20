@@ -27,9 +27,10 @@ public class TrackEqBandService {
     private final ProjectMemberService projectMemberService;
     private final RedisTemplate<String, String> redisTemplate;
 
+    @Transactional(readOnly = true)
     public TrackEqBandListResponse getTrackEqBandList(Integer trackEqId, Integer userId) {
 
-        getAuthorizedTrackEq(trackEqId, userId);
+        TrackEq trackEq = getAuthorizedTrackEq(trackEqId, userId);
 
         List<TrackEqBand> trackEqBands = trackEqBandRepository.findByTrackEq_IdOrderByBandOrderAsc(trackEqId);
 
@@ -37,7 +38,7 @@ public class TrackEqBandService {
                 .trackEqBandSummaries(trackEqBands.stream()
                         .map(trackEqBand -> new TrackEqBandListResponse.TrackEqBandSummary(
                                 trackEqBand.getId(),
-                                trackEqBand.getTrackEq().getId(),
+                                trackEq.getId(),
                                 trackEqBand.getBandOrder(),
                                 toEqType(trackEqBand.getEqTypeCode()),
                                 trackEqBand.getFrequencyHz(),

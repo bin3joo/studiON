@@ -1,18 +1,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { reissueAccessToken, requestLogout } from '../api/onboarding.api'
+import { fetchCurrentUser, reissueAccessToken, requestLogout } from '../api/onboarding.api'
+import type { CurrentUser } from '../types/onboarding.types'
 
 export const useAuthStore = defineStore('auth', () => {
-  const accessToken = ref<string | null>(null)
+  const currentUser = ref<CurrentUser | null>(null)
 
-  const isLoggedIn = computed(() => accessToken.value !== null)
+  const isLoggedIn = computed(() => currentUser.value !== null)
 
-  function setAccessToken(token: string) {
-    accessToken.value = token
+  function setCurrentUser(user: CurrentUser | null) {
+    currentUser.value = user
   }
 
-  function clearAccessToken() {
-    accessToken.value = null
+  function clearAuthState() {
+    currentUser.value = null
   }
 
   let silentRefreshPromise: Promise<boolean> | null = null
@@ -25,13 +26,14 @@ export const useAuthStore = defineStore('auth', () => {
     silentRefreshPromise = (async () => {
       try {
         const response = await reissueAccessToken()
-        if (response && response.data && response.data.accessToken) {
-          setAccessToken(response.data.accessToken)
+        if (response?.isSuccess) {
+          const meResponse = await fetchCurrentUser()
+          setCurrentUser(meResponse.data)
           return true
         }
         return false
       } catch (error) {
-        clearAccessToken()
+        clearAuthState()
         return false
       } finally {
         silentRefreshPromise = null
@@ -42,7 +44,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
-    clearAccessToken()
+    clearAuthState()
 
     try {
       await requestLogout()
@@ -52,10 +54,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return {
-    accessToken,
+    currentUser,
     isLoggedIn,
-    setAccessToken,
-    clearAccessToken,
+    setCurrentUser,
+    clearAuthState,
     silentRefresh,
     logout,
   }

@@ -33,10 +33,10 @@ const handleKeyChange = (newNote: string, newMode: string) => {
 // 3. 재생 제어 함수
 const handlePlay = async() => {
   await Tone.start();
-  if(!trackStore.isPlaying) trackStore.togglePlay();
+  if(!trackStore.isPlaying) await trackStore.togglePlay();
 };
 const handlePause = async() => {
-  if(trackStore.isPlaying) trackStore.togglePlay();
+  if(trackStore.isPlaying) await trackStore.togglePlay();
 };
 const handleStop = () => {
   trackStore.stopPlay();

@@ -13,8 +13,8 @@ const errorMessage = ref('')
 onMounted(async () => {
   const loginCode = new URLSearchParams(window.location.search).get('code')
    
-   // ★ 백엔드 요청 전에 무조건 예전 토큰 비우기 ★
-  authStore.clearAccessToken() 
+   // ★ 백엔드 요청 전에 무조건 예전 인증 상태 비우기 ★
+  authStore.clearAuthState() 
   
   if (!loginCode) {
     errorMessage.value = '로그인 코드가 없습니다.'
@@ -29,7 +29,7 @@ onMounted(async () => {
       throw new Error(response.message)
     }
 
-    authStore.setAccessToken(response.data.accessToken)
+    await authStore.silentRefresh()
 
     router.replace('/dashboard')
   } catch (error) {

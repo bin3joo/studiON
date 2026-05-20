@@ -28,8 +28,15 @@ export interface OnboardingRequest {
 
 export interface AuthTokenData {
   isNewUser: boolean
-  accessToken: string
 }
 
 export type OnboardingResponse = ApiResponse<AuthTokenData>
 export type TokenExchangeResponse = ApiResponse<AuthTokenData>
+
+export interface CurrentUser {
+  userId: number
+  nickname: string
+  profileImageUrl: string | null
+}
+
+export type CurrentUserResponse = ApiResponse<CurrentUser>

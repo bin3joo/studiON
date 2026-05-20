@@ -3,10 +3,9 @@ package com.salmon.studion.domain.auth.controller;
 import com.salmon.studion.domain.auth.dto.request.OnboardingRequest;
 import com.salmon.studion.domain.auth.dto.response.PositionDetailResponse;
 import com.salmon.studion.domain.auth.dto.response.TokenResponse;
-import com.salmon.studion.domain.auth.entity.PositionDetail;
-import com.salmon.studion.domain.auth.entity.PositionGroup;
 import com.salmon.studion.domain.auth.entity.User;
 import com.salmon.studion.domain.auth.service.UserService;
+import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.auth.JwtTokenProvider;
 import com.salmon.studion.global.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
@@ -18,6 +17,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -33,6 +33,11 @@ public class UserController {
     private final UserService userService;
     private final StringRedisTemplate redisTemplate;
 
+    private static final String ACCESS_TOKEN_COOKIE = "ACCESS_TOKEN";
+    private static final String REFRESH_TOKEN_COOKIE = "REFRESH_TOKEN";
+
+    @Value("${spring.jwt.expiration}")
+    long accessTokenExpiration;
     @Value("${spring.jwt.refresh-expiration}")
     long refreshTokenExpiration;
 
@@ -40,6 +45,22 @@ public class UserController {
     @GetMapping("/positions")
     public ResponseEntity<ApiResponse<List<PositionDetailResponse>>> getPositions() {
         return ResponseEntity.ok(ApiResponse.success(userService.getPositions()));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<CurrentUserResponse>> getCurrentUser(
+            @AuthenticationPrincipal CustomOAuth2User principal
+    ) {
+        if (principal == null || principal.getUserId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증이 필요합니다.");
+        }
+
+        User user = userService.getUserByUserId(principal.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(new CurrentUserResponse(
+                user.getId(),
+                user.getNickname(),
+                user.getProfileImgUrl()
+        )));
     }
 
     // 온보딩 완료 (ONBOARDING_SESSION 쿠키로 임시 OAuth 정보를 조회한 뒤 정식 토큰 발급)
@@ -73,20 +94,12 @@ public class UserController {
 
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, deleteOnboardingCookie.toString());
 
-        ResponseCookie refreshCookie = ResponseCookie.from("REFRESH_TOKEN", refreshToken)
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Lax")
-                .path("/api/v1/auth")
-                .maxAge(refreshTokenExpiration / 1000)
-                .build();
-
-        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+        addAccessTokenCookie(servletResponse, accessToken);
+        addRefreshTokenCookie(servletResponse, refreshToken);
 
         // 정식 토큰 발급
         TokenResponse response = TokenResponse.builder()
                 .isNewUser(false)
-                .accessToken(accessToken)
                 .build();
 
         return ResponseEntity.ok(ApiResponse.success(response));
@@ -95,7 +108,8 @@ public class UserController {
     // 프론트 => url에서 code 읽고 이 API 호출 -> access token 발급받음
     @PostMapping("/exchange")
     public ResponseEntity<ApiResponse<TokenResponse>> exchangeLoginCode(
-            @RequestParam String code
+            @RequestParam String code,
+            HttpServletResponse servletResponse
     ) {
 
         String redisKey = "login-code:" + code;
@@ -107,10 +121,20 @@ public class UserController {
 
         Integer userId = Integer.valueOf(userIdValue);
         String accessToken = jwtTokenProvider.generateAccessToken(userId);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(userId);
+
+        redisTemplate.opsForValue().set(
+                "refresh:" + userId,
+                refreshToken,
+                refreshTokenExpiration,
+                TimeUnit.MILLISECONDS
+        );
+
+        addAccessTokenCookie(servletResponse, accessToken);
+        addRefreshTokenCookie(servletResponse, refreshToken);
 
         TokenResponse response = TokenResponse.builder()
                 .isNewUser(false)
-                .accessToken(accessToken)
                 .build();
 
         return ResponseEntity.ok(ApiResponse.success(response));
@@ -119,10 +143,18 @@ public class UserController {
     // access token 재발급
     @PostMapping("/reissue")
     public ResponseEntity<ApiResponse<TokenResponse>> reissue(
-            @CookieValue("REFRESH_TOKEN") String refreshToken,
+            @CookieValue(value="REFRESH_TOKEN", required = false) String refreshToken,
             HttpServletResponse servletResponse
     ) {
-        jwtTokenProvider.validateTokenType(refreshToken, "REFRESH");
+        if(refreshToken == null || refreshToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "refresh token이 없습니다.");
+        }
+
+        try {
+            jwtTokenProvider.validateTokenType(refreshToken, "REFRESH");
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 refresh token입니다.");
+        }
 
         Integer userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
 
@@ -133,6 +165,7 @@ public class UserController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 refresh token입니다.");
         }
 
+        // refresh token 재발급
         String newAccessToken = jwtTokenProvider.generateAccessToken(userId);
         String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
 
@@ -144,19 +177,11 @@ public class UserController {
                 TimeUnit.MILLISECONDS
         );
 
-        ResponseCookie refreshCookie = ResponseCookie.from("REFRESH_TOKEN", newRefreshToken)
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Lax")
-                .path("/api/v1/auth")
-                .maxAge(refreshTokenExpiration / 1000)
-                .build();
-
-        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+        addAccessTokenCookie(servletResponse, newAccessToken);
+        addRefreshTokenCookie(servletResponse, newRefreshToken);
 
         TokenResponse response = TokenResponse.builder()
                 .isNewUser(false)
-                .accessToken(newAccessToken)
                 .build();
 
         return ResponseEntity.ok(ApiResponse.success(response));
@@ -178,7 +203,44 @@ public class UserController {
             }
         }
 
-        ResponseCookie deleteRefreshCookie = ResponseCookie.from("REFRESH_TOKEN", "")
+        deleteAuthCookies(servletResponse);
+
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    private void addAccessTokenCookie(HttpServletResponse response, String accessToken) {
+        ResponseCookie accessCookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE, accessToken)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(accessTokenExpiration / 1000)
+                .build();
+
+        response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
+    }
+
+    private void addRefreshTokenCookie(HttpServletResponse response, String refreshToken) {
+        ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE, refreshToken)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/api/v1/auth")
+                .maxAge(refreshTokenExpiration / 1000)
+                .build();
+
+        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+    }
+
+    private void deleteAuthCookies(HttpServletResponse response) {
+        ResponseCookie deleteAccessCookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE, "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(0)
+                .build();
+        ResponseCookie deleteRefreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE, "")
                 .httpOnly(true)
                 .secure(true)
                 .sameSite("Lax")
@@ -186,8 +248,14 @@ public class UserController {
                 .maxAge(0)
                 .build();
 
-        servletResponse.addHeader(HttpHeaders.SET_COOKIE, deleteRefreshCookie.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, deleteAccessCookie.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, deleteRefreshCookie.toString());
+    }
 
-        return ResponseEntity.ok(ApiResponse.success());
+    public record CurrentUserResponse(
+            Integer userId,
+            String nickname,
+            String profileImageUrl
+    ) {
     }
 }

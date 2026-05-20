@@ -60,15 +60,9 @@ function handleDefaultTrackBrowse() {
   toolbarFileInputRef.value?.click()
 }
 
-// 현재 내 정보 (토큰에서 추출)
+// 현재 내 정보
 const currentUserId = computed(() => {
-  if (!authStore.accessToken) return null
-  try {
-    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
-    return payload.userId || payload.memberId || null
-  } catch(e) {
-    return null
-  }
+  return authStore.currentUser?.userId ?? null
 })
 
 const {
@@ -161,7 +155,7 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
   if(e.code === 'Space' || e.key === ' '){
     e.preventDefault(); // 여기서 브라우저 기본 스크롤 동작을 완벽히 차단.
     await Tone.start(); 
-    trackStore.togglePlay();
+    await trackStore.togglePlay();
     return; // 실행 후 바로 종료
   }
 

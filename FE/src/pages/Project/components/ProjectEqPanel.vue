@@ -229,7 +229,7 @@ async function togglePreview(type: 'before' | 'after') {
     trackStore.playheadPosition = exactStartBar
   }
 
-  trackStore.togglePlay()
+  await trackStore.togglePlay()
 }
 
 watch(

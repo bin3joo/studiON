@@ -1,7 +1,6 @@
-import { onUnmounted, ref, watch, type WatchStopHandle } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { useTrackStore } from '../store/useTrackStore'
 import { socketService } from '@/core/services/socket.service'
-import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 
 interface OnlineUser {
   userId: number
@@ -11,12 +10,10 @@ interface OnlineUser {
 
 export function useProjectCollaboration(projectId: number) {
   const trackStore = useTrackStore()
-  const authStore = useAuthStore()
 
   const onlineUsers = ref<OnlineUser[]>([])
   const projectName = ref('프로젝트')
 
-  let tokenWatcher: WatchStopHandle | null = null
   let isProjectSocketSubscribed = false
 
   function syncProjectNameFromStore() {
@@ -53,28 +50,10 @@ export function useProjectCollaboration(projectId: number) {
   }
 
   function connectProjectSocket() {
-    if (authStore.accessToken) {
-      socketService.connect(projectId)
-      return
-    }
-
-    tokenWatcher = watch(
-      () => authStore.accessToken,
-      (newToken) => {
-        if (!newToken) return
-
-        socketService.connect(projectId)
-
-        tokenWatcher?.()
-        tokenWatcher = null
-      },
-    )
+    socketService.connect(projectId)
   }
 
   function disconnectProjectSocket() {
-    tokenWatcher?.()
-    tokenWatcher = null
-
     socketService.disconnect()
   }
 

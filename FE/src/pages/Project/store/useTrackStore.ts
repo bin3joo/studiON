@@ -105,32 +105,16 @@ export const useTrackStore = defineStore('track', () => {
         const promise = (async () => {
             const response = await fetch(url);
             const arrayBuffer = await response.arrayBuffer();
-            const audioCtx = Tone.getContext().rawContext as AudioContext;
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            const OfflineAudioContextCtor =
+                window.OfflineAudioContext ||
+                (window as typeof window & { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
 
-            // [최적화] Web Audio API 버퍼 할당 병목(JIT Compile Freeze) 사전 제거
-            // 거대한 AudioBuffer가 처음 할당될 때 브라우저가 멈추는 현상을 막기 위해
-            // ?�디???�운로드 직후 백그?�운?�에????�?�??�생??강제?�여 캐싱???�도?�니??
-            try {
-                const warmupSource = audioCtx.createBufferSource();
-                warmupSource.buffer = audioBuffer;
-                const dummyGain = audioCtx.createGain();
-                dummyGain.gain.value = 0; // 무음 처리
-                warmupSource.connect(dummyGain);
-                dummyGain.connect(audioCtx.destination);
-
-                warmupSource.start(0, 0, 0.001);
-
-                // 웜업 노드가 JIT 컴파일을 충분히 완료할 수 있도록 메모리 해제를 늦춥니다
-                setTimeout(() => {
-                    try {
-                        warmupSource.disconnect();
-                        dummyGain.disconnect();
-                    } catch (e) { /* ignore */ }
-                }, 5000);
-            } catch (e) {
-                // 무시
+            if (!OfflineAudioContextCtor) {
+                throw new Error('OfflineAudioContext is not supported.');
             }
+
+            const decodeContext = new OfflineAudioContextCtor(1, 1, 44100);
+            const audioBuffer = await decodeContext.decodeAudioData(arrayBuffer.slice(0));
 
             audioBufferCache.set(url, audioBuffer);
             audioBufferPending.delete(url);
@@ -231,20 +215,29 @@ export const useTrackStore = defineStore('track', () => {
 
     //프로젝트 BPM 설정 및 Tone.js 동기화
     const bpm = ref(120);
-    Tone.getTransport().bpm.value = 120; // Transport 내부 시계는 항상 고정 (playbackRate로 속도 조절)
-    // 메인 스레드 블로킹 시 이벤트 스킵 방지를 위한 스케줄링 여유시간 상향 조정
-    Tone.getContext().lookAhead = 0.2;
     // transport는 백 그라운드의 오디오 시계 역할을 함. 여기 tempo를 조정하면 전체 앱의 빠르기가 바뀜.
 
-    // 마스터 트랙의 믹서 채널 생성 (모노 다운믹스 절대 방지: 강제 스테레오)
-    const masterPanner = new Tone.Panner(0).toDestination();
-    const masterVolume = new Tone.Volume(0).connect(masterPanner);
+    let masterPanner: Tone.Panner | null = null;
+    let masterVolume: Tone.Volume | null = null;
+    let audioEngineSetupPromise: Promise<void> | null = null;
 
-    // 스테레오 보존을 위한 강력한 Web Audio API 옵션 적용
-    masterVolume.channelCount = 2;
-    masterVolume.channelCountMode = "explicit";
-    masterPanner.channelCount = 2;
-    masterPanner.channelCountMode = "explicit";
+    function ensureMasterBus() {
+        if (masterPanner && masterVolume) return { masterPanner, masterVolume };
+
+        // 사용자 제스처 이후에만 마스터 오디오 노드를 생성해 브라우저 자동재생 경고를 피합니다.
+        masterPanner = new Tone.Panner(0).toDestination();
+        masterVolume = new Tone.Volume(0).connect(masterPanner);
+
+        // 스테레오 보존을 위한 강력한 Web Audio API 옵션 적용
+        masterVolume.channelCount = 2;
+        masterVolume.channelCountMode = "explicit";
+        masterPanner.channelCount = 2;
+        masterPanner.channelCountMode = "explicit";
+        masterVolume.volume.value = masterTrack.value.volume;
+        masterPanner.pan.value = masterTrack.value.pan / 100;
+
+        return { masterPanner, masterVolume };
+    }
 
     //bpm이 변경될때마다 전체 클립을 재스케줄링 (Transport BPM은 고정, playbackRate만으로 속도 제어)
     watch(bpm, (newBpm) => {
@@ -869,15 +862,17 @@ export const useTrackStore = defineStore('track', () => {
         };
         trackList.value.push(newTrack);
 
-        const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
-        const vol = new Tone.Volume(newTrack.volume).connect(panner);
-        panner.channelCount = 2; panner.channelCountMode = "explicit";
-        vol.channelCount = 2; vol.channelCountMode = "explicit";
+        if (masterVolume) {
+            const panner = new Tone.Panner(newTrack.pan / 100).connect(masterVolume);
+            const vol = new Tone.Volume(newTrack.volume).connect(panner);
+            panner.channelCount = 2; panner.channelCountMode = "explicit";
+            vol.channelCount = 2; vol.channelCountMode = "explicit";
 
-        trackVolumes.set(newTrack.trackId, vol);
-        trackPanners.set(newTrack.trackId, panner);
+            trackVolumes.set(newTrack.trackId, vol);
+            trackPanners.set(newTrack.trackId, panner);
 
-        rebuildTrackEqChain(newTrack.trackId);
+            rebuildTrackEqChain(newTrack.trackId);
+        }
 
         if (pendingTrackAddCount.value > 0) {
             pendingTrackAddCount.value--;
@@ -1995,7 +1990,7 @@ export const useTrackStore = defineStore('track', () => {
     const setTrackVolume = (trackId: number, volume: number, emitSocket: boolean = true) => {
         if (trackId === 999999) {
             masterTrack.value.volume = volume;
-            masterVolume.volume.value = volume;
+            if (masterVolume) masterVolume.volume.value = volume;
             return;
         }
 
@@ -2037,7 +2032,7 @@ export const useTrackStore = defineStore('track', () => {
         // console.log(`[패닝 디버그] setTrackPan 호출! trackId=${trackId}, pan=${pan}`);
         if (trackId === 999999) {
             masterTrack.value.pan = pan;
-            masterPanner.pan.value = pan / 100;
+            if (masterPanner) masterPanner.pan.value = pan / 100;
             // console.log(`[패닝 디버그] 마스터 패너 적용 완료: masterPanner.pan.value=${masterPanner.pan.value}`);
             return;
         }
@@ -2198,9 +2193,11 @@ export const useTrackStore = defineStore('track', () => {
     let playbackStartTransportSec = 0;
 
     //재생 상태 토글 함수
-    const togglePlay = () => {
+    const togglePlay = async () => {
         try {
             if (!isPlaying.value) {
+                await ensureAudioEngineReady();
+
                 const offsetTime = playheadPosition.value * secondsPerBar.value;
                 playbackStartTransportSec = offsetTime;
 
@@ -2508,6 +2505,7 @@ export const useTrackStore = defineStore('track', () => {
     //오디오 파일 로딩 및 Transport 조절 함수
     const setupAudioEngine = async (tracks: TrackUIState[]) => {
         // console.log("========== [Audio Engine Setup Start] ==========");
+        const { masterVolume } = ensureMasterBus();
 
         for (const track of tracks) {
             if (!trackVolumes.has(track.trackId)) {
@@ -2577,6 +2575,25 @@ export const useTrackStore = defineStore('track', () => {
         // console.log("========== [Audio Engine Setup End] ==========");
     }
 
+    const ensureAudioEngineReady = async () => {
+        await Tone.start();
+        Tone.getTransport().bpm.value = 120; // Transport 내부 시계는 항상 고정 (playbackRate로 속도 조절)
+        Tone.getContext().lookAhead = 0.2;
+
+        if (!audioEngineSetupPromise) {
+            audioEngineSetupPromise = setupAudioEngine(trackList.value)
+                .catch(error => {
+                    console.warn('[AudioEngine] setupAudioEngine failed.', error);
+                    throw error;
+                })
+                .finally(() => {
+                    audioEngineSetupPromise = null;
+                });
+        }
+
+        await audioEngineSetupPromise;
+    }
+
     // 프로젝트 진입 시 기존 오디오 자원 완벽 초기화 (유령 오디오, 중복 스케줄링 누수 방지)
     const disposeAllAudio = () => {
         // console.log("========== [Audio Engine Cleanup Start] ==========");
@@ -2593,6 +2610,12 @@ export const useTrackStore = defineStore('track', () => {
 
         trackPanners.forEach(panner => panner.dispose());
         trackPanners.clear();
+
+        masterVolume?.dispose();
+        masterVolume = null;
+        masterPanner?.dispose();
+        masterPanner = null;
+        audioEngineSetupPromise = null;
 
         // EQ/분석 노드 정리
         trackEqNodes.forEach(nodes => nodes.forEach(node => node.filter.dispose()));
@@ -2882,18 +2905,26 @@ export const useTrackStore = defineStore('track', () => {
 
                     await Promise.all(
                         trackEqs.map(async (trackEq) => {
-                            const bands = await projectApi.getTrackEqBands(trackEq.trackEqId)
+                            try {
+                                const bands = await projectApi.getTrackEqBands(trackEq.trackEqId)
 
-                            eqBandsByTrackId.set(
-                                Number(trackEq.trackId),
-                                [...bands]
-                                    .sort((a, b) => a.bandOrder - b.bandOrder)
-                                    .map(mapTrackEqBandSummaryToState),
-                            )
+                                eqBandsByTrackId.set(
+                                    Number(trackEq.trackId),
+                                    [...bands]
+                                        .sort((a, b) => a.bandOrder - b.bandOrder)
+                                        .map(mapTrackEqBandSummaryToState),
+                                )
+                            } catch (bandError) {
+                                console.error('[EQ bands fetch failed]', {
+                                    trackId: trackEq.trackId,
+                                    trackEqId: trackEq.trackEqId,
+                                    error: bandError,
+                                })
+                            }
                         }),
                     )
                 } catch (eqError) {
-                    console.error('[EQ bands fetch failed]', eqError)
+                    console.error('[EQ list fetch failed]', eqError)
                 }
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({
@@ -2925,11 +2956,6 @@ export const useTrackStore = defineStore('track', () => {
 
                 // nextTick???�용??DOM ?�데?�트�?보장?????�디???�진???�정?�여 ?�더�?꼬임??방�?
                 await nextTick();
-                try {
-                    setupAudioEngine(trackList.value);
-                } catch (audioError) {
-                    console.warn('[AudioEngine] setupAudioEngine failed, but track loaded.', audioError);
-                }
             }
         } catch (error) {
             //  console.error("프로젝트 로딩 실패:", error);

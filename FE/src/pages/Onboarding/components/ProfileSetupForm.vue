@@ -158,7 +158,7 @@ async function handleSubmit() {
       throw new Error(response.message)
     }
 
-    authStore.setAccessToken(response.data.accessToken)
+    await authStore.silentRefresh()
 
     done.value = true
   } catch (error) {

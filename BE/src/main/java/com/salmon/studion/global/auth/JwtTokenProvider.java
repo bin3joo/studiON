@@ -1,6 +1,7 @@
 package com.salmon.studion.global.auth;
 
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -85,7 +86,7 @@ public class JwtTokenProvider {
         String tokenType = getTokenType(token);
 
         if(!expectedType.equals(tokenType)) {
-            throw new IllegalArgumentException("잘못된 토큰 타입입니다.");
+            throw new JwtException("잘못된 토큰 타입입니다.");
         }
     }
 

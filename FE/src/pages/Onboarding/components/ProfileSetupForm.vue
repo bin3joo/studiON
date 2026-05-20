@@ -173,9 +173,6 @@ function handleEnterDashboard() {
   router.push('/dashboard')
 }
 
-function handleEditAgain() {
-  done.value = false
-}
 </script>
 
 <template>
@@ -333,13 +330,6 @@ function handleEditAgain() {
           Enter Dashboard
         </button>
 
-        <button
-          type="button"
-          class="rounded-full border border-white/10 px-6 py-2.5 text-xs uppercase tracking-[0.3em] text-zinc-400 transition hover:border-[#FF3DCB]/60 hover:text-[#FF3DCB]"
-          @click="handleEditAgain"
-        >
-          Edit again
-        </button>
       </div>
     </div>
   </div>

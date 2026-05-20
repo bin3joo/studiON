@@ -114,8 +114,14 @@ const appliedAiEqIssueIds = ref<Set<string | number>>(new Set())
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
+const AI_WORKFLOW_POLL_INTERVAL_MS = 2000
+const AI_WORKFLOW_POLL_TIMEOUT_MS = 10 * 60 * 1000
+const AI_WORKFLOW_POLL_MAX_TRY = Math.ceil(
+  AI_WORKFLOW_POLL_TIMEOUT_MS / AI_WORKFLOW_POLL_INTERVAL_MS,
+)
+
   async function pollAiWorkflow(jobId: number) {
-  const maxTry = 60
+  const maxTry = AI_WORKFLOW_POLL_MAX_TRY
 
   for (let i = 0; i < maxTry; i += 1) {
     const result = await getAiWorkflowStatus(jobId)
@@ -144,14 +150,14 @@ const appliedAiEqIssueIds = ref<Set<string | number>>(new Set())
       return result
     }
 
-    await sleep(2000)
+    await sleep(AI_WORKFLOW_POLL_INTERVAL_MS)
   }
 
   throw new Error('AI 분석 결과를 가져오지 못했습니다.')
 }
 
 async function pollAiFeedbackResult(jobId: number) {
-  const maxTry = 60
+  const maxTry = AI_WORKFLOW_POLL_MAX_TRY
 
   for (let i = 0; i < maxTry; i += 1) {
     const result = await getAiWorkflowStatus(jobId)
@@ -177,7 +183,7 @@ async function pollAiFeedbackResult(jobId: number) {
       return result
     }
 
-    await sleep(2000)
+    await sleep(AI_WORKFLOW_POLL_INTERVAL_MS)
   }
 
   throw new Error('AI 수정안을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.')

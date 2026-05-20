@@ -18,7 +18,7 @@ import {socketService} from '../../core/services/socket.service'; //웹 소켓 �
 import {useAuthStore} from '@/pages/Onboarding/stores/auth.store';
 import ProjectEqPanel from './components/ProjectEqPanel.vue'
 import type { TrackEqBandState } from './types'
-import { AlertTriangle, Loader2 } from 'lucide-vue-next';
+import { AlertTriangle } from 'lucide-vue-next';
 import { projectApi } from './api/project.api';
 import { useProjectSave } from './composables/useProjectSave';
 import { useCommentStore } from './store/useCommentStore'
@@ -392,7 +392,7 @@ function parseTrackId(trackId: string) {
 const hoveredMeasure = ref<number | null>(null)
 const hoveredTrackId = ref<string | null>(null)
 
-  function applyCommentAdded(data: {
+function applyCommentAdded(data: {
   projectId: number
   trackId: number
   commentId: number
@@ -412,6 +412,8 @@ const hoveredTrackId = ref<string | null>(null)
   }[]
   createdAt: string
 }) {
+  if (data.isResolved) return
+
   const trackId = String(data.trackId)
 
   const target = commentGroups.value.find(group =>
@@ -496,17 +498,22 @@ function applyCommentStatusChanged(data: {
   isResolved: boolean
   updatedAt: string
 }) {
-  const trackId = String(data.trackId)
   const commentId = String(data.commentId)
 
-  const targetGroup = commentGroups.value.find(group =>
-    group.trackId === trackId &&
-    group.comments.some(comment => comment.id === commentId),
-  )
+  if (data.isResolved) {
+    commentGroups.value = commentGroups.value.filter(group =>
+      !group.comments.some(comment => comment.id === commentId),
+    )
+  } else {
+    const trackId = String(data.trackId)
+    const targetGroup = commentGroups.value.find(group =>
+      group.trackId === trackId &&
+      group.comments.some(comment => comment.id === commentId),
+    )
 
-  if (!targetGroup) return
-
-  targetGroup.resolved = data.isResolved
+    if (!targetGroup) return
+    targetGroup.resolved = false
+  }
 
   if (projectId) {
     commentStore.fetchComments(Number(projectId));
@@ -553,6 +560,8 @@ watch(
     const newGroups = new Map<string, TrackMeasureCommentGroup>()
 
     newComments.forEach((rootComment) => {
+      if (rootComment.isResolved) return
+
       const trackIdStr = String(rootComment.trackId)
       // 마스터 트랙은 인라인 코멘트를 지원하지 않으므로 무시
       if (trackStore.masterTrack && trackIdStr === String(trackStore.masterTrack.trackId)) return;
@@ -1111,8 +1120,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
 <template>
   <!-- 로딩 오버레이 -->
-  <div v-if="trackStore.isLoading" class="fixed inset-0 z-100 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm transition-all duration-300">
-    <Loader2 class="h-10 w-10 animate-spin text-orange-400 mb-4" />
+  <div v-if="trackStore.isLoading" class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm transition-all duration-300">
     <p class="text-zinc-300 font-medium animate-pulse">프로젝트를 불러오는 중입니다...</p>
   </div>
 
@@ -1282,7 +1290,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     />
 
     <!-- 잘못된 파일 드롭 안내 모달 -->
-    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="isInvalidDropModalOpen = false">
+    <div v-if="isInvalidDropModalOpen" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="isInvalidDropModalOpen = false">
       <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
         <div class="rounded-full bg-red-500/20 p-3">
           <AlertTriangle class="h-6 w-6 text-red-400" />
@@ -1298,7 +1306,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     </div>
 
     <!-- AI 성공 메시지 모달 -->
-    <div v-if="aiSuccessMessage" class="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
+    <div v-if="aiSuccessMessage" class="fixed inset-0 z-[9999] grid place-items-center bg-black/40 px-4 backdrop-blur-md animate-fade-in" @click.self="aiSuccessMessage = null">
       <div class="relative w-full max-w-sm rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all flex flex-col items-center gap-4 text-center">
         <div class="rounded-full bg-emerald-500/20 p-3">
           <svg class="h-6 w-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

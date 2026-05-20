@@ -45,11 +45,6 @@ ENTRY_PATH_MAP = {
     "apply_selected_edit_recipe": "apply_selected_edit_recipe",
 }
 
-CLAP_GATE_PATH_MAP = {
-    "infer_track_roles": "infer_track_roles",
-    "detect_sibilance": "detect_sibilance",
-}
-
 DSP_SCAN_PATH_MAP = {
     "detect_band_overlap": "detect_band_overlap",
     "fail_workflow": "fail_workflow",
@@ -104,9 +99,6 @@ WORKFLOW_NODE_LABELS = {
         "detect_high_band_harshness / 고역 harshness 탐지"
     ),
     "select_role_candidates": "select_role_candidates / 역할 추론 후보 선택",
-    "clap_gate": "clap_gate / CLAP 실행 여부 판단",
-    "infer_track_roles": "infer_track_roles / 트랙 역할 추론",
-    "detect_sibilance": "detect_sibilance / 치찰음 탐지",
     "merge_analysis": "merge_analysis / 분석 결과 병합",
     "candidate_ranking": "candidate_ranking / 사용자 후보 정렬",
     "wait_user_plan_input": "wait_user_plan_input / 사용자 입력 대기",
@@ -155,9 +147,6 @@ def build_workflow_graph():
     )
     graph.add_node("detect_high_band_harshness", nodes.detect_high_band_harshness)
     graph.add_node("select_role_candidates", nodes.select_role_candidates)
-    graph.add_node("clap_gate", nodes.clap_gate)
-    graph.add_node("infer_track_roles", nodes.infer_track_roles)
-    graph.add_node("detect_sibilance", nodes.detect_sibilance)
     graph.add_node("merge_analysis", nodes.merge_analysis)
     graph.add_node("build_issue_payloads", nodes.build_issue_payloads)
     graph.add_node("candidate_ranking", nodes.candidate_ranking)
@@ -197,10 +186,7 @@ def build_workflow_graph():
     )
     graph.add_edge("detect_residual_master_clipping", "detect_high_band_harshness")
     graph.add_edge("detect_high_band_harshness", "select_role_candidates")
-    graph.add_edge("select_role_candidates", "clap_gate")
-    graph.add_conditional_edges("clap_gate", edges.route_after_clap_gate, CLAP_GATE_PATH_MAP)
-    graph.add_edge("infer_track_roles", "detect_sibilance")
-    graph.add_edge("detect_sibilance", "merge_analysis")
+    graph.add_edge("select_role_candidates", "merge_analysis")
     graph.add_edge("merge_analysis", "build_issue_payloads")
     graph.add_edge("build_issue_payloads", "candidate_ranking")
     graph.add_conditional_edges(

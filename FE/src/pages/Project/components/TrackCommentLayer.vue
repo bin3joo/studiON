@@ -140,6 +140,24 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+// 한글(IME) 조합 중 엔터 키 입력 시 발생하는 중복 등록(더블 코멘트) 이슈를 막기 위해
+// composition 진행 중(e.isComposing === true)일 때는 이벤트를 무시하는 키 핸들러를 새로 도입합니다.
+function handleInputKeydown(e: KeyboardEvent, measure: number) {
+  if (e.isComposing) return
+
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    // 멘션 드롭다운이 활성인 경우 엔터는 멘션 목록의 멤버를 선택하는 동작이 우선이어야 합니다.
+    if (mentionDropdownActive.value) {
+      handleKeydown(e)
+    } else {
+      submitComment(measure)
+    }
+  } else {
+    handleKeydown(e)
+  }
+}
+
 const COMMENT_BOX_HEIGHT = 280
 const VIEWPORT_MARGIN = 24
 
@@ -585,9 +603,8 @@ function parseMentions(content: string) {
               type="text"
               placeholder="댓글 추가"
               class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
-              @keydown.enter.prevent="submitComment(expandedMeasure)"
               @input="handleInput"
-              @keydown="handleKeydown"
+              @keydown="handleInputKeydown($event, expandedMeasure)"
             />
             <button
               class="shrink-0 transition hover:scale-110 disabled:opacity-50"
@@ -679,9 +696,8 @@ function parseMentions(content: string) {
                 type="text"
                 placeholder="댓글 추가"
                 class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
-                @keydown.enter.prevent="submitComment(expandedMeasure)"
                 @input="handleInput"
-                @keydown="handleKeydown"
+                @keydown="handleInputKeydown($event, expandedMeasure)"
               />
               <button
                 class="shrink-0 transition hover:scale-110 disabled:opacity-50"

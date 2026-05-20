@@ -104,6 +104,23 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+// 한글(IME) 조합(composition) 도중에 엔터 키를 입력할 때 대댓글이 이중 등록되는 버그를
+// 해결하기 위해 isComposing 상태를 검사하여 중복 엔터 이벤트를 필터링하는 핸들러입니다.
+function handleInputKeydown(e: KeyboardEvent) {
+  if (e.isComposing) return
+
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    if (mentionDropdownActive.value) {
+      handleKeydown(e)
+    } else {
+      handleSubmitReply()
+    }
+  } else {
+    handleKeydown(e)
+  }
+}
+
 const handleSubmitReply = () => {
   const trimmed = replyContent.value.trim()
   if (!trimmed) return
@@ -177,9 +194,8 @@ const highlightMentions = (text: string) => {
         <input
           ref="inputRef"
           v-model="replyContent"
-          @keydown.enter.prevent="handleSubmitReply"
           @input="handleInput"
-          @keydown="handleKeydown"
+          @keydown="handleInputKeydown"
           type="text"
           placeholder="댓글 추가"
           class="w-full rounded-md border border-white/10 bg-[#1c1c1c] py-1.5 pl-3 pr-8 text-xs text-white placeholder-gray-500 focus:border-white/30 focus:outline-none"

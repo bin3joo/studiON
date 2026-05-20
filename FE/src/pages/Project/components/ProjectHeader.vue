@@ -207,7 +207,7 @@ const isNearLimit = computed(() => {
         @click="emit('save-version')"
       >
         <Camera class="h-4 w-4" />
-        <span>음원 버전 저장</span>
+        <span>버전 저장</span>
       </button>
     </div>
 
@@ -238,7 +238,7 @@ const isNearLimit = computed(() => {
         @click="emit('save')"
       >
         <Save class="h-4 w-4" />
-        <span>저장</span>
+        <span></span>
         <span class="text-muted-foreground">{{ lastSavedAt }}</span>
       </button>
     </div>

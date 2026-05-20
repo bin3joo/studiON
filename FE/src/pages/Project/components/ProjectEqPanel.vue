@@ -100,7 +100,19 @@ const selectedRevisionTrackIds = ref<number[]>([])
 const revisionMessage = ref('')
 
 const revisionCandidateTracks = computed(() => {
-  return trackStore.trackList
+  const allowedTrackIds = new Set(activeAiAnalysis.value?.involvedTrackIds ?? [])
+
+  if (allowedTrackIds.size === 0) {
+    return []
+  }
+
+  return trackStore.trackList.filter(track =>
+    allowedTrackIds.has(Number(track.trackId)),
+  )
+})
+
+const hasRevisionCandidates = computed(() => {
+  return revisionCandidateTracks.value.length > 0
 })
 
 function toggleRevisionTrack(trackId: number) {
@@ -182,6 +194,25 @@ const activeAiAnalysis = computed(() => {
   if (!aiAnalysisItems?.value || !activeAiAnalysisId?.value) return null
   return aiAnalysisItems.value.find(item => item.id === activeAiAnalysisId.value) || null
 })
+
+watch(
+  () => activeAiAnalysis.value?.id,
+  () => {
+    selectedRevisionTrackIds.value = []
+    revisionMessage.value = ''
+  },
+)
+
+watch(
+  revisionCandidateTracks,
+  (tracks) => {
+    const candidateTrackIds = new Set(tracks.map(track => Number(track.trackId)))
+
+    selectedRevisionTrackIds.value = selectedRevisionTrackIds.value.filter(trackId =>
+      candidateTrackIds.has(Number(trackId)),
+    )
+  },
+)
 
 let previousLoopState = { active: false, start: 0, end: 4 }
 
@@ -397,7 +428,17 @@ watch(
           충돌 트랙을 확인하고 수정하고 싶은 트랙을 선택해주세요.
         </p>
 
-        <div class="mt-5 flex flex-wrap gap-3">
+        <p
+          v-if="!hasRevisionCandidates"
+          class="mt-4 text-sm text-amber-300"
+        >
+          현재 문제 구간과 직접 관련된 트랙 정보가 없어 수정 요청을 보낼 수 없습니다.
+        </p>
+
+        <div
+          v-else
+          class="mt-5 flex flex-wrap gap-3"
+        >
           <button
             v-for="track in revisionCandidateTracks"
             :key="track.trackId"
@@ -445,7 +486,7 @@ watch(
           <button
             type="button"
             class="inline-flex h-11 items-center gap-2 rounded-md bg-[#FF8F1A] px-5 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-40"
-            :disabled="aiAnalyzing || selectedRevisionTrackIds.length === 0"
+            :disabled="aiAnalyzing || selectedRevisionTrackIds.length === 0 || !hasRevisionCandidates"
             @click="requestAiRevision"
           >
             <Wand2 class="h-4 w-4" />

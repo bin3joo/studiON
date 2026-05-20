@@ -301,7 +301,6 @@ const isNearLimit = computed(() => {
         @click="emit('open-history')"
       >
         <History class="h-4 w-4" />
-        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
       </button>
 
       <!-- 코멘트 (말풍선 아이콘) -->

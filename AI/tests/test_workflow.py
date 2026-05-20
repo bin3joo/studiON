@@ -787,7 +787,6 @@ def test_workflow_skips_clap_when_not_needed() -> None:
         }
     )
 
-    assert result["clap_required"] is False
     assert result["current_node"] == "wait_user_plan_input"
     assert result["inferred_roles"] == {}
 
@@ -2114,7 +2113,6 @@ def test_select_role_candidates_uses_high_band_issue_tracks() -> None:
     result = analysis_nodes.select_role_candidates(state)
 
     assert result["role_candidate_track_ids"] == [1, 3]
-    assert result["clap_required"] is True
 
 
 def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() -> None:
@@ -2143,7 +2141,6 @@ def test_select_role_candidates_falls_back_to_high_band_windows_for_sibilance() 
     result = analysis_nodes.select_role_candidates(state)
 
     assert result["role_candidate_track_ids"] == [2]
-    assert result["clap_required"] is True
 
 
 def test_infer_track_roles_calls_clap_and_persists_summary_artifact() -> None:
@@ -3553,7 +3550,6 @@ def test_workflow_skips_sibilance_when_clap_candidate_is_absent() -> None:
         }
     )
 
-    assert result["clap_required"] is False
     assert result["inferred_roles"] == {}
     assert result["vocal_detected"] is False
     assert "sibilance" not in result["detected_issues"]

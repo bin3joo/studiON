@@ -64,7 +64,7 @@ ISSUE_MIN_DURATION_MS = {
     "track_clipping": 80,
     "master_clipping": 80,
     "sibilance": 96,
-    "high_band_harshness": 96,
+    "high_band_harshness": 160,
 }
 BAND_OVERLAP_FRAME_MIN_WINDOW_ENERGY = 0.01
 BAND_OVERLAP_FRAME_MIN_BODY_ENERGY = 0.18
@@ -336,7 +336,6 @@ def detect_high_band_harshness(state: WorkflowState) -> WorkflowState:
 
 def select_role_candidates(state: WorkflowState) -> WorkflowState:
     role_candidates = _find_role_candidate_track_ids(state)
-    clap_required = bool(role_candidates) and "sibilance" in state.get("issue_types", [])
     return workflow_update(
         state,
         node="select_role_candidates",
@@ -344,7 +343,6 @@ def select_role_candidates(state: WorkflowState) -> WorkflowState:
         progress=36,
         extra={
             "role_candidate_track_ids": role_candidates,
-            "clap_required": clap_required,
         },
     )
 
@@ -368,9 +366,9 @@ def _find_role_candidate_track_ids(state: WorkflowState) -> list[int]:
     for track_id, windows in track_frames_by_id.items():
         for window in windows:
             if (
-                window["high_band_ratio"] >= 0.34
-                and window["presence_energy"] >= 0.06
-                and window["spectral_centroid_hz"] >= 3200
+                window["high_band_ratio"] >= 0.38
+                and window["presence_energy"] >= 0.08
+                and window["spectral_centroid_hz"] >= 3600
             ):
                 candidate_track_ids.add(track_id)
                 break

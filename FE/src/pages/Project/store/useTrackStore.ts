@@ -223,6 +223,7 @@ export const useTrackStore = defineStore('track', () => {
 
     const projectMembers = ref<{ userId: number; nickname: string; profileImageUrl: string | null; }[]>([]);
     const currentTotalSizeBytes = ref<number>(0);
+    const maxTotalSizeBytes = ref<number>(50 * 1024 * 1024);
 
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
@@ -1605,9 +1606,10 @@ export const useTrackStore = defineStore('track', () => {
         }
     };
     // 1. 복사
-    const copyClip = (clip: ClipUIState) => {
+    const copyClip = (clip: ClipUIState, trackId: number) => {
         // 프론트 클립보드 저장
         clipboardClip.value = JSON.parse(JSON.stringify(clip));
+        clipboardTrackId.value = trackId;
         isCutAction.value = false;
         // 서버 클립보드 동기화
         socketService.publish('CLIP_COPY', {
@@ -2672,20 +2674,22 @@ export const useTrackStore = defineStore('track', () => {
             player.unsync();
             player.stop();
 
-            // 새 secondsPerBar 기준으로 재계산
+            // BPM 변경 시 오디오 원본 재생 속도는 유지(1x)하고, 그리드 상의 차지하는 마디 수(duration)만 변환
+            const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            targetClip.duration = sourceAudioSec / secondsPerBar.value;
+
+            // 새 secondsPerBar 기준으로 시작점 재계산
             const exactStartTimeSec = targetClip.start * secondsPerBar.value;
             const audioOffsetSec = (targetClip.audioStartMs || 0) / 1000;
-            const visualDurationSec = targetClip.duration * secondsPerBar.value;
-            // BPM에 따른 재생 속도 조절
-            const sourceAudioSec = targetClip.audioDurationMs / 1000;
+            const visualDurationSec = sourceAudioSec; // 재생 시간은 항상 원본 길이와 같음
 
             (player as any).customOriginalOffset = audioOffsetSec;
             (player as any).customSourceAudioSec = sourceAudioSec;
 
-            const rate = visualDurationSec > 0 ? sourceAudioSec / visualDurationSec : 1;
-            player.playbackRate = rate;
+            // 항상 원본 오디오 속도(1x) 유지
+            player.playbackRate = 1;
 
-            console.log(`[resyncAll] clipId=${clipId}, rate=${rate.toFixed(3)}, visualDur=${visualDurationSec.toFixed(2)}s, sourceDur=${sourceAudioSec.toFixed(2)}s`);
+            console.log(`[resyncAll] clipId=${clipId}, rate=1, visualDur=${visualDurationSec.toFixed(2)}s, sourceDur=${sourceAudioSec.toFixed(2)}s, newBarDur=${targetClip.duration.toFixed(2)}`);
 
             if (visualDurationSec > 0) {
                 player.sync().start(exactStartTimeSec, audioOffsetSec, sourceAudioSec);
@@ -2843,6 +2847,7 @@ export const useTrackStore = defineStore('track', () => {
             };
             projectMembers.value = [];
             currentTotalSizeBytes.value = 0;
+            maxTotalSizeBytes.value = 50 * 1024 * 1024;
             bpm.value = 120;
 
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
@@ -2867,6 +2872,7 @@ export const useTrackStore = defineStore('track', () => {
                 }
                 projectMembers.value = data.members || [];
                 currentTotalSizeBytes.value = data.currentTotalSizeBytes || 0;
+                maxTotalSizeBytes.value = data.maxTotalSizeBytes || (50 * 1024 * 1024);
                 bpm.value = data.tempo;
 
                 const eqBandsByTrackId = new Map<number, TrackEqBandState[]>()
@@ -2967,6 +2973,61 @@ export const useTrackStore = defineStore('track', () => {
             if (isPlaying.value) { togglePlay(); }
             cmd.redo();
             undoStack.value.push(cmd);
+        }
+    };
+
+    // ==========================================
+    // 오프라인 렌더링 (파형 시각화용)
+    // ==========================================
+    const renderAudioBufferWithEq = async (audioUrl: string, bands: TrackEqBandState[]): Promise<{ channels: Float32Array[], sampleRate: number } | null> => {
+        try {
+            // 원본 버퍼 가져오기 (캐시 활용)
+            const originalBuffer = await fetchAndCacheAudioBuffer(audioUrl);
+            
+            // 밴드가 없으면 원본 데이터 그대로 반환
+            if (!bands || bands.length === 0) {
+                const numChannels = Math.min(2, originalBuffer.numberOfChannels);
+                const channels = [];
+                for (let i = 0; i < numChannels; i++) {
+                    channels.push(originalBuffer.getChannelData(i));
+                }
+                return { channels, sampleRate: originalBuffer.sampleRate };
+            }
+
+            // 오프라인 렌더링 시작 (duration은 원본 버퍼 길이와 동일)
+            const renderedBuffer = await Tone.Offline(({ transport }) => {
+                const player = new Tone.Player(originalBuffer).start(0);
+                
+                let currentNode: any = player;
+                bands.forEach(band => {
+                    const type = band.eqTypeCode === 2 ? 'lowshelf' : band.eqTypeCode === 3 ? 'highshelf' : 'peaking';
+                    const filter = new Tone.Filter({
+                        type,
+                        frequency: band.frequencyHz,
+                        Q: band.q,
+                        gain: band.gainDeltaDb,
+                    });
+                    
+                    filter.channelCount = 2;
+                    filter.channelCountMode = 'explicit';
+
+                    currentNode.connect(filter);
+                    currentNode = filter;
+                });
+                
+                currentNode.toDestination();
+            }, originalBuffer.duration);
+
+            const numChannels = Math.min(2, renderedBuffer.numberOfChannels);
+            const channels = [];
+            for (let i = 0; i < numChannels; i++) {
+                channels.push(renderedBuffer.getChannelData(i));
+            }
+
+            return { channels, sampleRate: renderedBuffer.sampleRate };
+        } catch (e) {
+            console.error('[EQ Waveform Render Error]', e);
+            return null;
         }
     };
 
@@ -3072,6 +3133,7 @@ export const useTrackStore = defineStore('track', () => {
         getAudioBufferCache,
         projectMembers,
         currentTotalSizeBytes,
+        maxTotalSizeBytes,
         fetchAndCacheAudioBuffer,
         isAutoScrollActive,
 
@@ -3080,7 +3142,8 @@ export const useTrackStore = defineStore('track', () => {
         removeTrackEqBand,
         getTrackSpectrum,
         workspaceZoom,
-        rebuildTrackEqChain
+        rebuildTrackEqChain,
+        renderAudioBufferWithEq
     };
 });
 

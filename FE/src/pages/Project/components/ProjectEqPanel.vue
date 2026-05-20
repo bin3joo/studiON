@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, inject } from 'vue'
+import type { Ref } from 'vue'
 import { Play, Square, Sparkles, Wand2, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import type { TrackUIState, TrackEqBandState } from '../types'
+import type { AiAnalysisItem } from '../composables/useProjectAiWorkflow'
 import EqGraph from './EqGraph.vue'
 import { useTrackStore } from '../store/useTrackStore'
 
@@ -47,13 +49,16 @@ const emit = defineEmits<{
   'add-eq-band': [payload: {
     frequencyHz: number
     gainDeltaDb: number
+    isAiEq?: boolean
   }]
   'update-eq-band': [payload: {
     bandOrder: number
     patch: Partial<TrackEqBandState>
+    isAiEq?: boolean
   }]
   'remove-eq-band': [payload: {
     bandOrder: number
+    isAiEq?: boolean
   }]
 }>()
 
@@ -170,6 +175,16 @@ watch(
 
 const isPreviewPlaying = ref<'before' | 'after' | null>(null)
 
+const aiAnalysisItems = inject<Ref<AiAnalysisItem[]>>('aiAnalysisItems')
+const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId')
+
+const activeAiAnalysis = computed(() => {
+  if (!aiAnalysisItems?.value || !activeAiAnalysisId?.value) return null
+  return aiAnalysisItems.value.find(item => item.id === activeAiAnalysisId.value) || null
+})
+
+let previousLoopState = { active: false, start: 0, end: 4 }
+
 async function togglePreview(type: 'before' | 'after') {
   if (!props.selectedTrack) return
 
@@ -186,7 +201,34 @@ async function togglePreview(type: 'before' | 'after') {
     trackStore.rebuildTrackEqChain(props.selectedTrack.trackId, props.aiAfterBands)
   }
 
+  if (isPreviewPlaying.value === null) {
+    previousLoopState = {
+      active: trackStore.isLoopActive,
+      start: trackStore.loopStartBar,
+      end: trackStore.loopEndBar
+    }
+  }
+
   isPreviewPlaying.value = type
+
+  const analysis = activeAiAnalysis.value
+  if (analysis) {
+    trackStore.isLoopActive = true
+    
+    // 밀리초(ms) 데이터를 기반으로 정확한 마디 단위(소수점 포함) 계산
+    const exactStartBar = analysis.startMs / (trackStore.secondsPerBar * 1000)
+    
+    // 루프가 너무 짧아 오디오가 튀는 현상을 막기 위해 최소 1박자(0.25마디) 길이는 보장
+    const exactEndBar = Math.max(
+      analysis.endMs / (trackStore.secondsPerBar * 1000),
+      exactStartBar + 0.25
+    )
+
+    trackStore.loopStartBar = exactStartBar
+    trackStore.loopEndBar = exactEndBar
+    trackStore.playheadPosition = exactStartBar
+  }
+
   trackStore.togglePlay()
 }
 
@@ -198,6 +240,10 @@ watch(
       if (props.selectedTrack) {
         trackStore.rebuildTrackEqChain(props.selectedTrack.trackId)
       }
+
+      trackStore.isLoopActive = previousLoopState.active
+      trackStore.loopStartBar = previousLoopState.start
+      trackStore.loopEndBar = previousLoopState.end
     }
   }
 )
@@ -420,10 +466,7 @@ watch(
   :ai-markers="aiMarkers"
   :after="true"
   :loading="aiAnalyzing"
-  :interactive="!!selectedTrack"
-  @add-band="emit('add-eq-band', $event)"
-  @update-band="emit('update-eq-band', $event)"
-  @remove-band="emit('remove-eq-band', $event)"
+  :interactive="false"
 />
   </div>
 </div>

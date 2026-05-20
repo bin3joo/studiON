@@ -25,7 +25,7 @@ const TIMELINE_TRACK_HEADER_WIDTH = 266
 type AiIssueKind = 'BAND_OVERLAP' | 'CLIPPING' | 'HARSHNESS'
 type AiIssueTargetType = 'TIMELINE' | 'MASTER_TRACK' | 'TRACK'
 
-type AiAnalysisItem = {
+export type AiAnalysisItem = {
   id: string | number
   issueType: string
   kind: AiIssueKind

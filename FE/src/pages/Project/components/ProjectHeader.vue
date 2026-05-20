@@ -131,13 +131,12 @@ function formatAudioSize(bytes: number): string {
 }
 
 const isNearLimit = computed(() => {
-  const MAX_STORAGE_BYTES = 50 * 1024 * 1024
-  return trackStore.currentTotalSizeBytes > MAX_STORAGE_BYTES * 0.9
+  return trackStore.currentTotalSizeBytes > trackStore.maxTotalSizeBytes * 0.9
 })
 </script>
 
 <template>
-  <header class="flex h-[68px] w-full items-center justify-between border-b border-border bg-background px-4">
+  <header class="relative flex h-[68px] w-full items-center justify-between border-b border-border bg-background px-4">
     <!-- 왼쪽 -->
     <div class="flex min-w-0 items-center gap-4">
       <RouterLink
@@ -161,83 +160,62 @@ const isNearLimit = computed(() => {
       <div class="hidden h-7 w-px bg-border md:block" />
 
       <div class="flex min-w-0 items-center gap-2">
-  <template v-if="!isEditingProjectName">
-    <span class="truncate text-sm font-semibold text-foreground">
-      {{ projectName }}
-    </span>
+        <template v-if="!isEditingProjectName">
+          <span class="truncate text-sm font-semibold text-foreground">
+            {{ projectName }}
+          </span>
 
-    <button
-      type="button"
-      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground"
-      @click="startProjectNameEdit"
-    >
-      <Pencil class="h-3.5 w-3.5" />
-    </button>
-  </template>
+          <button
+            type="button"
+            class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground"
+            @click="startProjectNameEdit"
+          >
+            <Pencil class="h-3.5 w-3.5" />
+          </button>
+        </template>
 
-  <template v-else>
-    <input
-      ref="projectNameInputRef"
-      v-model="editingProjectName"
-      type="text"
-      class="h-7 w-[160px] rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition focus:border-primary"
-      @keydown.enter.prevent="submitProjectNameEdit"
-      @keydown.esc.prevent="cancelProjectNameEdit"
-      @blur="submitProjectNameEdit"
-    >
-  </template>
-</div>
-
-      <button
-        type="button"
-        class="ml-2 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
-        data-guide="export"
-        @click="emit('export')"
-      >
-        <Download class="h-4 w-4" />
-        <span>다운로드</span>
-      </button>
-    </div>
-
-    <!-- 가운데 -->
-    <div class="hidden items-center gap-2 lg:flex">
-      
-      <!-- 오디오 사용량 -->
-      <div class="mr-2 flex items-center gap-1.5 rounded-lg bg-secondary/30 px-3 py-1.5 text-xs font-mono-tight text-foreground border border-border/50" title="최대 50MB까지 업로드 가능합니다.">
-        <span class="material-symbols-outlined text-[#FF3DCB] text-[13px] leading-none flex items-center" style="font-variation-settings: 'FILL' 1;">sd_card</span>
-        <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">사용량 :</span>
-        <span class="font-semibold mt-0.5" :class="isNearLimit ? 'text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.5)]' : 'text-primary/90'">
-          {{ formatAudioSize(trackStore.currentTotalSizeBytes) }} <span class="text-muted-foreground font-normal text-[10px]">/ 50 MB</span>
-        </span>
+        <template v-else>
+          <input
+            ref="projectNameInputRef"
+            v-model="editingProjectName"
+            type="text"
+            class="h-7 w-[160px] rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition focus:border-primary"
+            @keydown.enter.prevent="submitProjectNameEdit"
+            @keydown.esc.prevent="cancelProjectNameEdit"
+            @blur="submitProjectNameEdit"
+          >
+        </template>
       </div>
 
       <!-- 새로 추가된 프로젝트 재생 시간 (대시보드와 동일한 Length) -->
-      <div class="mr-2 flex items-center gap-1.5 rounded-lg bg-secondary/30 px-3 py-1.5 text-xs font-mono-tight text-foreground border border-border/50">
+      <div class="hidden lg:flex ml-2 items-center gap-1.5 rounded-lg bg-secondary/30 px-3 py-1.5 text-xs font-mono-tight text-foreground border border-border/50">
         <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">총 재생 시간 :</span>
         <span class="font-semibold text-primary/90 mt-0.5">{{ projectLengthFormatted }}</span>
       </div>
 
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
-        data-guide="version-save" 
-        @click="emit('save-version')"
+        class="hidden lg:inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        data-guide="export"
+        @click="emit('export')"
       >
-        <Camera class="h-4 w-4" />
-        <span>버전 저장</span>
+        <Download class="h-4 w-4" />
+        <span>음원 내보내기</span>
       </button>
 
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
-        title="저장 (Ctrl + S)"
-        @click="emit('save')"
+        class="hidden lg:inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        data-guide="version-save" 
+        @click="emit('save-version')"
       >
-        <Save class="h-4 w-4" />
-        <span>저장</span>
-        <span class="text-muted-foreground">{{ lastSavedAt }}</span>
+        <Camera class="h-4 w-4" />
+        <span>음원 버전 저장</span>
       </button>
+    </div>
 
+    <!-- 가운데 -->
+    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden items-center gap-2 lg:flex">
       <button
         type="button"
         class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
@@ -255,39 +233,58 @@ const isNearLimit = computed(() => {
       >
         <Redo2 class="h-4 w-4" />
       </button>
+      
+      <button
+        type="button"
+        class="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        title="저장 (Ctrl + S)"
+        @click="emit('save')"
+      >
+        <Save class="h-4 w-4" />
+        <span>저장</span>
+        <span class="text-muted-foreground">{{ lastSavedAt }}</span>
+      </button>
     </div>
 
     <!-- 오른쪽 -->
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2 lg:gap-3">
+      
+      <!-- 오디오 사용량 -->
+      <div class="hidden lg:flex ml-2 mr-2 items-center gap-1.5 rounded-lg bg-secondary/30 px-3 py-1.5 text-xs font-mono-tight text-foreground border border-border/50" :title="`최대 ${formatAudioSize(trackStore.maxTotalSizeBytes)}까지 업로드 가능합니다.`">
+        <span class="text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">내 사용량 :</span>
+        <span class="font-semibold mt-0.5" :class="isNearLimit ? 'text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.5)]' : 'text-primary/90'">
+          {{ formatAudioSize(trackStore.currentTotalSizeBytes) }} <span class="text-muted-foreground font-normal text-[10px]">/ {{ formatAudioSize(trackStore.maxTotalSizeBytes) }}</span>
+        </span>
+      </div>
+
+      <!-- 접속자 프로필 -->
       <div class="hidden items-center -space-x-2 md:flex">
-  <div
-    v-for="user in visibleOnlineUsers"
-    :key="user.userId"
-    class="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-foreground"
-    :title="user.nickname"
-  >
-    <img
-      v-if="user.profileImageUrl"
-      :src="user.profileImageUrl"
-      :alt="user.nickname"
-      class="h-full w-full object-cover"
-    >
+        <div
+          v-for="user in visibleOnlineUsers"
+          :key="user.userId"
+          class="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-foreground"
+          :title="user.nickname"
+        >
+          <img
+            v-if="user.profileImageUrl"
+            :src="user.profileImageUrl"
+            :alt="user.nickname"
+            class="h-full w-full object-cover"
+          >
+          <span v-else>
+            {{ user.nickname.charAt(0) }}
+          </span>
+        </div>
 
-    <span v-else>
-      {{ user.nickname.charAt(0) }}
-    </span>
-  </div>
+        <div
+          v-if="hiddenOnlineUserCount > 0"
+          class="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground"
+        >
+          +{{ hiddenOnlineUserCount }}
+        </div>
+      </div>
 
-  <div
-    v-if="hiddenOnlineUserCount > 0"
-    class="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-muted-foreground"
-  >
-    +{{ hiddenOnlineUserCount }}
-  </div>
-</div>
-
-
-
+      <!-- 초대코드 생성 -->
       <button
         type="button"
         class="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
@@ -297,6 +294,17 @@ const isNearLimit = computed(() => {
         <span class="hidden sm:inline">초대코드 생성</span>
       </button>
 
+      <!-- 히스토리 (시계 아이콘) -->
+      <button
+        type="button"
+        class="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-foreground transition hover:bg-muted"
+        @click="emit('open-history')"
+      >
+        <History class="h-4 w-4" />
+        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+      </button>
+
+      <!-- 코멘트 (말풍선 아이콘) -->
       <button
         type="button"
         class="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-foreground transition hover:bg-muted"
@@ -306,14 +314,6 @@ const isNearLimit = computed(() => {
         <span v-if="commentStore.hasNewComment" class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
       </button>
 
-      <button
-        type="button"
-        class="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-foreground transition hover:bg-muted"
-        @click="emit('open-history')"
-      >
-        <History class="h-4 w-4" />
-        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
-      </button>
     </div>
   </header>
 </template>

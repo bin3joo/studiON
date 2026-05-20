@@ -914,7 +914,8 @@ if (mergedItems.length > 0) {
   return
 }
 
-activeAiAnalysisId.value = mergedItems.length > 0 ? mergedItems[0].id : null
+// AI 분석 완료 시 기본적으로 첫 번째 팝업이 열려 있는 상태를 방지하기 위해 null로 초기화합니다.
+activeAiAnalysisId.value = null
 
 syncSelectedRegionIdFromActiveItem()
 applyActiveAiAnalysisSelection()

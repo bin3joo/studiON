@@ -189,7 +189,7 @@ const toggleOpen = () => {
   } else {
     emit('open')
     if (activeAiAnalysisId) {
-      activeAiAnalysisId.value = props.conflict.id
+      activeAiAnalysisId.value = props.conflict.id ?? null
     }
   }
 }

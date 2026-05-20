@@ -1094,7 +1094,9 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
   ceilingDbfs: clippingAction.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
   attackMs: currentLimiter.attackMs,
   releaseMs: currentLimiter.releaseMs,
-  inputGainDb: currentLimiter.inputGainDb - Math.abs(recommendedReductionDb),
+  // 백엔드의 inputGainDb 허용 범위는 [-12.0, 12.0]dB 입니다.
+  // 계산된 게인 값이 이 범위를 이탈하여 유효성 에러가 발생하는 것을 방지하고자 최대/최솟값 한계 조정을 수행합니다.
+  inputGainDb: Math.max(-12.0, Math.min(12.0, currentLimiter.inputGainDb - Math.abs(recommendedReductionDb))),
   makeupGainDb: currentLimiter.makeupGainDb,
   jobId: currentAiJobId.value,
   suggestionActionId: null,

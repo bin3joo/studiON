@@ -1,7 +1,7 @@
 from app.graph.state import WorkflowState
 
 
-# entry 진입 시에는 실패 복구, interrupt 재진입, 신규 실행 시작 중 무엇인지 먼저 판별한다.
+# entry 진입 시에는 실패 복구, interrupt 재진입, 신규 실행 시작 중 무엇인지 먼저 분기한다.
 def route_after_entry(state: WorkflowState) -> str:
     if state.get("runtime_status") == "failed" or state.get("durable_status") == "FAILED":
         return "fail_workflow"
@@ -15,12 +15,7 @@ def route_after_entry(state: WorkflowState) -> str:
     return "init_state"
 
 
-# CLAP이 필요한 job만 외부 역할 추론을 호출하고, 아니면 바로 sibilance detector로 넘긴다.
-def route_after_clap_gate(state: WorkflowState) -> str:
-    return "infer_track_roles" if state.get("clap_required") else "detect_sibilance"
-
-
-# DSP 단계에서 이미 실패가 확정되면 이후 detector를 태우지 않고 즉시 실패 경로로 보낸다.
+# DSP 단계에서 이미 실패가 확정되면 이후 detector를 더 세우지 않고 즉시 실패 경로로 보낸다.
 def route_after_dsp_scan(state: WorkflowState) -> str:
     return "fail_workflow" if state.get("runtime_status") == "failed" else "detect_band_overlap"
 
@@ -37,7 +32,7 @@ def route_after_plan_input(state: WorkflowState) -> str:
     return "planning_agent"
 
 
-# validator는 통과, 재생성, 실패 세 갈래만 만들고 revise 허용 횟수를 넘기면 실패로 닫는다.
+# validator 통과, 재생성, 실패 중 갈래만 만들고 revise 허용 횟수를 넘기면 실패로 닫는다.
 def route_after_validator(state: WorkflowState) -> str:
     if state.get("runtime_status") == "failed" or state.get("current_node") == "fail_workflow":
         return "fail_workflow"
@@ -66,4 +61,4 @@ def route_after_user_action_gate(state: WorkflowState) -> str:
     return "apply_selected_edit_recipe" if state.get("preview_required") else "finalize_output"
 
 
-# preview 이후에는 confirm/retry/cancel만 허용하고, 그 외 값은 안전하게 END로 끊는다.
+# preview 이후에는 confirm/retry/cancel만 허용하고, 그 외 값은 안전하게 END로 닫는다.

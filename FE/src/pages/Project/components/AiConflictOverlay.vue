@@ -326,15 +326,12 @@ const dynamicWidthPx = computed(() => {
           </div>
 
           <div v-show="!isMinimized" class="space-y-3 px-4 py-4">
-          <div class="text-base font-semibold">
-            {{ props.conflict.title }}
-          </div>
 
           <p class="text-sm text-white/60">
             {{ props.conflict.summary }}
           </p>
 
-          <ul class="space-y-2 border-t border-white/10 pt-3 text-sm leading-relaxed text-white/80">
+          <ul class="space-y-2 pt-1 text-sm leading-relaxed text-white/80">
             <li
               v-for="(bullet, index) in props.conflict.bullets"
               :key="index"
@@ -377,7 +374,7 @@ const dynamicWidthPx = computed(() => {
 <!-- 클리핑이 아닌 다른 모든 이슈 처리 (테스트 등) -->
 <div
   v-else
-  class="space-y-3 border-t border-white/10 pt-3"
+  class="space-y-3 pt-1"
 >
   <div class="flex gap-2">
     <button
@@ -385,7 +382,7 @@ const dynamicWidthPx = computed(() => {
       class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
       @click="emit('dismissClipping')"
     >
-      무시하기 (범위 삭제)
+      무시하기
     </button>
   </div>
 </div>

@@ -421,11 +421,11 @@ watch(
     >
       <div>
         <div class="text-xl font-bold text-white">
-          수정 후보 트랙
+          유지할 트랙 선택
         </div>
 
         <p class="mt-2 text-sm text-gray-400">
-          충돌 트랙을 확인하고 수정하고 싶은 트랙을 선택해주세요.
+          충돌 트랙을 확인하고 유지할 트랙을 선택해주세요. 해당 트랙을 제외하고 AI가 수정 계획을 생성합니다.
         </p>
 
         <p
@@ -472,7 +472,7 @@ watch(
         </div>
 
         <p class="mt-2 text-sm text-gray-400">
-          선택한 트랙에 대해 AI에게 수정 방향을 요청하세요.
+          선택하지 않은 트랙에 대해 AI에게 수정 방향을 요청하세요.
         </p>
 
         <div class="mt-4 flex gap-3">
@@ -480,7 +480,7 @@ watch(
             v-model="revisionMessage"
             type="text"
             class="h-11 flex-1 rounded-md border border-white/10 bg-black/30 px-4 text-sm text-white outline-none placeholder:text-gray-500 focus:border-[#FF8F1A]"
-            placeholder="ex. 이 클립은 살리고 나머지는 자연스럽게 너무 세게 깎지 말아줘"
+            placeholder="선택한 트랙은 그대로 두고, 나머지 트랙만 자연스럽게 줄여줘."
           />
 
           <button

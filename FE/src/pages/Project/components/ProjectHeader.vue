@@ -108,15 +108,12 @@ const projectLengthFormatted = computed(() => {
     })
   })
 
-  // 1박자(beat) = 60000 / BPM ms
-  // 1마디(bar) = 1박자 * timeSigNumerator
-  const msPerBeat = 60000 / trackStore.bpm
-  const msPerBar = msPerBeat * trackStore.projectInfo.timeSigNumerator
-  const totalMs = maxEndBar * msPerBar
+  // trackStore의 secondsPerBar(마디당 초 단위 시간)를 사용하여 정확한 총 재생 시간(초)을 계산합니다.
+  // 이 방식은 박자 분모(timeSigDenominator)와 BPM 등이 모두 반영된 정확한 값입니다.
+  const totalSeconds = Math.floor(maxEndBar * trackStore.secondsPerBar)
 
-  if (!Number.isFinite(totalMs) || totalMs <= 0) return '0:00'
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0:00'
 
-  const totalSeconds = Math.floor(totalMs / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
 
@@ -210,7 +207,7 @@ const isNearLimit = computed(() => {
         @click="emit('save-version')"
       >
         <Camera class="h-4 w-4" />
-        <span>음원 버전 저장</span>
+        <span>버전 저장</span>
       </button>
     </div>
 
@@ -241,7 +238,7 @@ const isNearLimit = computed(() => {
         @click="emit('save')"
       >
         <Save class="h-4 w-4" />
-        <span>저장</span>
+        <span></span>
         <span class="text-muted-foreground">{{ lastSavedAt }}</span>
       </button>
     </div>

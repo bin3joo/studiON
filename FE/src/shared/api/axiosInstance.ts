@@ -2,6 +2,22 @@
 import axios from 'axios'
 import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
 
+const PUBLIC_AUTH_PATHS = [
+  '/api/v1/auth/positions',
+  '/api/v1/auth/onboarding',
+  '/api/v1/auth/exchange',
+  '/api/v1/auth/reissue',
+  '/api/v1/auth/logout',
+]
+
+function isPublicAuthRequest(url?: string) {
+  if (!url) {
+    return false
+  }
+
+  return PUBLIC_AUTH_PATHS.some((path) => url.includes(path))
+}
+
 // 1. 기본 설정이 적용된 axios instance 생성
 export const axiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080',
@@ -16,7 +32,7 @@ axiosInstance.interceptors.request.use(
     const authStore = useAuthStore()
     const token = authStore.accessToken
 
-    if (token) {
+    if (token && !isPublicAuthRequest(config.url)) {
       config.headers.Authorization = `Bearer ${token}`
     }
 
@@ -48,13 +64,18 @@ axiosInstance.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
-    if (error.response?.status === 401 && !originalRequest._isRetry && !originalRequest.url?.includes('/auth/reissue')) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._isRetry &&
+      !isPublicAuthRequest(originalRequest.url)
+    ) {
       originalRequest._isRetry = true
       
       const authStore = useAuthStore()
       const success = await authStore.silentRefresh()
       
       if (success && authStore.accessToken) {
+        originalRequest.headers = originalRequest.headers ?? {}
         originalRequest.headers.Authorization = `Bearer ${authStore.accessToken}`
         return axiosInstance(originalRequest)
       } else {

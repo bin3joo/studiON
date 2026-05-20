@@ -65,7 +65,7 @@ export type AiAnalysisItem = {
 }
 
 export function useProjectAiWorkflow(projectId: number) {
-  const trackStore = useTrackStore()
+const trackStore = useTrackStore()
 
   const aiAnalyzing = ref(false)
 
@@ -98,7 +98,7 @@ export function useProjectAiWorkflow(projectId: number) {
 
 const appliedAiEqIssueIds = ref<Set<string | number>>(new Set())
 
-  const selectedEqTrack = computed(() => {
+const selectedEqTrack = computed(() => {
   if (trackStore.selectedTarget?.type === 'MASTER') {
     return trackStore.masterTrack
   }
@@ -914,7 +914,8 @@ if (mergedItems.length > 0) {
   return
 }
 
-activeAiAnalysisId.value = mergedItems.length > 0 ? mergedItems[0].id : null
+// AI 분석 완료 시 기본적으로 첫 번째 팝업이 열려 있는 상태를 방지하기 위해 null로 초기화합니다.
+activeAiAnalysisId.value = null
 
 syncSelectedRegionIdFromActiveItem()
 applyActiveAiAnalysisSelection()
@@ -1093,13 +1094,16 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
   ceilingDbfs: clippingAction.targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
   attackMs: currentLimiter.attackMs,
   releaseMs: currentLimiter.releaseMs,
-  inputGainDb: currentLimiter.inputGainDb - Math.abs(recommendedReductionDb),
+  // 백엔드의 inputGainDb 허용 범위는 [-12.0, 12.0]dB 입니다.
+  // 계산된 게인 값이 이 범위를 이탈하여 유효성 에러가 발생하는 것을 방지하고자 최대/최솟값 한계 조정을 수행합니다.
+  inputGainDb: Math.max(-12.0, Math.min(12.0, currentLimiter.inputGainDb - Math.abs(recommendedReductionDb))),
   makeupGainDb: currentLimiter.makeupGainDb,
   jobId: currentAiJobId.value,
   suggestionActionId: null,
   appliedSuggestionId: null,
   sourceType: 'AI_SUGGESTION',
 })
+    trackStore.setMasterLimiterState(savedLimiter)
 
     appliedClippingIssueIds.value = new Set([
       ...appliedClippingIssueIds.value,

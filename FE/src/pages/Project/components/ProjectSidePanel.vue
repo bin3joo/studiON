@@ -37,6 +37,9 @@ const currentUserNickname = computed(() => {
 const filteredComments = computed(() => {
   // 1. 백엔드에서 모든 코멘트를 가져오므로, 프론트엔드에서 isResolved 상태를 직접 필터링합니다.
   let result = commentStore.comments.filter(comment => comment.isResolved === commentStore.isResolvedFilter)
+  if (commentStore.selectedTrackId !== undefined) {
+    result = result.filter(comment => comment.trackId === commentStore.selectedTrackId)
+  }
 
   // 2. 멘션 필터링
   if (!commentStore.isMentionedFilter) return result
@@ -76,7 +79,7 @@ const emit = defineEmits<{
 
 // 사이드 패널이 열리거나 필터(탭, 트랙선택)가 변경될 때마다 API 재호출
 watch(
-  [() => props.open, () => props.type, () => commentStore.isResolvedFilter, () => commentStore.selectedTrackId],
+  [() => props.open, () => props.type, () => commentStore.isResolvedFilter],
   ([isOpen, currentType]) => {
     if (isOpen) {
       if (currentType === 'comments') {

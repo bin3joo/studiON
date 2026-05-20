@@ -10,6 +10,8 @@ import * as Tone from 'tone';
 import { socketService } from '../../../core/services/socket.service';
 import { projectApi } from '../api/project.api'
 import type { TrackEqBandSummary } from '../api/project.api'
+import { getMasterLimiter } from '../api/projectLimiter.api'
+import type { MasterLimiterState } from '../api/projectLimiter.api'
 import axios from 'axios'
 
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
@@ -224,6 +226,7 @@ export const useTrackStore = defineStore('track', () => {
     const projectMembers = ref<{ userId: number; nickname: string; profileImageUrl: string | null; }[]>([]);
     const currentTotalSizeBytes = ref<number>(0);
     const maxTotalSizeBytes = ref<number>(50 * 1024 * 1024);
+    const masterLimiterState = ref<MasterLimiterState | null>(null);
 
     //[1-2] 타임라인 UI 전용 상태 (프론트에서 화면 그릴 때만 쓰는 변수들)
     const isPlaying = ref(false); //재생중인지 아닌지
@@ -238,13 +241,57 @@ export const useTrackStore = defineStore('track', () => {
 
     // 마스터 트랙의 믹서 채널 생성 (모노 다운믹스 절대 방지: 강제 스테레오)
     const masterPanner = new Tone.Panner(0).toDestination();
-    const masterVolume = new Tone.Volume(0).connect(masterPanner);
+    const masterLimiterInput = new Tone.Gain(1);
+    const masterLimiter = new Tone.Compressor({
+        threshold: 0,
+        ratio: 20,
+        attack: 0.003,
+        release: 0.25,
+        knee: 0,
+    });
+    const masterLimiterOutput = new Tone.Gain(1);
+    const masterVolume = new Tone.Volume(0).connect(masterLimiterInput);
+    masterLimiterInput.connect(masterLimiter);
+    masterLimiter.connect(masterLimiterOutput);
+    masterLimiterOutput.connect(masterPanner);
 
     // 스테레오 보존을 위한 강력한 Web Audio API 옵션 적용
     masterVolume.channelCount = 2;
     masterVolume.channelCountMode = "explicit";
+    masterLimiterInput.channelCount = 2;
+    masterLimiterInput.channelCountMode = "explicit";
+    masterLimiter.channelCount = 2;
+    masterLimiter.channelCountMode = "explicit";
+    masterLimiterOutput.channelCount = 2;
+    masterLimiterOutput.channelCountMode = "explicit";
     masterPanner.channelCount = 2;
     masterPanner.channelCountMode = "explicit";
+
+    const dbToLinear = (db: number) => Math.pow(10, db / 20);
+
+    function applyMasterLimiterStateToAudio(limiterState: MasterLimiterState | null) {
+        if (!limiterState || !limiterState.isEnabled) {
+            masterLimiterInput.gain.value = 1;
+            masterLimiter.threshold.value = 0;
+            masterLimiter.attack.value = 0.003;
+            masterLimiter.release.value = 0.25;
+            masterLimiterOutput.gain.value = 1;
+            return;
+        }
+
+        masterLimiterInput.gain.value = dbToLinear(limiterState.inputGainDb);
+        masterLimiter.threshold.value = Math.max(-100, Math.min(0, limiterState.thresholdDb));
+        masterLimiter.attack.value = Math.max(0, limiterState.attackMs / 1000);
+        masterLimiter.release.value = Math.max(0.001, limiterState.releaseMs / 1000);
+        masterLimiterOutput.gain.value = dbToLinear(
+            limiterState.makeupGainDb + limiterState.ceilingDbfs,
+        );
+    }
+
+    function setMasterLimiterState(limiterState: MasterLimiterState | null) {
+        masterLimiterState.value = limiterState;
+        applyMasterLimiterStateToAudio(limiterState);
+    }
 
     //bpm이 변경될때마다 전체 클립을 재스케줄링 (Transport BPM은 고정, playbackRate만으로 속도 제어)
     watch(bpm, (newBpm) => {
@@ -2851,6 +2898,7 @@ export const useTrackStore = defineStore('track', () => {
             projectMembers.value = [];
             currentTotalSizeBytes.value = 0;
             maxTotalSizeBytes.value = 50 * 1024 * 1024;
+            setMasterLimiterState(null);
             bpm.value = 120;
 
             // 백엔드 연결 시 실제 통신 로직으로 복구 필요 
@@ -2897,6 +2945,14 @@ export const useTrackStore = defineStore('track', () => {
                     )
                 } catch (eqError) {
                     console.error('[EQ bands fetch failed]', eqError)
+                }
+
+                try {
+                    const limiter = await getMasterLimiter(projectId)
+                    setMasterLimiterState(limiter)
+                } catch (limiterError) {
+                    console.error('[Master limiter fetch failed]', limiterError)
+                    setMasterLimiterState(null)
                 }
 
                 trackList.value = data.tracks.map((track): TrackUIState => ({
@@ -3137,8 +3193,10 @@ export const useTrackStore = defineStore('track', () => {
         projectMembers,
         currentTotalSizeBytes,
         maxTotalSizeBytes,
+        masterLimiterState,
         fetchAndCacheAudioBuffer,
         isAutoScrollActive,
+        setMasterLimiterState,
 
         addTrackEqBand,
         updateTrackEqBand,

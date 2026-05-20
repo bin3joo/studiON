@@ -27,9 +27,15 @@ public class WebClientConfig {
     // WebClient 객체를 만들어 스프링 컨테이너가 관리하게 함
     @Bean
     public WebClient aiWebClient(WebClient.Builder builder, AiFastApiProperties properties) {
+
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+              .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
+              .build();
+
         return builder
                 .baseUrl(properties.baseUrl())      // base-url로 baseUrl을 지정
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)      // 기본 요청 헤더 주입, Content-Type: application/json
+                .exchangeStrategies(strategies)
                 .build();
     }
 }

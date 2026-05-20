@@ -45,10 +45,14 @@ public class UserController {
     // 온보딩 완료 (ONBOARDING_SESSION 쿠키로 임시 OAuth 정보를 조회한 뒤 정식 토큰 발급)
     @PostMapping("/onboarding")
     public ResponseEntity<ApiResponse<TokenResponse>> completeOnboarding(
-            @CookieValue("ONBOARDING_SESSION") String onboardingSessionId,
+            @CookieValue(value = "ONBOARDING_SESSION", required = false) String onboardingSessionId,
             @RequestBody @Valid OnboardingRequest request,
             HttpServletResponse servletResponse
             ) {
+        if(onboardingSessionId == null || onboardingSessionId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "온보딩 세션이 없습니다.");
+        }
+
         User user = userService.completeOnboarding(onboardingSessionId, request);
 
         String accessToken = jwtTokenProvider.generateAccessToken(user.getId());
@@ -119,9 +123,13 @@ public class UserController {
     // access token 재발급
     @PostMapping("/reissue")
     public ResponseEntity<ApiResponse<TokenResponse>> reissue(
-            @CookieValue("REFRESH_TOKEN") String refreshToken,
+            @CookieValue(value="REFRESH_TOKEN", required = false) String refreshToken,
             HttpServletResponse servletResponse
     ) {
+        if(refreshToken == null || refreshToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "refresh token이 없습니다.");
+        }
+
         jwtTokenProvider.validateTokenType(refreshToken, "REFRESH");
 
         Integer userId = jwtTokenProvider.getUserIdFromToken(refreshToken);

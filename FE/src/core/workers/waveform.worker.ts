@@ -25,6 +25,7 @@ interface CacheMessage {
 interface RenderMessage {
   type: 'render';
   requestId: number;
+  cacheKey: string; // 메인 스레드의 LRU 캐시에서 사용할 키
   audioKey: string;
   color: string;
   width: number;
@@ -59,7 +60,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
 
   // 렌더 요청
   if (msg.type === 'render') {
-    const { requestId, audioKey, color, width, height, samplesPerPixel, startSampleOffset, channelIndex } = msg;
+    const { requestId, cacheKey, audioKey, color, width, height, samplesPerPixel, startSampleOffset, channelIndex } = msg;
 
     const channels = audioCache.get(audioKey);
     const channelData = channels ? channels[channelIndex] : undefined;
@@ -138,7 +139,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
 
     // 5. ImageBitmap으로 변환하여 메인 스레드로 반환
     const bitmap = offscreenCanvas.transferToImageBitmap();
-    (self as unknown as Worker).postMessage({ requestId, bitmap }, [bitmap]);
+    (self as unknown as Worker).postMessage({ requestId, bitmap, cacheKey }, [bitmap]);
     return;
   }
 };

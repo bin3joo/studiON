@@ -215,7 +215,7 @@ const isNearLimit = computed(() => {
     </div>
 
     <!-- 가운데 -->
-    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden items-center gap-2 lg:flex">
+    <div class="hidden items-center gap-2 lg:flex">
       <button
         type="button"
         class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"

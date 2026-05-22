@@ -415,20 +415,23 @@ function mapRegionToAnalysisItem(
             ? `권장 감소량: ${region.estimated_gain_reduction_db.toFixed(2)}dB`
             : '권장 감소량 정보를 확인 중입니다.',
           region.current_true_peak_dbtp != null
-            ? `현재 True Peak: ${region.current_true_peak_dbtp.toFixed(2)} dBTP`
-            : '현재 True Peak 정보를 확인 중입니다.',
+            ? `현재 트루 피크: ${region.current_true_peak_dbtp.toFixed(2)} dBTP`
+            : '현재 트루 피크 정보를 확인 중입니다.',
           region.target_ceiling_dbtp != null
-            ? `목표 Ceiling: ${region.target_ceiling_dbtp.toFixed(1)} dBTP`
-            : '목표 Ceiling 정보를 확인 중입니다.',
+            ? `목표 상한: ${region.target_ceiling_dbtp.toFixed(1)} dBTP`
+            : '목표 상한 정보를 확인 중입니다.',
         ]
       : [
-          region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
           region.band_low_hz && region.band_high_hz
             ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 문제가 감지됐어요.`
             : '주파수 대역 정보가 없습니다.',
-          involvedTrackNamesText
-            ? `관련 트랙: ${involvedTrackNamesText}`
-            : '관련 트랙 정보를 확인 중입니다.',
+          ...(kind === 'HARSHNESS'
+            ? []
+            : [
+                involvedTrackNamesText
+                  ? `관련 트랙: ${involvedTrackNamesText}`
+                  : '관련 트랙 정보를 확인 중입니다.',
+              ]),
         ]
 
   const clippingTrimValues = getClippingTrimValues(region)
@@ -594,7 +597,6 @@ function mapSuggestionIssueToAnalysisItem(
   const bullets =
     kind === 'HARSHNESS'
       ? [
-          `문제 유형: ${issue.issueType}`,
           markerCenterHz != null
             ? `중심 주파수: ${markerCenterHz}Hz`
             : '중심 주파수 정보가 없습니다.',
@@ -608,15 +610,13 @@ function mapSuggestionIssueToAnalysisItem(
               ? `권장 감소량: ${trimAction.recommendedReductionDb}dB`
               : '권장 감소량 정보를 확인 중입니다.',
             trimAction?.currentTruePeakDbtp != null
-              ? `현재 True Peak: ${trimAction.currentTruePeakDbtp} dBTP`
-              : '현재 True Peak 정보를 확인 중입니다.',
+              ? `현재 트루 피크: ${trimAction.currentTruePeakDbtp} dBTP`
+              : '현재 트루 피크 정보를 확인 중입니다.',
             trimAction?.targetCeilingDbtp != null
-              ? `목표 Ceiling: ${trimAction.targetCeilingDbtp} dBTP`
-              : '목표 Ceiling 정보를 확인 중입니다.',
+              ? `목표 상한: ${trimAction.targetCeilingDbtp} dBTP`
+              : '목표 상한 정보를 확인 중입니다.',
           ]
-        : [
-            `문제 유형: ${issue.issueType}`,
-          ]
+        : []
 
   return {
     id: issue.issueId,

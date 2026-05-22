@@ -65,7 +65,7 @@ const currentUserId = computed(() => {
   if (!authStore.accessToken) return null
   try {
     const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
-    return payload.userId || payload.memberId || null
+    return Number(payload.sub) || payload.userId || payload.memberId || null
   } catch(e) {
     return null
   }
@@ -422,6 +422,7 @@ function applyCommentAdded(data: {
 
   const newComment: TimelineComment = {
     id: String(data.commentId),
+    authorId: data.author.userId,
     author: data.author.nickname,
     content: data.content,
     color: '#d93ce6',
@@ -570,6 +571,7 @@ watch(
       
       const newComment: TimelineComment = {
         id: String(rootComment.commentId),
+        authorId: rootComment.author?.userId,
         author: rootComment.author?.nickname || 'Unknown',
         content: rootComment.content,
         color: '#d93ce6',
@@ -578,6 +580,7 @@ watch(
       
       const replyComments: TimelineComment[] = (rootComment.replies || []).map(reply => ({
         id: String(reply.commentId),
+        authorId: reply.author?.userId,
         author: reply.author?.nickname || 'Unknown',
         content: reply.content,
         color: '#d93ce6',

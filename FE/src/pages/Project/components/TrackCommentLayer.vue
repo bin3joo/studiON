@@ -18,6 +18,16 @@ const currentUserProfileImageUrl = computed(() => {
   }
 })
 
+const currentUserId = computed(() => {
+  if (!authStore.accessToken) return null
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
+    return Number(payload.sub) || payload.userId || payload.memberId || null
+  } catch(e) {
+    return null
+  }
+})
+
 type Placement = 'top' | 'bottom'
 
 const props = defineProps<{
@@ -655,12 +665,14 @@ function parseMentions(content: string) {
                 </div>
                 <div class="flex items-center gap-1">
                   <button
+                    v-if="comment.authorId === currentUserId"
                     class="opacity-0 transition-opacity group-hover:opacity-100"
                     @click.stop="requestDeleteComment(comment.id)"
                     title="삭제"
                   >
                     <Trash2 class="h-4 w-4 text-white/40 hover:text-red-400" />
                   </button>
+                  <div v-else class="h-4 w-4" />
                   <button
                     v-if="idx === 0"
                     class="transition-colors"

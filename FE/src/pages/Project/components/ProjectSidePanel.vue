@@ -306,7 +306,7 @@ const handleDeleteVersion = async (versionId: number) => {
         <div class="mb-6">
           <button
             type="button"
-            class="flex w-full items-center justify-center gap-2 rounded-lg bg-[#FF8F1A] py-2.5 text-[13px] font-bold text-black transition hover:brightness-110"
+            class="flex w-full items-center justify-center gap-2 rounded-lg bg-[#FF3DCB] py-2.5 text-[13px] font-bold text-black transition hover:brightness-110"
             @click="emit('start-tutorial')"
           >
             기능 안내 튜토리얼 시작

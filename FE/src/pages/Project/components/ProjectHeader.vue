@@ -12,6 +12,7 @@ import {
   Undo2,
   UserPlus,
   MessageSquare,
+  CircleHelp,
 } from 'lucide-vue-next'
 import logoLight from '@/assets/logo_light.png'
 import logoDark from '@/assets/logo_dark.png'
@@ -46,6 +47,7 @@ const emit = defineEmits<{
   (e: 'open-invite'): void
   (e: 'open-comments'): void
   (e: 'open-history'): void
+  (e: 'open-help'): void
 }>()
 
 const visibleOnlineUsers = computed(() => props.onlineUsers.slice(0, 3))
@@ -308,6 +310,15 @@ const isNearLimit = computed(() => {
       >
         <MessageSquare class="h-4 w-4" />
         <span v-if="commentStore.hasNewComment" class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+      </button>
+
+      <!-- 도움말 -->
+      <button
+        type="button"
+        class="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-foreground transition hover:bg-muted"
+        @click="emit('open-help')"
+      >
+        <CircleHelp class="h-4 w-4" />
       </button>
 
     </div>

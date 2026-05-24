@@ -1018,13 +1018,12 @@ function handleApplyAiEq() {
 }
 
 function handleCancelAiEq() {
-  aiAnalysisItems.value = []
+  // 패널을 닫기 위해 현재 선택된 활성 상태만 해제합니다.
+  // 주의: 전체 분석 결과(aiAnalysisItems)나 job_id는 유지해야 합니다.
   activeAiAnalysisId.value = null
   selectedAiRegionId.value = null
-  currentAiJobId.value = null
   aiBeforeBands.value = []
   aiAfterBands.value = []
-  appliedAiEqIssueIds.value = new Set()
 }
 
 function isActionableClippingItem(item: AiAnalysisItem) {

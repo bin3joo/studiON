@@ -15,7 +15,7 @@ const props = withDefaults(defineProps<{
   existingProjectNames: () => [],
 })
 
-const emit = defineEmits(['openFeedback'])
+const emit = defineEmits(['openFeedback', 'start-guide'])
 
 const navItems = [
   { label: '내 프로젝트', to: '/dashboard', active: true },
@@ -48,15 +48,27 @@ async function handleLogout() {
     </div>
 
     <div class="flex items-center gap-3 md:gap-4 mr-4 md:mr-6">
-      <InviteCodeInputButton />
+      <div data-guide="invite-code">
+        <InviteCodeInputButton />
+      </div>
 
       <!-- Feedback Button -->
       <button
+        data-guide="feedback-button"
         @click="emit('openFeedback')"
         class="hidden md:flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-gradient-to-r from-[#FF3DCB]/20 to-[#e3b5ff]/20 border border-[#FF3DCB]/30 text-[#FF3DCB] text-sm font-bold tracking-wide animate-[pulse_2s_ease-in-out_infinite] hover:shadow-[0_0_15px_rgba(255,61,203,0.4)] transition-all"
       >
         <span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">campaign</span>
         피드백 남기기
+      </button>
+
+      <!-- Help / Guide Button -->
+      <button
+        @click="emit('start-guide')"
+        class="text-[#e5bcc5] hover:text-[#FF3DCB] transition-all duration-300 flex items-center justify-center p-1.5 rounded-full hover:shadow-[0_0_15px_rgba(255,61,203,0.4)]"
+        title="가이드 보기"
+      >
+        <span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 0;">help</span>
       </button>
 
       <!-- Logout Button -->

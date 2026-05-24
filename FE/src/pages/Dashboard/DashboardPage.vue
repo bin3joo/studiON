@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { AudioLines, Disc3, Mic, Play } from 'lucide-vue-next'
 import DashboardHeader from './components/DashboardHeader.vue'
+import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
 import { fetchProjects } from '@/pages/Project/api/project.api'
 import { buildCreateProjectPayload, createProject, projectApi } from '@/pages/Project/api/project.api'
 import type { ProjectListItem, CreateProjectResponse, ProjectId } from '@/pages/Project/types/project.types'
@@ -18,6 +19,37 @@ const neverShowAgain = ref(false)
 const searchQuery = ref('')
 const currentTotalSizeBytes = ref(0)
 const maxTotalSizeBytes = ref(50 * 1024 * 1024)
+
+// Guide Overlay State
+const isGuideOpen = ref(false)
+
+const dashboardGuideSteps = [
+  {
+    selector: '[data-guide="invite-code"]',
+    title: '초대 코드 입력',
+    description: '팀원에게 전달받은 6자리 초대 코드를 입력하여 기존 프로젝트에 참여할 수 있습니다.',
+  },
+  {
+    selector: '[data-guide="create-project"]',
+    title: '새 프로젝트 생성',
+    description: '새로운 빈 캔버스를 열고 당신만의 음악 작업을 시작해 보세요. 생성된 프로젝트에서 팀원들을 초대할 수 있습니다.',
+  },
+  {
+    selector: '[data-guide="usage-bar"]',
+    title: '내 사용량 확인',
+    description: '현재 계정에서 사용 중인 총 오디오 용량을 확인합니다. 최대 50MB(임시)까지 업로드할 수 있습니다.',
+  },
+  {
+    selector: '[data-guide="search-project"]',
+    title: '프로젝트 검색',
+    description: '프로젝트 이름으로 검색하여 원하는 작업물을 빠르게 찾아볼 수 있습니다.',
+  },
+  {
+    selector: '[data-guide="feedback-button"]',
+    title: '피드백 남기기',
+    description: '베타 서비스 이용 중 불편한 점이나 제안할 내용이 있다면 언제든 설문조사에 참여해 주세요!',
+  },
+]
 
 // Slider State
 const currentSlide = ref(0)
@@ -182,7 +214,7 @@ onUnmounted(() => {
 
 <template>
   <main class="min-h-[125vh] bg-[#131313] text-[#e5e2e1] flex flex-col font-body-md text-body-md" style="zoom: 0.8;">
-    <DashboardHeader :existing-project-names="existingProjectNames" @openFeedback="showFeedbackModal = true" />
+    <DashboardHeader :existing-project-names="existingProjectNames" @openFeedback="showFeedbackModal = true" @start-guide="isGuideOpen = true" />
 
     <div class="flex-1 flex flex-col p-6 md:p-10 mx-auto w-[95%] lg:w-[80%] max-w-[1600px] gap-8">
       
@@ -244,7 +276,7 @@ onUnmounted(() => {
             <p class="font-body-lg text-[16px] text-[#e5bcc5] mt-2 opacity-80">최근 작업 중인 트랙들을 확인하고 관리하세요.</p>
             
             <!-- 오디오 사용량 프로그레스 바 -->
-            <div class="mt-4 flex items-center gap-4 max-w-md w-full bg-[#1c1b1b] p-3.5 rounded-2xl border border-white/10 shadow-lg">
+            <div data-guide="usage-bar" class="mt-4 flex items-center gap-4 max-w-md w-full bg-[#1c1b1b] p-3.5 rounded-2xl border border-white/10 shadow-lg">
               <span class="text-[14px] text-white uppercase tracking-wider shrink-0 font-bold flex items-center gap-2">
                 내 사용량
               </span>
@@ -258,11 +290,12 @@ onUnmounted(() => {
           </div>
 
           <div class="flex flex-col sm:flex-row justify-end items-center gap-4 w-full md:w-auto">
-            <div class="relative w-full sm:w-64">
+            <div data-guide="search-project" class="relative w-full sm:w-64">
               <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#e5bcc5]" style="font-variation-settings: 'FILL' 0;">search</span>
               <input v-model="searchQuery" class="w-full bg-[#1c1b1b] border border-white/10 rounded-full focus:border-[#FF3DCB] text-[#e5e2e1] text-[14px] pl-10 pr-4 py-2.5 outline-none transition-colors placeholder:text-[#e5bcc5]/50" placeholder="프로젝트 검색..." type="text" />
             </div>
             <button
+              data-guide="create-project"
               @click="handleCreateProjectClick"
               :disabled="isCreating"
               class="bg-[#FF3DCB] text-[#65002e] text-[15px] font-bold px-6 py-2.5 rounded-full hover:shadow-[0_0_15px_rgba(255,61,203,0.4)] hover:bg-[#ff4a8d] transition-all flex items-center justify-center gap-2 w-full sm:w-auto whitespace-nowrap disabled:opacity-50">
@@ -409,5 +442,12 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Guide Overlay -->
+    <ProjectGuideOverlay
+      :steps="dashboardGuideSteps"
+      :open="isGuideOpen"
+      @close="isGuideOpen = false"
+    />
   </main>
 </template>

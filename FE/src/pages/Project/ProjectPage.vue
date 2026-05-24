@@ -29,10 +29,12 @@ import { useProjectCollaboration } from './composables/useProjectCollaboration'
 import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
 import DefaultTrackDropGuide from '@/pages/Project/components/DefaultTrackDropGuide.vue'
 import { trackEvent } from '@/shared/utils/analytics'
+import { useAlertStore } from '@/shared/stores/useAlertStore'
 
-type SidePanelType = 'comments' | 'history' | 'ai' | null
+type SidePanelType = 'comments' | 'history' | 'ai' | 'help' | null
 
 const route = useRoute()
+const alertStore = useAlertStore()
 const projectId = route.params.projectId as string
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
@@ -262,12 +264,12 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
             if (clipUnderPlayhead) {
               trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
             } else {
-              alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
+              alertStore.showAlert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.", "warning");
             }
           }
         } else {
           // 3. 아무것도 선택되지 않은 경우 분할 취소
-          alert("분할할 클립이나 트랙을 선택해 주세요.");
+          alertStore.showAlert("분할할 클립이나 트랙을 선택해 주세요.", "warning");
         }
         break;
       }
@@ -646,6 +648,15 @@ function handleOpenComments() {
   activeSidePanel.value = activeSidePanel.value === 'comments' ? null : 'comments'
 }
 
+function handleOpenHelp() {
+  activeSidePanel.value = activeSidePanel.value === 'help' ? null : 'help'
+}
+
+function startAiTutorial() {
+  activeSidePanel.value = null
+  isProjectGuideOpen.value = true
+}
+
 function handleCloseSidePanel() {
   activeSidePanel.value = null
 }
@@ -865,7 +876,7 @@ async function handleToolbarFileUpload(event: Event) {
 
   const selectedTrackId = trackStore.selectedTrackId
   if (!selectedTrackId) {
-    alert("오디오를 업로드할 트랙을 먼저 선택해 주세요.");
+    alertStore.showAlert("오디오를 업로드할 트랙을 먼저 선택해 주세요.", "warning");
     target.value = '';
     return;
   }
@@ -920,11 +931,11 @@ function handleActionSplit() {
       if (clipUnderPlayhead) {
         trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
       } else {
-        alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
+        alertStore.showAlert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.", "warning");
       }
     }
   } else {
-    alert("분할할 클립이나 트랙을 선택해 주세요.");
+    alertStore.showAlert("분할할 클립이나 트랙을 선택해 주세요.", "warning");
   }
 }
 
@@ -1100,8 +1111,13 @@ const projectGuideSteps = [
   },
   {
     selector: '[data-guide="ai-analysis"]',
-    title: 'AI 오디오 분석',
-    description: 'AI가 오디오를 분석해 주파수 충돌(Frequency Masking), 위상 캔슬링(Phase Cancellation), 볼륨 불균형 등 믹싱 에러를 시각적으로 짚어주고 해결책을 제시합니다.',
+    title: 'AI 오디오 분석 시작',
+    description: 'AI가 오디오를 분석하여 주파수 마스킹(소리 겹침), 위상 캔슬링(소리 상쇄), 볼륨 불균형 등 믹싱 문제점들을 탐지합니다. 플레이 컨트롤러의 별 버튼을 눌러 스캔을 시작해 보세요.',
+  },
+  {
+    selector: '[data-guide="ai-eq-panel"]',
+    title: 'AI 스마트 EQ 조절',
+    description: '탐지된 문제를 클릭하면 EQ 패널이 열립니다. AI가 제안하는 Before/After 곡선을 비교하고 \'유지할 트랙\'을 선택해 자연스러운 수정을 요청할 수 있습니다. 마음에 들면 \'AI 적용\'으로 반영하세요.',
   },
   {
     selector: '[data-guide="export"]',
@@ -1154,6 +1170,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   @open-invite="handleOpenInvite"
   @open-comments="handleOpenComments"
   @open-history="handleOpenHistory"
+  @open-help="handleOpenHelp"
 />
     <!-- 재생 컨트롤러 컴포넌트 추가 -->
     <PlayController
@@ -1274,6 +1291,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
       @close="handleCloseSidePanel"
       @resolve-comment="handlePanelResolveComment"
       @add-reply="handlePanelAddReply"
+      @start-tutorial="startAiTutorial"
     />
     </main>
 

@@ -282,6 +282,7 @@ watch(
 
 <template>
   <section
+    data-guide="ai-eq-panel"
     class="shrink-0 border-t border-white/10 bg-[#202020] shadow-[0_-18px_30px_rgba(0,0,0,0.45)] transition-all"
   >
     <!-- 상단 헤더 -->

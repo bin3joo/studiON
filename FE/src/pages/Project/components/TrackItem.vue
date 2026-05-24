@@ -3,6 +3,7 @@ import {ref, computed, inject, type Ref, nextTick} from 'vue';
 import type { TrackUIState, ClipUIState } from '../types';
 import { Pencil, VolumeX, Volume2 } from 'lucide-vue-next';
 import { useTrackStore } from '../store/useTrackStore'; //트랙스토얼를 임포트해서 타임라인 길이를 맞춘다.
+import { useAlertStore } from '@/shared/stores/useAlertStore';
 import WaveformWebGL from './WaveformWebGL.vue'; //파형 컴포넌트 불러오기
 import {UploadIcon, ScissorsIcon, ClipboardIcon, TrashIcon, CopyIcon, CopyPlusIcon, Lock, Unlock, Loader2, GripVertical, Sparkles} from 'lucide-vue-next';
 import type { TrackMeasureCommentGroup } from '../types/comment.types'
@@ -20,6 +21,7 @@ const props = defineProps<{
 
 //스토어 사용
 const trackStore = useTrackStore();
+const alertStore = useAlertStore();
 
 const aiAnalysisItems = inject<Ref<any[]>>('aiAnalysisItems')
 const activeAiAnalysisId = inject<Ref<string | number | null>>('activeAiAnalysisId')
@@ -173,7 +175,7 @@ const onClipPointerDown = (e: PointerEvent, clip: ClipUIState) => {
   if(e.button !== 0) return; // 좌클릭만 허용하기
   // 누군가(다른 사람) 이미 잠근 클립이면 아예 건드리지도 못하게 튕겨냄
   if(clip.isLocked) {
-      alert("다른 사용자가 편집 중인 클립입니다."); // 시각적 피드백
+      alertStore.showAlert("다른 사용자가 편집 중인 클립입니다.", "warning"); // 시각적 피드백
       return; 
   }
   e.stopPropagation(); //이벤트를 부모로 전달 안하기 (트랙의 빈 공간 클릭 방지)
@@ -703,7 +705,7 @@ const onDrop = (e: DragEvent) => {
   // 2. 오디오 파일인지 검증 (mp3, wav 등)
   if (!file.type.startsWith('audio/')) {
    // console.warn(`[디버그 - 드래그 앤 드롭 차단됨] file.type이 'audio/'로 시작하지 않습니다. (현재: '${file.type}')`);
-    alert('오디오 파일(mp3, wav 등)만 추가할 수 있습니다.');
+    alertStore.showAlert('오디오 파일(mp3, wav 등)만 추가할 수 있습니다.', 'warning');
     return;
   }
 

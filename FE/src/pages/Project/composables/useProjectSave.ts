@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { projectApi } from '../api/project.api'
 import { useTrackStore } from '../store/useTrackStore'
+import { useAlertStore } from '@/shared/stores/useAlertStore'
 import type { TrackEqBandState } from '../types'
 
 type EqType = 'BELL' | 'LOW_SHELF' | 'HIGH_SHELF'
@@ -109,7 +110,7 @@ export function useProjectSave(projectId: number) {
       lastSavedTime.value = formatTime(response.saveAt)
     } catch (error) {
       console.error('저장 실패:', error)
-      alert('프로젝트 저장에 실패했습니다.')
+      useAlertStore().showAlert('프로젝트 저장에 실패했습니다.', 'error')
     }
   }
 

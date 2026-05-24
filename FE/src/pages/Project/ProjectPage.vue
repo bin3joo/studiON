@@ -29,10 +29,12 @@ import { useProjectCollaboration } from './composables/useProjectCollaboration'
 import ProjectGuideOverlay from '@/pages/Project/components/ProjectGuideOverlay.vue'
 import DefaultTrackDropGuide from '@/pages/Project/components/DefaultTrackDropGuide.vue'
 import { trackEvent } from '@/shared/utils/analytics'
+import { useAlertStore } from '@/shared/stores/useAlertStore'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | 'help' | null
 
 const route = useRoute()
+const alertStore = useAlertStore()
 const projectId = route.params.projectId as string
 const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
@@ -262,12 +264,12 @@ const handleKeyDown = async (e: KeyboardEvent) => { // async 추가
             if (clipUnderPlayhead) {
               trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
             } else {
-              alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
+              alertStore.showAlert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.", "warning");
             }
           }
         } else {
           // 3. 아무것도 선택되지 않은 경우 분할 취소
-          alert("분할할 클립이나 트랙을 선택해 주세요.");
+          alertStore.showAlert("분할할 클립이나 트랙을 선택해 주세요.", "warning");
         }
         break;
       }
@@ -874,7 +876,7 @@ async function handleToolbarFileUpload(event: Event) {
 
   const selectedTrackId = trackStore.selectedTrackId
   if (!selectedTrackId) {
-    alert("오디오를 업로드할 트랙을 먼저 선택해 주세요.");
+    alertStore.showAlert("오디오를 업로드할 트랙을 먼저 선택해 주세요.", "warning");
     target.value = '';
     return;
   }
@@ -929,11 +931,11 @@ function handleActionSplit() {
       if (clipUnderPlayhead) {
         trackStore.splitClip(clipUnderPlayhead.clipId, track.trackId);
       } else {
-        alert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.");
+        alertStore.showAlert("선택한 트랙의 재생바 위치에 자를 수 있는 오디오 클립이 없습니다.", "warning");
       }
     }
   } else {
-    alert("분할할 클립이나 트랙을 선택해 주세요.");
+    alertStore.showAlert("분할할 클립이나 트랙을 선택해 주세요.", "warning");
   }
 }
 

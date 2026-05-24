@@ -13,9 +13,11 @@ import type { TrackEqBandSummary } from '../api/project.api'
 import { getMasterLimiter } from '../api/projectLimiter.api'
 import type { MasterLimiterState } from '../api/projectLimiter.api'
 import axios from 'axios'
+import { useAlertStore } from '@/shared/stores/useAlertStore'
 
 //페이지 어디든 사용가능하도록 useTrackStore로 export 고유 ID는 track
 export const useTrackStore = defineStore('track', () => {
+    const alertStore = useAlertStore();
     // ==========================================
     // 1. 상태(State) 선언
     // ==========================================
@@ -938,7 +940,7 @@ export const useTrackStore = defineStore('track', () => {
                     });
                 },
                 redo: () => {
-                    alert("취소된 트랙은 '새 트랙 추가' 버튼으로 다시 만들어 주세요.");
+                    useAlertStore().showAlert("취소된 트랙은 '새 트랙 추가' 버튼으로 다시 만들어 주세요.", "info");
                 }
             });
         }
@@ -1016,9 +1018,9 @@ export const useTrackStore = defineStore('track', () => {
     // --------------------- 에러 수신 (소켓) ---------------------
     socketService.subscribePersistent('ERROR', (data: any) => {
         if (data && data.message) {
-            alert(data.message);
+            alertStore.showAlert(data.message, "error");
         } else {
-            alert("처리 중 오류가 발생했습니다.");
+            alertStore.showAlert("처리 중 오류가 발생했습니다.", "error");
         }
     });
 
@@ -1159,7 +1161,7 @@ export const useTrackStore = defineStore('track', () => {
                         },
                         redo: () => {
                             // 오디오 업로드 리두는 지원하지 않음 (파일 재업로드 필요하므로)
-                            alert("업로드 취소한 클립은 다시 복구할 수 없습니다.");
+                            useAlertStore().showAlert("업로드 취소한 클립은 다시 복구할 수 없습니다.", "warning");
                         }
                     });
                 }
@@ -1390,7 +1392,7 @@ export const useTrackStore = defineStore('track', () => {
                 },
                 redo: () => {
                     // 붙여넣기 리두: 원래 붙여넣기 로직 재실행 (편의상 알림 제공)
-                    alert("되돌린 클립은 클립보드에서 다시 붙여넣기(Ctrl+V) 해주세요.");
+                    useAlertStore().showAlert("되돌린 클립은 클립보드에서 다시 붙여넣기(Ctrl+V) 해주세요.", "info");
                 }
             });
         }
@@ -1450,7 +1452,7 @@ export const useTrackStore = defineStore('track', () => {
                 },
                 redo: () => {
                     // 복제 리두는 지원하지 않음
-                    alert("되돌린 클립은 다시 복제(Alt+Drag) 해주세요.");
+                    useAlertStore().showAlert("되돌린 클립은 다시 복제(Alt+Drag) 해주세요.", "info");
                 }
             });
         }
@@ -1647,7 +1649,7 @@ export const useTrackStore = defineStore('track', () => {
         } catch (error) {
             // console.error(`[Upload Error] 업로드 또는 클립 생성 요청 실패:`, error);
             URL.revokeObjectURL(localBlobUrl);
-            alert("파일 업로드에 실패했습니다.");
+            useAlertStore().showAlert("파일 업로드에 실패했습니다.", "error");
             uploadingTrackId.value = null;
             uploadingBar.value = null;
         }
@@ -1682,7 +1684,7 @@ export const useTrackStore = defineStore('track', () => {
 
         pushCommand({
             undo: () => {
-                alert("잘라낸 클립은 되돌릴 수 없습니다.");
+                useAlertStore().showAlert("잘라낸 클립은 되돌릴 수 없습니다.", "warning");
             },
             redo: () => {
                 // do nothing
@@ -1778,7 +1780,7 @@ export const useTrackStore = defineStore('track', () => {
 
         pushCommand({
             undo: () => {
-                alert("삭제한 클립은 되돌릴 수 없습니다.");
+                useAlertStore().showAlert("삭제한 클립은 되돌릴 수 없습니다.", "warning");
             },
             redo: () => {
                 // do nothing
@@ -1828,7 +1830,7 @@ export const useTrackStore = defineStore('track', () => {
 
         const EPSILON = 0.0001; // 부동소수점 오차 방어
         if (currentBar <= originalClip.start + EPSILON || currentBar >= originalClip.start + originalClip.duration - EPSILON) {
-            alert("재생바(Playhead)가 클립 위에 있어야 분할할 수 있습니다.");
+            useAlertStore().showAlert("재생바(Playhead)가 클립 위에 있어야 분할할 수 있습니다.", "warning");
             return;
         }
 
@@ -2127,7 +2129,7 @@ export const useTrackStore = defineStore('track', () => {
 
         pushCommand({
             undo: () => {
-                alert("트랙 삭제는 되돌릴 수 없습니다.");
+                useAlertStore().showAlert("트랙 삭제는 되돌릴 수 없습니다.", "warning");
             },
             redo: () => { }
         });

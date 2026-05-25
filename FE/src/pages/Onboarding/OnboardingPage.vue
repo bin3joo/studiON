@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import logoDark from '@/assets/logo_dark.png'
 import { redirectToGoogleLogin } from './api/onboarding.api'
+import { ref } from 'vue'
+
+const isTermsModalOpen = ref(false)
+const isPrivacyModalOpen = ref(false)
 
 function handleLoginClick() {
   redirectToGoogleLogin()
@@ -67,7 +71,7 @@ function handleLoginClick() {
               <span class="text-white font-bold text-[15px]">베타 서비스 이용 안내</span>
             </div>
             <p class="text-[14px] leading-relaxed tracking-wide">계정 당 총 <strong class="text-[#00dce6]">100MB</strong>, 1회 최대 <strong class="text-[#00dce6]">50MB</strong>의 오디오를 업로드할 수 있습니다.</p>
-            <p class="text-[14px] leading-relaxed tracking-wide">원활한 동기화를 위해 프로젝트당 최대 <strong class="text-[#00dce6]">6명</strong>까지 동시 참여를 권장합니다.</p>
+            <p class="text-[14px] leading-relaxed tracking-wide">프로젝트당 최대 <strong class="text-[#00dce6]">6명</strong>까지 동시 참여가 가능합니다.</p>
             <p class="text-[13px] leading-relaxed text-gray-500 mt-1">현재 베타 버전은 오디오 트랙 생성 위주로 지원되며, 더 많은 기능이 곧 추가될 예정입니다.</p>
           </div>
         </div>
@@ -130,8 +134,167 @@ function handleLoginClick() {
             </div>
           </div>
         </div>
+
+        <!-- How It Works Section -->
+        <div class="w-full max-w-[1200px] mx-auto pt-16 pb-16 relative z-10 border-t border-white/5">
+          <div class="text-center mb-16">
+            <h2 class="font-display-lg text-3xl md:text-5xl text-white mb-4">How It Works</h2>
+            <p class="font-body-lg text-gray-400">단 3단계면 충분합니다. 웹 브라우저에서 바로 시작하세요.</p>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div class="relative flex flex-col items-center text-center">
+              <div class="w-16 h-16 rounded-full bg-[#1c1b1b] border border-white/10 flex items-center justify-center text-2xl font-bold text-[#FF3DCB] mb-6 shadow-[0_0_15px_rgba(255,61,203,0.2)]">1</div>
+              <h3 class="text-xl font-bold text-white mb-3">트랙 추가</h3>
+              <p class="text-gray-400 leading-relaxed text-[15px]">오디오 파일(.mp3, .wav)을 빈 타임라인에 드래그 앤 드롭하여 간편하게 새 트랙을 추가해 보세요.</p>
+            </div>
+            <!-- 연결선 (Desktop) -->
+            <div class="hidden md:block absolute top-8 left-[16.66%] w-[33.33%] h-px bg-gradient-to-r from-transparent via-[#FF3DCB]/30 to-transparent"></div>
+            
+            <div class="relative flex flex-col items-center text-center">
+              <div class="w-16 h-16 rounded-full bg-[#1c1b1b] border border-white/10 flex items-center justify-center text-2xl font-bold text-[#00dce6] mb-6 shadow-[0_0_15px_rgba(0,220,230,0.2)]">2</div>
+              <h3 class="text-xl font-bold text-white mb-3">AI 분석 & 협업</h3>
+              <p class="text-gray-400 leading-relaxed text-[15px]">AI의 도움으로 믹싱 오류를 잡고, 초대된 팀원들과 코멘트를 주고받으며 실시간으로 프로젝트를 발전시키세요.</p>
+            </div>
+            <!-- 연결선 (Desktop) -->
+            <div class="hidden md:block absolute top-8 left-[50%] w-[33.33%] h-px bg-gradient-to-r from-transparent via-[#00dce6]/30 to-transparent"></div>
+
+            <div class="relative flex flex-col items-center text-center">
+              <div class="w-16 h-16 rounded-full bg-[#1c1b1b] border border-white/10 flex items-center justify-center text-2xl font-bold text-[#e3b5ff] mb-6 shadow-[0_0_15px_rgba(227,181,255,0.2)]">3</div>
+              <h3 class="text-xl font-bold text-white mb-3">고품질 추출</h3>
+              <p class="text-gray-400 leading-relaxed text-[15px]">작업이 완료된 프로젝트는 언제든지 클릭 한 번으로 무손실 고음질 오디오 파일로 내보낼 수 있습니다.</p>
+            </div>
+          </div>
+        </div>
+
+
+
+        <!-- FAQ Section -->
+        <div class="w-full max-w-[800px] mx-auto pt-16 pb-24 relative z-10 border-t border-white/5">
+          <div class="text-center mb-12">
+            <h2 class="font-display-lg text-3xl md:text-5xl text-white mb-4">FAQ</h2>
+            <p class="font-body-lg text-gray-400">자주 묻는 질문들을 모아봤습니다.</p>
+          </div>
+          <div class="flex flex-col gap-4">
+            <details class="group bg-[#1c1b1b]/40 border border-white/10 rounded-xl overflow-hidden [&_summary::-webkit-details-marker]:hidden">
+              <summary class="flex items-center justify-between cursor-pointer p-6 text-white font-bold text-lg hover:bg-white/5 transition-colors">
+                <span>정말 무료로 사용할 수 있나요?</span>
+                <span class="transition group-open:rotate-180 text-gray-400">
+                  <svg fill="none" height="24" shape-rendering="geometricPrecision" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+                </span>
+              </summary>
+              <div class="px-6 pb-6 text-gray-400 text-[15px] leading-relaxed">
+                네, 현재 베타 서비스 기간 동안 실시간 동시 편집, AI 믹싱 분석 등 모든 핵심 기능을 100% 무료로 이용하실 수 있습니다. (계정당 최대 100MB 업로드 지원)
+              </div>
+            </details>
+            <details class="group bg-[#1c1b1b]/40 border border-white/10 rounded-xl overflow-hidden [&_summary::-webkit-details-marker]:hidden">
+              <summary class="flex items-center justify-between cursor-pointer p-6 text-white font-bold text-lg hover:bg-white/5 transition-colors">
+                <span>어떤 오디오 포맷을 지원하나요?</span>
+                <span class="transition group-open:rotate-180 text-gray-400">
+                  <svg fill="none" height="24" shape-rendering="geometricPrecision" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+                </span>
+              </summary>
+              <div class="px-6 pb-6 text-gray-400 text-[15px] leading-relaxed">
+                현재 가장 널리 쓰이는 MP3 파일과 무손실 WAV 파일을 업로드하고 다운로드(Export)할 수 있습니다. 1회 업로드 용량은 최대 50MB로 제한됩니다.
+              </div>
+            </details>
+            <details class="group bg-[#1c1b1b]/40 border border-white/10 rounded-xl overflow-hidden [&_summary::-webkit-details-marker]:hidden">
+              <summary class="flex items-center justify-between cursor-pointer p-6 text-white font-bold text-lg hover:bg-white/5 transition-colors">
+                <span>AI 분석은 정확히 어떤 역할을 하나요?</span>
+                <span class="transition group-open:rotate-180 text-gray-400">
+                  <svg fill="none" height="24" shape-rendering="geometricPrecision" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+                </span>
+              </summary>
+              <div class="px-6 pb-6 text-gray-400 text-[15px] leading-relaxed">
+                인간의 귀로는 구분하기 힘든 주파수 마스킹(소리 겹침 현상), 위상 캔슬링(소리 상쇄 현상) 등의 믹싱 오류를 AI가 빠르게 스캔합니다. 나아가 스마트 EQ를 통해 보컬이나 특정 악기를 선명하게 살리는 자동 보정(Revision) 기능을 제공합니다.
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- Bottom CTA Section -->
+        <div class="w-full relative z-10 py-24 bg-gradient-to-b from-[#131313] to-[#FF3DCB]/10 border-t border-white/5 text-center px-4">
+          <h2 class="font-display-lg text-4xl md:text-6xl text-white mb-6">당신만의 스튜디오를<br/>지금 열어보세요.</h2>
+          <p class="font-body-lg text-gray-300 mb-10 max-w-2xl mx-auto">더 이상 무거운 프로그램을 설치하지 마세요. 구글 계정만 있다면 10초 만에 브라우저에서 음악 작업을 시작할 수 있습니다.</p>
+          <div class="flex justify-center">
+            <button class="gsi-material-button scale-110 shadow-2xl" @click="handleLoginClick">
+              <div class="gsi-material-button-state"></div>
+              <div class="gsi-material-button-content-wrapper">
+                <div class="gsi-material-button-icon">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" xmlns:xlink="http://www.w3.org/1999/xlink" style="display: block;">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                    <path fill="none" d="M0 0h48v48H0z"></path>
+                  </svg>
+                </div>
+                <span class="gsi-material-button-contents">Google 계정으로 시작하기</span>
+                <span style="display: none;">Google 계정으로 시작하기</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="w-full relative z-10 py-10 border-t border-white/10 bg-[#0a0a0a] text-center md:text-left">
+          <div class="max-w-[1200px] mx-auto px-4 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-2">
+              <img :src="logoDark" alt="StudiON" class="h-6 w-auto opacity-70">
+              <span class="text-gray-500 text-sm">© 2026 StudiON. All rights reserved.</span>
+            </div>
+            <div class="flex gap-6 text-sm text-gray-500">
+              <button @click="isTermsModalOpen = true" class="hover:text-white transition-colors">이용약관</button>
+              <button @click="isPrivacyModalOpen = true" class="hover:text-white transition-colors">개인정보처리방침</button>
+              <a href="https://docs.google.com/forms/d/e/1FAIpQLSd8j0DchO_6TY9FC7Ya_LCfH-mxJQUTAqcV4Gu-UXptyRPsuA/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">문의하기</a>
+            </div>
+          </div>
+        </footer>
+
       </div>
     </section>
+
+    <!-- Terms Modal -->
+    <div v-if="isTermsModalOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" @click.self="isTermsModalOpen = false">
+      <div class="bg-[#1c1b1b] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div class="flex items-center justify-between p-6 border-b border-white/10">
+          <h2 class="text-xl font-bold text-white">이용약관</h2>
+          <button @click="isTermsModalOpen = false" class="text-gray-400 hover:text-white transition-colors">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="p-6 overflow-y-auto custom-scrollbar text-gray-300 text-[15px] leading-relaxed space-y-4">
+          <p><strong>제 1 조 (목적)</strong><br>본 약관은 StudiON(이하 "회사")이 제공하는 웹 기반 오디오 편집 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리, 의무 및 책임사항 등을 규정함을 목적으로 합니다.</p>
+          <p><strong>제 2 조 (약관의 효력 및 변경)</strong><br>1. 본 약관은 서비스를 이용하고자 하는 모든 회원에 대하여 그 효력을 발생합니다.<br>2. 회사는 약관의 규제에 관한 법률 등 관련 법령을 위배하지 않는 범위에서 본 약관을 개정할 수 있습니다.</p>
+          <p><strong>제 3 조 (서비스의 제공 및 변경)</strong><br>1. 서비스는 현재 베타 버전으로 제공되며, 일부 기능이 제한되거나 예고 없이 변경될 수 있습니다.<br>2. 회사는 서비스의 안정적인 제공을 위해 최선을 다하며, 정기 점검 등으로 서비스가 일시 중단될 수 있습니다.</p>
+          <p><strong>제 4 조 (사용자의 의무)</strong><br>1. 회원은 서비스 이용 시 타인의 저작권을 침해하는 오디오 데이터를 업로드해서는 안 됩니다.<br>2. 불법적이거나 타인에게 불쾌감을 주는 콘텐츠의 업로드 및 공유는 엄격히 금지됩니다.</p>
+        </div>
+        <div class="p-6 border-t border-white/10 flex justify-end">
+          <button @click="isTermsModalOpen = false" class="px-5 py-2 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition">확인</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy Policy Modal -->
+    <div v-if="isPrivacyModalOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" @click.self="isPrivacyModalOpen = false">
+      <div class="bg-[#1c1b1b] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div class="flex items-center justify-between p-6 border-b border-white/10">
+          <h2 class="text-xl font-bold text-white">개인정보처리방침</h2>
+          <button @click="isPrivacyModalOpen = false" class="text-gray-400 hover:text-white transition-colors">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="p-6 overflow-y-auto custom-scrollbar text-gray-300 text-[15px] leading-relaxed space-y-4">
+          <p><strong>1. 수집하는 개인정보 항목</strong><br>회사는 회원가입, 고객상담, 각종 서비스의 제공을 위해 아래와 같은 최소한의 개인정보를 수집하고 있습니다.<br>- 필수항목: 이메일 주소, 이름(또는 닉네임), 프로필 이미지 (소셜 로그인 시 제공받는 정보)</p>
+          <p><strong>2. 개인정보의 수집 및 이용 목적</strong><br>회사는 수집한 개인정보를 다음의 목적을 위해 활용합니다.<br>- 서비스 제공에 관한 계약 이행 및 콘텐츠 제공<br>- 회원 관리, 본인 확인, 불량 회원의 부정 이용 방지</p>
+          <p><strong>3. 개인정보의 보유 및 이용기간</strong><br>원칙적으로, 개인정보 수집 및 이용 목적이 달성된 후에는 해당 정보를 지체 없이 파기합니다. 단, 관계법령의 규정에 의하여 보존할 필요가 있는 경우 회사는 법령에서 정한 일정한 기간 동안 회원정보를 보관합니다.</p>
+          <p><strong>4. 업로드된 오디오 데이터</strong><br>사용자가 업로드한 오디오 데이터는 서비스 제공(실시간 동기화, AI 분석 등)의 목적으로만 활용되며, 사용자의 명시적인 동의 없이 외부로 유출되거나 상업적인 용도로 사용되지 않습니다.</p>
+        </div>
+        <div class="p-6 border-t border-white/10 flex justify-end">
+          <button @click="isPrivacyModalOpen = false" class="px-5 py-2 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition">확인</button>
+        </div>
+      </div>
+    </div>
+
   </main>
 </template>
 

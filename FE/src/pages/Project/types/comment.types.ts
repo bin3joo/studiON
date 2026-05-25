@@ -1,5 +1,6 @@
 export interface TimelineComment {
   id: string
+  authorId?: number
   author: string
   mention?: string
   content: string

@@ -18,6 +18,16 @@ const currentUserProfileImageUrl = computed(() => {
   }
 })
 
+const currentUserId = computed(() => {
+  if (!authStore.accessToken) return null
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]))
+    return Number(payload.sub) || payload.userId || payload.memberId || null
+  } catch(e) {
+    return null
+  }
+})
+
 type Placement = 'top' | 'bottom'
 
 const props = defineProps<{
@@ -62,6 +72,10 @@ const expandedMeasure = ref<number | null>(null)
 const expandedCellLeft = ref(0)
 const expandedPlacement = ref<Placement>('bottom')
 const rootRef = ref<HTMLElement | null>(null)
+const expandedAnchorRef = ref<HTMLElement | null>(null)
+const expandedBoxRef = ref<HTMLElement | null>(null)
+const expandedBoxStyle = ref<Record<string, string>>({})
+const expandedArrowStyle = ref<Record<string, string>>({})
 
 const mentionDropdownActive = ref(false)
 const mentionQuery = ref('')
@@ -159,6 +173,11 @@ function handleInputKeydown(e: KeyboardEvent, measure: number) {
 }
 
 const COMMENT_BOX_HEIGHT = 280
+const COMMENT_BOX_WIDTH = 360
+const COMMENT_BOX_GAP = 18
+const COMMENT_BOX_ARROW_SAFE_PADDING = 28
+const COMMENT_ANCHOR_OFFSET_X = 13
+const COMMENT_ANCHOR_OFFSET_Y = 13
 const VIEWPORT_MARGIN = 24
 
 // [성능 최적화] 마우스 위치에서 셀 위치를 동적으로 계산 (수만 개 div 제거)
@@ -265,30 +284,8 @@ async function openCommentBox(measure: number, event?: MouseEvent) {
     emit('comment-expanded', true)
   })
 
-  if (event) {
-    const triggerRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    
-    // 타임라인 컨테이너의 영역을 기준으로 가용 공간 계산
-    const scrollContainer = rootRef.value?.closest('.custom-scrollbar') as HTMLElement | null
-    const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : { top: 0, bottom: window.innerHeight }
-    
-    const spaceAbove = triggerRect.top - containerRect.top - VIEWPORT_MARGIN
-    const spaceBelow = containerRect.bottom - triggerRect.bottom - VIEWPORT_MARGIN
-
-    if (spaceBelow >= COMMENT_BOX_HEIGHT) {
-      expandedPlacement.value = 'bottom'
-    }
-    else if (spaceAbove >= COMMENT_BOX_HEIGHT) {
-      expandedPlacement.value = 'top'
-    }
-    else {
-      expandedPlacement.value = spaceBelow > spaceAbove ? 'bottom' : 'top'
-    }
-  }
-  else {
-    await nextTick()
-    expandedPlacement.value = 'top'
-  }
+  await nextTick()
+  updateExpandedBoxPosition()
 }
 
 function closeCommentBox() {
@@ -298,6 +295,46 @@ function closeCommentBox() {
   mentionDropdownActive.value = false
   emit('hover-measure', { trackId: null, measure: null })
   emit('comment-expanded', false)
+}
+
+function updateExpandedBoxPosition() {
+  if (expandedMeasure.value === null || !expandedAnchorRef.value) {
+    return
+  }
+
+  const anchorRect = expandedAnchorRef.value.getBoundingClientRect()
+  const anchorX = anchorRect.left
+  const anchorY = anchorRect.top
+  const availableAbove = anchorY - VIEWPORT_MARGIN
+  const availableBelow = window.innerHeight - anchorY - VIEWPORT_MARGIN
+
+  if (availableBelow >= COMMENT_BOX_HEIGHT + COMMENT_BOX_GAP) {
+    expandedPlacement.value = 'bottom'
+  } else if (availableAbove >= COMMENT_BOX_HEIGHT + COMMENT_BOX_GAP) {
+    expandedPlacement.value = 'top'
+  } else {
+    expandedPlacement.value = availableBelow >= availableAbove ? 'bottom' : 'top'
+  }
+
+  const boxLeft = Math.min(
+    Math.max(anchorX - COMMENT_BOX_WIDTH / 2, VIEWPORT_MARGIN),
+    window.innerWidth - VIEWPORT_MARGIN - COMMENT_BOX_WIDTH,
+  )
+  const boxTop = expandedPlacement.value === 'top'
+    ? Math.max(VIEWPORT_MARGIN, anchorY - COMMENT_BOX_HEIGHT - COMMENT_BOX_GAP)
+    : Math.min(window.innerHeight - VIEWPORT_MARGIN - COMMENT_BOX_HEIGHT, anchorY + COMMENT_BOX_GAP)
+  const arrowLeft = Math.min(
+    Math.max(anchorX - boxLeft, COMMENT_BOX_ARROW_SAFE_PADDING),
+    COMMENT_BOX_WIDTH - COMMENT_BOX_ARROW_SAFE_PADDING,
+  )
+
+  expandedBoxStyle.value = {
+    left: `${boxLeft}px`,
+    top: `${boxTop}px`,
+  }
+  expandedArrowStyle.value = {
+    left: `${arrowLeft}px`,
+  }
 }
 
 function submitComment(measure: number) {
@@ -354,9 +391,10 @@ function handleOutsideClick(event: MouseEvent) {
 
   const target = event.target as Node
 
-  if (!rootRef.value.contains(target)) {
-    closeCommentBox()
-  }
+  if (rootRef.value.contains(target)) return
+  if (expandedBoxRef.value?.contains(target)) return
+
+  closeCommentBox()
 }
 
 function handleCloseOtherComments(e: Event) {
@@ -366,14 +404,37 @@ function handleCloseOtherComments(e: Event) {
   }
 }
 
+function handleOpenTrackComment(e: Event) {
+  const customEvent = e as CustomEvent<{ trackId: string, measure: number }>
+  const detail = customEvent.detail
+
+  if (!detail || detail.trackId !== props.trackId) {
+    return
+  }
+
+  activeCellLocation.value = detail.measure
+  updateCellLocation(detail.measure)
+  openCommentBox(detail.measure)
+}
+
+function handleViewportChange() {
+  updateExpandedBoxPosition()
+}
+
 onMounted(() => {
   document.addEventListener('mousedown', handleOutsideClick)
   document.addEventListener('close-other-comments', handleCloseOtherComments)
+  document.addEventListener('open-track-comment', handleOpenTrackComment)
+  window.addEventListener('resize', handleViewportChange)
+  window.addEventListener('scroll', handleViewportChange, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleOutsideClick)
   document.removeEventListener('close-other-comments', handleCloseOtherComments)
+  document.removeEventListener('open-track-comment', handleOpenTrackComment)
+  window.removeEventListener('resize', handleViewportChange)
+  window.removeEventListener('scroll', handleViewportChange, true)
 })
 
 // 댓글 마커 클러스터링
@@ -525,6 +586,16 @@ function parseMentions(content: string) {
         :style="{ left: `${activeCellLeft}px` }"
       />
 
+      <div
+        v-if="expandedMeasure !== null"
+        ref="expandedAnchorRef"
+        class="pointer-events-none absolute h-0 w-0"
+        :style="{
+          left: `${expandedCellLeft + COMMENT_ANCHOR_OFFSET_X}px`,
+          top: `${COMMENT_ANCHOR_OFFSET_Y}px`,
+        }"
+      />
+
       <!-- 댓글 없는 경우: hover 시 댓글 추가 버튼 -->
       <button
         v-if="trackStore.isCommentMode && activeCellLocation !== null && !hasComment(activeCellLocation) && !isExpanded(activeCellLocation)"
@@ -560,45 +631,139 @@ function parseMentions(content: string) {
         </p>
       </button>
 
-      <!-- 확장 댓글 박스 -->
-      <div
-        v-if="expandedMeasure !== null"
-        class="track-comment-box pointer-events-auto absolute z-[120] w-[360px] -translate-x-1/2 rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-4"
-        :class="expandedPlacement === 'top' ? 'bottom-[calc(100%+20px)]' : 'top-[20px]'"
-        :style="{ left: `calc(${expandedCellLeft}px + 13px)` }"
-        @mousedown.stop
-        @click.stop
-      >
-        <!-- 말풍선 꼬리 (Arrow) -->
-        <div 
-          class="absolute left-1/2 -translate-x-1/2 h-3.5 w-3.5 rotate-45 border-white/20 bg-[#1c1c1c]"
-          :class="expandedPlacement === 'top' ? 'bottom-[-7.5px] border-b border-r' : 'top-[-7.5px] border-t border-l'"
-        ></div>
+    </div>
+  </div>
 
-        <!-- 공통 헤더: 트랙 이름 & 마디 수 -->
-        <div class="mb-2.5 flex items-center justify-between border-b border-white/10 pb-2">
-          <span class="text-[13px] font-semibold text-white/50">
-            {{ trackStore.masterTrack.trackId === Number(props.trackId) ? trackStore.masterTrack.name : (trackStore.trackList.find(t => String(t.trackId) === props.trackId)?.name || `트랙 ${props.trackId}`) }} · {{ expandedMeasure }}마디
-          </span>
-          <!-- 닫기 버튼 -->
+  <Teleport to="body">
+    <!-- 확장 댓글 박스 -->
+    <div
+      v-if="expandedMeasure !== null"
+      ref="expandedBoxRef"
+      class="track-comment-box pointer-events-auto fixed z-[500] w-[360px] rounded-[6px] border border-white/20 bg-[#1c1c1c] shadow-2xl p-4"
+      :style="expandedBoxStyle"
+      @mousedown.stop
+      @click.stop
+    >
+      <!-- 말풍선 꼬리 (Arrow) -->
+      <div
+        class="absolute h-3.5 w-3.5 -translate-x-1/2 rotate-45 border-white/20 bg-[#1c1c1c]"
+        :style="expandedArrowStyle"
+        :class="expandedPlacement === 'top' ? 'bottom-[-7.5px] border-b border-r' : 'top-[-7.5px] border-t border-l'"
+      ></div>
+
+      <!-- 공통 헤더: 트랙 이름 & 마디 수 -->
+      <div class="mb-2.5 flex items-center justify-between border-b border-white/10 pb-2">
+        <span class="text-[13px] font-semibold text-white/50">
+          {{ trackStore.masterTrack.trackId === Number(props.trackId) ? trackStore.masterTrack.name : (trackStore.trackList.find(t => String(t.trackId) === props.trackId)?.name || `트랙 ${props.trackId}`) }} · {{ expandedMeasure }}마디
+        </span>
+        <button
+          class="shrink-0 transition hover:scale-110"
+          @click.stop="closeCommentBox"
+          title="닫기"
+        >
+          <X class="h-4 w-4 text-white/40 hover:text-white" />
+        </button>
+      </div>
+
+      <div v-if="!getCommentGroup(expandedMeasure)" class="relative z-10 flex items-center gap-2">
+        <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
+          <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
+          <span v-else class="text-[10px] font-bold text-white/90">나</span>
+        </div>
+        <div class="relative flex-1 flex items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
+          <input
+            ref="inputRef1"
+            v-model="draftComment"
+            type="text"
+            placeholder="댓글 추가"
+            class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
+            @input="handleInput"
+            @keydown="handleInputKeydown($event, expandedMeasure)"
+          />
           <button
-            class="shrink-0 transition hover:scale-110"
-            @click.stop="closeCommentBox"
-            title="닫기"
+            class="shrink-0 transition hover:scale-110 disabled:opacity-50"
+            :disabled="!draftComment.trim()"
+            @click="submitComment(expandedMeasure)"
           >
-            <X class="h-4 w-4 text-white/40 hover:text-white" />
+            <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
           </button>
+
+          <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar z-[130]">
+            <button
+              v-for="(member, index) in filteredMembers"
+              :key="member.userId"
+              class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
+              :class="{ 'bg-white/10': index === selectedMentionIndex }"
+              @click.prevent="insertMention(member)"
+              @mousedown.prevent
+            >
+              <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
+                <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
+                <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
+              </div>
+              <span class="text-white">{{ member.nickname }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="relative z-10 flex flex-col">
+        <div class="flex max-h-[300px] flex-col gap-3 overflow-y-auto custom-scrollbar">
+          <div
+            v-for="(comment, idx) in getCommentGroup(expandedMeasure)?.comments || []"
+            :key="comment.id"
+            class="group flex flex-col gap-1"
+            :class="getCommentGroup(expandedMeasure)?.resolved ? 'opacity-50' : ''"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2" :class="{ 'ml-4': idx > 0 }">
+                <CornerDownRight v-if="idx > 0" class="h-4 w-4 shrink-0 text-white/40" />
+                <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: comment.profileImageUrl ? 'transparent' : (comment.color || getAuthorColor(comment.author)) }">
+                  <img v-if="comment.profileImageUrl" :src="comment.profileImageUrl || undefined" class="h-full w-full object-cover" />
+                  <span v-else class="text-[10px] font-bold text-white/90">{{ comment.author.slice(0, 2) }}</span>
+                </div>
+                <span class="text-[13px] font-medium text-white/60">{{ comment.author }}</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <button
+                  v-if="comment.authorId === currentUserId"
+                  class="opacity-0 transition-opacity group-hover:opacity-100"
+                  @click.stop="requestDeleteComment(comment.id)"
+                  title="삭제"
+                >
+                  <Trash2 class="h-4 w-4 text-white/40 hover:text-red-400" />
+                </button>
+                <div v-else class="h-4 w-4" />
+                <button
+                  v-if="idx === 0"
+                  class="transition-colors"
+                  :class="getCommentGroup(expandedMeasure)?.resolved ? 'text-green-500' : 'text-white hover:text-green-400'"
+                  @click.stop="emit('resolve-comment', { trackId, measure: expandedMeasure })"
+                  title="해결됨 표시"
+                >
+                  <Check class="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div class="pl-[32px]" :class="{ 'ml-10': idx > 0 }">
+              <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-white">
+                <template v-for="(part, i) in parseMentions(comment.mention ? comment.mention + ' \n' + comment.content : comment.content)" :key="i">
+                  <span v-if="part.isMention" class="font-medium text-[#FF3DCB]">{{ part.text }}</span>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+              </p>
+            </div>
+          </div>
         </div>
 
-        <!-- 새 댓글 달기 (Empty State) -->
-        <div v-if="!getCommentGroup(expandedMeasure)" class="relative z-10 flex items-center gap-2">
+        <div class="mt-3 flex items-center gap-2">
           <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
             <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
             <span v-else class="text-[10px] font-bold text-white/90">나</span>
           </div>
-          <div class="relative flex-1 flex items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
+          <div class="relative flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
             <input
-              ref="inputRef1"
+              ref="inputRef2"
               v-model="draftComment"
               type="text"
               placeholder="댓글 추가"
@@ -614,7 +779,6 @@ function parseMentions(content: string) {
               <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
             </button>
 
-            <!-- 멘션 자동완성 드롭다운 (Empty State용) -->
             <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar z-[130]">
               <button
                 v-for="(member, index) in filteredMembers"
@@ -633,101 +797,7 @@ function parseMentions(content: string) {
             </div>
           </div>
         </div>
-
-        <!-- 댓글 목록 & 입력 (Populated State) -->
-        <div v-else class="relative z-10 flex flex-col">
-          <!-- 댓글 목록 -->
-          <div class="flex max-h-[300px] flex-col gap-3 overflow-y-auto custom-scrollbar">
-            <div
-              v-for="(comment, idx) in getCommentGroup(expandedMeasure)?.comments || []"
-              :key="comment.id"
-              class="group flex flex-col gap-1"
-              :class="getCommentGroup(expandedMeasure)?.resolved ? 'opacity-50' : ''"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2" :class="{ 'ml-4': idx > 0 }">
-                  <CornerDownRight v-if="idx > 0" class="h-4 w-4 shrink-0 text-white/40" />
-                  <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: comment.profileImageUrl ? 'transparent' : (comment.color || getAuthorColor(comment.author)) }">
-                    <img v-if="comment.profileImageUrl" :src="comment.profileImageUrl || undefined" class="h-full w-full object-cover" />
-                    <span v-else class="text-[10px] font-bold text-white/90">{{ comment.author.slice(0, 2) }}</span>
-                  </div>
-                  <span class="text-[13px] font-medium text-white/60">{{ comment.author }}</span>
-                </div>
-                <div class="flex items-center gap-1">
-                  <button
-                    class="opacity-0 transition-opacity group-hover:opacity-100"
-                    @click.stop="requestDeleteComment(comment.id)"
-                    title="삭제"
-                  >
-                    <Trash2 class="h-4 w-4 text-white/40 hover:text-red-400" />
-                  </button>
-                  <button
-                    v-if="idx === 0"
-                    class="transition-colors"
-                    :class="getCommentGroup(expandedMeasure)?.resolved ? 'text-green-500' : 'text-white hover:text-green-400'"
-                    @click.stop="emit('resolve-comment', { trackId, measure: expandedMeasure })"
-                    title="해결됨 표시"
-                  >
-                    <Check class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-              <div class="pl-[32px]" :class="{ 'ml-10': idx > 0 }">
-                <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-white">
-                  <template v-for="(part, i) in parseMentions(comment.mention ? comment.mention + ' \n' + comment.content : comment.content)" :key="i">
-                    <span v-if="part.isMention" class="font-medium text-[#FF3DCB]">{{ part.text }}</span>
-                    <span v-else>{{ part.text }}</span>
-                  </template>
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <!-- 댓글 입력 줄 -->
-          <div class="mt-3 flex items-center gap-2">
-            <div class="flex h-6 w-6 shrink-0 overflow-hidden items-center justify-center rounded-full bg-[#FF3DCB]">
-              <img v-if="currentUserProfileImageUrl" :src="currentUserProfileImageUrl || undefined" class="h-full w-full object-cover" />
-              <span v-else class="text-[10px] font-bold text-white/90">나</span>
-            </div>
-            <div class="relative flex flex-1 items-center justify-between rounded-[6px] border border-white/15 bg-transparent px-2.5 py-1.5">
-              <input
-                ref="inputRef2"
-                v-model="draftComment"
-                type="text"
-                placeholder="댓글 추가"
-                class="flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-white/40"
-                @input="handleInput"
-                @keydown="handleInputKeydown($event, expandedMeasure)"
-              />
-              <button
-                class="shrink-0 transition hover:scale-110 disabled:opacity-50"
-                :disabled="!draftComment.trim()"
-                @click="submitComment(expandedMeasure)"
-              >
-                <ArrowUpCircle class="h-5 w-5 text-white/40 hover:text-white" />
-              </button>
-
-              <!-- 멘션 자동완성 드롭다운 (Populated State용) -->
-              <div v-if="mentionDropdownActive && filteredMembers.length > 0" class="absolute left-0 right-0 bottom-full mb-1 max-h-40 overflow-y-auto rounded-md border border-white/20 bg-[#2a2a2a] shadow-lg custom-scrollbar z-[130]">
-                <button
-                  v-for="(member, index) in filteredMembers"
-                  :key="member.userId"
-                  class="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/10"
-                  :class="{ 'bg-white/10': index === selectedMentionIndex }"
-                  @click.prevent="insertMention(member)"
-                  @mousedown.prevent
-                >
-                  <div class="flex h-5 w-5 shrink-0 overflow-hidden items-center justify-center rounded-full" :style="{ backgroundColor: member.profileImageUrl ? 'transparent' : getAuthorColor(member.nickname) }">
-                    <img v-if="member.profileImageUrl" :src="member.profileImageUrl" class="h-full w-full object-cover" />
-                    <span v-else class="text-[9px] font-bold text-white/90">{{ member.nickname.slice(0, 2) }}</span>
-                  </div>
-                  <span class="text-white">{{ member.nickname }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>

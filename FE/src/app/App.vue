@@ -2,6 +2,7 @@
 import {ref, onMounted} from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/pages/Onboarding/stores/auth.store'
+import GlobalAlertModal from '@/shared/components/GlobalAlertModal.vue'
 
 const authStore = useAuthStore()
 const route = useRoute()
@@ -31,4 +32,5 @@ onMounted(async () => {
 
 <template>
   <RouterView v-if="isAuthInitialized" />
+  <GlobalAlertModal />
 </template>

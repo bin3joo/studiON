@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { MessageSquare, X, Filter, Download, Trash2, History } from 'lucide-vue-next'
+import { MessageSquare, X, Filter, Download, Trash2, History, CircleHelp, Camera, Undo2, Redo2, Save, UserPlus, Play, Copy, Scissors, ClipboardPaste, Plus, MousePointerClick, ZoomIn, Files } from 'lucide-vue-next'
 import { useCommentStore } from '../store/useCommentStore'
 import { useTrackStore } from '../store/useTrackStore'
 import { useAudioVersionStore } from '../store/useAudioVersionStore'
@@ -63,7 +63,7 @@ const filteredComments = computed(() => {
 })
 
 // 1. 타입을 먼저 선언
-type PanelType = 'comments' | 'history' | 'ai'
+type PanelType = 'comments' | 'history' | 'ai' | 'help'
 // 2. props 선언
 const props = defineProps<{
   open: boolean
@@ -75,6 +75,7 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'resolve-comment', commentId: number): void
   (e: 'add-reply', parentCommentId: number, content: string, mentionedUserIds: number[]): void
+  (e: 'start-tutorial'): void
 }>()
 
 // 사이드 패널이 열리거나 필터(탭, 트랙선택)가 변경될 때마다 API 재호출
@@ -96,6 +97,7 @@ const panelTitleMap: Record<PanelType, string> = {
   comments: '코멘트',
   history: '버전 기록',
   ai: 'AI 기능',
+  help: '도움말 및 단축키',
 }
 
 // 필터 변경 핸들러
@@ -158,6 +160,7 @@ const handleDeleteVersion = async (versionId: number) => {
       <div class="flex items-center gap-2 text-xs font-semibold">
         <MessageSquare v-if="type === 'comments'" class="h-4 w-4" />
         <History v-else-if="type === 'history'" class="h-4 w-4" />
+        <CircleHelp v-else-if="type === 'help'" class="h-4 w-4" />
         <div v-else class="h-4 w-4"></div>
         {{ panelTitleMap[type] }}
       </div>
@@ -290,6 +293,145 @@ const handleDeleteVersion = async (versionId: number) => {
               <span class="flex items-center gap-1"><History class="h-3 w-3" /> {{ formatDate(version.createdAt) }}</span>
               <span>{{ formatDuration(version.durationMs) }}</span>
               <span>{{ formatSize(version.sizeBytes) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 도움말 및 단축키 패널 내용 -->
+    <template v-else-if="type === 'help'">
+      <div class="flex-1 overflow-y-auto p-4 custom-scrollbar">
+        <!-- 튜토리얼 다시보기 버튼 -->
+        <div class="mb-6">
+          <button
+            type="button"
+            class="flex w-full items-center justify-center gap-2 rounded-lg bg-[#FF3DCB] py-2.5 text-[13px] font-bold text-black transition hover:brightness-110"
+            @click="emit('start-tutorial')"
+          >
+            기능 안내 튜토리얼 시작
+          </button>
+        </div>
+
+        <!-- 기본 기능 (아이콘) -->
+        <div class="mb-6">
+          <h3 class="mb-3 text-[13px] font-bold text-white/90">주요 기능 안내</h3>
+          <div class="space-y-2">
+            <div class="flex items-center gap-3 rounded-lg border border-white/5 bg-white/5 p-2 text-xs text-gray-300">
+              <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#262626]"><Camera class="h-3.5 w-3.5" /></div>
+              <span>현재 상태를 버전으로 저장합니다.</span>
+            </div>
+            <div class="flex items-center gap-3 rounded-lg border border-white/5 bg-white/5 p-2 text-xs text-gray-300">
+              <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#262626]"><Download class="h-3.5 w-3.5" /></div>
+              <span>작업한 오디오를 음원 파일로 내보냅니다.</span>
+            </div>
+            <div class="flex items-center gap-3 rounded-lg border border-white/5 bg-white/5 p-2 text-xs text-gray-300">
+              <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#262626]"><UserPlus class="h-3.5 w-3.5" /></div>
+              <span>팀원을 초대할 수 있는 코드를 생성합니다.</span>
+            </div>
+            <div class="flex items-center gap-3 rounded-lg border border-white/5 bg-white/5 p-2 text-xs text-gray-300">
+              <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#262626]"><History class="h-3.5 w-3.5" /></div>
+              <span>저장된 버전 기록을 확인하고 불러옵니다.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 단축키 -->
+        <div>
+          <h3 class="mb-3 text-[13px] font-bold text-white/90">키보드 단축키</h3>
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Play class="h-3.5 w-3.5 text-gray-400" />
+                <span>재생 / 일시정지</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Space</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Save class="h-3.5 w-3.5 text-gray-400" />
+                <span>저장</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + S</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Undo2 class="h-3.5 w-3.5 text-gray-400" />
+                <span>실행 취소</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + Z</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Redo2 class="h-3.5 w-3.5 text-gray-400" />
+                <span>다시 실행</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + Y</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Copy class="h-3.5 w-3.5 text-gray-400" />
+                <span>복사</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + C</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Scissors class="h-3.5 w-3.5 text-gray-400" />
+                <span>잘라내기</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + X</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <ClipboardPaste class="h-3.5 w-3.5 text-gray-400" />
+                <span>붙여넣기</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + V</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Files class="h-3.5 w-3.5 text-gray-400" />
+                <span>복제</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + D</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Scissors class="h-3.5 w-3.5 text-gray-400" />
+                <span>클립 분할</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + E</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Trash2 class="h-3.5 w-3.5 text-gray-400" />
+                <span>클립/트랙 삭제</span>
+              </div>
+              <div class="flex gap-1">
+                <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Del</kbd>
+              </div>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <Plus class="h-3.5 w-3.5 text-gray-400" />
+                <span>트랙 추가</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Shift + T</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <MessageSquare class="h-3.5 w-3.5 text-gray-400" />
+                <span>코멘트 모드</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">C</kbd>
+            </div>
+            <div class="flex items-center justify-between rounded-lg p-2 text-xs text-gray-300 hover:bg-white/5">
+              <div class="flex items-center gap-2">
+                <ZoomIn class="h-3.5 w-3.5 text-gray-400" />
+                <span>타임라인 줌</span>
+              </div>
+              <kbd class="rounded border border-white/20 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-gray-300">Ctrl + 휠</kbd>
             </div>
           </div>
         </div>

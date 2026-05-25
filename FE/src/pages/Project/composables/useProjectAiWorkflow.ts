@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { useAlertStore } from '@/shared/stores/useAlertStore'
 import { useTrackStore } from '../store/useTrackStore'
 import type { EqTypeCode, TrackEqBandState } from '../types'
 import {
@@ -415,20 +416,23 @@ function mapRegionToAnalysisItem(
             ? `권장 감소량: ${region.estimated_gain_reduction_db.toFixed(2)}dB`
             : '권장 감소량 정보를 확인 중입니다.',
           region.current_true_peak_dbtp != null
-            ? `현재 True Peak: ${region.current_true_peak_dbtp.toFixed(2)} dBTP`
-            : '현재 True Peak 정보를 확인 중입니다.',
+            ? `현재 트루 피크: ${region.current_true_peak_dbtp.toFixed(2)} dBTP`
+            : '현재 트루 피크 정보를 확인 중입니다.',
           region.target_ceiling_dbtp != null
-            ? `목표 Ceiling: ${region.target_ceiling_dbtp.toFixed(1)} dBTP`
-            : '목표 Ceiling 정보를 확인 중입니다.',
+            ? `목표 상한: ${region.target_ceiling_dbtp.toFixed(1)} dBTP`
+            : '목표 상한 정보를 확인 중입니다.',
         ]
       : [
-          region.issue_type ? `문제 유형: ${region.issue_type}` : '문제 유형을 확인 중입니다.',
           region.band_low_hz && region.band_high_hz
             ? `${region.band_low_hz}Hz~${region.band_high_hz}Hz 대역에서 문제가 감지됐어요.`
             : '주파수 대역 정보가 없습니다.',
-          involvedTrackNamesText
-            ? `관련 트랙: ${involvedTrackNamesText}`
-            : '관련 트랙 정보를 확인 중입니다.',
+          ...(kind === 'HARSHNESS'
+            ? []
+            : [
+                involvedTrackNamesText
+                  ? `관련 트랙: ${involvedTrackNamesText}`
+                  : '관련 트랙 정보를 확인 중입니다.',
+              ]),
         ]
 
   const clippingTrimValues = getClippingTrimValues(region)
@@ -594,7 +598,6 @@ function mapSuggestionIssueToAnalysisItem(
   const bullets =
     kind === 'HARSHNESS'
       ? [
-          `문제 유형: ${issue.issueType}`,
           markerCenterHz != null
             ? `중심 주파수: ${markerCenterHz}Hz`
             : '중심 주파수 정보가 없습니다.',
@@ -608,15 +611,13 @@ function mapSuggestionIssueToAnalysisItem(
               ? `권장 감소량: ${trimAction.recommendedReductionDb}dB`
               : '권장 감소량 정보를 확인 중입니다.',
             trimAction?.currentTruePeakDbtp != null
-              ? `현재 True Peak: ${trimAction.currentTruePeakDbtp} dBTP`
-              : '현재 True Peak 정보를 확인 중입니다.',
+              ? `현재 트루 피크: ${trimAction.currentTruePeakDbtp} dBTP`
+              : '현재 트루 피크 정보를 확인 중입니다.',
             trimAction?.targetCeilingDbtp != null
-              ? `목표 Ceiling: ${trimAction.targetCeilingDbtp} dBTP`
-              : '목표 Ceiling 정보를 확인 중입니다.',
+              ? `목표 상한: ${trimAction.targetCeilingDbtp} dBTP`
+              : '목표 상한 정보를 확인 중입니다.',
           ]
-        : [
-            `문제 유형: ${issue.issueType}`,
-          ]
+        : []
 
   return {
     id: issue.issueId,
@@ -845,12 +846,12 @@ function hasAiEqSuggestion(statusResult: any) {
     const snapshot = buildProjectSnapshotFromStore()
 
     if (snapshot.tracks.length === 0) {
-      alert('분석할 트랙이 없습니다.')
+        useAlertStore().showAlert('분석할 트랙이 없습니다.', 'warning')
       return
     }
 
     if (snapshot.clips.length === 0) {
-      alert('AI 분석을 하려면 먼저 저장된 오디오 클립이 필요합니다.')
+        useAlertStore().showAlert('AI 분석을 하려면 먼저 저장된 오디오 클립이 필요합니다.', 'warning')
       return
     }
 
@@ -910,7 +911,7 @@ const mergedItems =
 if (mergedItems.length > 0) {
   aiAnalysisItems.value = mergedItems
 } else {
-  alert('AI가 감지한 문제 구간이 없습니다.')
+  useAlertStore().showAlert('AI가 감지한 문제 구간이 없습니다.', 'info')
   return
 }
 
@@ -937,11 +938,11 @@ trackEvent('ai_analysis_completed', {
       error instanceof Error &&
       error.message.includes('timeout')
     ) {
-      alert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.')
+        useAlertStore().showAlert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.', 'warning')
       return
     }
 
-    alert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.')
+      useAlertStore().showAlert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.', 'error')
   } finally {
     aiAnalyzing.value = false
   }
@@ -951,17 +952,17 @@ function handleApplyAiEq() {
   const item = activeAiAnalysis.value
 
   if (!item) {
-    alert('적용할 AI 분석 결과가 없습니다.')
+      useAlertStore().showAlert('적용할 AI 분석 결과가 없습니다.', 'warning')
     return
   }
 
   if (item.kind !== 'BAND_OVERLAP') {
-    alert('EQ 적용은 대역 중복 이슈에서만 사용할 수 있습니다.')
+      useAlertStore().showAlert('EQ 적용은 대역 중복 이슈에서만 사용할 수 있습니다.', 'warning')
     return
   }
 
   if (appliedAiEqIssueIds.value.has(item.id)) {
-    alert('이미 적용된 AI EQ입니다.')
+      useAlertStore().showAlert('이미 적용된 AI EQ입니다.', 'warning')
     return
   }
 
@@ -970,7 +971,7 @@ function handleApplyAiEq() {
     : aiAfterBands.value
 
   if (previewBands.length === 0) {
-    alert('적용할 AI EQ가 없습니다.')
+      useAlertStore().showAlert('적용할 AI EQ가 없습니다.', 'warning')
     return
   }
 
@@ -980,7 +981,7 @@ function handleApplyAiEq() {
     item.targetTrackId
 
   if (!targetTrackId) {
-    alert('AI EQ를 적용할 트랙을 찾지 못했습니다.')
+      useAlertStore().showAlert('AI EQ를 적용할 트랙을 찾지 못했습니다.', 'warning')
     return
   }
 
@@ -1013,17 +1014,16 @@ function handleApplyAiEq() {
     ? appliedTrack.eq.bands.map(band => ({ ...band }))
     : []
 
-  alert('AI EQ가 현재 트랙에 추가되었습니다.')
+  useAlertStore().showAlert('AI EQ가 현재 트랙에 추가되었습니다.', 'success')
 }
 
 function handleCancelAiEq() {
-  aiAnalysisItems.value = []
+  // 패널을 닫기 위해 현재 선택된 활성 상태만 해제합니다.
+  // 주의: 전체 분석 결과(aiAnalysisItems)나 job_id는 유지해야 합니다.
   activeAiAnalysisId.value = null
   selectedAiRegionId.value = null
-  currentAiJobId.value = null
   aiBeforeBands.value = []
   aiAfterBands.value = []
-  appliedAiEqIssueIds.value = new Set()
 }
 
 function isActionableClippingItem(item: AiAnalysisItem) {
@@ -1064,14 +1064,14 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
   if (!item || item.kind !== 'CLIPPING') return
 
   if (appliedClippingIssueIds.value.has(item.id)) {
-    alert('이미 적용된 클리핑 이슈입니다.')
+      useAlertStore().showAlert('이미 적용된 클리핑 이슈입니다.', 'warning')
     return
   }
 
   const action = getActiveClippingTrimAction(item)
 
   if (!action || action.recommendedReductionDb == null) {
-    alert('클리핑 적용값이 없습니다.')
+      useAlertStore().showAlert('클리핑 적용값이 없습니다.', 'warning')
     return
   }
 
@@ -1139,7 +1139,7 @@ async function handleApplyClippingIssue(item: AiAnalysisItem) {
       error,
     })
 
-    alert(error?.response?.data?.message ?? '클리핑 적용 중 오류가 발생했습니다.')
+      useAlertStore().showAlert(error?.response?.data?.message ?? '클리핑 적용 중 오류가 발생했습니다.', 'error')
   } finally {
     if (locked) {
       try {
@@ -1242,26 +1242,26 @@ async function handleRequestAiEqRevision(payload: {
   const jobId = item.jobId ?? currentAiJobId.value
 
   if (!jobId) {
-    alert('AI 분석 작업 정보가 없습니다. 먼저 AI 분석을 실행해주세요.')
+      useAlertStore().showAlert('AI 분석 작업 정보가 없습니다. 먼저 AI 분석을 실행해주세요.', 'warning')
     return
   }
 
   if (!hasValidRevisionMetadata(item)) {
-    alert('현재 AI 이슈는 수정 요청 대상을 결정할 수 없어 다시 분석이 필요합니다.')
+      useAlertStore().showAlert('현재 AI 이슈는 수정 요청 대상을 결정할 수 없어 다시 분석이 필요합니다.', 'warning')
     return
   }
 
   const validSelectedTrackIds = getValidRevisionTrackIds(item, payload.selectedTrackIds)
 
   if (validSelectedTrackIds.length === 0) {
-    alert('현재 문제 구간과 직접 관련된 트랙만 선택해 수정 요청을 보낼 수 있습니다.')
+      useAlertStore().showAlert('현재 문제 구간과 직접 관련된 트랙만 선택해 수정 요청을 보낼 수 있습니다.', 'warning')
     return
   }
 
   const preserveClipId = findPreserveClipIdFromSelectedTrack(validSelectedTrackIds)
 
   if (preserveClipId == null) {
-    alert('선택한 트랙에서 AI 분석 구간과 겹치는 클립을 찾지 못했습니다.')
+      useAlertStore().showAlert('선택한 트랙에서 AI 분석 구간과 겹치는 클립을 찾지 못했습니다.', 'warning')
     return
   }
 
@@ -1294,7 +1294,7 @@ async function handleRequestAiEqRevision(payload: {
     const nextBands = mapAiSuggestionToEqBands(statusResult)
 
     if (nextBands.length === 0) {
-      alert('AI 수정안이 아직 생성되지 않았습니다. 잠시 후 다시 시도해주세요.')
+        useAlertStore().showAlert('AI 수정안이 아직 생성되지 않았습니다. 잠시 후 다시 시도해주세요.', 'warning')
       return
     }
 
@@ -1307,7 +1307,7 @@ async function handleRequestAiEqRevision(payload: {
     applyPreviewBandsToActiveIssue(nextBands)
   } catch (error) {
     console.error('[AI 수정 요청 실패]', error)
-    alert(error instanceof Error ? error.message : 'AI 수정 요청 중 오류가 발생했습니다.')
+      useAlertStore().showAlert(error instanceof Error ? error.message : 'AI 수정 요청 중 오류가 발생했습니다.', 'error')
   } finally {
     aiAnalyzing.value = false
   }

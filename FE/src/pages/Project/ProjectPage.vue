@@ -32,6 +32,19 @@ import { trackEvent } from '@/shared/utils/analytics'
 import { useAlertStore } from '@/shared/stores/useAlertStore'
 
 type SidePanelType = 'comments' | 'history' | 'ai' | 'help' | null
+type CommentToastVariant = 'comment' | 'mention'
+
+interface CommentToast {
+  id: number
+  variant: CommentToastVariant
+  title: string
+  meta: string
+  content: string
+  trackId: number
+  location: number
+  author: string
+  profileImageUrl?: string | null
+}
 
 const route = useRoute()
 const alertStore = useAlertStore()
@@ -40,6 +53,10 @@ const trackStore = useTrackStore() // 트랙 리스트 정보 사용 준비
 const collabStore = useCollabStore(); //공동 작업 스토어 사용
 const authStore = useAuthStore(); // Auth 스토어 사용 준비
 const commentStore = useCommentStore(); // 코멘트 전역 상태 사용
+const commentToasts = ref<CommentToast[]>([])
+const commentToastTimers = new Map<number, ReturnType<typeof setTimeout>>()
+const COMMENT_TOAST_DURATION_MS = 10000
+const MENTION_TOAST_DURATION_MS = 10000
 
 const shouldShowDefaultTrackGuide = computed(() => {
   const tracks = trackStore.trackList
@@ -72,6 +89,170 @@ const currentUserId = computed(() => {
     return null
   }
 })
+
+function trimCommentPreview(content: string, maxLength = 88) {
+  const normalized = content.replace(/\s+/g, ' ').trim()
+
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}...`
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function formatCommentLocation(location: number) {
+  if (Number.isInteger(location)) {
+    return String(location)
+  }
+
+  return location.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function removeCommentToast(toastId: number) {
+  const timer = commentToastTimers.get(toastId)
+  if (timer) {
+    clearTimeout(timer)
+    commentToastTimers.delete(toastId)
+  }
+
+  commentToasts.value = commentToasts.value.filter(toast => toast.id !== toastId)
+}
+
+function pushCommentToast(toast: CommentToast, durationMs: number) {
+  if (commentToasts.value.length >= 3) {
+    const oldestToast = commentToasts.value[commentToasts.value.length - 1]
+    if (oldestToast) {
+      removeCommentToast(oldestToast.id)
+    }
+  }
+
+  commentToasts.value = [toast, ...commentToasts.value]
+
+  const timer = window.setTimeout(() => {
+    removeCommentToast(toast.id)
+  }, durationMs)
+
+  commentToastTimers.set(toast.id, timer)
+}
+
+function openTimelineCommentThread(toastId: number, trackId: number, location: number) {
+  const container = timelineContainerRef.value
+  if (!container) return
+
+  removeCommentToast(toastId)
+
+  const targetEl = container.querySelector(
+    `[data-track-id="${trackId}"]`,
+  ) as HTMLElement | null
+
+  if (!targetEl) return
+
+  const contentTop = getElementContentTop(container, targetEl)
+  const targetLeft = Math.max(
+    0,
+    (location - 1) * trackStore.pixelPerBar - Math.max(container.clientWidth * 0.28, 160),
+  )
+
+  container.scrollTo({
+    top: Math.max(0, contentTop - 80),
+    left: targetLeft,
+    behavior: 'smooth',
+  })
+
+  window.setTimeout(() => {
+    document.dispatchEvent(new CustomEvent('open-track-comment', {
+      detail: {
+        trackId: String(trackId),
+        measure: location,
+      },
+    }))
+  }, 260)
+}
+
+function isCurrentUserMentionedInContent(content: string) {
+  const userId = currentUserId.value
+
+  if (!userId || !content) {
+    return false
+  }
+
+  const currentMember = trackStore.projectMembers.find(member => member.userId === userId)
+
+  if (!currentMember?.nickname) {
+    return false
+  }
+
+  const escapedNickname = escapeRegExp(currentMember.nickname)
+  const mentionPattern = new RegExp(`(^|\\s)@${escapedNickname}(?=\\s|$|[.,!?)]|:)`)
+
+  return mentionPattern.test(content)
+}
+
+function isCurrentUserMentionedInComment(data: {
+  content: string
+  mentionedUsers: {
+    userId: number
+  }[]
+}) {
+  const userId = currentUserId.value
+
+  if (!userId) {
+    return false
+  }
+
+  const isMentionedByPayload = data.mentionedUsers.some(user => user.userId === userId)
+
+  if (isMentionedByPayload) {
+    return true
+  }
+
+  return isCurrentUserMentionedInContent(data.content)
+}
+
+function notifyIncomingComment(data: {
+  trackId: number
+  commentId: number
+  parentCommentId: number | null
+  content: string
+  location: number
+  author: {
+    userId: number
+    nickname: string
+    profileImgUrl: string | null
+  }
+  mentionedUsers: {
+    userId: number
+  }[]
+}) {
+  if (data.author.userId === currentUserId.value) {
+    return
+  }
+
+  const isMentioned = isCurrentUserMentionedInComment(data)
+  const trackName = findTrackName(String(data.trackId))
+  const locationLabel = formatCommentLocation(data.location)
+
+  pushCommentToast(
+    {
+      id: data.commentId,
+      variant: isMentioned ? 'mention' : 'comment',
+      title: isMentioned
+        ? `${data.author.nickname}님이 회원님을 언급했습니다`
+        : `${data.author.nickname}님이 새 코멘트를 남겼습니다`,
+      meta: `${trackName} · ${locationLabel}마디`,
+      content: trimCommentPreview(data.content),
+      trackId: data.trackId,
+      location: data.location,
+      author: data.author.nickname,
+      profileImageUrl: data.author.profileImgUrl,
+    },
+    isMentioned ? MENTION_TOAST_DURATION_MS : COMMENT_TOAST_DURATION_MS,
+  )
+}
 
 const {
   onlineUsers,
@@ -374,6 +555,8 @@ onUnmounted(()=>{
   trackStore.stopPlay();
   // 프로젝트를 나갈 때 코멘트 모드 상태 초기화
   trackStore.isCommentMode = false;
+  commentToastTimers.forEach(timer => clearTimeout(timer))
+  commentToastTimers.clear()
 })
 
 
@@ -454,6 +637,8 @@ function applyCommentAdded(data: {
   if (data.author.userId !== currentUserId.value) {
     commentStore.setHasNewComment(true)
   }
+
+  notifyIncomingComment(data)
 }
 
 function findTrackName(trackId: string) {
@@ -1293,6 +1478,74 @@ function closeProjectGuide(doNotShowAgain: boolean) {
       @add-reply="handlePanelAddReply"
       @start-tutorial="startAiTutorial"
     />
+
+    <div class="pointer-events-none fixed left-1/2 top-4 z-[400] flex w-full max-w-[480px] -translate-x-1/2 flex-col gap-2 px-4">
+      <TransitionGroup name="comment-toast">
+        <div
+          v-for="toast in commentToasts"
+          :key="toast.id"
+          class="pointer-events-auto relative overflow-hidden rounded-[18px] border shadow-2xl backdrop-blur-md"
+          :class="toast.variant === 'mention'
+            ? 'border-[#FF3DCB]/50 bg-[#1b171c]/95 shadow-[0_0_0_1px_rgba(255,61,203,0.08),0_14px_40px_rgba(255,61,203,0.20)]'
+            : 'border-white/18 bg-[#181818]/92 shadow-[0_18px_50px_rgba(0,0,0,0.32)]'"
+          @click="openTimelineCommentThread(toast.id, toast.trackId, toast.location)"
+        >
+          <button
+            type="button"
+            class="absolute z-10 shrink-0 rounded-full p-1 text-white/35 transition hover:bg-white/8 hover:text-white/75"
+            :class="toast.variant === 'mention' ? 'right-3 top-2 text-white/45' : 'right-3 top-1.5'"
+            @click.stop="removeCommentToast(toast.id)"
+          >
+            <span class="text-[12px] font-semibold leading-none">x</span>
+          </button>
+          <div class="relative z-[1] flex items-center gap-2 px-3.5 py-3">
+            <div
+              class="flex h-[34px] w-[34px] shrink-0 items-center justify-center overflow-hidden rounded-full text-[10px] font-semibold"
+              :class="toast.variant === 'mention'
+                ? 'ring-1 ring-[#FF3DCB]/35 bg-[#FF3DCB]/12 text-[#FF72D7]'
+                : 'bg-white/8 text-white/80'"
+            >
+              <img
+                v-if="toast.profileImageUrl"
+                :src="toast.profileImageUrl"
+                class="h-full w-full object-cover"
+              />
+              <span v-else>{{ toast.author.slice(0, 2) }}</span>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-start gap-2 pr-6">
+                <div class="flex min-w-0 items-center gap-2">
+                  <p
+                    class="truncate text-[13px] font-extrabold tracking-[-0.03em]"
+                    :class="toast.variant === 'mention' ? 'text-[#FFF4FD]' : 'text-white'"
+                  >
+                    {{ toast.title }}
+                  </p>
+                  <span
+                    class="shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold tracking-[0.04em]"
+                    :class="toast.variant === 'mention'
+                      ? 'border-[#FF3DCB]/40 bg-[#3b2338]/88 text-[#FFB1E8]'
+                      : 'border-white/16 bg-[#2a2a2a]/90 text-white/64'"
+                  >
+                    {{ toast.variant === 'mention' ? 'MENTION' : 'COMMENT' }}
+                  </span>
+                </div>
+              </div>
+              <div class="mt-1 flex items-end justify-between gap-2">
+                <p
+                  class="min-w-0 truncate text-[11px] font-semibold leading-tight text-white"
+                >
+                  {{ toast.content }}
+                </p>
+                <p class="shrink-0 text-right text-[9px] font-semibold text-white/42">
+                  {{ toast.meta }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </TransitionGroup>
+    </div>
     </main>
 
     <!-- 협업자 커서 렌더링 -->
@@ -1378,5 +1631,20 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #52525b #131313;
+}
+
+.comment-toast-enter-active,
+.comment-toast-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.comment-toast-enter-from,
+.comment-toast-leave-to {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.98);
+}
+
+.comment-toast-move {
+  transition: transform 0.22s ease;
 }
 </style>

@@ -71,7 +71,7 @@ function handleLoginClick() {
               <span class="text-white font-bold text-[15px]">베타 서비스 이용 안내</span>
             </div>
             <p class="text-[14px] leading-relaxed tracking-wide">계정 당 총 <strong class="text-[#00dce6]">100MB</strong>, 1회 최대 <strong class="text-[#00dce6]">50MB</strong>의 오디오를 업로드할 수 있습니다.</p>
-            <p class="text-[14px] leading-relaxed tracking-wide">원활한 동기화를 위해 프로젝트당 최대 <strong class="text-[#00dce6]">6명</strong>까지 동시 참여를 권장합니다.</p>
+            <p class="text-[14px] leading-relaxed tracking-wide">프로젝트당 최대 <strong class="text-[#00dce6]">6명</strong>까지 동시 참여가 가능합니다.</p>
             <p class="text-[13px] leading-relaxed text-gray-500 mt-1">현재 베타 버전은 오디오 트랙 생성 위주로 지원되며, 더 많은 기능이 곧 추가될 예정입니다.</p>
           </div>
         </div>

@@ -55,10 +55,9 @@ const dashboardGuideSteps = [
 const currentSlide = ref(0)
 const slideInterval = ref<number | undefined>(undefined)
 
-const slides = [
+const slides: { id: number; image?: string; title: string; desc: string; bg?: string }[] = [
   { id: 2, image: '/Open.png', title: 'StudiON 전격 오픈!', desc: 'AI 기반의 충돌 분석과 실시간 협업을 경험해 보세요!' },
   { id: 1, image: '/banner.png', title: '피드백 참여하기', desc: 'StudiON에서 피드백을 남기고 커피쿠폰 받자!' },
-  { id: 3, image: '/SSAFY16.png', title: 'SSAFY 16기', desc: '싸피 16기 여러분들의 뜨거운 열정과 도전을 응원합니다!', bg: 'bg-gradient-to-br from-[#FF3DCB]/20 to-[#65002e]/80' },
 ]
 
 function nextSlide() {

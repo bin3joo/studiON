@@ -106,8 +106,8 @@ const onDrag = (e: PointerEvent) => {
   if (newTop < 0) newTop = 0 // 상단 이탈 방지
   if (newTop > window.innerHeight - 40) newTop = window.innerHeight - 40 // 하단 이탈 방지
   
-  // 좌우 이탈 방지 (팝업 가로 크기 420px 기준, 최소 50px은 화면에 남도록)
-  if (newLeft < -370) newLeft = -370
+  // 좌우 이탈 방지 (팝업 가로 크기 460px 기준, 최소 50px은 화면에 남도록)
+  if (newLeft < -410) newLeft = -410
   if (newLeft > window.innerWidth - 50) newLeft = window.innerWidth - 50
 
   popupStyle.value = {
@@ -135,7 +135,7 @@ const startDrag = (e: PointerEvent) => {
   // 만약 transform(translateX(-50%))가 적용된 상태라면, 실제 좌상단 X좌표를 계산하여 보정해야 함
   let adjustedLeft = currentLeft
   if (popupStyle.value.transform === 'translateX(-50%)') {
-    adjustedLeft -= 210 // 팝업 넓이(420px)의 절반
+    adjustedLeft -= 230 // 팝업 넓이(460px)의 절반
   } else if (popupStyle.value.transform === 'translateX(-16px)') {
     adjustedLeft -= 16
   }
@@ -274,7 +274,7 @@ const dynamicWidthPx = computed(() => {
       <Teleport to="body">
         <div
           v-if="open"
-          class="fixed z-9999 w-[420px] rounded-lg p-px shadow-2xl backdrop-blur-md"
+          class="fixed z-9999 w-[460px] rounded-lg p-px shadow-2xl backdrop-blur-md"
           :style="popupStyle"
         >
           <div class="absolute inset-0 rounded-lg bg-[linear-gradient(135deg,#8B5CF6,#3B82F6,#06B6D4,#22C55E,#F59E0B,#EC4899)] opacity-80" />
@@ -327,17 +327,17 @@ const dynamicWidthPx = computed(() => {
 
           <div v-show="!isMinimized" class="space-y-3 px-4 py-4">
 
-          <p class="text-sm text-white/60">
+          <p class="text-base text-white/60 break-keep">
             {{ props.conflict.summary }}
           </p>
 
-          <ul class="space-y-2 pt-1 text-sm leading-relaxed text-white/80">
+          <ul class="space-y-2 pt-1 text-base leading-relaxed text-white/80 break-keep">
             <li
               v-for="(bullet, index) in props.conflict.bullets"
               :key="index"
               class="flex gap-2"
             >
-              <span class="text-fuchsia-300">›</span>
+              <span class="text-fuchsia-300 shrink-0">›</span>
               <span>{{ bullet }}</span>
             </li>
           </ul>
@@ -346,8 +346,8 @@ const dynamicWidthPx = computed(() => {
             v-if="props.conflict.kind === 'CLIPPING'"
             class="space-y-3 border-t border-white/10 pt-3"
           >
-            <p class="text-xs leading-relaxed text-white/60">
-              마스터 트랙에서 클리핑이 감지됐어요.
+            <p class="text-sm leading-relaxed text-white/60 break-keep">
+              마스터 트랙에서 클리핑이 감지됐어요.<br />
               AI는 약 {{ Math.abs(props.conflict.recommendedGainReductionDb ?? 0).toFixed(2) }}dB 감소를 제안합니다.
             </p>
 
@@ -355,7 +355,7 @@ const dynamicWidthPx = computed(() => {
               <button
                 type="button"
                 :disabled="props.conflict.recommendedGainReductionDb == null"
-                class="w-full rounded-md bg-[#FF8F1A] px-3 py-1.5 text-xs font-bold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 transition"
+                class="w-full rounded-md bg-[#FF8F1A] px-3 py-1.5 text-sm font-bold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 transition"
                 @click="emit('applyClipping')"
               >
                 적용하기
@@ -363,7 +363,7 @@ const dynamicWidthPx = computed(() => {
 
               <button
                 type="button"
-                class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
+                class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
                 @click="emit('dismissClipping')"
               >
                 건너뛰기
@@ -379,7 +379,7 @@ const dynamicWidthPx = computed(() => {
   <div class="flex gap-2">
     <button
       type="button"
-      class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
+      class="w-full rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm font-bold text-white/70 hover:bg-white/10 hover:text-white transition"
       @click="emit('dismissClipping')"
     >
       무시하기

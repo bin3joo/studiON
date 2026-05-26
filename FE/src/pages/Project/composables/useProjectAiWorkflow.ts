@@ -113,6 +113,41 @@ const selectedEqTrack = computed(() => {
   ) ?? null
 })
 
+  // --- [개발/테스트용 콘솔 노출] ---
+  // @ts-ignore
+  window.showAiTest = () => {
+    aiAnalyzing.value = false;
+    aiAnalysisItems.value = [
+      {
+        id: 'test-1', issueType: 'BAND_OVERLAP', kind: 'BAND_OVERLAP', uiMode: 'eq_ai',
+        jobId: 999, regionId: 999, startMs: 0, endMs: 2000,
+        targetType: 'TIMELINE', targetTrackId: null, involvedTrackIds: [1, 2], affectedClipIds: [],
+        startPercent: 0, endPercent: 10, startPx: 300, endPx: 500, barStart: 2, barEnd: 3,
+        title: '대역 중복 · 2마디에서 3마디 사이',
+        summary: '트랙들이 겹치는 구간에서 바디 대역이 몰려 소리가 두껍고 혼탁하게 들릴 수 있습니다.',
+        explanation: null,
+        bullets: ['359Hz~422Hz 대역에서 문제가 감지됐어요.', '관련 트랙: 트랙 1, 트랙 2'],
+        bandLowHz: 359, bandHighHz: 422, recommendedGainReductionDb: null,
+        previewBands: [], actions: [], markers: []
+      },
+      {
+        id: 'test-2', issueType: 'CLIPPING', kind: 'CLIPPING', uiMode: 'master_trim',
+        jobId: 999, regionId: 1000, startMs: 4000, endMs: 6000,
+        targetType: 'MASTER_TRACK', targetTrackId: null, involvedTrackIds: [], affectedClipIds: [],
+        startPercent: 20, endPercent: 30, startPx: 600, endPx: 800, barStart: 4, barEnd: 5,
+        title: '클리핑 · 4마디에서 5마디 사이',
+        summary: '클리핑(소리 깨짐)이 감지되었습니다.',
+        explanation: null,
+        bullets: ['클리핑 감지 트랙: 마스터', '권장 감소량: -4.71dB', '현재 트루 피크: 2.1 dBTP', '목표 상한: -1.0 dBTP'],
+        bandLowHz: null, bandHighHz: null, recommendedGainReductionDb: -4.71,
+        previewBands: [], actions: [], markers: []
+      }
+    ];
+    activeAiAnalysisId.value = 'test-1';
+    console.log('✅ 테스트용 AI 분석 데이터가 주입되었습니다!');
+  }
+  // ------------------------------
+
   function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms))
   }

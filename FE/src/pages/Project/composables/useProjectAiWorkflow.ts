@@ -696,11 +696,22 @@ function mapSuggestionPayloadToAnalysisItems(
       : payload.issues
 
   return orderedIssues.map(issue =>
-    mapSuggestionIssueToAnalysisItem(
-      issue,
-      durationMs,
-      regionMap.get(String(issue.issueId)) ?? null,
-    ),
+    {
+      const primarySourceRegionId =
+        issue.sourceRegionIds?.find(regionId => regionId != null) ?? null
+      const mappedRegion =
+        (primarySourceRegionId != null
+          ? regionMap.get(String(primarySourceRegionId))
+          : null) ??
+        regionMap.get(String(issue.issueId)) ??
+        null
+
+      return mapSuggestionIssueToAnalysisItem(
+        issue,
+        durationMs,
+        mappedRegion,
+      )
+    }
   )
 }
 

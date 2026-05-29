@@ -518,13 +518,32 @@ function getSuggestionPayload(projections: any): AiSuggestionPayload | null {
 }
 
 function mapPreviewBandsToEqBands(previewBands: any[] = []): TrackEqBandState[] {
-  return previewBands.map((band, index) => ({
-    bandOrder: band.band_order ?? band.bandOrder ?? index + 1,
-    frequencyHz: band.frequency_hz ?? band.frequencyHz ?? 500,
-    gainDeltaDb: band.gain_delta_db ?? band.gainDeltaDb ?? 0,
-    q: band.q ?? 1,
-    eqTypeCode: band.eq_type_code ?? band.eqTypeCode ?? 1,
-  })) as TrackEqBandState[]
+  return previewBands
+    .map((band, index): TrackEqBandState | null => {
+      const frequencyHz = Number(band.frequency_hz ?? band.frequencyHz)
+      const gainDeltaDb = Number(band.gain_delta_db ?? band.gainDeltaDb)
+      const q = Number(band.q ?? 1)
+      const rawEqTypeCode = Number(band.eq_type_code ?? band.eqTypeCode ?? 1)
+      const eqTypeCode: EqTypeCode =
+        rawEqTypeCode === 2 || rawEqTypeCode === 3 ? rawEqTypeCode : 1
+
+      if (!Number.isFinite(frequencyHz) || !Number.isFinite(gainDeltaDb)) {
+        return null
+      }
+
+      return {
+        bandOrder: Number(band.band_order ?? band.bandOrder ?? index + 1),
+        frequencyHz,
+        gainDeltaDb,
+        q: Number.isFinite(q) ? q : 1,
+        eqTypeCode,
+        sourceTypeCode: 3,
+        jobId: band.job_id ?? band.jobId ?? null,
+        suggestionActionId: band.suggestion_action_id ?? band.suggestionActionId ?? null,
+        appliedSuggestionId: band.applied_suggestion_id ?? band.appliedSuggestionId ?? null,
+      }
+    })
+    .filter((band): band is TrackEqBandState => band !== null)
 }
 
 function mapSuggestionIssueToAnalysisItem(
@@ -789,7 +808,10 @@ function mapPreviewBandSpecsToEqBands(previewBandSpecs: any[]): TrackEqBandState
         frequencyHz,
         q: Number.isFinite(q) ? q : 1,
         gainDeltaDb,
-        sourceTypeCode: 1,
+        sourceTypeCode: 3,
+        jobId: band.jobId ?? band.job_id ?? null,
+        suggestionActionId: band.suggestionActionId ?? band.suggestion_action_id ?? null,
+        appliedSuggestionId: band.appliedSuggestionId ?? band.applied_suggestion_id ?? null,
       } satisfies TrackEqBandState
     })
     .filter((band): band is TrackEqBandState => band !== null)
@@ -978,21 +1000,26 @@ function handleApplyAiEq() {
   }
 
   const targetTrackId =
+    item.targetTrackId ??
     selectedEqTrack.value?.trackId ??
-    trackStore.selectedTrackId ??
-    item.targetTrackId
+    trackStore.selectedTrackId
 
   if (!targetTrackId) {
       useAlertStore().showAlert('AI EQ를 적용할 트랙을 찾지 못했습니다.', 'warning')
     return
   }
 
-  previewBands.forEach(band => {
-    trackStore.addTrackEqBand(targetTrackId, {
-      frequencyHz: band.frequencyHz,
-      gainDeltaDb: band.gainDeltaDb,
-    })
-  })
+  const committedBands = previewBands.map((band, index): TrackEqBandState => ({
+    ...band,
+    bandOrder: index + 1,
+    sourceTypeCode: 4,
+    jobId: band.jobId ?? item.jobId ?? currentAiJobId.value,
+    suggestionActionId: band.suggestionActionId ?? null,
+    appliedSuggestionId: band.appliedSuggestionId ?? null,
+  }))
+
+  trackStore.setTrackEqBands(targetTrackId, committedBands)
+  aiAfterBands.value = committedBands.map(band => ({ ...band }))
 
   appliedAiEqIssueIds.value = new Set([
     ...appliedAiEqIssueIds.value,

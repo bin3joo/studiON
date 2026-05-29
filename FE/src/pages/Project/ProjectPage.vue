@@ -941,32 +941,6 @@ function handleAddEqBand(payload: {
 }) {
   if (!trackStore.selectedTrackId) return
 
-  if (payload.isAiEq) {
-    const currentBands = aiAfterBands.value
-    if (currentBands.length >= 5) return
-
-    const nextBandOrder = currentBands.length > 0 
-      ? Math.max(...currentBands.map(b => b.bandOrder)) + 1 
-      : 1
-      
-    aiAfterBands.value = [
-      ...currentBands,
-      {
-        bandOrder: nextBandOrder,
-        eqTypeCode: 1,
-        frequencyHz: payload.frequencyHz,
-        q: 1,
-        gainDeltaDb: payload.gainDeltaDb,
-        sourceTypeCode: 2,
-        jobId: null,
-        suggestionActionId: null,
-        appliedSuggestionId: null,
-      }
-    ]
-    trackStore.rebuildTrackEqChain(trackStore.selectedTrackId, aiAfterBands.value)
-    return
-  }
-
   trackStore.addTrackEqBand(
     trackStore.selectedTrackId,
     payload,
@@ -980,18 +954,6 @@ function handleUpdateEqBand(payload: {
 }) {
   if (!trackStore.selectedTrackId) return
 
-  if (payload.isAiEq) {
-    aiAfterBands.value = aiAfterBands.value.map(band => {
-      if (band.bandOrder !== payload.bandOrder) return band
-      return {
-        ...band,
-        ...payload.patch,
-      }
-    })
-    trackStore.rebuildTrackEqChain(trackStore.selectedTrackId, aiAfterBands.value)
-    return
-  }
-
   trackStore.updateTrackEqBand(
     trackStore.selectedTrackId,
     payload.bandOrder,
@@ -1004,17 +966,6 @@ function handleRemoveEqBand(payload: {
   isAiEq?: boolean
 }) {
   if (!trackStore.selectedTrackId) return
-
-  if (payload.isAiEq) {
-    aiAfterBands.value = aiAfterBands.value
-      .filter(band => band.bandOrder !== payload.bandOrder)
-      .map((band, index) => ({
-        ...band,
-        bandOrder: index + 1
-      }))
-    trackStore.rebuildTrackEqChain(trackStore.selectedTrackId, aiAfterBands.value)
-    return
-  }
 
   trackStore.removeTrackEqBand(
     trackStore.selectedTrackId,

@@ -16,6 +16,7 @@ from app.graph.nodes.analysis import (
     sample_track_clips,
     select_role_candidates,
 )
+from app.graph.nodes.batch_plan import batch_plan_candidates
 from app.graph.nodes.review import plan_critic, plan_rule_validator
 from app.graph.nodes.runtime import (
     apply_selected_edit_recipe,
@@ -40,6 +41,7 @@ from app.graph.nodes.suggestion import (
 __all__ = [
     "analyze_master_clipping_contributors",
     "apply_selected_edit_recipe",
+    "batch_plan_candidates",
     "build_issue_payloads",
     "candidate_ranking",
     "cheap_dsp_scan",

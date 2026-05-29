@@ -29,6 +29,7 @@ WorkflowDispatchType = Literal[
     "start",
     "resume_plan_input",
 ]
+RequestMode = Literal["single", "batch"]
 WorkflowUserDecision = Literal[
     "CONFIRM",
     "CANCEL",
@@ -88,8 +89,10 @@ class WorkflowState(TypedDict, total=False):
     promoted_track_clipping_regions: list[dict]
     ranked_candidate_ids: list[int]
     ranking_scores: dict[int, float]
+    request_mode: RequestMode | None
     selected_region_id: int | None
     preserve_clip_id: int | None
+    selected_region_selections: list[dict]
     issue_id: str | None
     action_type: str | None
     action_payload: dict | None
@@ -116,6 +119,11 @@ class WorkflowState(TypedDict, total=False):
     planner_artifact_id: str | None
     plan_status: str | None
     plan_revision_notes: list[str]
+    batch_candidate_plans: list[dict]
+    batch_failed_regions: list[dict]
+    batch_final_track_envelopes: list[dict]
+    batch_failed_envelopes: list[dict]
+    batch_validation_summary: dict
     critic_raw_text: str | None
     critic_artifact_id: str | None
     suggestion_payload: dict
@@ -213,8 +221,10 @@ def build_workflow_initial_state(
         "promoted_track_clipping_regions": [],
         "ranked_candidate_ids": [],
         "ranking_scores": {},
+        "request_mode": None,
         "selected_region_id": None,
         "preserve_clip_id": None,
+        "selected_region_selections": [],
         "issue_id": None,
         "action_type": None,
         "action_payload": None,
@@ -237,6 +247,11 @@ def build_workflow_initial_state(
         "planner_artifact_id": None,
         "plan_status": None,
         "plan_revision_notes": [],
+        "batch_candidate_plans": [],
+        "batch_failed_regions": [],
+        "batch_final_track_envelopes": [],
+        "batch_failed_envelopes": [],
+        "batch_validation_summary": {},
         "critic_raw_text": None,
         "critic_artifact_id": None,
         "suggestion_payload": {},

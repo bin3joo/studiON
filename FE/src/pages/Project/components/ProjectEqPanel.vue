@@ -44,6 +44,10 @@ const emit = defineEmits<{
   'cancel-ai-eq': []
   'request-ai-eq-revision': [payload: {
     selectedTrackIds: number[]
+    selectedRegionSelections?: Array<{
+      regionId: number
+      preserveTrackId: number
+    }>
     message: string
   }]
   'add-eq-band': [payload: {
@@ -97,6 +101,7 @@ const shouldShowCompareEqGraph = computed(() => {
 })
 
 const selectedRevisionTrackIds = ref<number[]>([])
+const selectedRevisionTrackIdsByRegion = ref<Record<number, number | null>>({})
 const revisionMessage = ref('')
 
 const revisionCandidateTracks = computed(() => {
@@ -115,6 +120,32 @@ const hasRevisionCandidates = computed(() => {
   return revisionCandidateTracks.value.length > 0
 })
 
+const batchRevisionItems = computed(() => {
+  if (!aiAnalysisItems?.value) return []
+
+  return aiAnalysisItems.value.filter(item =>
+    item.uiMode === 'eq_ai' &&
+    item.issueType === 'band_overlap' &&
+    item.regionId != null &&
+    item.involvedTrackIds.length > 0,
+  )
+})
+
+const hasBatchRevisionSelections = computed(() => {
+  return batchRevisionItems.value.every(item => {
+    if (item.regionId == null) return false
+    return selectedRevisionTrackIdsByRegion.value[Number(item.regionId)] != null
+  })
+})
+
+function getRevisionCandidateTracksForItem(item: AiAnalysisItem) {
+  const allowedTrackIds = new Set(item.involvedTrackIds.map(trackId => Number(trackId)))
+
+  return trackStore.trackList.filter(track =>
+    allowedTrackIds.has(Number(track.trackId)),
+  )
+}
+
 function toggleRevisionTrack(trackId: number) {
   if (selectedRevisionTrackIds.value.includes(trackId)) {
     selectedRevisionTrackIds.value = selectedRevisionTrackIds.value.filter(id => id !== trackId)
@@ -127,9 +158,46 @@ function toggleRevisionTrack(trackId: number) {
   ]
 }
 
+function toggleRevisionTrackForRegion(regionId: number, trackId: number) {
+  const normalizedRegionId = Number(regionId)
+  const normalizedTrackId = Number(trackId)
+
+  if (selectedRevisionTrackIdsByRegion.value[normalizedRegionId] === normalizedTrackId) {
+    selectedRevisionTrackIdsByRegion.value = {
+      ...selectedRevisionTrackIdsByRegion.value,
+      [normalizedRegionId]: null,
+    }
+    return
+  }
+
+  selectedRevisionTrackIdsByRegion.value = {
+    ...selectedRevisionTrackIdsByRegion.value,
+    [normalizedRegionId]: normalizedTrackId,
+  }
+}
+
 function requestAiRevision() {
+  const selectedRegionSelections = batchRevisionItems.value
+    .map(item => {
+      const regionId = Number(item.regionId)
+      const preserveTrackId = selectedRevisionTrackIdsByRegion.value[regionId]
+
+      if (Number.isNaN(regionId) || preserveTrackId == null) {
+        return null
+      }
+
+      return {
+        regionId,
+        preserveTrackId: Number(preserveTrackId),
+      }
+    })
+    .filter((selection): selection is { regionId: number; preserveTrackId: number } => {
+      return selection !== null && !Number.isNaN(selection.preserveTrackId)
+    })
+
   emit('request-ai-eq-revision', {
     selectedTrackIds: selectedRevisionTrackIds.value,
+    selectedRegionSelections,
     message: revisionMessage.value.trim(),
   })
 }
@@ -199,6 +267,7 @@ watch(
   () => activeAiAnalysis.value?.id,
   () => {
     selectedRevisionTrackIds.value = []
+    selectedRevisionTrackIdsByRegion.value = {}
     revisionMessage.value = ''
   },
 )
@@ -210,6 +279,23 @@ watch(
 
     selectedRevisionTrackIds.value = selectedRevisionTrackIds.value.filter(trackId =>
       candidateTrackIds.has(Number(trackId)),
+    )
+  },
+)
+
+watch(
+  batchRevisionItems,
+  items => {
+    const validRegionIds = new Set(
+      items
+        .map(item => item.regionId)
+        .filter((regionId): regionId is number => regionId != null),
+    )
+
+    selectedRevisionTrackIdsByRegion.value = Object.fromEntries(
+      Object.entries(selectedRevisionTrackIdsByRegion.value).filter(([regionId]) =>
+        validRegionIds.has(Number(regionId)),
+      ),
     )
   },
 )
@@ -465,6 +551,43 @@ watch(
             {{ track.name }}
           </button>
         </div>
+
+        <div
+          v-if="batchRevisionItems.length > 1"
+          class="mt-6 space-y-4"
+        >
+          <div class="text-sm font-semibold text-white">
+            여러 문제 구간 한 번에 요청
+          </div>
+          <div class="space-y-3">
+            <div
+              v-for="regionItem in batchRevisionItems"
+              :key="regionItem.id"
+              class="rounded-lg border border-white/10 bg-black/20 p-4"
+            >
+              <div class="mb-2 text-sm font-semibold text-white">
+                구간 {{ regionItem.regionId }}
+              </div>
+              <div class="mb-3 text-xs text-gray-400">
+                {{ Math.round(regionItem.startMs) }}ms ~ {{ Math.round(regionItem.endMs) }}ms
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="track in getRevisionCandidateTracksForItem(regionItem)"
+                  :key="`${regionItem.id}-${track.trackId}`"
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-bold transition"
+                  :class="selectedRevisionTrackIdsByRegion[Number(regionItem.regionId)] === Number(track.trackId)
+                    ? 'border-[#FF8F1A] bg-[#FF8F1A] text-black'
+                    : 'border-white/20 text-gray-100 hover:border-[#FF8F1A] hover:text-[#FF8F1A]'"
+                  @click="toggleRevisionTrackForRegion(Number(regionItem.regionId), Number(track.trackId))"
+                >
+                  {{ track.name }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="mt-10">
@@ -487,7 +610,7 @@ watch(
           <button
             type="button"
             class="inline-flex h-11 items-center gap-2 rounded-md bg-[#FF8F1A] px-5 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-40"
-            :disabled="aiAnalyzing || selectedRevisionTrackIds.length === 0 || !hasRevisionCandidates"
+            :disabled="aiAnalyzing || (batchRevisionItems.length > 1 ? !hasBatchRevisionSelections : selectedRevisionTrackIds.length === 0 || !hasRevisionCandidates)"
             @click="requestAiRevision"
           >
             <Wand2 class="h-4 w-4" />

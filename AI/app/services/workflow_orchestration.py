@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.graph.state import (
     WorkflowDispatchType,
@@ -12,7 +12,11 @@ from app.graph.state import (
     build_workflow_initial_state,
     utc_now,
 )
-from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
+from app.services.workflow_jobs import (
+    WorkflowDispatchMessage,
+    WorkflowRegionSelection,
+    get_workflow_job_store,
+)
 from app.services.workflow_inspection_report import build_workflow_inspection_report
 from app.services.workflow_preview_compare import build_preview_compare_payload
 from app.services.workflow_queue import enqueue_workflow_dispatch
@@ -53,14 +57,21 @@ class WorkflowStartPayload(BaseModel):
 
 
 class WorkflowResumePayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     job_id: int
     project_id: int
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
+    region_selections: list[WorkflowRegionSelection] = Field(
+        default_factory=list,
+        alias="regionSelections",
+    )
     issue_id: str | None = None
     action_type: str | None = None
     action_payload: dict[str, object] | None = None
     user_feedback_message: str | None = None
+    user_prompt: str | None = Field(default=None, alias="userPrompt")
     user_decision: WorkflowUserDecision = "RESUME"
     requested_by: int | None = None
 
@@ -146,18 +157,21 @@ def resume_workflow_job(payload: WorkflowResumePayload) -> WorkflowDispatchAccep
 
     dispatch_type = _dispatch_type_for_phase(job.phase)
     _validate_resume_inputs(dispatch_type, payload.model_dump(mode="python"))
+    effective_feedback_message = payload.user_feedback_message or payload.user_prompt
 
     message = WorkflowDispatchMessage(
         job_id=payload.job_id,
         project_id=payload.project_id,
         dispatch_type=dispatch_type,
         requested_by=payload.requested_by,
+        request_mode="batch" if len(payload.region_selections) > 1 else None,
         selected_region_id=payload.selected_region_id,
         preserve_clip_id=payload.preserve_clip_id,
+        selected_region_selections=payload.region_selections,
         issue_id=payload.issue_id,
         action_type=payload.action_type,
         action_payload=payload.action_payload,
-        user_feedback_message=payload.user_feedback_message,
+        user_feedback_message=effective_feedback_message,
         user_decision=payload.user_decision,
     )
     logger.info(
@@ -321,6 +335,10 @@ def _dispatch_type_for_phase(phase: str) -> WorkflowDispatchType:
 
 def _validate_resume_inputs(dispatch_type: WorkflowDispatchType, payload: dict[str, Any]) -> None:
     if dispatch_type == "resume_plan_input" and payload.get("selected_region_id") is None:
+        region_selections = payload.get("region_selections") or []
+        if region_selections:
+            _validate_batch_resume_inputs(region_selections, payload)
+            return
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="selected_region_id is required for plan-input resume.",
@@ -329,4 +347,32 @@ def _validate_resume_inputs(dispatch_type: WorkflowDispatchType, payload: dict[s
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="preserve_clip_id is required for plan-input resume.",
+        )
+
+
+def _validate_batch_resume_inputs(
+    region_selections: list[dict[str, Any]],
+    payload: dict[str, Any],
+) -> None:
+    seen_region_ids: set[int] = set()
+    for selection in region_selections:
+        region_id = int(selection["region_id"])
+        preserve_track_id = int(selection["preserve_track_id"])
+        if region_id in seen_region_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="regionSelections must not contain duplicate regionId values.",
+            )
+        seen_region_ids.add(region_id)
+        if preserve_track_id <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="regionSelections.preserveTrackId must be a positive integer.",
+            )
+    if len(region_selections) > 1 and not str(
+        payload.get("user_prompt") or payload.get("user_feedback_message") or ""
+    ).strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="userPrompt is required for batch plan-input resume.",
         )

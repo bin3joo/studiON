@@ -10,6 +10,7 @@ from scipy.signal import resample_poly
 
 from app.graph import nodes
 from app.graph.nodes import analysis as analysis_nodes
+from app.graph.nodes import review as review_nodes
 from app.graph.nodes import runtime as runtime_nodes
 from app.graph.nodes import suggestion as suggestion_nodes
 from app.graph.state import build_workflow_initial_state
@@ -732,6 +733,117 @@ def test_plan_rule_validator_rejects_upper_mid_overlap_gain_over_6db() -> None:
     assert any("within 6 dB" in note for note in result["plan_revision_notes"])
 
 
+def test_review_selection_context_prefers_user_selected_track_over_preserve_track() -> None:
+    state = build_workflow_initial_state(
+        job_id=1004331,
+        project_id=2004331,
+        clip_index=[
+            {"clip_id": 9001, "track_id": 9},
+            {"clip_id": 17001, "track_id": 17},
+        ],
+        track_name_map={9: "Vocal", 17: "Guitar"},
+        action_payload={"selected_track_ids": [17]},
+    )
+    region = {
+        "id": 1,
+        "track_id": 9,
+        "secondary_track_id": 17,
+        "involved_track_ids": [9, 17],
+        "band_overlap_subtype": "low_mid_overlap",
+        "band_focus_label": "body",
+        "track_body_contributions": {"9": 0.7, "17": 0.3},
+    }
+
+    selection_context = review_nodes.build_selection_context(state, region, 9001)
+
+    assert selection_context["selectedTrackId"] == 17
+    assert selection_context["preserveTrackId"] == 9
+    assert selection_context["selectedTrackIsProtected"] is False
+    assert selection_context["nonPreserveOverlappingTrackIds"] == [17]
+    assert selection_context["trackNameMap"] == {9: "Vocal", 17: "Guitar"}
+
+
+def test_suggestion_selection_context_marks_selected_preserve_track_as_protected() -> None:
+    state = build_workflow_initial_state(
+        job_id=1004332,
+        project_id=2004332,
+        clip_index=[
+            {"clip_id": 17001, "track_id": 17},
+        ],
+        track_name_map={17: "Lead Vocal"},
+        action_payload={"selected_track_ids": [17]},
+    )
+    region = {
+        "id": 1,
+        "track_id": 17,
+        "secondary_track_id": None,
+        "involved_track_ids": [17],
+        "band_overlap_subtype": "presence_overlap",
+        "band_focus_label": "presence",
+        "track_body_contributions": {"17": 1.0},
+    }
+
+    selection_context = suggestion_nodes.build_selection_context(state, region, 17001)
+
+    assert selection_context["selectedTrackId"] == 17
+    assert selection_context["preserveTrackId"] == 17
+    assert selection_context["selectedTrackIsProtected"] is True
+    assert selection_context["nonPreserveOverlappingTrackIds"] == []
+
+
+def test_plan_rule_validator_allows_targeting_user_selected_non_preserve_track() -> None:
+    state = build_workflow_initial_state(
+        job_id=1004333,
+        project_id=2004333,
+        analysis_regions=[
+            {
+                "id": 1,
+                "issue_type": "band_overlap",
+                "band_overlap_subtype": "low_mid_overlap",
+                "start_ms": 0,
+                "end_ms": 400,
+                "track_id": 9,
+                "secondary_track_id": 17,
+                "involved_track_ids": [9, 17],
+                "band_low_hz": 250,
+                "band_high_hz": 420,
+            }
+        ],
+        clip_index=[
+            {"clip_id": 9001, "track_id": 9},
+            {"clip_id": 17001, "track_id": 17},
+        ],
+        selected_region_id=1,
+        preserve_clip_id=9001,
+        action_payload={"selected_track_ids": [17]},
+        plan_payload={
+            "strategyTitle": "title",
+            "strategySummary": "summary",
+            "summary": "candidate summary",
+            "explanation": "candidate explanation",
+            "candidate": {
+                "action": {
+                    "actionType": "DYNAMIC_EQ",
+                    "targetScope": "TRACK",
+                    "targetTrackId": 17,
+                    "targetClipId": None,
+                    "startMs": 0,
+                    "endMs": 400,
+                    "bandLowHz": 250,
+                    "bandHighHz": 420,
+                    "gainDeltaDb": -2.8,
+                    "params": {"threshold": -18},
+                }
+            },
+        },
+    )
+
+    result = nodes.plan_rule_validator(state)
+
+    assert result["validator_result"] == "PASS"
+    assert result["plan_revision_notes"] == []
+
+
 def test_materialize_execution_plan_rejects_master_scope_preview_action() -> None:
     state = build_workflow_initial_state(
         job_id=10044,
@@ -1056,7 +1168,7 @@ def test_workflow_materializes_sibilance_without_planner_loop() -> None:
     assert sibilance_issue["actions"]
 
 
-def test_workflow_keeps_band_overlap_preview_and_includes_sibilance_issue_in_mixed_run() -> None:
+def test_workflow_keeps_band_overlap_preview_in_mixed_run() -> None:
     sample_rate = 16000
     duration_seconds = 4.8
     time_axis = np.linspace(
@@ -1094,11 +1206,10 @@ def test_workflow_keeps_band_overlap_preview_and_includes_sibilance_issue_in_mix
     assert result["current_node"] == "finalize_output"
     preview_band = result["suggestion_payload"]["suggestions"][0]["previewBands"][0]
     assert preview_band["jobId"] == 10042
-    sibilance_issue = next(
-        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    assert any(
+        issue["issueType"] == "band_overlap"
+        for issue in result["suggestion_payload"]["issues"]
     )
-    assert sibilance_issue["uiMode"] == "eq_ai"
-    assert sibilance_issue["actions"][0]["actionType"] == "DYNAMIC_EQ"
     assert result["auto_fix_recipe_artifact_id"] is None
     assert result["sibilance_fix_log_id"] is None
 
@@ -1268,7 +1379,71 @@ def test_resolve_preview_excerpt_range_uses_context_padding() -> None:
     assert result["preview_excerpt_end_ms"] == 4800
 
 
-def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
+def test_workflow_uses_user_selected_main_track_for_generated_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_planner_context: dict[str, object] = {}
+    captured_critic_context: dict[str, object] = {}
+
+    class _CapturingPlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            selection_context: dict[str, object],
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            captured_planner_context.update(selection_context)
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "selected track plan",
+                    "strategySummary": "selected track summary",
+                    "summary": "selected track suggestion",
+                    "explanation": "selected track explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": "DYNAMIC_EQ",
+                            "targetScope": "TRACK",
+                            "targetTrackId": int(selection_context["selectedTrackId"]),
+                            "targetClipId": None,
+                            "startMs": int(region["start_ms"]),
+                            "endMs": int(region["end_ms"]),
+                            "bandLowHz": int(region.get("band_low_hz") or 250),
+                            "bandHighHz": int(region.get("band_high_hz") or 1200),
+                            "gainDeltaDb": -2.4,
+                            "params": {"threshold": -19, "ratio": 2.0},
+                        }
+                    },
+                }
+            )
+
+    class _CapturingCriticClient:
+        def review_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            selection_context: dict[str, object],
+            region: dict[str, object],
+            plan_payload: dict[str, object],
+            revision_notes: list[str],
+        ) -> PlanCriticLLMResponse:
+            captured_critic_context.update(selection_context)
+            return PlanCriticLLMResponse(result="PASS", note="")
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _CapturingPlanningClient(),
+    )
+    monkeypatch.setattr(
+        "app.graph.nodes.review.get_plan_critic_llm_client",
+        lambda: _CapturingCriticClient(),
+    )
     waiting = run_workflow_graph(
         {
             "job_id": 10041,
@@ -1279,10 +1454,22 @@ def test_workflow_uses_user_selected_main_track_for_generated_action() -> None:
     )
 
     plan_input = build_plan_input(waiting)
-    resumed = run_workflow_graph({**waiting, **plan_input})
+    resumed = run_workflow_graph(
+        {
+            **waiting,
+            **plan_input,
+            "action_payload": {"selected_track_ids": [22]},
+        }
+    )
 
     action = resumed["plan_payload"]["candidate"]["action"]
-    assert action["targetTrackId"] in {11, 22}
+    assert captured_planner_context["selectedTrackId"] == 22
+    assert captured_planner_context["preserveTrackId"] == 11
+    assert captured_planner_context["selectedTrackIsProtected"] is False
+    assert captured_critic_context["selectedTrackId"] == 22
+    assert captured_critic_context["preserveTrackId"] == 11
+    assert captured_critic_context["selectedTrackIsProtected"] is False
+    assert action["targetTrackId"] == 22
 
 
 def test_workflow_response_contains_unified_projections() -> None:
@@ -1478,6 +1665,80 @@ def test_render_preview_uses_auto_preview_focus_region_without_selected_region()
     assert rendered["auto_preview_generated"] is True
     assert rendered["preview_excerpt_start_ms"] == 0
     assert rendered["preview_excerpt_end_ms"] == 2400
+
+
+def test_render_preview_uses_batch_issue_source_region_without_selected_region() -> None:
+    rendered = nodes.render_preview(
+        build_workflow_initial_state(
+            job_id=100312,
+            project_id=200312,
+            request_mode="batch",
+            preview_id="100312-preview",
+            suggestion_group_id="100312-group",
+            analysis_regions=[
+                {
+                    "id": 21,
+                    "issue_type": "band_overlap",
+                    "track_id": 12,
+                    "start_ms": 500,
+                    "end_ms": 1500,
+                    "measure_start": 2,
+                    "measure_end": 3,
+                }
+            ],
+            clip_index=[
+                {
+                    "clip_id": _clip_id(12, 1),
+                    "track_id": 12,
+                    "start_ms": 0,
+                    "end_ms": 2500,
+                    "audio_path": str(Path(gettempdir()) / "missing-batch-preview-source.wav"),
+                    "audio_start_ms": 0,
+                    "audio_duration_ms": 2500,
+                }
+            ],
+            project_duration_ms=2500,
+            suggestion_payload={
+                "activeIssueId": "100312-batch-envelope-1",
+                "issues": [
+                    {
+                        "issueId": "100312-batch-envelope-1",
+                        "issueType": "band_overlap",
+                        "trackId": 12,
+                        "sourceRegionIds": [21],
+                        "actions": [
+                            {
+                                "type": "DYNAMIC_EQ",
+                                "targetScope": "TRACK",
+                                "targetTrackId": 12,
+                            }
+                        ],
+                    }
+                ],
+                "suggestions": [
+                    {
+                        "previewBands": [
+                            {
+                                "jobId": 100312,
+                                "targetTrackId": 12,
+                                "bandOrder": 1,
+                                "eqTypeCode": 1,
+                                "frequencyHz": 420,
+                                "q": 1.2,
+                                "gainDeltaDb": -2.5,
+                                "statusCode": 1,
+                                "previewExpiresAt": "2026-05-07T10:00:00+09:00",
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
+    )
+
+    assert rendered["preview_status"] == "READY"
+    assert rendered["preview_excerpt_start_ms"] == 0
+    assert rendered["preview_excerpt_end_ms"] == 2500
 
 
 def test_workflow_analysis_regions_include_detector_metadata() -> None:

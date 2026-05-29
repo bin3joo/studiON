@@ -7,8 +7,11 @@ def route_after_entry(state: WorkflowState) -> str:
         return "fail_workflow"
     if state.get("phase") == "waiting_for_user_plan_input":
         if (
-            state.get("selected_region_id") is not None
-            and state.get("preserve_clip_id") is not None
+            (
+                state.get("selected_region_id") is not None
+                and state.get("preserve_clip_id") is not None
+            )
+            or state.get("selected_region_selections")
         ):
             return "resume_after_plan_input"
         return "wait_user_plan_input"
@@ -29,6 +32,8 @@ def route_after_candidate_ranking(state: WorkflowState) -> str:
 
 # plan input이 채워졌다면 즉시 rule candidate 구성을 시작한다.
 def route_after_plan_input(state: WorkflowState) -> str:
+    if state.get("request_mode") == "batch":
+        return "batch_plan_candidates"
     return "planning_agent"
 
 

@@ -125,7 +125,7 @@ const batchRevisionItems = computed(() => {
 
   return aiAnalysisItems.value.filter(item =>
     item.uiMode === 'eq_ai' &&
-    item.issueType === 'band_overlap' &&
+    item.issueType?.toLowerCase() === 'band_overlap' &&
     item.regionId != null &&
     item.involvedTrackIds.length > 0,
   )

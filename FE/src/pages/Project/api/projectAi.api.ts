@@ -106,6 +106,7 @@ export interface AiSuggestionIssue {
   startMs: number
   endMs: number
   trackId: number | null
+  sourceRegionIds?: number[]
   bubbleTarget: 'track' | 'master'
   uiMode: AiIssueUiMode
   summary: string

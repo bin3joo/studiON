@@ -95,7 +95,7 @@ studiON은 프론트엔드, 백엔드, AI 서버가 분리된 구조를 기반�
 
 개발 환경에서는 `compose.dev.yaml`을 통해 MySQL, MongoDB, Redis를 구성하고, 운영 환경에서는 Nginx와 백엔드 서비스, Redis를 조합해 배포할 수 있도록 구성되어 있습니다.
 
-## 5. 디렉터리 구조
+## 📁 디렉터리 구조
 
 ```text
 .
@@ -134,6 +134,28 @@ Jenkins와 Docker 기반의 빌드 및 배포 파이프라인을 구성합니다
 - Redis healthcheck 기반 백엔드 기동 제어
 
 
+### 🏠 온보딩
+
+서비스 소개, 로그인, 프로필 설정 흐름을 제공합니다.
+
+### 📁 대시보드
+
+내 프로젝트 목록, 새 프로젝트 생성, 초대 코드 참여, 사용량 확인 기능을 제공합니다.
+
+### 🎚️ 프로젝트 편집
+
+타임라인, 트랙 리스트, 마스터 트랙, 재생 컨트롤러, EQ 패널을 중심으로 오디오 편집 작업을 수행합니다.
+
+### 🤖 AI 분석 / EQ 제안
+
+AI 분석 결과를 타임라인 오버레이와 EQ 패널에서 확인하고, 제안된 EQ를 비교·적용할 수 있습니다.
+
+### 💬 협업 코멘트
+
+트랙 및 마디 기준으로 코멘트를 작성하고, 사이드 패널에서 피드백을 관리합니다.
+
+
+
 ## 👥6. 팀 구성 및 담당 역할
 
 프로필 이미지를 클릭하면 각 팀원의 GitHub 페이지로 이동합니다.
@@ -146,4 +168,6 @@ Jenkins와 Docker 기반의 빌드 및 배포 파이프라인을 구성합니다
 | <a href="https://github.com/Charmander0308"><img src="https://github.com/Charmander0308.png?size=100" width="60" alt="한예성 GitHub Profile" /></a> | 한예성 | BE | 트랙, 클립 파트 구현 |
 | <a href="https://github.com/kyubongg"><img src="https://github.com/kyubongg.png?size=100" width="60" alt="유규봉 GitHub Profile" /></a> | 유규봉 | AI | 00 AI 기능 구현 |
 | <a href="https://github.com/seoliee"><img src="https://github.com/seoliee.png?size=100" width="60" alt="이서현 GitHub Profile" /></a> | 이서현 | INF | 인프라 및 배포 환경 구성 |
+
+## 🎧 studiON - 팀의 연결, 더 똑똑한 믹싱
 

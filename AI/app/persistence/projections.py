@@ -80,8 +80,10 @@ class TrackVocalPredictionProjection(BaseModel):
 
 # 정책 retrieval 결과를 요약해서 외부로 노출한다.
 class PlanStateProjection(BaseModel):
+    request_mode: str | None = None
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
+    selected_region_selections: list[dict[str, Any]] = Field(default_factory=list)
     issue_id: str | None = None
     action_type: str | None = None
     action_payload: dict[str, Any] | None = None
@@ -91,6 +93,11 @@ class PlanStateProjection(BaseModel):
     critic_result: str | None = None
     revise_count: int = 0
     revision_notes: list[str] = Field(default_factory=list)
+    candidatePlans: list[dict[str, Any]] = Field(default_factory=list)
+    failedRegions: list[dict[str, Any]] = Field(default_factory=list)
+    finalTrackEnvelopes: list[dict[str, Any]] = Field(default_factory=list)
+    failedEnvelopes: list[dict[str, Any]] = Field(default_factory=list)
+    validationSummary: dict[str, Any] = Field(default_factory=dict)
 
 
 # suggestion 내부의 단일 action을 응답용 스키마로 변환한다.
@@ -354,6 +361,7 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
         [
             state.get("selected_region_id"),
             state.get("preserve_clip_id"),
+            state.get("selected_region_selections"),
             state.get("issue_id"),
             state.get("action_type"),
             state.get("action_payload"),
@@ -362,12 +370,19 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
             state.get("validator_result"),
             state.get("critic_result"),
             state.get("plan_revision_notes"),
+            state.get("batch_candidate_plans"),
+            state.get("batch_failed_regions"),
+            state.get("batch_final_track_envelopes"),
+            state.get("batch_failed_envelopes"),
+            state.get("batch_validation_summary"),
         ]
     ):
         return None
     return PlanStateProjection(
+        request_mode=state.get("request_mode"),
         selected_region_id=state.get("selected_region_id"),
         preserve_clip_id=state.get("preserve_clip_id"),
+        selected_region_selections=state.get("selected_region_selections", []),
         issue_id=state.get("issue_id"),
         action_type=state.get("action_type"),
         action_payload=state.get("action_payload"),
@@ -377,6 +392,11 @@ def _build_plan_state(state: WorkflowState) -> PlanStateProjection | None:
         critic_result=state.get("critic_result"),
         revise_count=state.get("revise_count", 0),
         revision_notes=state.get("plan_revision_notes", []),
+        candidatePlans=state.get("batch_candidate_plans", []),
+        failedRegions=state.get("batch_failed_regions", []),
+        finalTrackEnvelopes=state.get("batch_final_track_envelopes", []),
+        failedEnvelopes=state.get("batch_failed_envelopes", []),
+        validationSummary=state.get("batch_validation_summary", {}),
     )
 
 
@@ -423,6 +443,13 @@ def _build_suggestion_group(state: WorkflowState) -> SuggestionGroupProjection |
     # suggestion group은 선택된 region의 시간/마디 문맥을 같이 들고 있어야
     # 프론트가 어떤 구간에 대한 제안인지 자연스럽게 표현할 수 있다.
     selected_region_id = _resolve_region_id_from_issue_id(str(payload.get("activeIssueId") or ""))
+    if selected_region_id is None:
+        active_issue_id = str(payload.get("activeIssueId") or "")
+        active_issue = issue_map.get(active_issue_id)
+        if isinstance(active_issue, dict):
+            source_region_ids = active_issue.get("sourceRegionIds") or []
+            if source_region_ids:
+                selected_region_id = int(source_region_ids[0])
     if selected_region_id is None:
         selected_region_id = (
             state.get("selected_region_id")
@@ -611,6 +638,15 @@ def _resolve_preview_region_id(state: WorkflowState) -> int | None:
     selected_region_id = state.get("selected_region_id")
     if selected_region_id is not None:
         return int(selected_region_id)
+    payload = state.get("suggestion_payload") or {}
+    active_issue_id = payload.get("activeIssueId")
+    if active_issue_id:
+        for issue in payload.get("issues", []):
+            if not isinstance(issue, dict) or str(issue.get("issueId")) != str(active_issue_id):
+                continue
+            source_region_ids = issue.get("sourceRegionIds") or []
+            if source_region_ids:
+                return int(source_region_ids[0])
     artifact_id = state.get("auto_fix_recipe_artifact_id")
     if not artifact_id:
         return None
@@ -628,6 +664,20 @@ def _resolve_preview_region_id(state: WorkflowState) -> int | None:
 
 
 def _resolve_auto_preview_action_projection(state: WorkflowState) -> dict[str, Any] | None:
+    payload = state.get("suggestion_payload") or {}
+    active_issue_id = payload.get("activeIssueId")
+    if active_issue_id:
+        for issue in payload.get("issues", []):
+            if not isinstance(issue, dict) or str(issue.get("issueId")) != str(active_issue_id):
+                continue
+            actions = issue.get("actions") or []
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                return {
+                    "action_type": action.get("type") or action.get("actionType"),
+                    "target_track_id": action.get("targetTrackId") or issue.get("trackId"),
+                }
     artifact_id = state.get("auto_fix_recipe_artifact_id")
     if not artifact_id:
         return None

@@ -263,6 +263,10 @@ export interface AiUserFeedbackRequest {
   // 기존 resume 흐름 호환
   selected_region_id?: number | null
   preserve_clip_id?: number | null
+  selected_region_selections?: Array<{
+    regionId: number
+    preserveTrackId: number
+  }>
   user_feedback_message?: string | null
   user_decision?: 'CONFIRM' | 'CANCEL' | 'RESUME'
 }

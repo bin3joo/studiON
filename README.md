@@ -80,7 +80,7 @@
 | CI/CD | Jenkins |
 | Certificate | Certbot, Let's Encrypt |
 | Version Control | GitLab |
-## 4. 서비스 아키텍처
+## 🌐 서비스 아키텍처
 
 studiON은 프론트엔드, 백엔드, AI 서버가 분리된 구조를 기반으로 동작합니다.
 
@@ -107,6 +107,32 @@ studiON은 프론트엔드, 백엔드, AI 서버가 분리된 구조를 기반�
 ├─ compose.dev.yaml    # 개발용 Docker Compose
 └─ compose.prod.yaml   # 운영용 Docker Compose
 ```
+
+## 📦 프로젝트 산출물
+
+### 📐 와이어프레임
+
+이미지 파일 추가 필요
+
+### 🗄️ ERD
+
+이미지 파일 추가 필요
+
+### ✅ API Documentation
+
+- Backend API: `/swagger-ui.html`
+- AI API: FastAPI `/docs`
+
+### 🔄 CI/CD Pipeline
+
+Jenkins와 Docker 기반의 빌드 및 배포 파이프라인을 구성합니다.
+
+- 프론트엔드 정적 빌드
+- 백엔드 애플리케이션 빌드
+- Docker 이미지 생성
+- Nginx 기반 서비스 배포
+- Redis healthcheck 기반 백엔드 기동 제어
+
 
 ## 👥6. 팀 구성 및 담당 역할
 

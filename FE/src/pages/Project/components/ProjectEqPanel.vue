@@ -552,42 +552,6 @@ watch(
           </button>
         </div>
 
-        <div
-          v-if="batchRevisionItems.length > 1"
-          class="mt-6 space-y-4"
-        >
-          <div class="text-sm font-semibold text-white">
-            여러 문제 구간 한 번에 요청
-          </div>
-          <div class="space-y-3">
-            <div
-              v-for="regionItem in batchRevisionItems"
-              :key="regionItem.id"
-              class="rounded-lg border border-white/10 bg-black/20 p-4"
-            >
-              <div class="mb-2 text-sm font-semibold text-white">
-                구간 {{ regionItem.regionId }}
-              </div>
-              <div class="mb-3 text-xs text-gray-400">
-                {{ Math.round(regionItem.startMs) }}ms ~ {{ Math.round(regionItem.endMs) }}ms
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button
-                  v-for="track in getRevisionCandidateTracksForItem(regionItem)"
-                  :key="`${regionItem.id}-${track.trackId}`"
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-bold transition"
-                  :class="selectedRevisionTrackIdsByRegion[Number(regionItem.regionId)] === Number(track.trackId)
-                    ? 'border-[#FF8F1A] bg-[#FF8F1A] text-black'
-                    : 'border-white/20 text-gray-100 hover:border-[#FF8F1A] hover:text-[#FF8F1A]'"
-                  @click="toggleRevisionTrackForRegion(Number(regionItem.regionId), Number(track.trackId))"
-                >
-                  {{ track.name }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div class="mt-10">
@@ -635,6 +599,49 @@ watch(
 />
   </div>
 </div>
+    </div>
+    <div
+      v-if="!isCollapsed && shouldShowRevisionRequest && batchRevisionItems.length > 1"
+      class="border-t border-white/10 bg-[#181818] px-5 py-5"
+    >
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <div class="text-sm font-semibold text-white">
+          여러 문제 구간 한 번에 요청
+        </div>
+        <div class="text-[11px] text-gray-500">
+          구간별로 유지할 트랙 1개씩 선택
+        </div>
+      </div>
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <div
+          v-for="regionItem in batchRevisionItems"
+          :key="regionItem.id"
+          class="rounded-lg border border-white/10 bg-black/20 p-3"
+        >
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <div class="text-sm font-semibold text-white">
+              구간 {{ regionItem.regionId }}
+            </div>
+            <div class="text-[11px] text-gray-400">
+              {{ Math.round(regionItem.startMs) }}ms ~ {{ Math.round(regionItem.endMs) }}ms
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="track in getRevisionCandidateTracksForItem(regionItem)"
+              :key="`${regionItem.id}-${track.trackId}`"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-bold transition"
+              :class="selectedRevisionTrackIdsByRegion[Number(regionItem.regionId)] === Number(track.trackId)
+                ? 'border-[#FF8F1A] bg-[#FF8F1A] text-black'
+                : 'border-white/20 text-gray-100 hover:border-[#FF8F1A] hover:text-[#FF8F1A]'"
+              @click="toggleRevisionTrackForRegion(Number(regionItem.regionId), Number(track.trackId))"
+            >
+              {{ track.name }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
     <!-- 패널 내용 끝 -->
   </section>

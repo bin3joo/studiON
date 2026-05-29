@@ -1234,6 +1234,10 @@ function findPreserveClipIdFromSelectedTrack(selectedTrackIds: number[]) {
 }
 async function handleRequestAiEqRevision(payload: {
   selectedTrackIds: number[]
+  selectedRegionSelections?: Array<{
+    regionId: number
+    preserveTrackId: number
+  }>
   message: string
 }) {
   if (aiAnalyzing.value) return
@@ -1251,6 +1255,66 @@ async function handleRequestAiEqRevision(payload: {
   if (!hasValidRevisionMetadata(item)) {
       useAlertStore().showAlert('현재 AI 이슈는 수정 요청 대상을 결정할 수 없어 다시 분석이 필요합니다.', 'warning')
     return
+  }
+
+  const batchSelections = (payload.selectedRegionSelections ?? [])
+    .filter(selection => selection.regionId != null && selection.preserveTrackId != null)
+    .map(selection => ({
+      regionId: Number(selection.regionId),
+      preserveTrackId: Number(selection.preserveTrackId),
+    }))
+    .filter(selection =>
+      !Number.isNaN(selection.regionId) && !Number.isNaN(selection.preserveTrackId),
+    )
+
+  if (batchSelections.length > 1) {
+    const selectedTrackNamesText = formatTrackNames(
+      batchSelections.map(selection => selection.preserveTrackId),
+    )
+    const selectedTrackText =
+      selectedTrackNamesText
+        ? `선택한 유지 트랙: ${selectedTrackNamesText}. `
+        : ''
+
+    try {
+      aiAnalyzing.value = true
+
+      await sendAiWorkflowFeedback(jobId, {
+        project_id: projectId,
+        issue_id: String(item.id),
+        action_type: 'preserve_track_batch',
+        action_payload: {
+          selected_region_selections: batchSelections,
+        },
+        selected_region_selections: batchSelections,
+        user_feedback_message: `${selectedTrackText}${payload.message}`.trim(),
+        user_decision: 'RESUME',
+      })
+
+      const statusResult = await pollAiFeedbackResult(jobId)
+
+      const nextBands = mapAiSuggestionToEqBands(statusResult)
+
+      if (nextBands.length === 0) {
+        alert('AI 수정안이 아직 생성되지 않았습니다. 잠시 후 다시 시도해주세요.')
+        return
+      }
+
+      const previewActionTrackId = getPreviewActionTrackId(statusResult)
+
+      if (previewActionTrackId != null) {
+        trackStore.selectTrack?.(Number(previewActionTrackId))
+      }
+
+      applyPreviewBandsToActiveIssue(nextBands)
+      return
+    } catch (error) {
+      console.error('[AI batch 수정 요청 실패]', error)
+      alert(error instanceof Error ? error.message : 'AI 일괄 수정 요청 중 오류가 발생했습니다.')
+      return
+    } finally {
+      aiAnalyzing.value = false
+    }
   }
 
   const validSelectedTrackIds = getValidRevisionTrackIds(item, payload.selectedTrackIds)

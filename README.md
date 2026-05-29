@@ -26,15 +26,60 @@
 ### 웹 기반 믹싱 워크플로
   - 설치형 툴 없이 브라우저에서 업로드, 편집, 조정, 버전 관리, 내보내기까지 한 번에 이어지는 작업 환경을 제공합니다.
 
-## 3. 기술 스택
+## 🛠️ 기술 스택
 
-| 구분 | 기술 |
+### 🌕 Frontend
+
+| Category | Stack |
 |---|---|
-| Frontend | Vue 3, TypeScript, Vite, Pinia, Tailwind CSS, STOMP / SockJS, Tone.js |
-| Backend | Java 21, Spring Boot 3, Spring Security, Spring WebSocket, Spring Data JPA, QueryDSL, Flyway |
-| AI | Python 3.11, FastAPI, LangGraph, Dramatiq, Redis, MongoDB, Qdrant |
-| Database / Infra | MySQL, MongoDB, Redis, AWS S3, Docker Compose, Nginx |
+| Language | TypeScript |
+| Runtime Environment | Node.js, Vite |
+| Framework | Vue 3 |
+| Styling | Tailwind CSS |
+| State / Data | Pinia, Pinia Persisted State |
+| Network / Realtime | Axios, STOMP, SockJS |
+| Audio | Tone.js, Web Audio API |
+| UI | Reka UI, Lucide Vue |
+| Build Tool | Vite |
 
+### 🌑 Backend
+
+| Category | Stack |
+|---|---|
+| Language | Java 21 |
+| Framework | Spring Boot 3.5.13 |
+| Security | Spring Security, OAuth2 Client, JWT |
+| Realtime | Spring WebSocket |
+| Data Access | Spring Data JPA, QueryDSL, Spring Data Redis, Spring Data MongoDB |
+| Database | MySQL, MongoDB, Redis |
+| Storage | AWS S3 Compatible Storage |
+| API Docs | Springdoc OpenAPI / Swagger UI |
+| Migration | Flyway |
+| Build Tool | Gradle |
+| Monitoring | Spring Actuator |
+
+### 🌘 AI
+
+| Category | Stack |
+|---|---|
+| Language | Python 3.11 |
+| Framework | FastAPI |
+| Workflow | LangGraph |
+| Queue | Dramatiq, Redis |
+| Data / Artifact Store | MySQL, MongoDB, Qdrant |
+| Audio Processing | Librosa, NumPy |
+| LLM Integration | OpenAI-compatible API |
+| Package / Runtime | uv, Uvicorn |
+
+### ⚙️ Infra / DevOps
+
+| Category | Stack |
+|---|---|
+| Containerization | Docker, Docker Compose |
+| Web / Proxy | Nginx |
+| CI/CD | Jenkins |
+| Certificate | Certbot, Let's Encrypt |
+| Version Control | GitLab |
 ## 4. 서비스 아키텍처
 
 studiON은 프론트엔드, 백엔드, AI 서버가 분리된 구조를 기반으로 동작합니다.

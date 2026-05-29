@@ -2862,6 +2862,38 @@ export const useTrackStore = defineStore('track', () => {
         rebuildTrackEqChain(trackId)
     }
 
+    const setTrackEqBands = (
+        trackId: number,
+        bands: TrackEqBandState[],
+    ) => {
+        const track = trackList.value.find(track => track.trackId === trackId)
+        if (!track) return
+
+        const nextBands = bands
+            .slice(0, MAX_EQ_BANDS)
+            .map((band, index): TrackEqBandState => ({
+                ...band,
+                bandOrder: index + 1,
+                eqTypeCode:
+                    band.eqTypeCode === 2 || band.eqTypeCode === 3
+                        ? band.eqTypeCode
+                        : 1,
+                frequencyHz: clampFrequency(band.frequencyHz),
+                q: clampQ(band.q),
+                gainDeltaDb: clampGain(band.gainDeltaDb),
+                sourceTypeCode: band.sourceTypeCode ?? 4,
+                jobId: band.jobId ?? null,
+                suggestionActionId: band.suggestionActionId ?? null,
+                appliedSuggestionId: band.appliedSuggestionId ?? null,
+            }))
+
+        track.eq = {
+            bands: nextBands,
+        }
+
+        rebuildTrackEqChain(trackId)
+    }
+
     const getTrackSpectrum = (trackId: number): number[] => {
         const analyzer = trackAnalyzers.get(trackId)
 
@@ -3203,6 +3235,7 @@ export const useTrackStore = defineStore('track', () => {
         addTrackEqBand,
         updateTrackEqBand,
         removeTrackEqBand,
+        setTrackEqBands,
         getTrackSpectrum,
         workspaceZoom,
         rebuildTrackEqChain,

@@ -902,7 +902,7 @@ function hasAiEqSuggestion(statusResult: any) {
     const suggestionPayload = getSuggestionPayload(statusResult.projections)
     const regions = statusResult.projections.analysis_regions ?? []
 
-    const regionItems = regions.map(region =>
+    const regionItems = regions.map((region: AiAnalysisRegion) =>
   mapRegionToAnalysisItem(region, snapshot.duration_ms),
 )
 
@@ -922,12 +922,12 @@ const actionableSuggestionClippingItems = suggestionItems.filter(item =>
   isActionableClippingItem(item)
 )
 
-const actionableRegionClippingItems = regionItems.filter(item =>
+const actionableRegionClippingItems = regionItems.filter((item: AiAnalysisItem) =>
   isActionableClippingItem(item)
 )
 
 // analysis_regions 에서 온 비클리핑 항목(BAND_OVERLAP, HARSHNESS 등)도 항상 포함
-const regionNonClippingItems = regionItems.filter(item =>
+const regionNonClippingItems = regionItems.filter((item: AiAnalysisItem) =>
   item.kind !== 'CLIPPING'
 )
 
@@ -943,9 +943,9 @@ let mergedItems =
 
 // [최적화 & 전시 지원] 대역 중복(BAND_OVERLAP) 이슈가 다수 발생 시 수동 처리 시간 단축을 위해
 // 첫 번째 감지된 대역 중복 이슈만 남기고 나머지는 제외(필터링) 처리합니다.
-const firstBandOverlapIndex = mergedItems.findIndex(item => item.kind === 'BAND_OVERLAP')
+const firstBandOverlapIndex = mergedItems.findIndex((item: AiAnalysisItem) => item.kind === 'BAND_OVERLAP')
 if (firstBandOverlapIndex !== -1) {
-  mergedItems = mergedItems.filter((item, index) => {
+  mergedItems = mergedItems.filter((item: AiAnalysisItem, index: number) => {
     if (item.kind === 'BAND_OVERLAP') {
       return index === firstBandOverlapIndex
     }

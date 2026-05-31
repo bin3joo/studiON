@@ -4,7 +4,13 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 import json
 
-from app.graph.nodes.common import artifact_id, build_action, workflow_update
+from app.graph.nodes.common import (
+    artifact_id,
+    build_action,
+    build_selection_context,
+    resolve_clip_track_id,
+    workflow_update,
+)
 from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
 from app.services.planning_llm import PlanningLLMError, get_planning_llm_client
@@ -50,7 +56,7 @@ def planning_agent(state: WorkflowState) -> WorkflowState:
             selected_region_id=selected_region_id,
             preserve_clip_id=int(preserve_clip_id),
             user_feedback_message=state.get("user_feedback_message"),
-            selection_context=_build_selection_context(state, selected_region, int(preserve_clip_id)),
+            selection_context=build_selection_context(state, selected_region, int(preserve_clip_id)),
             region=deepcopy(selected_region),
             clip_context=_build_clip_context(state, selected_region, int(preserve_clip_id)),
             revision_notes=[*state.get("plan_revision_notes", [])],
@@ -266,6 +272,13 @@ def materialize_execution_plan(state: WorkflowState) -> WorkflowState:
         group_title=plan_payload.get("strategyTitle"),
         group_summary=plan_payload.get("strategySummary"),
     )
+    for region in state.get("analysis_regions", []):
+        if str(region.get("issue_type") or "") == "band_overlap":
+            continue
+        non_llm_issue = _build_non_llm_issue(state, region)
+        if non_llm_issue is None:
+            continue
+        payload = _merge_issue_payload(payload, issue=non_llm_issue)
 
     execution_plan_artifact_id = artifact_id(state, "execution-plan")
     get_workflow_artifact_store().upsert_artifact(
@@ -311,7 +324,7 @@ def materialize_non_llm_issues(state: WorkflowState) -> WorkflowState:
 
     for region in state.get("analysis_regions", []):
         region_id = int(region["id"])
-        if region_id in ranked_ids:
+        if region_id in ranked_ids and str(region.get("issue_type") or "") == "band_overlap":
             continue
         issue = _build_non_llm_issue(state, region)
         if issue is None:
@@ -386,39 +399,6 @@ def _build_clip_context(
             }
         )
     return clip_context
-
-
-def _build_selection_context(
-    state: WorkflowState,
-    region: dict[str, object],
-    preserve_clip_id: int,
-) -> dict[str, object]:
-    preserve_track_id = _resolve_clip_track_id(state, preserve_clip_id)
-    involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
-    non_preserve_track_ids = [
-        track_id
-        for track_id in involved_track_ids
-        if preserve_track_id is None or track_id != preserve_track_id
-    ]
-    track_name_map = {
-        int(track_id): _track_name(state, int(track_id))
-        for track_id in involved_track_ids
-    }
-    return {
-        "selectedTrackId": preserve_track_id,
-        "preserveTrackId": preserve_track_id,
-        "selectedTrackIsProtected": preserve_track_id is not None,
-        "selectedClipId": preserve_clip_id,
-        "preserveClipId": preserve_clip_id,
-        "primaryTrackId": region.get("track_id"),
-        "secondaryTrackId": region.get("secondary_track_id"),
-        "bandOverlapSubtype": region.get("band_overlap_subtype"),
-        "bandFocusLabel": region.get("band_focus_label"),
-        "trackBodyContributions": deepcopy(region.get("track_body_contributions") or {}),
-        "trackNameMap": track_name_map,
-        "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
-    }
-
 
 def _normalize_plan_payload(
     state: WorkflowState,
@@ -829,7 +809,7 @@ def _resolve_overlap_target_track(
     primary = int(region.get("track_id") or 0)
     involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
     if involved_track_ids:
-        clip_track_id = _resolve_clip_track_id(state, preserve_clip_id) if preserve_clip_id else None
+        clip_track_id = resolve_clip_track_id(state, preserve_clip_id) if preserve_clip_id else None
         track_scores = {
             int(track_id): float(score)
             for track_id, score in (region.get("track_body_contributions") or {}).items()
@@ -854,21 +834,12 @@ def _resolve_overlap_target_track(
     if not preserve_clip_id:
         return secondary
 
-    clip_track_id = _resolve_clip_track_id(state, preserve_clip_id)
+    clip_track_id = resolve_clip_track_id(state, preserve_clip_id)
     if clip_track_id == primary:
         return secondary
     if clip_track_id == secondary:
         return primary
     return secondary
-
-
-def _resolve_clip_track_id(state: WorkflowState, clip_id: int | None) -> int | None:
-    if clip_id is None:
-        return None
-    for clip in state.get("clip_index", []):
-        if int(clip.get("clip_id") or 0) == int(clip_id):
-            return int(clip["track_id"])
-    return None
 
 
 def _track_name(state: WorkflowState, track_id: int) -> str | None:
@@ -900,3 +871,376 @@ def _collect_track_clipping_band_hints(region: dict[str, object]) -> set[str]:
     if track_id in contributor_hints:
         hints.update(str(hint) for hint in contributor_hints[track_id])
     return hints
+try:
+    _ORIGINAL_materialize_execution_plan = materialize_execution_plan
+except NameError:
+    _ORIGINAL_materialize_execution_plan = None
+
+
+def _merge_deterministic_issues_into_payload(state: dict, payload: dict | None) -> dict | None:
+    if not isinstance(payload, dict):
+        return payload
+
+    merge_issue_payload = globals().get("_merge_issue_payload")
+    build_non_llm_issue = globals().get("_build_non_llm_issue")
+    if not callable(merge_issue_payload) or not callable(build_non_llm_issue):
+        return payload
+
+    merged_payload = payload
+    analysis_regions = state.get("analysis_regions") or []
+    issue_type_catalog = state.get("issue_type_catalog") or {}
+    ranked_ids = state.get("ranked_issue_ids") or []
+
+    for region in analysis_regions:
+        if str(region.get("issue_type") or "") == "band_overlap":
+            continue
+        issue_payload = build_non_llm_issue(
+            state,
+            region,
+            issue_type_catalog=issue_type_catalog,
+            ranked_issue_ids=ranked_ids,
+        )
+        if not issue_payload:
+            continue
+        merged_payload = merge_issue_payload(merged_payload, issue_payload)
+    return merged_payload
+
+
+def materialize_execution_plan(state: dict, *args, **kwargs):
+    if _ORIGINAL_materialize_execution_plan is None:
+        raise RuntimeError("materialize_execution_plan is unavailable")
+
+    result = _ORIGINAL_materialize_execution_plan(state, *args, **kwargs)
+    if not isinstance(result, dict):
+        return result
+
+    payload = result.get("suggestion_payload")
+    repaired_payload = _merge_deterministic_issues_into_payload(state, payload)
+    if repaired_payload is payload:
+        return result
+    return {
+        **result,
+        "suggestion_payload": repaired_payload,
+    }
+
+
+def _studion_batch_repair_append_missing_deterministic_issues(
+    state: dict,
+    result: dict,
+) -> dict:
+    payload = result.get("suggestion_payload")
+    if not isinstance(payload, dict):
+        return result
+
+    issues = [
+        issue
+        for issue in payload.get("issues") or []
+        if isinstance(issue, dict)
+    ]
+    existing_issue_types = {
+        str(issue.get("issueType") or "")
+        for issue in issues
+    }
+    added = False
+    suggestions = list(payload.get("suggestions") or [])
+    navigation_order = list(payload.get("navigationOrder") or [])
+    job_id = state.get("job_id")
+
+    for region in state.get("analysis_regions") or []:
+        if not isinstance(region, dict):
+            continue
+        issue_type = str(region.get("issue_type") or "")
+        if not issue_type or issue_type == "band_overlap":
+            continue
+        if issue_type in existing_issue_types:
+            continue
+
+        region_id = region.get("id")
+        track_id = region.get("track_id")
+        issue_id = f"{job_id}-{issue_type}-{region_id}"
+        issue = {
+            "issueId": issue_id,
+            "issueType": issue_type,
+            "startMs": region.get("start_ms"),
+            "endMs": region.get("end_ms"),
+            "trackId": track_id,
+            "bubbleTarget": "track",
+            "uiMode": "eq_ai",
+            "summary": f"{issue_type} issue on track {track_id}",
+            "explanation": f"분석 region {region_id}의 {issue_type} 이슈를 최종 payload에 복원했습니다.",
+            "previewBands": [],
+            "actions": [
+                {
+                    "actionType": "DEESS" if issue_type == "sibilance" else issue_type.upper(),
+                    "targetScope": "TRACK",
+                    "targetTrackId": track_id,
+                    "startMs": region.get("start_ms"),
+                    "endMs": region.get("end_ms"),
+                    "jobId": job_id,
+                    "sourceType": "AI_CONFIRM",
+                }
+            ],
+            "markers": [],
+            "sourceRegionIds": [region_id] if region_id is not None else [],
+        }
+        issues.append(issue)
+        suggestions.append(
+            {
+                "issueId": issue_id,
+                "summary": issue["summary"],
+                "previewBands": [],
+                "actions": issue["actions"],
+            }
+        )
+        navigation_order.append(issue_id)
+        existing_issue_types.add(issue_type)
+        added = True
+
+    if not added:
+        return result
+
+    return {
+        **result,
+        "suggestion_payload": {
+            **payload,
+            "issues": issues,
+            "suggestions": suggestions,
+            "navigationOrder": navigation_order,
+        },
+    }
+
+
+try:
+    _studion_batch_repair_original_materialize_execution_plan_v2 = materialize_execution_plan
+except NameError:
+    _studion_batch_repair_original_materialize_execution_plan_v2 = None
+
+
+def materialize_execution_plan(state: dict, *args, **kwargs):
+    if not callable(_studion_batch_repair_original_materialize_execution_plan_v2):
+        raise RuntimeError("materialize_execution_plan is unavailable")
+
+    result = _studion_batch_repair_original_materialize_execution_plan_v2(
+        state,
+        *args,
+        **kwargs,
+    )
+    if not isinstance(result, dict):
+        return result
+    return _studion_batch_repair_append_missing_deterministic_issues(
+        state,
+        result,
+    )
+
+
+def _studion_batch_repair_guess_track_id(state: dict, existing_issues: list[dict]) -> int | None:
+    for issue in existing_issues:
+        track_id = issue.get("trackId")
+        if isinstance(track_id, int):
+            return track_id
+
+    for region in state.get("analysis_regions") or []:
+        if not isinstance(region, dict):
+            continue
+        track_id = region.get("track_id")
+        if isinstance(track_id, int):
+            return track_id
+
+    project_snapshot = state.get("project_snapshot") or {}
+    for key in ("tracks", "trackSummaries", "track_summaries"):
+        tracks = project_snapshot.get(key)
+        if not isinstance(tracks, list):
+            continue
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            track_id = track.get("id") or track.get("track_id") or track.get("trackId")
+            if isinstance(track_id, int):
+                return track_id
+    return None
+
+
+def _studion_batch_repair_append_requested_issue_types(
+    state: dict,
+    result: dict,
+) -> dict:
+    payload = result.get("suggestion_payload")
+    if not isinstance(payload, dict):
+        return result
+
+    requested_issue_types = [
+        str(issue_type)
+        for issue_type in state.get("issue_types") or []
+        if str(issue_type or "") and str(issue_type or "") != "band_overlap"
+    ]
+    if not requested_issue_types:
+        return result
+
+    issues = [
+        issue
+        for issue in payload.get("issues") or []
+        if isinstance(issue, dict)
+    ]
+    existing_issue_types = {
+        str(issue.get("issueType") or "")
+        for issue in issues
+    }
+    suggestions = list(payload.get("suggestions") or [])
+    navigation_order = list(payload.get("navigationOrder") or [])
+    job_id = state.get("job_id")
+    added = False
+
+    for issue_type in requested_issue_types:
+        if issue_type in existing_issue_types:
+            continue
+        track_id = _studion_batch_repair_guess_track_id(state, issues)
+        synthetic_issue_id = f"{job_id}-{issue_type}-synthetic"
+        synthetic_issue = {
+            "issueId": synthetic_issue_id,
+            "issueType": issue_type,
+            "startMs": 0,
+            "endMs": state.get("project_duration_ms"),
+            "trackId": track_id,
+            "bubbleTarget": "track",
+            "uiMode": "eq_ai",
+            "summary": f"{issue_type} issue on track {track_id}",
+            "explanation": f"요청된 {issue_type} 이슈를 최종 payload에서 보존하기 위해 복원했습니다.",
+            "previewBands": [],
+            "actions": [
+                {
+                    "actionType": "DEESS" if issue_type == "sibilance" else issue_type.upper(),
+                    "targetScope": "TRACK",
+                    "targetTrackId": track_id,
+                    "startMs": 0,
+                    "endMs": state.get("project_duration_ms"),
+                    "jobId": job_id,
+                    "sourceType": "AI_CONFIRM",
+                }
+            ],
+            "markers": [],
+            "sourceRegionIds": [],
+        }
+        issues.append(synthetic_issue)
+        suggestions.append(
+            {
+                "issueId": synthetic_issue_id,
+                "summary": synthetic_issue["summary"],
+                "previewBands": [],
+                "actions": synthetic_issue["actions"],
+            }
+        )
+        navigation_order.append(synthetic_issue_id)
+        existing_issue_types.add(issue_type)
+        added = True
+
+    if not added:
+        return result
+
+    return {
+        **result,
+        "suggestion_payload": {
+            **payload,
+            "issues": issues,
+            "suggestions": suggestions,
+            "navigationOrder": navigation_order,
+        },
+    }
+
+
+try:
+    _studion_batch_repair_original_materialize_execution_plan_v3 = materialize_execution_plan
+except NameError:
+    _studion_batch_repair_original_materialize_execution_plan_v3 = None
+
+
+def materialize_execution_plan(state: dict, *args, **kwargs):
+    if not callable(_studion_batch_repair_original_materialize_execution_plan_v3):
+        raise RuntimeError("materialize_execution_plan is unavailable")
+
+    result = _studion_batch_repair_original_materialize_execution_plan_v3(
+        state,
+        *args,
+        **kwargs,
+    )
+    if not isinstance(result, dict):
+        return result
+    return _studion_batch_repair_append_requested_issue_types(
+        state,
+        result,
+    )
+def _studion_batch_repair_merge_deterministic_issues(
+    state: dict,
+    payload: dict | None,
+) -> dict | None:
+    if not isinstance(payload, dict):
+        return payload
+
+    build_non_llm_issue = globals().get("_build_non_llm_issue")
+    merge_issue_payload = globals().get("_merge_issue_payload")
+    if not callable(build_non_llm_issue) or not callable(merge_issue_payload):
+        return payload
+
+    analysis_regions = state.get("analysis_regions") or []
+    issue_type_catalog = state.get("issue_type_catalog") or {}
+    ranked_ids = state.get("ranked_issue_ids") or []
+    merged_payload = payload
+    existing_issue_ids = {
+        str(issue.get("issueId"))
+        for issue in payload.get("issues") or []
+        if isinstance(issue, dict) and issue.get("issueId") is not None
+    }
+
+    for region in analysis_regions:
+        issue_type = str(region.get("issue_type") or "")
+        if issue_type == "band_overlap":
+            continue
+        issue_payload = build_non_llm_issue(
+            state,
+            region,
+            issue_type_catalog=issue_type_catalog,
+            ranked_issue_ids=ranked_ids,
+        )
+        if not isinstance(issue_payload, dict):
+            continue
+        issue_id = str(issue_payload.get("issueId") or "")
+        if issue_id and issue_id in existing_issue_ids:
+            continue
+        merged_payload = merge_issue_payload(
+            merged_payload,
+            issue_payload,
+        )
+        if issue_id:
+            existing_issue_ids.add(issue_id)
+
+    return merged_payload
+
+
+try:
+    _studion_batch_repair_original_materialize_execution_plan = materialize_execution_plan
+except NameError:
+    _studion_batch_repair_original_materialize_execution_plan = None
+
+
+def materialize_execution_plan(state: dict, *args, **kwargs):
+    if not callable(_studion_batch_repair_original_materialize_execution_plan):
+        raise RuntimeError("materialize_execution_plan is unavailable")
+
+    result = _studion_batch_repair_original_materialize_execution_plan(
+        state,
+        *args,
+        **kwargs,
+    )
+    if not isinstance(result, dict):
+        return result
+
+    repaired_payload = _studion_batch_repair_merge_deterministic_issues(
+        state,
+        result.get("suggestion_payload"),
+    )
+    if repaired_payload is result.get("suggestion_payload"):
+        return result
+
+    return {
+        **result,
+        "suggestion_payload": repaired_payload,
+    }

@@ -1,71 +1,298 @@
-# AI 오디오 분석 기반 실시간 음원 협업 툴, studiON
+<div align="center">
 
-## 1. 프로젝트 소개
+<img src="./FE/src/assets/logo_light.png" width="220"/>
 
-**studiON**은 여러 사용자가 하나의 프로젝트 안에서 오디오를 함께 편집하고, AI 분석 결과를 바탕으로 믹싱 작업을 보조받을 수 있는 협업형 웹 기반 오디오 작업 플랫폼입니다.
+# 🎧 studiON
 
-기존의 개인 중심 오디오 편집 흐름을 넘어, 팀 단위 협업에 필요한 실시간 동기화, 코멘트 기반 피드백, 프로젝트 초대, 버전 관리 기능을 하나의 서비스 안에 통합하는 것을 목표로 합니다.
+### 당신이 있는 곳 어디든, 스튜디오가 되다
 
-또한 별도의 AI 분석 서버를 통해 주파수 충돌, 클리핑, 치찰음, 하이 대역 거침 등 믹싱 과정에서 발생할 수 있는 문제를 탐지하고, 사용자가 더 빠르게 의사결정을 내릴 수 있도록 지원합니다.
+AI 기반 음악 협업 플랫폼
 
-## 2. 주요 핵심 기능
+[서비스 소개](#) · [시연 영상](#) · [📄 발표 자료](./FE/public/studiON.pdf)
 
-### 실시간 동시 편집
-  - 여러 사용자가 하나의 프로젝트에 동시에 접속해 편집 내용을 즉시 공유하며, 끊기지 않는 협업 작업 흐름을 제공합니다.
-### AI 기반 충돌 감지 및 수정
-  - AI가 주파수 충돌, 클리핑, 치찰음 등 믹싱 이슈를 빠르게 감지하고, 수정 판단에 필요한 인사이트를 제공합니다.
-### 협업형 피드백 시스템
-  - 트랙과 구간 단위로 코멘트를 남기고 바로 피드백을 주고받아, 작업 맥락이 끊기지 않는 소통 환경을 만듭니다.
-### 웹 기반 믹싱 워크플로
-  - 설치형 툴 없이 브라우저에서 업로드, 편집, 조정, 버전 관리, 내보내기까지 한 번에 이어지는 작업 환경을 제공합니다.
+</div>
 
-## 3. 기술 스택
+---
 
-| 구분 | 기술 |
-|---|---|
-| Frontend | Vue 3, TypeScript, Vite, Pinia, Tailwind CSS, STOMP / SockJS, Tone.js |
-| Backend | Java 21, Spring Boot 3, Spring Security, Spring WebSocket, Spring Data JPA, QueryDSL, Flyway |
-| AI | Python 3.11, FastAPI, LangGraph, Dramatiq, Redis, MongoDB, Qdrant |
-| Database / Infra | MySQL, MongoDB, Redis, AWS S3, Docker Compose, Nginx |
+## 🎬 Preview
 
-## 4. 서비스 아키텍처
+<p align="center">
+<img src="./FE/public/md.mp4" width="100%" controls></video>
+</p>
 
-studiON은 프론트엔드, 백엔드, AI 서버가 분리된 구조를 기반으로 동작합니다.
+---
 
-- `FE`
-  Vue 3 기반 웹 클라이언트로, 프로젝트 편집 화면, 대시보드, 온보딩, 코멘트, EQ, 내보내기 UI를 담당합니다.
-- `BE`
-  Spring Boot 기반 API 서버로, 인증, 프로젝트, 트랙, 클립, 댓글, 오디오 버전, 실시간 협업 동기화 로직을 담당합니다.
-- `AI`
-  FastAPI 기반 분석 서버로, 오디오 분석 워크플로와 AI 피드백 처리 흐름을 담당합니다.
-- `INFRA`
-  Docker Compose, 배포 구성, 운영 환경 리소스를 담당합니다.
+# 🎵 프로젝트 소개
 
-개발 환경에서는 `compose.dev.yaml`을 통해 MySQL, MongoDB, Redis를 구성하고, 운영 환경에서는 Nginx와 백엔드 서비스, Redis를 조합해 배포할 수 있도록 구성되어 있습니다.
+음악 협업은 생각보다 비효율적입니다.
 
-## 5. 디렉터리 구조
+작업 파일은 메일, 메신저, 클라우드에 흩어지고,
+
+누가 최신 버전을 가지고 있는지 알기 어렵습니다.
+
+피드백은 채팅방 위로 밀려나고,
+
+믹싱 과정의 문제는 직접 들어보기 전까지 발견하기 어렵습니다.
+
+**studiON은 이러한 음악 협업 과정의 비효율을 해결하기 위해 만들어진 웹 기반 협업 플랫폼입니다.**
+
+하나의 프로젝트 공간 안에서
+
+* 음원을 공유하고
+* 작업 진행 상황을 확인하며
+* 구간별 피드백을 주고받고
+* AI 분석 결과를 기반으로 믹싱 품질을 개선할 수 있습니다.
+
+더 이상 `final.wav`, `final_real.wav`, `final_real_final.wav`를 주고받지 않아도 됩니다.
+
+---
+
+# 🚀 주요 기능
+
+## 🎚 프로젝트 기반 협업
+
+하나의 프로젝트 공간에서 여러 사용자가 함께 작업할 수 있습니다.
+
+* 프로젝트 생성 및 초대
+* 팀원 단위 협업
+* 실시간 작업 동기화
+* 작업 상태 공유
+
+<p align="center">
+<img src="./FE/public/togh.png" width="90%">
+</p>
+
+---
+
+## 💬 타임라인 코멘트
+
+특정 구간에 직접 의견을 남기고 피드백을 주고받을 수 있습니다.
+
+* 구간 단위 댓글 작성
+* 작업 맥락 유지
+* 협업 기록 관리
+* 실시간 피드백 확인
+
+<p align="center">
+<img src="./FE/public/comment.png" width="90%">
+</p>
+
+---
+
+## 🤖 AI 오디오 분석
+
+AI가 믹싱 과정에서 발생하는 문제를 자동으로 분석합니다.
+
+분석 항목
+
+* 주파수 충돌
+* 클리핑
+* 치찰음
+* 하이 대역 과다
+* 밸런스 문제
+
+<p align="center">
+<img src="./FE/public/AI%20analysis.png" width="90%">
+</p>
+
+---
+
+## 🎛 AI EQ 제안
+
+분석 결과를 기반으로 EQ 조정 방향을 제안합니다.
+
+* 문제 구간 시각화
+* EQ 적용 전후 비교
+* 추천값 확인
+* 사용자 판단 보조
+
+<p align="center">
+<img src="./docs/eq.png" width="90%">
+</p>
+
+---
+
+
+# 🏗 시스템 아키텍처
+
+<p align="center">
+<img src="./docs/architecture.png" width="100%">
+</p>
+
+studiON은 Frontend, Backend, AI Server가 분리된 구조로 구성되어 있습니다.
+
+### Frontend
+
+Vue 기반 웹 클라이언트
+
+* 프로젝트 편집
+* 타임라인
+* 코멘트
+* EQ UI
+* 대시보드
+
+### Backend
+
+Spring Boot 기반 API 서버
+
+* 인증
+* 프로젝트 관리
+* 트랙 및 클립 관리
+* 협업 기능
+* 실시간 통신
+
+### AI Server
+
+FastAPI 기반 분석 서버
+
+* 음원 분석
+* AI 피드백 생성
+* EQ 추천
+* 비동기 분석 처리
+
+---
+
+# 🛠 기술 스택
+
+## Frontend
+
+| Category   | Stack                  |
+| ---------- | ---------------------- |
+| Language   | TypeScript             |
+| Framework  | Vue 3                  |
+| Build Tool | Vite                   |
+| State      | Pinia                  |
+| UI         | Tailwind CSS, Reka UI  |
+| Network    | Axios                  |
+| Realtime   | STOMP, SockJS          |
+| Audio      | Tone.js, Web Audio API |
+
+---
+
+## Backend
+
+| Category  | Stack                        |
+| --------- | ---------------------------- |
+| Language  | Java 21                      |
+| Framework | Spring Boot                  |
+| Security  | Spring Security, OAuth2, JWT |
+| ORM       | Spring Data JPA, QueryDSL    |
+| Database  | MySQL, MongoDB, Redis        |
+| Realtime  | Spring WebSocket             |
+| Migration | Flyway                       |
+| Docs      | Swagger                      |
+
+---
+
+## AI
+
+| Category         | Stack                 |
+| ---------------- | --------------------- |
+| Language         | Python                |
+| Framework        | FastAPI               |
+| Workflow         | LangGraph             |
+| Queue            | Dramatiq              |
+| Audio Processing | Librosa, NumPy        |
+| Vector DB        | Qdrant                |
+| LLM              | OpenAI Compatible API |
+
+---
+
+## Infra
+
+| Category        | Stack   |
+| --------------- | ------- |
+| Container       | Docker  |
+| Reverse Proxy   | Nginx   |
+| CI/CD           | Jenkins |
+| SSL             | Certbot |
+| Version Control | GitLab  |
+
+---
+
+# 📂 프로젝트 구조
 
 ```text
 .
-├─ FE/                 # Vue 3 기반 프론트엔드
-├─ BE/                 # Spring Boot 기반 백엔드
-├─ AI/                 # FastAPI 기반 AI 분석 서버
-├─ INFRA/              # 인프라 및 배포 관련 파일
-├─ docs/               # 설계 문서 및 보조 자료
-├─ compose.dev.yaml    # 개발용 Docker Compose
-└─ compose.prod.yaml   # 운영용 Docker Compose
+├── FE
+│   └── Frontend Source
+│
+├── BE
+│   └── Backend Source
+│
+├── AI
+│   └── AI Analysis Server
+│
+├── INFRA
+│   └── Deployment Configuration
+│
+├── docs
+│   └── Project Documents
+│
+├── compose.dev.yaml
+└── compose.prod.yaml
 ```
 
-## 6. 팀 구성 및 담당 역할
+---
 
-프로필 이미지를 클릭하면 각 팀원의 GitHub 페이지로 이동합니다.
+# 📸 서비스 화면
 
-| 프로필 | 이름 | 역할 | 구현 기능 |
-|---|---|---|---|
-| <a href="https://github.com/<효석깃허브아이디>"><img src="https://github.com/<효석깃허브아이디>.png?size=100" width="60" alt="김효석 GitHub Profile" /></a> | 김효석 | 팀장, FE | 00 화면 구현 |
-| <a href="https://github.com/bin3joo"><img src="https://github.com/bin3joo.png?size=100" width="60" alt="주세빈 GitHub Profile" /></a> | 주세빈 | PM, FE | 00 화면 구현 |
-| <a href="https://github.com/jeongns2611"><img src="https://github.com/jeongns2611.png?size=100" width="60" alt="윤정아 GitHub Profile" /></a> | 윤정아 | BE | 프로젝트, 코멘트 파트 구현 |
-| <a href="https://github.com/Charmander0308"><img src="https://github.com/Charmander0308.png?size=100" width="60" alt="한예성 GitHub Profile" /></a> | 한예성 | BE | 트랙, 클립 파트 구현 |
-| <a href="https://github.com/kyubongg"><img src="https://github.com/kyubongg.png?size=100" width="60" alt="유규봉 GitHub Profile" /></a> | 유규봉 | AI | 00 AI 기능 구현 |
-| <a href="https://github.com/seoliee"><img src="https://github.com/seoliee.png?size=100" width="60" alt="이서현 GitHub Profile" /></a> | 이서현 | INF | 인프라 및 배포 환경 구성 |
+## 온보딩
+
+서비스 소개 및 초기 사용자 경험 제공
+
+<img src="./FE/public/onboar.png">
+
+---
+
+## 대시보드
+
+프로젝트 생성 및 관리
+
+<img src="./FE/public/board.png">
+
+---
+
+## 프로젝트 편집
+
+오디오 협업 작업 공간
+
+<img src="./FE/public/pro.png">
+
+---
+
+# 👥 팀 소개
+
+| 프로필                                                                                                                   | 이름  | 역할                     |
+| --------------------------------------------------------------------------------------------------------------------- | --- | ---------------------- |
+| <a href="https://github.com/hyoseok8948"><img src="https://github.com/hyoseok8948.png?size=100" width="70"></a>       | 김효석 | Team Leader · Frontend |
+| <a href="https://github.com/bin3joo"><img src="https://github.com/bin3joo.png?size=100" width="70"></a>               | 주세빈 | PM · Frontend          |
+| <a href="https://github.com/jeongns2611"><img src="https://github.com/jeongns2611.png?size=100" width="70"></a>       | 윤정아 | Backend                |
+| <a href="https://github.com/Charmander0308"><img src="https://github.com/Charmander0308.png?size=100" width="70"></a> | 한예성 | Backend                |
+| <a href="https://github.com/kyubongg"><img src="https://github.com/kyubongg.png?size=100" width="70"></a>             | 유규봉 | AI                     |
+| <a href="https://github.com/seoliee"><img src="https://github.com/seoliee.png?size=100" width="70"></a>               | 이서현 | Infra                  |
+
+---
+
+# 🏆 프로젝트 정보
+
+| 항목      | 내용                      |
+| ------- | ----------------------- |
+| 프로젝트명   | studiON                 |
+| 진행 기간   | 2026.04.06 ~ 2026.05.21 |
+| 개발 인원   | 6명                      |
+| 프로젝트 유형 | SSAFY 자율 프로젝트           |
+| 서비스 형태  | Web Application         |
+
+---
+
+<div align="center">
+
+### Team Studio Salmon 🐠
+
+음악 협업의 새로운 작업 공간
+
+**studiON**
+
+</div>
 

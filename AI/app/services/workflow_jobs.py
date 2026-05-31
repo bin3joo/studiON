@@ -6,7 +6,7 @@ from json import dumps, loads
 from threading import RLock
 from typing import Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 from app.core.config import get_settings
@@ -19,13 +19,23 @@ from app.services.workflow_artifacts import (
 
 # API와 worker 사이에는 최소 dispatch payload만 넘기고,
 # 재개에 필요한 큰 상태는 MySQL row + Mongo artifact 조합으로 복원한다.
+class WorkflowRegionSelection(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    region_id: int = Field(alias="regionId")
+    preserve_track_id: int = Field(alias="preserveTrackId")
+    preserve_clip_id: int | None = None
+
+
 class WorkflowDispatchMessage(BaseModel):
     job_id: int
     project_id: int
     dispatch_type: WorkflowDispatchType
     requested_by: int | None = None
+    request_mode: str | None = None
     selected_region_id: int | None = None
     preserve_clip_id: int | None = None
+    selected_region_selections: list[WorkflowRegionSelection] = Field(default_factory=list)
     issue_id: str | None = None
     action_type: str | None = None
     action_payload: dict[str, object] | None = None
@@ -77,8 +87,10 @@ COMPACT_STATE_KEYS = {
     "issue_types",
     "detected_issues",
     "analysis_region_ids",
+    "request_mode",
     "selected_region_id",
     "preserve_clip_id",
+    "selected_region_selections",
     "issue_id",
     "action_type",
     "action_payload",
@@ -145,6 +157,11 @@ SPILLOVER_STATE_KEYS = {
     "plan_payload",
     "planner_raw_text",
     "plan_revision_notes",
+    "batch_candidate_plans",
+    "batch_failed_regions",
+    "batch_final_track_envelopes",
+    "batch_failed_envelopes",
+    "batch_validation_summary",
     "critic_raw_text",
     "suggestion_payload",
 }

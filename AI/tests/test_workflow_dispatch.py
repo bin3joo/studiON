@@ -14,7 +14,7 @@ from app.main import create_app
 from app.services.clap_inference import CLAPTrackPrediction
 from app.services.mongo_documents import normalize_mongo_document_keys
 from app.services.plan_critic_llm import PlanCriticLLMResponse
-from app.services.planning_llm import PlanningLLMResponse
+from app.services.planning_llm import PlanningLLMError, PlanningLLMResponse
 from app.services.workflow_artifacts import (
     MongoWorkflowArtifactStore,
     WorkflowArtifactDocument,
@@ -292,6 +292,57 @@ def build_plan_input(state: dict) -> dict[str, object]:
         "selected_region_id": selected_region_id,
         "preserve_clip_id": region["affected_clip_ids"][0],
     }
+
+
+def build_batch_waiting_state(*, job_id: int, project_id: int) -> dict[str, object]:
+    return build_workflow_initial_state(
+        job_id=job_id,
+        project_id=project_id,
+        phase="waiting_for_user_plan_input",
+        current_node="wait_user_plan_input",
+        progress=62,
+        runtime_status="waiting_for_user",
+        durable_status="WAITING_USER",
+        clip_index=[
+            {"clip_id": 11001, "track_id": 11, "start_ms": 0, "end_ms": 2200},
+            {"clip_id": 12001, "track_id": 12, "start_ms": 200, "end_ms": 2200},
+            {"clip_id": 13001, "track_id": 13, "start_ms": 300, "end_ms": 2200},
+        ],
+        track_name_map={11: "Lead Vocal", 12: "Synth Bed", 13: "Guitar"},
+        analysis_regions=[
+            {
+                "id": 101,
+                "issue_type": "band_overlap",
+                "requires_user_action": True,
+                "track_id": 11,
+                "secondary_track_id": 12,
+                "involved_track_ids": [11, 12],
+                "affected_clip_ids": [11001, 12001],
+                "start_ms": 0,
+                "end_ms": 700,
+                "band_low_hz": 260,
+                "band_high_hz": 520,
+                "band_overlap_subtype": "low_mid_overlap",
+                "band_focus_label": "body",
+            },
+            {
+                "id": 102,
+                "issue_type": "band_overlap",
+                "requires_user_action": True,
+                "track_id": 11,
+                "secondary_track_id": 12,
+                "involved_track_ids": [11, 12, 13],
+                "affected_clip_ids": [11001, 12001, 13001],
+                "start_ms": 900,
+                "end_ms": 1900,
+                "band_low_hz": 1800,
+                "band_high_hz": 3400,
+                "band_overlap_subtype": "presence_overlap",
+                "band_focus_label": "presence",
+            },
+        ],
+        ranked_candidate_ids=[101, 102],
+    )
 
 
 def test_normalize_mongo_document_keys_recursively_stringifies_numeric_keys() -> None:
@@ -623,8 +674,9 @@ def test_worker_start_dispatch_materializes_sibilance_without_waiting(
         region for region in result["analysis_regions"] if region["issue_type"] == "sibilance"
     )
     assert sibilance_region["requires_user_action"] is False
-    sibilance_issue = next(
-        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    assert any(
+        issue["issueType"] == "band_overlap"
+        for issue in result["suggestion_payload"]["issues"]
     )
     assert sibilance_issue["uiMode"] == "eq_ai"
 
@@ -864,7 +916,7 @@ def test_preview_compare_api_rejects_non_preview_issue_payload(
     assert response.status_code == 404
 
 
-def test_worker_start_dispatch_keeps_band_overlap_preview_and_includes_sibilance_issue(
+def test_worker_start_dispatch_keeps_band_overlap_preview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sample_rate = 16000
@@ -954,10 +1006,10 @@ def test_worker_start_dispatch_keeps_band_overlap_preview_and_includes_sibilance
     assert result["preview_excerpt_end_ms"] > result["preview_excerpt_start_ms"]
     preview_band = result["suggestion_payload"]["suggestions"][0]["previewBands"][0]
     assert preview_band["jobId"] == 20015
-    sibilance_issue = next(
-        issue for issue in result["suggestion_payload"]["issues"] if issue["issueType"] == "sibilance"
+    assert any(
+        issue["issueType"] == "band_overlap"
+        for issue in result["suggestion_payload"]["issues"]
     )
-    assert sibilance_issue["actions"][0]["actionType"] == "DYNAMIC_EQ"
     assert result["auto_fix_recipe_artifact_id"] is None
 
 
@@ -1311,6 +1363,351 @@ def test_resume_api_infers_dispatch_type_from_waiting_phase(
     assert len(queued_messages) == 2
     assert queued_messages[-1].selected_region_id == plan_input["selected_region_id"]
     assert queued_messages[-1].preserve_clip_id == plan_input["preserve_clip_id"]
+
+
+def test_resume_api_rejects_batch_resume_without_user_prompt() -> None:
+    store = get_workflow_job_store()
+    store.create_pending_job(build_batch_waiting_state(job_id=20040, project_id=30040))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/v1/internal/workflow/jobs/resume",
+        json={
+            "job_id": 20040,
+            "project_id": 30040,
+            "regionSelections": [
+                {"regionId": 101, "preserveTrackId": 11},
+                {"regionId": 102, "preserveTrackId": 11},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "userPrompt is required for batch" in response.json()["detail"]
+
+
+def test_resume_api_rejects_duplicate_batch_region_ids() -> None:
+    store = get_workflow_job_store()
+    store.create_pending_job(build_batch_waiting_state(job_id=20041, project_id=30041))
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/api/v1/internal/workflow/jobs/resume",
+        json={
+            "job_id": 20041,
+            "project_id": 30041,
+            "userPrompt": "Keep the vocal intact.",
+            "regionSelections": [
+                {"regionId": 101, "preserveTrackId": 11},
+                {"regionId": 101, "preserveTrackId": 11},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "duplicate regionId" in response.json()["detail"]
+
+
+def test_worker_generates_batch_candidate_plans_and_skips_simple_critic() -> None:
+    store = get_workflow_job_store()
+    store.create_pending_job(build_batch_waiting_state(job_id=20042, project_id=30042))
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20042,
+            project_id=30042,
+            dispatch_type="resume_plan_input",
+            selected_region_selections=[
+                {"regionId": 101, "preserveTrackId": 11},
+                {"regionId": 102, "preserveTrackId": 11},
+            ],
+            user_feedback_message="Keep the vocal intact and only move the masking track.",
+        )
+    )
+
+    assert result["phase"] == "completed"
+    assert result["request_mode"] == "batch"
+    assert result["preview_required"] is True
+    assert result["preview_status"] == "READY"
+    assert len(result["batch_candidate_plans"]) == 2
+    assert result["batch_failed_regions"] == []
+    assert len(result["batch_final_track_envelopes"]) >= 1
+    assert all(
+        envelope["trackId"] == 12 for envelope in result["batch_final_track_envelopes"]
+    )
+    assert result["batch_candidate_plans"][0]["regionId"] == 101
+    assert result["batch_candidate_plans"][0]["criticSkipped"] is True
+    assert result["batch_candidate_plans"][0]["criticResult"] is None
+    assert result["batch_candidate_plans"][0]["mergeStatus"] == "MERGED"
+    assert result["batch_candidate_plans"][1]["regionId"] == 102
+    assert result["batch_candidate_plans"][1]["criticSkipped"] is False
+    assert result["batch_candidate_plans"][1]["criticResult"] == "PASS"
+    assert result["batch_candidate_plans"][1]["mergeStatus"] == "MERGED"
+    assert result["batch_validation_summary"] == {
+        "requestedRegions": 2,
+        "successfulRegions": 2,
+        "failedRegions": 0,
+        "criticRunRegions": 1,
+        "criticSkippedRegions": 1,
+        "mergedEnvelopeCount": len(result["batch_final_track_envelopes"]),
+        "failedEnvelopeCount": 0,
+    }
+    assert result["suggestion_payload"]["activeIssueId"] == "20042-batch-envelope-1"
+    assert len(result["suggestion_payload"]["issues"]) == len(result["batch_final_track_envelopes"])
+    assert result["suggestion_payload"]["suggestions"]
+    total_preview_band_count = sum(
+        len(suggestion.get("previewBands", []))
+        for suggestion in result["suggestion_payload"]["suggestions"]
+        if isinstance(suggestion, dict)
+    )
+    assert total_preview_band_count >= 1
+
+    projections = build_workflow_projections(result)
+    assert projections.plan_state is not None
+    assert projections.plan_state.request_mode == "batch"
+    assert len(projections.plan_state.candidatePlans) == 2
+    assert projections.plan_state.failedRegions == []
+    assert len(projections.plan_state.finalTrackEnvelopes) == len(result["batch_final_track_envelopes"])
+    assert projections.plan_state.validationSummary["criticRunRegions"] == 1
+
+
+def test_worker_keeps_single_resume_path_when_batch_fields_are_absent() -> None:
+    store = get_workflow_job_store()
+    store.create_pending_job(build_batch_waiting_state(job_id=20044, project_id=30044))
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20044,
+            project_id=30044,
+            dispatch_type="resume_plan_input",
+            selected_region_id=101,
+            preserve_clip_id=11001,
+            user_feedback_message="Keep the vocal intact.",
+        )
+    )
+
+    assert result["phase"] == "completed"
+    assert result.get("request_mode") == "single"
+    assert result["selected_region_id"] == 101
+    assert result["batch_candidate_plans"] == []
+    assert result["batch_failed_regions"] == []
+    assert result["preview_status"] == "READY"
+
+
+def test_worker_excludes_failed_batch_region_and_keeps_successes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _PartiallyFailingPlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            selection_context: dict[str, object],
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            if selected_region_id == 102:
+                raise PlanningLLMError("PLANNING_TEST_FAILURE", "planner failed for region 102")
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "batch success",
+                    "strategySummary": "batch success summary",
+                    "summary": "batch success suggestion",
+                    "explanation": "batch success explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": "DYNAMIC_EQ",
+                            "targetScope": "TRACK",
+                            "targetTrackId": 12,
+                            "targetClipId": None,
+                            "startMs": 0,
+                            "endMs": 700,
+                            "bandLowHz": 260,
+                            "bandHighHz": 520,
+                            "gainDeltaDb": -2.5,
+                            "params": {"threshold": -19, "ratio": 2.0},
+                        }
+                    },
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _PartiallyFailingPlanningClient(),
+    )
+    store = get_workflow_job_store()
+    store.create_pending_job(build_batch_waiting_state(job_id=20043, project_id=30043))
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20043,
+            project_id=30043,
+            dispatch_type="resume_plan_input",
+            selected_region_selections=[
+                {"regionId": 101, "preserveTrackId": 11},
+                {"regionId": 102, "preserveTrackId": 11},
+            ],
+            user_feedback_message="Keep the vocal intact and only move the masking track.",
+        )
+    )
+
+    assert result["phase"] == "completed"
+    assert len(result["batch_candidate_plans"]) == 1
+    assert result["batch_candidate_plans"][0]["regionId"] == 101
+    assert result["batch_candidate_plans"][0]["mergeStatus"] == "MERGED"
+    assert len(result["batch_failed_regions"]) == 1
+    assert result["batch_failed_regions"][0]["regionId"] == 102
+    assert result["batch_failed_regions"][0]["reasonCode"] == "PLANNING_TEST_FAILURE"
+    assert result["batch_validation_summary"]["successfulRegions"] == 1
+    assert result["batch_validation_summary"]["failedRegions"] == 1
+    assert result["batch_validation_summary"]["mergedEnvelopeCount"] == 1
+    assert result["preview_status"] == "READY"
+    assert len(result["suggestion_payload"]["issues"]) == 1
+
+
+def test_worker_merges_adjacent_batch_candidates_into_one_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _MergingPlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            selection_context: dict[str, object],
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "merge batch",
+                    "strategySummary": "merge batch summary",
+                    "summary": "merge batch suggestion",
+                    "explanation": "merge batch explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": "DYNAMIC_EQ",
+                            "targetScope": "TRACK",
+                            "targetTrackId": 12,
+                            "targetClipId": None,
+                            "startMs": 0 if selected_region_id == 101 else 80,
+                            "endMs": 700 if selected_region_id == 101 else 760,
+                            "bandLowHz": 260 if selected_region_id == 101 else 300,
+                            "bandHighHz": 520 if selected_region_id == 101 else 560,
+                            "gainDeltaDb": -2.5 if selected_region_id == 101 else -1.8,
+                            "params": {"threshold": -19, "ratio": 2.0, "q": 1.4},
+                        }
+                    },
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _MergingPlanningClient(),
+    )
+    store = get_workflow_job_store()
+    waiting_state = build_batch_waiting_state(job_id=20046, project_id=30046)
+    waiting_state["analysis_regions"][1]["start_ms"] = 80
+    waiting_state["analysis_regions"][1]["end_ms"] = 760
+    waiting_state["analysis_regions"][1]["band_low_hz"] = 300
+    waiting_state["analysis_regions"][1]["band_high_hz"] = 560
+    store.create_pending_job(waiting_state)
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20046,
+            project_id=30046,
+            dispatch_type="resume_plan_input",
+            selected_region_selections=[
+                {"regionId": 101, "preserveTrackId": 11},
+                {"regionId": 102, "preserveTrackId": 11},
+            ],
+            user_feedback_message="Merge adjacent cuts on the masking track.",
+        )
+    )
+
+    assert result["phase"] == "completed"
+    assert len(result["batch_final_track_envelopes"]) == 1
+    assert result["batch_final_track_envelopes"][0]["sourceRegionIds"] == [101, 102]
+    assert len(result["suggestion_payload"]["issues"]) == 1
+    assert len(result["suggestion_payload"]["suggestions"][0]["previewBands"]) == 2
+
+
+def test_worker_keeps_dynamic_eq_and_eq_cut_in_separate_batch_envelopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _MixedActionPlanningClient:
+        def generate_plan(
+            self,
+            *,
+            selected_region_id: int,
+            preserve_clip_id: int,
+            user_feedback_message: str | None,
+            selection_context: dict[str, object],
+            region: dict[str, object],
+            clip_context: list[dict[str, object]],
+            revision_notes: list[str],
+        ) -> PlanningLLMResponse:
+            action_type = "DYNAMIC_EQ" if selected_region_id == 101 else "EQ_CUT"
+            return PlanningLLMResponse(
+                plan_payload={
+                    "strategyTitle": "mixed action batch",
+                    "strategySummary": "mixed action batch summary",
+                    "summary": "mixed action batch suggestion",
+                    "explanation": "mixed action batch explanation",
+                    "candidate": {
+                        "action": {
+                            "actionType": action_type,
+                            "targetScope": "TRACK",
+                            "targetTrackId": 12,
+                            "targetClipId": None,
+                            "startMs": 0 if selected_region_id == 101 else 80,
+                            "endMs": 700 if selected_region_id == 101 else 760,
+                            "bandLowHz": 260 if selected_region_id == 101 else 300,
+                            "bandHighHz": 520 if selected_region_id == 101 else 560,
+                            "gainDeltaDb": -2.5 if selected_region_id == 101 else -1.8,
+                            "params": {"threshold": -19, "ratio": 2.0},
+                        }
+                    },
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.graph.nodes.suggestion.get_planning_llm_client",
+        lambda: _MixedActionPlanningClient(),
+    )
+    store = get_workflow_job_store()
+    waiting_state = build_batch_waiting_state(job_id=20045, project_id=30045)
+    waiting_state["analysis_regions"][1]["start_ms"] = 80
+    waiting_state["analysis_regions"][1]["end_ms"] = 760
+    waiting_state["analysis_regions"][1]["band_low_hz"] = 300
+    waiting_state["analysis_regions"][1]["band_high_hz"] = 560
+    store.create_pending_job(waiting_state)
+
+    result = run_workflow_dispatch(
+        WorkflowDispatchMessage(
+            job_id=20045,
+            project_id=30045,
+            dispatch_type="resume_plan_input",
+            selected_region_selections=[
+                {"regionId": 101, "preserveTrackId": 11},
+                {"regionId": 102, "preserveTrackId": 11},
+            ],
+            user_feedback_message="Keep separate action families.",
+        )
+    )
+
+    assert result["phase"] == "completed"
+    assert len(result["batch_final_track_envelopes"]) == 2
+    assert {
+        envelope["actionType"] for envelope in result["batch_final_track_envelopes"]
+    } == {"DYNAMIC_EQ", "EQ_CUT"}
+    assert len(result["suggestion_payload"]["issues"]) == 2
 
 
 def test_feedback_api_uses_path_job_id_for_resume_decision(

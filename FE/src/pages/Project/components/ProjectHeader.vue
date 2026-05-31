@@ -137,7 +137,7 @@ const isNearLimit = computed(() => {
 <template>
   <header class="relative flex h-[68px] w-full items-center justify-between border-b border-border bg-background px-4">
     <!-- 왼쪽 -->
-    <div class="flex min-w-0 items-center gap-4">
+    <div class="flex min-w-0 items-center gap-2 sm:gap-4">
       <RouterLink
         to="/dashboard"
         class="inline-flex items-center gap-4"
@@ -194,27 +194,27 @@ const isNearLimit = computed(() => {
 
       <button
         type="button"
-        class="hidden lg:inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        class="inline-flex items-center gap-2 rounded-lg border border-border p-2 xl:px-3 xl:py-2 text-xs font-medium text-foreground transition hover:bg-muted"
         data-guide="export"
         @click="emit('export')"
       >
         <Download class="h-4 w-4" />
-        <span>음원 내보내기</span>
+        <span class="hidden xl:inline">음원 내보내기</span>
       </button>
 
       <button
         type="button"
-        class="hidden lg:inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        class="inline-flex items-center gap-2 rounded-lg border border-border p-2 xl:px-3 xl:py-2 text-xs font-medium text-foreground transition hover:bg-muted"
         data-guide="version-save" 
         @click="emit('save-version')"
       >
         <Camera class="h-4 w-4" />
-        <span>버전 저장</span>
+        <span class="hidden xl:inline">버전 저장</span>
       </button>
     </div>
 
     <!-- 가운데 -->
-    <div class="hidden items-center gap-2 lg:flex">
+    <div class="flex items-center gap-1 sm:gap-2">
       <button
         type="button"
         class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
@@ -241,7 +241,7 @@ const isNearLimit = computed(() => {
       >
         <Save class="h-4 w-4" />
         <span></span>
-        <span class="text-muted-foreground">{{ lastSavedAt }}</span>
+        <span class="hidden xl:inline text-muted-foreground">{{ lastSavedAt }}</span>
       </button>
     </div>
 
@@ -286,11 +286,11 @@ const isNearLimit = computed(() => {
       <!-- 초대코드 생성 -->
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs font-medium text-foreground transition hover:bg-muted"
+        class="inline-flex items-center gap-2 rounded-full border border-border p-2 xl:px-4 xl:py-2 text-xs font-medium text-foreground transition hover:bg-muted"
         @click="emit('open-invite')"
       >
         <UserPlus class="h-4 w-4" />
-        <span class="hidden sm:inline">초대코드 생성</span>
+        <span class="hidden xl:inline">초대코드 생성</span>
       </button>
 
       <!-- 히스토리 (시계 아이콘) -->

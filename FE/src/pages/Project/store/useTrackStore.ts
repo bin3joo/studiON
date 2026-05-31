@@ -2933,16 +2933,20 @@ export const useTrackStore = defineStore('track', () => {
                 try {
                     const trackEqs = await projectApi.getProjectTrackEqs(projectId)
 
-                    await Promise.all(
+                    await Promise.allSettled(
                         trackEqs.map(async (trackEq) => {
-                            const bands = await projectApi.getTrackEqBands(trackEq.trackEqId)
+                            try {
+                                const bands = await projectApi.getTrackEqBands(trackEq.trackEqId)
 
-                            eqBandsByTrackId.set(
-                                Number(trackEq.trackId),
-                                [...bands]
-                                    .sort((a, b) => a.bandOrder - b.bandOrder)
-                                    .map(mapTrackEqBandSummaryToState),
-                            )
+                                eqBandsByTrackId.set(
+                                    Number(trackEq.trackId),
+                                    [...bands]
+                                        .sort((a, b) => a.bandOrder - b.bandOrder)
+                                        .map(mapTrackEqBandSummaryToState),
+                                )
+                            } catch (bandError) {
+                                console.warn(`[EQ] trackEqId=${trackEq.trackEqId} bands 로딩 실패, 빈 밴드로 진행`, bandError)
+                            }
                         }),
                     )
                 } catch (eqError) {

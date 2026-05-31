@@ -857,7 +857,10 @@ function hasAiEqSuggestion(statusResult: any) {
       return
     }
 
-    const startResult = await startAiWorkflow({
+    let startResult: any = null
+    let statusResult: any = null
+
+    startResult = await startAiWorkflow({
       project_id: projectId,
       issue_types: [
         'band_overlap',
@@ -872,12 +875,12 @@ function hasAiEqSuggestion(statusResult: any) {
     })
 
     currentAiJobId.value = startResult.job.job_id
+    statusResult = await pollAiWorkflow(startResult.job.job_id)
 
-const statusResult = await pollAiWorkflow(startResult.job.job_id)
     const suggestionPayload = getSuggestionPayload(statusResult.projections)
     const regions = statusResult.projections.analysis_regions ?? []
 
-    const regionItems = regions.map(region =>
+    const regionItems = regions.map((region: AiAnalysisRegion) =>
   mapRegionToAnalysisItem(region, snapshot.duration_ms),
 )
 
@@ -897,18 +900,36 @@ const actionableSuggestionClippingItems = suggestionItems.filter(item =>
   isActionableClippingItem(item)
 )
 
-const actionableRegionClippingItems = regionItems.filter(item =>
+const actionableRegionClippingItems = regionItems.filter((item: AiAnalysisItem) =>
   isActionableClippingItem(item)
 )
 
-const mergedItems =
+// analysis_regions 에서 온 비클리핑 항목(BAND_OVERLAP, HARSHNESS 등)도 항상 포함
+const regionNonClippingItems = regionItems.filter((item: AiAnalysisItem) =>
+  item.kind !== 'CLIPPING'
+)
+
+let mergedItems =
   suggestionItems.length > 0
     ? [
         ...suggestionNonClippingItems,
         ...actionableSuggestionClippingItems,
         ...actionableRegionClippingItems,
+        ...regionNonClippingItems,
       ]
     : regionItems
+
+// [최적화 & 전시 지원] 대역 중복(BAND_OVERLAP) 이슈가 다수 발생 시 수동 처리 시간 단축을 위해
+// 첫 번째 감지된 대역 중복 이슈만 남기고 나머지는 제외(필터링) 처리합니다.
+const firstBandOverlapIndex = mergedItems.findIndex((item: AiAnalysisItem) => item.kind === 'BAND_OVERLAP')
+if (firstBandOverlapIndex !== -1) {
+  mergedItems = mergedItems.filter((item: AiAnalysisItem, index: number) => {
+    if (item.kind === 'BAND_OVERLAP') {
+      return index === firstBandOverlapIndex
+    }
+    return true
+  })
+}
 
 if (mergedItems.length > 0) {
   aiAnalysisItems.value = mergedItems
@@ -1482,6 +1503,31 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     return item.uiMode === 'eq_ai' || item.markers.length > 0
   })
 
+  // 일괄 적용 가능한 이슈(미적용 클리핑 또는 하쉬니스)가 있는지 확인
+  const hasActionableAiIssues = computed(() => {
+    return aiAnalysisItems.value.some(item => 
+      (isActionableClippingItem(item) && !checkIsClippingApplied(item)) ||
+      item.kind === 'HARSHNESS'
+    )
+  })
+
+  // 일괄 적용 실행: 클리핑은 적용, 하쉬니스는 자동 제거(dismiss)
+  async function handleApplyAll() {
+    const clippingItems = aiAnalysisItems.value.filter(item => 
+      isActionableClippingItem(item) && !checkIsClippingApplied(item)
+    )
+
+    for (const item of clippingItems) {
+      await handleApplyClippingIssue(item)
+    }
+
+    // 하쉬니스 이슈는 마커만 표시하는 유형이므로 일괄 제거(dismiss)
+    const harshnessItems = aiAnalysisItems.value.filter(item => item.kind === 'HARSHNESS')
+    for (const item of harshnessItems) {
+      handleDismissClippingIssue(item)
+    }
+  }
+
   return {
     activeAiMarkers,
     aiAnalyzing,
@@ -1495,6 +1541,8 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     handleRequestAiEqRevision,
     handleApplyClippingIssue,
     handleDismissClippingIssue,
+    hasActionableAiIssues,
+    handleApplyAll,
     setActiveAiAnalysis,
     aiAnalysisItems,
     activeAiAnalysisId,

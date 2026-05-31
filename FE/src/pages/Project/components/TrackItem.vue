@@ -1156,7 +1156,10 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           <div
             v-for="conflict in aiAnalysisItems"
             :key="conflict.id"
-            v-show="activeAiAnalysisId === conflict.id"
+            v-show="activeAiAnalysisId === conflict.id && (
+              String(conflict.targetTrackId) === String(track.trackId) ||
+              (conflict.involvedTrackIds && conflict.involvedTrackIds.some((id: any) => String(id) === String(track.trackId)))
+            )"
             class="pointer-events-none absolute top-0 bottom-0 z-40 border-x border-red-500 bg-red-500/20"
             :style="{
               left: getConflictLeft(conflict) + 'px',

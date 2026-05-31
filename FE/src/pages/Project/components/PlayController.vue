@@ -46,10 +46,12 @@ const handleStop = () => {
 const props = defineProps<{
   aiAnalyzing: boolean
   projectId: number | string
+  hasActionableAiIssues?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'run-ai-analysis'): void
+  (e: 'apply-all-ai-issues'): void
   (e: 'action-copy'): void
   (e: 'action-cut'): void
   (e: 'action-paste'): void
@@ -144,7 +146,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
             :aria-label="`현재 재생 위치: ${playheadBar}마디 ${playheadBeat}박자, 전체 ${totalBars}마디`"
             class="flex h-8 items-center gap-2 rounded border border-white/5 bg-white/5 px-3 font-mono text-sm"
           >
-            <span class="text-[10px] uppercase tracking-wider text-muted-foreground" aria-hidden="true">마디</span>
+            <span class="hidden xl:inline text-[10px] uppercase tracking-wider text-muted-foreground" aria-hidden="true">마디</span>
             <span class="tabular-nums text-primary drop-shadow-[0_0_6px_hsl(var(--primary)/0.6)]">
               <span id="playhead-bar-text">{{ playheadBar }}</span><span class="text-muted-foreground">.</span><span id="playhead-beat-text">{{ playheadBeat }}</span>
             </span>
@@ -296,6 +298,28 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
 
     <!-- 3. 우측 영역: AI 분석 및 곡 정보 -->
     <div class="flex items-center gap-2 shrink-0">
+  <!-- 일괄적용하기 버튼 -->
+  <button
+    v-if="props.hasActionableAiIssues"
+    type="button"
+    aria-label="AI 이슈 일괄 적용"
+    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full p-px transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+    @click="emit('apply-all-ai-issues')"
+  >
+    <!-- gradient border -->
+    <span
+      class="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#8B5CF6,#3B82F6,#06B6D4,#22C55E,#F59E0B,#EC4899)] opacity-80 transition duration-300 group-hover:opacity-100"
+    />
+
+    <!-- inner button (white background) -->
+    <span
+      class="relative z-10 inline-flex h-full items-center gap-1.5 rounded-full bg-white px-4 text-[11px] font-semibold tracking-wider text-gray-800 transition duration-300 group-hover:bg-gray-50"
+    >
+      <Sparkles class="h-3.5 w-3.5 text-violet-500" aria-hidden="true" />
+      일괄적용하기
+    </span>
+  </button>
+
   <button
     type="button"
     aria-label="AI 믹스 분석 실행"
@@ -316,7 +340,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
 
     <!-- inner button -->
     <span
-      class="relative z-10 inline-flex h-full items-center gap-2 rounded-full bg-[#171717]/95 px-4 text-[11px] font-semibold tracking-[0.18em] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] transition duration-300 group-hover:bg-[#202020]/95"
+      class="relative z-10 inline-flex h-full items-center gap-2 rounded-full bg-[#171717]/95 p-2 xl:px-4 text-[11px] font-semibold tracking-[0.18em] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] transition duration-300 group-hover:bg-[#202020]/95"
     >
       <span
         class="grid h-5 w-5 place-items-center rounded-full bg-[conic-gradient(from_180deg,#8B5CF6,#38BDF8,#22C55E,#F59E0B,#EC4899,#8B5CF6)]"
@@ -341,7 +365,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
       >
         {{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}
       </span>
-      <span class="bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent">
+      <span class="hidden xl:inline bg-[linear-gradient(90deg,#DDD6FE,#93C5FD,#67E8F9,#F9A8D4)] bg-clip-text text-transparent">
         {{ props.aiAnalyzing ? '분석 중' : 'AI 분석' }}
       </span>
     </span>
@@ -357,7 +381,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
           : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/10'"
         @click="!isBpmEditing && startBpmEdit()"
       >
-        <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">BPM</span>
+        <span class="hidden xl:inline font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">BPM</span>
         <!-- 편집 모드 -->
         <input
           v-if="isBpmEditing"
@@ -391,7 +415,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
           ]"
           @click="isTimeSigPickerOpen = !isTimeSigPickerOpen"
         >
-          <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
+          <span class="hidden xl:inline font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">박자</span>
           <div class="flex items-center gap-1 font-display text-xs tracking-wider text-white tabular-nums">
             <span>{{ trackStore.projectInfo.timeSigNumerator }}</span>
             <span class="text-muted-foreground">/</span>
@@ -469,7 +493,7 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
           ]"
           @click="isKeyPickerOpen = !isKeyPickerOpen"
         >
-          <span class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">키</span>
+          <span class="hidden xl:inline font-mono text-[9px] uppercase tracking-widest text-muted-foreground" aria-hidden="true">키</span>
           <span class="font-display text-xs tracking-wider text-white">{{ displayKey }}</span>
           <ChevronDown class="h-3 w-3 text-muted-foreground transition-transform" :class="isKeyPickerOpen ? 'rotate-180' : ''" aria-hidden="true" />
         </button>

@@ -215,10 +215,10 @@ onUnmounted(() => {
   <main class="min-h-[125vh] bg-[#131313] text-[#e5e2e1] flex flex-col font-body-md text-body-md" style="zoom: 0.8;">
     <DashboardHeader :existing-project-names="existingProjectNames" @openFeedback="showFeedbackModal = true" @start-guide="isGuideOpen = true" />
 
-    <div class="flex-1 flex flex-col p-6 md:p-10 mx-auto w-[95%] lg:w-[80%] max-w-[1600px] gap-8">
+    <div class="flex-1 flex flex-col p-4 sm:p-6 md:p-10 mx-auto w-full sm:w-[95%] lg:w-[80%] max-w-[1600px] gap-6 md:gap-8">
       
       <!-- Top Banner: Carousel -->
-      <div class="w-full h-[240px] md:h-[360px] lg:h-[440px] rounded-3xl overflow-hidden relative shadow-[0_0_30px_rgba(255,61,203,0.05)] border border-white/5 bg-[#131313] group">
+      <div class="w-full h-[200px] md:h-[360px] lg:h-[440px] rounded-3xl overflow-hidden relative shadow-[0_0_30px_rgba(255,61,203,0.05)] border border-white/5 bg-[#131313] group">
         <!-- Slides Container -->
         <div 
           class="flex transition-transform duration-700 ease-[cubic-bezier(0.25,1,0.5,1)] h-full w-full"
@@ -337,7 +337,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Project Grid -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         <RouterLink
           v-for="(project, idx) in filteredProjects"
           :key="project.projectId"

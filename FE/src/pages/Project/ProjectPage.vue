@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
+import { useEventListener } from '@vueuse/core'
 import type { TrackMeasureCommentGroup, TimelineComment } from './types/comment.types'
 import {useTrackStore} from './store/useTrackStore' //트랙 상태 저장소
 import ProjectHeader from './components/ProjectHeader.vue'
@@ -315,6 +316,52 @@ const handleWheel = (e: WheelEvent) => {
     container.scrollLeft = newScrollLeft;
   }
 };
+
+let initialPinchDistance = 0;
+
+useEventListener(timelineContainerRef, 'touchstart', (e: TouchEvent) => {
+  if (e.touches.length === 2) {
+    trackStore.isAutoScrollActive = false;
+    initialPinchDistance = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+  }
+}, { passive: false });
+
+useEventListener(timelineContainerRef, 'touchmove', (e: TouchEvent) => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    trackStore.isAutoScrollActive = false;
+    
+    const currentDistance = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    
+    const diff = initialPinchDistance - currentDistance;
+    
+    if (Math.abs(diff) > 5) {
+      const container = timelineContainerRef.value;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const centerX = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+
+      const oldScrollLeft = container.scrollLeft;
+      const oldPixelPerBar = trackStore.pixelPerBar;
+      const centerBarPos = (oldScrollLeft + centerX) / oldPixelPerBar;
+
+      trackStore.updateZoom(diff * 3);
+      
+      const newPixelPerBar = trackStore.pixelPerBar;
+      const newScrollLeft = (centerBarPos * newPixelPerBar) - centerX;
+      container.scrollLeft = newScrollLeft;
+      
+      initialPinchDistance = currentDistance;
+    }
+  }
+}, { passive: false });
 
 let scrollRafId: number | null = null;
 const handleHorizontalScroll = (e: Event) => {
@@ -924,6 +971,8 @@ const {
   handleRequestAiEqRevision,
   handleApplyClippingIssue,
   handleDismissClippingIssue,
+  hasActionableAiIssues,
+  handleApplyAll,
   setActiveAiAnalysis,
   checkIsClippingApplied,
   getClippingAppliedInfo,
@@ -1328,6 +1377,17 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <p class="text-zinc-300 font-medium animate-pulse">프로젝트를 불러오는 중입니다...</p>
   </div>
 
+  <!-- 세로 모드 안내 오버레이 -->
+  <div class="portrait-overlay fixed inset-0 z-[10000] hidden flex-col items-center justify-center bg-black/90 backdrop-blur-md px-4 text-center">
+    <div class="rounded-full bg-white/10 p-4 mb-4">
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white rotate-90 animate-pulse"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><line x1="12" x2="12.01" y1="18" y2="18"/></svg>
+    </div>
+    <h2 class="text-xl font-bold text-white mb-2">가로 모드로 변경해 주세요</h2>
+    <p class="text-gray-400 text-sm leading-relaxed max-w-xs">
+      원활한 음악 작업과 타임라인 스크롤을 위해<br>스마트폰/태블릿을 가로로 돌려주세요.
+    </p>
+  </div>
+
   <!--트랙과 트랙목록 내용물을 위에서 아래로 쌓음, h-screen -> 화면 전체 높이, overflow-hidden -> 넘치는 부분 숨김, bg-background -> 배경색, text-foreground -> 글자색 -->
   
   <div 
@@ -1361,7 +1421,9 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <PlayController
       :ai-analyzing="aiAnalyzing"
       :project-id="Number(projectId)"
+      :has-actionable-ai-issues="hasActionableAiIssues"
       @run-ai-analysis="runAiAnalysis"
+      @apply-all-ai-issues="handleApplyAll"
       @action-upload="handleActionUpload"
       @action-copy="handleActionCopy"
       @action-cut="handleActionCut"
@@ -1376,7 +1438,7 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <input 
       type="file" 
       ref="toolbarFileInputRef" 
-      accept="audio/*" 
+      accept="audio/mpeg, audio/wav" 
       class="hidden" 
       @change="handleToolbarFileUpload" 
     />
@@ -1646,5 +1708,11 @@ function closeProjectGuide(doNotShowAgain: boolean) {
 
 .comment-toast-move {
   transition: transform 0.22s ease;
+}
+
+@media (orientation: portrait) and (max-width: 768px) {
+  .portrait-overlay {
+    display: flex !important;
+  }
 }
 </style>

@@ -888,8 +888,6 @@ def _merge_deterministic_issues_into_payload(state: dict, payload: dict | None) 
 
     merged_payload = payload
     analysis_regions = state.get("analysis_regions") or []
-    issue_type_catalog = state.get("issue_type_catalog") or {}
-    ranked_ids = state.get("ranked_issue_ids") or []
 
     for region in analysis_regions:
         if str(region.get("issue_type") or "") == "band_overlap":
@@ -897,12 +895,10 @@ def _merge_deterministic_issues_into_payload(state: dict, payload: dict | None) 
         issue_payload = build_non_llm_issue(
             state,
             region,
-            issue_type_catalog=issue_type_catalog,
-            ranked_issue_ids=ranked_ids,
         )
         if not issue_payload:
             continue
-        merged_payload = merge_issue_payload(merged_payload, issue_payload)
+        merged_payload = merge_issue_payload(merged_payload, issue=issue_payload)
     return merged_payload
 
 
@@ -1181,8 +1177,6 @@ def _studion_batch_repair_merge_deterministic_issues(
         return payload
 
     analysis_regions = state.get("analysis_regions") or []
-    issue_type_catalog = state.get("issue_type_catalog") or {}
-    ranked_ids = state.get("ranked_issue_ids") or []
     merged_payload = payload
     existing_issue_ids = {
         str(issue.get("issueId"))
@@ -1197,8 +1191,6 @@ def _studion_batch_repair_merge_deterministic_issues(
         issue_payload = build_non_llm_issue(
             state,
             region,
-            issue_type_catalog=issue_type_catalog,
-            ranked_issue_ids=ranked_ids,
         )
         if not isinstance(issue_payload, dict):
             continue
@@ -1207,7 +1199,7 @@ def _studion_batch_repair_merge_deterministic_issues(
             continue
         merged_payload = merge_issue_payload(
             merged_payload,
-            issue_payload,
+            issue=issue_payload,
         )
         if issue_id:
             existing_issue_ids.add(issue_id)

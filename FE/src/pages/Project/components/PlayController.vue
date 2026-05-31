@@ -303,11 +303,19 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
     v-if="props.hasActionableAiIssues"
     type="button"
     aria-label="AI 이슈 일괄 적용"
-    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 px-4 transition-all duration-300 hover:bg-white/10 hover:border-white/30 active:scale-[0.98]"
+    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full p-px transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
     @click="emit('apply-all-ai-issues')"
   >
-    <Sparkles class="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden="true" />
-    <span class="text-[11px] font-semibold tracking-wider text-white">
+    <!-- gradient border -->
+    <span
+      class="absolute inset-0 rounded-full bg-[linear-gradient(135deg,#8B5CF6,#3B82F6,#06B6D4,#22C55E,#F59E0B,#EC4899)] opacity-80 transition duration-300 group-hover:opacity-100"
+    />
+
+    <!-- inner button (white background) -->
+    <span
+      class="relative z-10 inline-flex h-full items-center gap-1.5 rounded-full bg-white px-4 text-[11px] font-semibold tracking-wider text-gray-800 transition duration-300 group-hover:bg-gray-50"
+    >
+      <Sparkles class="h-3.5 w-3.5 text-violet-500" aria-hidden="true" />
       일괄적용하기
     </span>
   </button>

@@ -37,7 +37,7 @@ function handleLoginClick() {
       <div class="relative min-h-[870px] w-full flex flex-col items-center justify-start pt-6 md:pt-8 px-4 md:px-10 overflow-hidden pb-32">
         <div class="relative z-10 max-w-4xl mx-auto flex flex-col items-center text-center space-y-8">
           <!-- Main Headlines -->
-          <h1 class="font-display-lg text-[#e5e2e1] drop-shadow-2xl md:text-[64px]">
+          <h1 class="font-display-lg text-[#e5e2e1] drop-shadow-2xl text-4xl sm:text-5xl md:text-[64px] leading-tight">
             브라우저에서 만나는<br/>
             <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#FF3DCB] to-[#e3b5ff]">무한한 음악의 세계</span>
           </h1>
@@ -88,7 +88,7 @@ function handleLoginClick() {
 
         <!-- Features Bento Grid -->
         <div class="w-full max-w-[1200px] mx-auto pt-8 pb-12 md:pt-16 md:pb-16 relative z-10">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             <!-- Feature 1 -->
             <div class="group relative bg-[#1c1b1b]/60 backdrop-blur-xl border border-white/5 rounded-[1.5rem] p-8 overflow-hidden hover:bg-[#2a2a2a]/80 hover:border-[#FF3DCB]/30 transition-all duration-500 ease-out flex flex-col items-start min-h-[320px]">
               <div class="absolute -inset-1 bg-gradient-to-br from-[#FF3DCB]/10 to-transparent opacity-0 group-hover:opacity-100 blur-2xl transition-opacity duration-500 rounded-[1.5rem] pointer-events-none"></div>
@@ -138,7 +138,7 @@ function handleLoginClick() {
         <!-- How It Works Section -->
         <div class="w-full max-w-[1200px] mx-auto pt-16 pb-16 relative z-10 border-t border-white/5">
           <div class="text-center mb-16">
-            <h2 class="font-display-lg text-3xl md:text-5xl text-white mb-4">How It Works</h2>
+            <h2 class="font-display-lg text-3xl sm:text-4xl md:text-5xl text-white mb-4">How It Works</h2>
             <p class="font-body-lg text-gray-400">단 3단계면 충분합니다. 웹 브라우저에서 바로 시작하세요.</p>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -171,7 +171,7 @@ function handleLoginClick() {
         <!-- FAQ Section -->
         <div class="w-full max-w-[800px] mx-auto pt-16 pb-24 relative z-10 border-t border-white/5">
           <div class="text-center mb-12">
-            <h2 class="font-display-lg text-3xl md:text-5xl text-white mb-4">FAQ</h2>
+            <h2 class="font-display-lg text-3xl sm:text-4xl md:text-5xl text-white mb-4">FAQ</h2>
             <p class="font-body-lg text-gray-400">자주 묻는 질문들을 모아봤습니다.</p>
           </div>
           <div class="flex flex-col gap-4">
@@ -213,7 +213,7 @@ function handleLoginClick() {
 
         <!-- Bottom CTA Section -->
         <div class="w-full relative z-10 py-24 bg-gradient-to-b from-[#131313] to-[#FF3DCB]/10 border-t border-white/5 text-center px-4">
-          <h2 class="font-display-lg text-4xl md:text-6xl text-white mb-6">당신만의 스튜디오를<br/>지금 열어보세요.</h2>
+          <h2 class="font-display-lg text-3xl sm:text-4xl md:text-6xl text-white mb-6">당신만의 스튜디오를<br/>지금 열어보세요.</h2>
           <p class="font-body-lg text-gray-300 mb-10 max-w-2xl mx-auto">더 이상 무거운 프로그램을 설치하지 마세요. 구글 계정만 있다면 10초 만에 브라우저에서 음악 작업을 시작할 수 있습니다.</p>
           <div class="flex justify-center">
             <button class="gsi-material-button scale-110 shadow-2xl" @click="handleLoginClick">

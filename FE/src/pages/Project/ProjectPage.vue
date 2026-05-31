@@ -971,6 +971,8 @@ const {
   handleRequestAiEqRevision,
   handleApplyClippingIssue,
   handleDismissClippingIssue,
+  hasActionableAiIssues,
+  handleApplyAll,
   setActiveAiAnalysis,
   checkIsClippingApplied,
   getClippingAppliedInfo,
@@ -1370,7 +1372,9 @@ function closeProjectGuide(doNotShowAgain: boolean) {
     <PlayController
       :ai-analyzing="aiAnalyzing"
       :project-id="Number(projectId)"
+      :has-actionable-ai-issues="hasActionableAiIssues"
       @run-ai-analysis="runAiAnalysis"
+      @apply-all-ai-issues="handleApplyAll"
       @action-upload="handleActionUpload"
       @action-copy="handleActionCopy"
       @action-cut="handleActionCut"

@@ -46,10 +46,12 @@ const handleStop = () => {
 const props = defineProps<{
   aiAnalyzing: boolean
   projectId: number | string
+  hasActionableAiIssues?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'run-ai-analysis'): void
+  (e: 'apply-all-ai-issues'): void
   (e: 'action-copy'): void
   (e: 'action-cut'): void
   (e: 'action-paste'): void
@@ -296,6 +298,20 @@ const isCurrentTimeSig = (numerator: number, denominator: number) => {
 
     <!-- 3. 우측 영역: AI 분석 및 곡 정보 -->
     <div class="flex items-center gap-2 shrink-0">
+  <!-- 일괄적용하기 버튼 -->
+  <button
+    v-if="props.hasActionableAiIssues"
+    type="button"
+    aria-label="AI 이슈 일괄 적용"
+    class="group relative inline-flex h-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 px-4 transition-all duration-300 hover:bg-white/10 hover:border-white/30 active:scale-[0.98]"
+    @click="emit('apply-all-ai-issues')"
+  >
+    <Sparkles class="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden="true" />
+    <span class="text-[11px] font-semibold tracking-wider text-white">
+      일괄적용하기
+    </span>
+  </button>
+
   <button
     type="button"
     aria-label="AI 믹스 분석 실행"

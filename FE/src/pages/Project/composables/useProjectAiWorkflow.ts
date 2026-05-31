@@ -847,6 +847,15 @@ function hasAiEqSuggestion(statusResult: any) {
   return mapAiSuggestionToEqBands(statusResult).length > 0
 }
 
+  // --- [테스트 지원용] ---
+  let isTestingAi = false
+  ;(window as any).aitest = async () => {
+    isTestingAi = true
+    await runAiAnalysis()
+    isTestingAi = false
+  }
+  // ----------------------
+
   async function runAiAnalysis() {
   if (aiAnalyzing.value) return
 
@@ -879,23 +888,93 @@ function hasAiEqSuggestion(statusResult: any) {
       return
     }
 
-    const startResult = await startAiWorkflow({
-      project_id: projectId,
-      issue_types: [
-        'band_overlap',
-        'track_clipping',
-        'master_clipping',
-        'sibilance',
-        'high_band_harshness',
-      ],
-      validator_mode: 'PASS',
-      critic_mode: 'PASS',
-      project_snapshot: snapshot,
-    })
+    let startResult: any = null
+    let statusResult: any = null
 
-    currentAiJobId.value = startResult.job.job_id
+    if (!isTestingAi) {
+      startResult = await startAiWorkflow({
+        project_id: projectId,
+        issue_types: [
+          'band_overlap',
+          'track_clipping',
+          'master_clipping',
+          'sibilance',
+          'high_band_harshness',
+        ],
+        validator_mode: 'PASS',
+        critic_mode: 'PASS',
+        project_snapshot: snapshot,
+      })
 
-const statusResult = await pollAiWorkflow(startResult.job.job_id)
+      currentAiJobId.value = startResult.job.job_id
+      statusResult = await pollAiWorkflow(startResult.job.job_id)
+    } else {
+      // 테스트 모드인 경우 1초 대기 후 가짜 응답 생성
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      currentAiJobId.value = 9999
+
+      const track1Id = snapshot.tracks[0]?.track_id || 1
+      const track2Id = snapshot.tracks[1]?.track_id || snapshot.tracks[0]?.track_id || 2
+      const track3Id = snapshot.tracks[2]?.track_id || snapshot.tracks[1]?.track_id || 3
+
+      statusResult = {
+        projections: {
+          analysis_regions: [
+            {
+              id: 'mock-overlap-1',
+              issue_type: 'band_overlap',
+              track_id: track2Id,
+              involved_track_ids: [track2Id, track1Id],
+              affected_clip_ids: [],
+              start_ms: 0,
+              end_ms: 3000,
+              band_low_hz: 300,
+              band_high_hz: 800,
+              analysis_summary: '[테스트] 대역 중복 — 트랙 1, 2에 빨간 배경'
+            },
+            {
+              id: 'mock-overlap-2',
+              issue_type: 'band_overlap',
+              track_id: track2Id,
+              involved_track_ids: [track2Id, track1Id],
+              affected_clip_ids: [],
+              start_ms: 5000,
+              end_ms: 8000,
+              band_low_hz: 1000,
+              band_high_hz: 2500,
+              analysis_summary: '[테스트] 두 번째 대역 중복 (필터링되어 안 보여야 함)'
+            },
+            {
+              id: 'mock-harshness-1',
+              issue_type: 'high_band_harshness',
+              track_id: track3Id,
+              involved_track_ids: [track3Id],
+              affected_clip_ids: [],
+              start_ms: 2000,
+              end_ms: 6000,
+              band_low_hz: 4500,
+              band_high_hz: 9000,
+              center_hz: 6500,
+              analysis_summary: '[테스트] 하쉬니스 — 트랙 3에 빨간 배경'
+            },
+            {
+              id: 'mock-clipping-1',
+              issue_type: 'master_clipping',
+              track_id: null,
+              involved_track_ids: [],
+              affected_clip_ids: [],
+              start_ms: 0,
+              end_ms: snapshot.duration_ms,
+              estimated_gain_reduction_db: 4.5,
+              current_true_peak_dbtp: 2.0,
+              target_ceiling_dbtp: -1.0,
+              analysis_summary: '[테스트] 마스터 클리핑 — 마스터 트랙 대상'
+            }
+          ]
+        }
+      }
+    }
+
     const suggestionPayload = getSuggestionPayload(statusResult.projections)
     const regions = statusResult.projections.analysis_regions ?? []
 
@@ -923,14 +1002,32 @@ const actionableRegionClippingItems = regionItems.filter(item =>
   isActionableClippingItem(item)
 )
 
-const mergedItems =
+// analysis_regions 에서 온 비클리핑 항목(BAND_OVERLAP, HARSHNESS 등)도 항상 포함
+const regionNonClippingItems = regionItems.filter(item =>
+  item.kind !== 'CLIPPING'
+)
+
+let mergedItems =
   suggestionItems.length > 0
     ? [
         ...suggestionNonClippingItems,
         ...actionableSuggestionClippingItems,
         ...actionableRegionClippingItems,
+        ...regionNonClippingItems,
       ]
     : regionItems
+
+// [최적화 & 전시 지원] 대역 중복(BAND_OVERLAP) 이슈가 다수 발생 시 수동 처리 시간 단축을 위해
+// 첫 번째 감지된 대역 중복 이슈만 남기고 나머지는 제외(필터링) 처리합니다.
+const firstBandOverlapIndex = mergedItems.findIndex(item => item.kind === 'BAND_OVERLAP')
+if (firstBandOverlapIndex !== -1) {
+  mergedItems = mergedItems.filter((item, index) => {
+    if (item.kind === 'BAND_OVERLAP') {
+      return index === firstBandOverlapIndex
+    }
+    return true
+  })
+}
 
 if (mergedItems.length > 0) {
   aiAnalysisItems.value = mergedItems
@@ -1445,6 +1542,31 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     return item.uiMode === 'eq_ai' || item.markers.length > 0
   })
 
+  // 일괄 적용 가능한 이슈(미적용 클리핑 또는 하쉬니스)가 있는지 확인
+  const hasActionableAiIssues = computed(() => {
+    return aiAnalysisItems.value.some(item => 
+      (isActionableClippingItem(item) && !checkIsClippingApplied(item)) ||
+      item.kind === 'HARSHNESS'
+    )
+  })
+
+  // 일괄 적용 실행: 클리핑은 적용, 하쉬니스는 자동 제거(dismiss)
+  async function handleApplyAll() {
+    const clippingItems = aiAnalysisItems.value.filter(item => 
+      isActionableClippingItem(item) && !checkIsClippingApplied(item)
+    )
+
+    for (const item of clippingItems) {
+      await handleApplyClippingIssue(item)
+    }
+
+    // 하쉬니스 이슈는 마커만 표시하는 유형이므로 일괄 제거(dismiss)
+    const harshnessItems = aiAnalysisItems.value.filter(item => item.kind === 'HARSHNESS')
+    for (const item of harshnessItems) {
+      handleDismissClippingIssue(item)
+    }
+  }
+
   return {
     activeAiMarkers,
     aiAnalyzing,
@@ -1458,6 +1580,8 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     handleRequestAiEqRevision,
     handleApplyClippingIssue,
     handleDismissClippingIssue,
+    hasActionableAiIssues,
+    handleApplyAll,
     setActiveAiAnalysis,
     aiAnalysisItems,
     activeAiAnalysisId,

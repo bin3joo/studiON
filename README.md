@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="FE\src\assets\logo_dark.png" width="220"/>
+<img src="./FE/src/assets/logo_dark.png" width="220"/>
 
 # 🎧 studiON
 
@@ -8,7 +8,7 @@
 
 AI 기반 음악 협업 플랫폼
 
-[서비스 소개](#) · [시연 영상](#) · [📄 발표 자료](FE\public\studiON.pdf)
+[서비스 소개](#) · [시연 영상](#) · [📄 발표 자료](./FE/public/studiON.pdf)
 
 </div>
 
@@ -17,7 +17,7 @@ AI 기반 음악 협업 플랫폼
 ## 🎬 Preview
 
 <p align="center">
-<img src="FE\public\md.mp4" width="100%">
+<video src="./FE/public/md.mp4" width="100%" controls></video>
 </p>
 
 ---
@@ -59,7 +59,7 @@ AI 기반 음악 협업 플랫폼
 * 작업 상태 공유
 
 <p align="center">
-<img src="FE\public\togh.png" width="90%">
+<img src="./FE/public/togh.png" width="90%">
 </p>
 
 ---
@@ -74,7 +74,7 @@ AI 기반 음악 협업 플랫폼
 * 실시간 피드백 확인
 
 <p align="center">
-<img src="FE\public\comment.png" width="90%">
+<img src="./FE/public/comment.png" width="90%">
 </p>
 
 ---
@@ -92,7 +92,7 @@ AI가 믹싱 과정에서 발생하는 문제를 자동으로 분석합니다.
 * 밸런스 문제
 
 <p align="center">
-<img src="FE\public\AI analysis.png" width="90%">
+<img src="./FE/public/AI%20analysis.png" width="90%">
 </p>
 
 ---
@@ -249,7 +249,7 @@ FastAPI 기반 분석 서버
 
 프로젝트 생성 및 관리
 
-<img src="FE\public\board.png">
+<img src="./FE/public/board.png">
 
 ---
 
@@ -257,7 +257,7 @@ FastAPI 기반 분석 서버
 
 오디오 협업 작업 공간
 
-<img src="FE\public\pro.png">
+<img src="./FE/public/pro.png">
 
 ---
 

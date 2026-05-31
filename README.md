@@ -92,7 +92,7 @@ AI가 믹싱 과정에서 발생하는 문제를 자동으로 분석합니다.
 * 밸런스 문제
 
 <p align="center">
-<img src="./FE/public/AI%20analysis.png" width="90%">
+<img src="./FE/public/AIanalysis.png" width="90%">
 </p>
 
 ---

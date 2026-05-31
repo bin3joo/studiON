@@ -1622,6 +1622,14 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   height: 12px !important; /* 가로 스크롤바 두께 */
 }
 
+/* 모바일 등 좁은 화면/가로 모드에서는 터치하기 쉽게 스크롤바를 더 두껍게 만듦 */
+@media (max-height: 500px), (max-width: 768px) {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 20px !important;
+    height: 20px !important;
+  }
+}
+
 /* 2. 스크롤바 배경(트랙) */
 .custom-scrollbar::-webkit-scrollbar-track {
   background: #131313;
@@ -1633,6 +1641,13 @@ function closeProjectGuide(doNotShowAgain: boolean) {
   background-color: #52525b;
   border-radius: 8px;
   border: 3px solid #131313; /* 배경색으로 테두리를 깎아서 얇게 만듦 */
+}
+
+/* 모바일 화면에서는 테두리를 줄여서 손잡이를 실질적으로 더 두껍게(터치 영역 확대) */
+@media (max-height: 500px), (max-width: 768px) {
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    border: 2px solid #131313; 
+  }
 }
 
 /* 4. 마우스 올렸을 때 살짝 밝아짐 */

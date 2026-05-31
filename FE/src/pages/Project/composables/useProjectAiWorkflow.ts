@@ -847,15 +847,6 @@ function hasAiEqSuggestion(statusResult: any) {
   return mapAiSuggestionToEqBands(statusResult).length > 0
 }
 
-  // --- [테스트 지원용] ---
-  let isTestingAi = false
-  ;(window as any).aitest = async () => {
-    isTestingAi = true
-    await runAiAnalysis()
-    isTestingAi = false
-  }
-  // ----------------------
-
   async function runAiAnalysis() {
   if (aiAnalyzing.value) return
 
@@ -891,89 +882,22 @@ function hasAiEqSuggestion(statusResult: any) {
     let startResult: any = null
     let statusResult: any = null
 
-    if (!isTestingAi) {
-      startResult = await startAiWorkflow({
-        project_id: projectId,
-        issue_types: [
-          'band_overlap',
-          'track_clipping',
-          'master_clipping',
-          'sibilance',
-          'high_band_harshness',
-        ],
-        validator_mode: 'PASS',
-        critic_mode: 'PASS',
-        project_snapshot: snapshot,
-      })
+    startResult = await startAiWorkflow({
+      project_id: projectId,
+      issue_types: [
+        'band_overlap',
+        'track_clipping',
+        'master_clipping',
+        'sibilance',
+        'high_band_harshness',
+      ],
+      validator_mode: 'PASS',
+      critic_mode: 'PASS',
+      project_snapshot: snapshot,
+    })
 
-      currentAiJobId.value = startResult.job.job_id
-      statusResult = await pollAiWorkflow(startResult.job.job_id)
-    } else {
-      // 테스트 모드인 경우 1초 대기 후 가짜 응답 생성
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      currentAiJobId.value = 9999
-
-      const track1Id = snapshot.tracks[0]?.track_id || 1
-      const track2Id = snapshot.tracks[1]?.track_id || snapshot.tracks[0]?.track_id || 2
-      const track3Id = snapshot.tracks[2]?.track_id || snapshot.tracks[1]?.track_id || 3
-
-      statusResult = {
-        projections: {
-          analysis_regions: [
-            {
-              id: 'mock-overlap-1',
-              issue_type: 'band_overlap',
-              track_id: track2Id,
-              involved_track_ids: [track2Id, track1Id],
-              affected_clip_ids: [],
-              start_ms: 0,
-              end_ms: 3000,
-              band_low_hz: 300,
-              band_high_hz: 800,
-              analysis_summary: '[테스트] 대역 중복 — 트랙 1, 2에 빨간 배경'
-            },
-            {
-              id: 'mock-overlap-2',
-              issue_type: 'band_overlap',
-              track_id: track2Id,
-              involved_track_ids: [track2Id, track1Id],
-              affected_clip_ids: [],
-              start_ms: 5000,
-              end_ms: 8000,
-              band_low_hz: 1000,
-              band_high_hz: 2500,
-              analysis_summary: '[테스트] 두 번째 대역 중복 (필터링되어 안 보여야 함)'
-            },
-            {
-              id: 'mock-harshness-1',
-              issue_type: 'high_band_harshness',
-              track_id: track3Id,
-              involved_track_ids: [track3Id],
-              affected_clip_ids: [],
-              start_ms: 2000,
-              end_ms: 6000,
-              band_low_hz: 4500,
-              band_high_hz: 9000,
-              center_hz: 6500,
-              analysis_summary: '[테스트] 하쉬니스 — 트랙 3에 빨간 배경'
-            },
-            {
-              id: 'mock-clipping-1',
-              issue_type: 'master_clipping',
-              track_id: null,
-              involved_track_ids: [],
-              affected_clip_ids: [],
-              start_ms: 0,
-              end_ms: snapshot.duration_ms,
-              estimated_gain_reduction_db: 4.5,
-              current_true_peak_dbtp: 2.0,
-              target_ceiling_dbtp: -1.0,
-              analysis_summary: '[테스트] 마스터 클리핑 — 마스터 트랙 대상'
-            }
-          ]
-        }
-      }
-    }
+    currentAiJobId.value = startResult.job.job_id
+    statusResult = await pollAiWorkflow(startResult.job.job_id)
 
     const suggestionPayload = getSuggestionPayload(statusResult.projections)
     const regions = statusResult.projections.analysis_regions ?? []

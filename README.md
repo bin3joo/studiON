@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./FE/src/assets/logo_dark.png" width="220"/>
+<img src="./FE/src/assets/logo_light.png" width="220"/>
 
 # 🎧 studiON
 
@@ -17,7 +17,7 @@ AI 기반 음악 협업 플랫폼
 ## 🎬 Preview
 
 <p align="center">
-<video src="./FE/public/md.mp4" width="100%" controls></video>
+<img src="./FE/public/md.mp4" width="100%" controls></video>
 </p>
 
 ---

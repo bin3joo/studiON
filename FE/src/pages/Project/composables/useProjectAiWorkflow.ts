@@ -158,7 +158,7 @@ const AI_WORKFLOW_POLL_MAX_TRY = Math.ceil(
     await sleep(AI_WORKFLOW_POLL_INTERVAL_MS)
   }
 
-  throw new Error('AI 분석 결과를 가져오지 못했습니다.')
+  throw new Error('AI 분석 결과를 가져오지 못했습니다. (timeout: 응답 대기 시간 초과)')
 }
 
 async function pollAiFeedbackResult(jobId: number) {
@@ -979,15 +979,21 @@ trackEvent('ai_analysis_completed', {
     reason: 'server_error',
   })
 
-    if (
-      error instanceof Error &&
-      error.message.includes('timeout')
-    ) {
-        useAlertStore().showAlert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.', 'warning')
+    // 에러 메시지를 안전하게 추출
+    const errorMessage = error instanceof Error ? error.message : String(error ?? '')
+
+    if (errorMessage.includes('timeout')) {
+        useAlertStore().showAlert('AI 서버 응답이 지연되고 있습니다. 네트워크 상태를 확인하고 잠시 후 다시 시도해주세요.', 'warning')
       return
     }
 
-      useAlertStore().showAlert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.', 'error')
+    // 500 에러 등 서버 측 오류
+    if (errorMessage.includes('서버') || errorMessage.includes('500')) {
+      useAlertStore().showAlert('AI 분석 서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해주세요.', 'error')
+      return
+    }
+
+      useAlertStore().showAlert(errorMessage || 'AI 분석 중 오류가 발생했습니다.', 'error')
   } finally {
     aiAnalyzing.value = false
   }

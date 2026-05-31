@@ -241,7 +241,7 @@ FastAPI 기반 분석 서버
 
 서비스 소개 및 초기 사용자 경험 제공
 
-<img src="FE\public\onboar.png">
+<img src="./FE/public/onboar.png">
 
 ---
 

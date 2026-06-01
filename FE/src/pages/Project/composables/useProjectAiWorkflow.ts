@@ -158,7 +158,7 @@ const AI_WORKFLOW_POLL_MAX_TRY = Math.ceil(
     await sleep(AI_WORKFLOW_POLL_INTERVAL_MS)
   }
 
-  throw new Error('AI 분석 결과를 가져오지 못했습니다.')
+  throw new Error('AI 분석 결과를 가져오지 못했습니다. (timeout: 응답 대기 시간 초과)')
 }
 
 async function pollAiFeedbackResult(jobId: number) {
@@ -879,7 +879,10 @@ function hasAiEqSuggestion(statusResult: any) {
       return
     }
 
-    const startResult = await startAiWorkflow({
+    let startResult: any = null
+    let statusResult: any = null
+
+    startResult = await startAiWorkflow({
       project_id: projectId,
       issue_types: [
         'band_overlap',
@@ -894,12 +897,12 @@ function hasAiEqSuggestion(statusResult: any) {
     })
 
     currentAiJobId.value = startResult.job.job_id
+    statusResult = await pollAiWorkflow(startResult.job.job_id)
 
-const statusResult = await pollAiWorkflow(startResult.job.job_id)
     const suggestionPayload = getSuggestionPayload(statusResult.projections)
     const regions = statusResult.projections.analysis_regions ?? []
 
-    const regionItems = regions.map(region =>
+    const regionItems = regions.map((region: AiAnalysisRegion) =>
   mapRegionToAnalysisItem(region, snapshot.duration_ms),
 )
 
@@ -919,18 +922,36 @@ const actionableSuggestionClippingItems = suggestionItems.filter(item =>
   isActionableClippingItem(item)
 )
 
-const actionableRegionClippingItems = regionItems.filter(item =>
+const actionableRegionClippingItems = regionItems.filter((item: AiAnalysisItem) =>
   isActionableClippingItem(item)
 )
 
-const mergedItems =
+// analysis_regions 에서 온 비클리핑 항목(BAND_OVERLAP, HARSHNESS 등)도 항상 포함
+const regionNonClippingItems = regionItems.filter((item: AiAnalysisItem) =>
+  item.kind !== 'CLIPPING'
+)
+
+let mergedItems =
   suggestionItems.length > 0
     ? [
         ...suggestionNonClippingItems,
         ...actionableSuggestionClippingItems,
         ...actionableRegionClippingItems,
+        ...regionNonClippingItems,
       ]
     : regionItems
+
+// [최적화 & 전시 지원] 대역 중복(BAND_OVERLAP) 이슈가 다수 발생 시 수동 처리 시간 단축을 위해
+// 첫 번째 감지된 대역 중복 이슈만 남기고 나머지는 제외(필터링) 처리합니다.
+const firstBandOverlapIndex = mergedItems.findIndex((item: AiAnalysisItem) => item.kind === 'BAND_OVERLAP')
+if (firstBandOverlapIndex !== -1) {
+  mergedItems = mergedItems.filter((item: AiAnalysisItem, index: number) => {
+    if (item.kind === 'BAND_OVERLAP') {
+      return index === firstBandOverlapIndex
+    }
+    return true
+  })
+}
 
 if (mergedItems.length > 0) {
   aiAnalysisItems.value = mergedItems
@@ -958,15 +979,21 @@ trackEvent('ai_analysis_completed', {
     reason: 'server_error',
   })
 
-    if (
-      error instanceof Error &&
-      error.message.includes('timeout')
-    ) {
-        useAlertStore().showAlert('AI 분석 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.', 'warning')
+    // 에러 메시지를 안전하게 추출
+    const errorMessage = error instanceof Error ? error.message : String(error ?? '')
+
+    if (errorMessage.includes('timeout')) {
+        useAlertStore().showAlert('AI 서버 응답이 지연되고 있습니다. 네트워크 상태를 확인하고 잠시 후 다시 시도해주세요.', 'warning')
       return
     }
 
-      useAlertStore().showAlert(error instanceof Error ? error.message : 'AI 분석 중 오류가 발생했습니다.', 'error')
+    // 500 에러 등 서버 측 오류
+    if (errorMessage.includes('서버') || errorMessage.includes('500')) {
+      useAlertStore().showAlert('AI 분석 서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해주세요.', 'error')
+      return
+    }
+
+      useAlertStore().showAlert(errorMessage || 'AI 분석 중 오류가 발생했습니다.', 'error')
   } finally {
     aiAnalyzing.value = false
   }
@@ -1445,6 +1472,115 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     return item.uiMode === 'eq_ai' || item.markers.length > 0
   })
 
+  // 일괄 적용 가능한 이슈(미적용 클리핑 또는 하쉬니스)가 있는지 확인
+  const hasActionableAiIssues = computed(() => {
+    return aiAnalysisItems.value.some(item => 
+      (isActionableClippingItem(item) && !checkIsClippingApplied(item)) ||
+      item.kind === 'HARSHNESS'
+    )
+  })
+
+  // 일괄 적용 실행: 클리핑은 최대 감소값을 찾아 마스터 리미터에 한 번만 적용, 하쉬니스는 자동 제거(dismiss)
+  async function handleApplyAll() {
+    if (aiAnalyzing.value) return
+
+    const clippingItems = aiAnalysisItems.value.filter(item => 
+      isActionableClippingItem(item) && !checkIsClippingApplied(item)
+    )
+
+    let maxReductionDb = 0
+    let targetCeilingDbtp: number | null = null
+
+    // 모든 클리핑 이슈 중 최대 감소값 찾기
+    for (const item of clippingItems) {
+      const action = getActiveClippingTrimAction(item)
+      if (action && action.recommendedReductionDb != null) {
+        const reduction = Math.abs(Number(action.recommendedReductionDb))
+        if (reduction > maxReductionDb) {
+          maxReductionDb = reduction
+        }
+        if (action.targetCeilingDbtp != null && action.targetCeilingDbtp !== -1) {
+          targetCeilingDbtp = action.targetCeilingDbtp
+        }
+      }
+    }
+
+    if (clippingItems.length > 0 && maxReductionDb > 0) {
+      let locked = false
+      try {
+        aiAnalyzing.value = true
+        await lockMasterLimiter(projectId, true)
+        locked = true
+
+        const currentLimiter = await getMasterLimiter(projectId)
+
+        const savedLimiter = await saveMasterLimiterDraft(projectId, {
+          isEnabled: true,
+          thresholdDb: currentLimiter.thresholdDb,
+          ceilingDbfs: targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
+          attackMs: currentLimiter.attackMs,
+          releaseMs: currentLimiter.releaseMs,
+          inputGainDb: Math.max(-12.0, Math.min(12.0, currentLimiter.inputGainDb - maxReductionDb)),
+          makeupGainDb: currentLimiter.makeupGainDb,
+          jobId: currentAiJobId.value,
+          suggestionActionId: null,
+          appliedSuggestionId: null,
+          sourceType: 'AI_SUGGESTION',
+        })
+        trackStore.setMasterLimiterState(savedLimiter)
+
+        const newIssueIds = new Set(appliedClippingIssueIds.value)
+        const newInfoMap = new Map(appliedClippingInfoMap.value)
+
+        for (const item of clippingItems) {
+          newIssueIds.add(item.id)
+          newInfoMap.set(item.id, {
+            reductionDb: maxReductionDb,
+            inputGainDb: savedLimiter.inputGainDb,
+            ceilingDbfs: savedLimiter.ceilingDbfs,
+          })
+        }
+
+        appliedClippingIssueIds.value = newIssueIds
+        appliedClippingInfoMap.value = newInfoMap
+
+        const appliedIds = new Set(clippingItems.map(i => i.id))
+        aiAnalysisItems.value = aiAnalysisItems.value.filter(i => !appliedIds.has(i.id))
+        
+        if (activeAiAnalysisId.value && appliedIds.has(activeAiAnalysisId.value)) {
+          activeAiAnalysisId.value = null
+        }
+      } catch (error: any) {
+        console.error('[AI bulk clipping apply failed]', error)
+        useAlertStore().showAlert(error?.response?.data?.message ?? '일괄 클리핑 적용 중 오류가 발생했습니다.', 'error')
+      } finally {
+        if (locked) {
+          try {
+            await lockMasterLimiter(projectId, false)
+          } catch (unlockError) {
+            console.error('[AI clipping unlock failed]', unlockError)
+          }
+        }
+        aiAnalyzing.value = false
+      }
+    }
+
+    // 하쉬니스 이슈는 마커만 표시하는 유형이므로 일괄 제거(dismiss)
+    const harshnessItems = aiAnalysisItems.value.filter(item => item.kind === 'HARSHNESS')
+    for (const item of harshnessItems) {
+      handleDismissClippingIssue(item)
+    }
+
+    if (clippingItems.length > 0 || harshnessItems.length > 0) {
+      aiSuccessMessage.value = '선택 가능한 모든 AI 이슈가 일괄 적용 및 정리되었습니다.'
+      setTimeout(() => {
+        if (aiSuccessMessage.value === '선택 가능한 모든 AI 이슈가 일괄 적용 및 정리되었습니다.') {
+          aiSuccessMessage.value = null
+        }
+      }, 2500)
+    }
+  }
+
   return {
     activeAiMarkers,
     aiAnalyzing,
@@ -1458,6 +1594,8 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     handleRequestAiEqRevision,
     handleApplyClippingIssue,
     handleDismissClippingIssue,
+    hasActionableAiIssues,
+    handleApplyAll,
     setActiveAiAnalysis,
     aiAnalysisItems,
     activeAiAnalysisId,

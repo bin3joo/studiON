@@ -130,6 +130,117 @@ def clear_raw_dsp_state() -> dict[str, object]:
     return payload
 
 
+def resolve_clip_track_id(state: WorkflowState, clip_id: int | None) -> int | None:
+    if clip_id is None:
+        return None
+    for clip in state.get("clip_index", []):
+        if int(clip.get("clip_id") or 0) == int(clip_id):
+            return int(clip["track_id"])
+    return None
+
+
+def resolve_preserve_clip_id_for_track(
+    state: WorkflowState,
+    region: dict[str, object],
+    preserve_track_id: int,
+) -> int | None:
+    for clip_id in region.get("affected_clip_ids", []) or []:
+        resolved_track_id = resolve_clip_track_id(state, int(clip_id))
+        if resolved_track_id is not None and int(resolved_track_id) == int(preserve_track_id):
+            return int(clip_id)
+
+    region_start_ms = region.get("start_ms")
+    region_end_ms = region.get("end_ms")
+    for clip in state.get("clip_index", []):
+        clip_track_id = clip.get("track_id")
+        if clip_track_id is None or int(clip_track_id) != int(preserve_track_id):
+            continue
+        clip_start_ms = clip.get("start_ms")
+        clip_end_ms = clip.get("end_ms")
+        if not all(
+            isinstance(value, int)
+            for value in (region_start_ms, region_end_ms, clip_start_ms, clip_end_ms)
+        ):
+            continue
+        if int(clip_end_ms) <= int(region_start_ms) or int(clip_start_ms) >= int(region_end_ms):
+            continue
+        return int(clip.get("clip_id") or 0)
+    return None
+
+
+def build_selection_context(
+    state: WorkflowState,
+    region: dict[str, object],
+    preserve_clip_id: int,
+) -> dict[str, object]:
+    preserve_track_id = resolve_clip_track_id(state, preserve_clip_id)
+    selected_track_id = _resolve_selected_track_id(state) or preserve_track_id
+    involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
+    track_ids_for_labels = list(dict.fromkeys([
+        *involved_track_ids,
+        *(
+            track_id
+            for track_id in (selected_track_id, preserve_track_id)
+            if isinstance(track_id, int)
+        ),
+    ]))
+    non_preserve_track_ids = [
+        track_id
+        for track_id in involved_track_ids
+        if preserve_track_id is None or track_id != preserve_track_id
+    ]
+    track_name_map = {
+        track_id: _track_name(state, track_id)
+        for track_id in track_ids_for_labels
+    }
+    return {
+        "selectedTrackId": selected_track_id,
+        "preserveTrackId": preserve_track_id,
+        "selectedTrackIsProtected": (
+            selected_track_id is not None and selected_track_id == preserve_track_id
+        ),
+        "selectedClipId": preserve_clip_id,
+        "preserveClipId": preserve_clip_id,
+        "primaryTrackId": region.get("track_id"),
+        "secondaryTrackId": region.get("secondary_track_id"),
+        "bandOverlapSubtype": region.get("band_overlap_subtype"),
+        "bandFocusLabel": region.get("band_focus_label"),
+        "trackBodyContributions": deepcopy(region.get("track_body_contributions") or {}),
+        "trackNameMap": track_name_map,
+        "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
+    }
+
+
+def _resolve_selected_track_id(state: WorkflowState) -> int | None:
+    action_payload = state.get("action_payload")
+    if not isinstance(action_payload, dict):
+        return None
+    selected_track_ids = action_payload.get("selected_track_ids")
+    if not isinstance(selected_track_ids, list):
+        return None
+    for track_id in selected_track_ids:
+        if isinstance(track_id, bool):
+            continue
+        if isinstance(track_id, int):
+            return track_id
+        if isinstance(track_id, str):
+            stripped = track_id.strip()
+            if stripped:
+                try:
+                    return int(stripped)
+                except ValueError:
+                    continue
+    return None
+
+
+def _track_name(state: WorkflowState, track_id: int) -> str | None:
+    track_name_map = state.get("track_name_map") or {}
+    track_name = track_name_map.get(int(track_id))
+    if isinstance(track_name, str) and track_name.strip():
+        return track_name.strip()
+    return None
+
+
 def _log_workflow_update(previous: WorkflowState, current: WorkflowState) -> None:
     log_level = _decide_log_level(current)
     summary = (

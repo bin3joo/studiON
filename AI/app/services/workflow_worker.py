@@ -26,8 +26,13 @@ def run_workflow_dispatch(message: WorkflowDispatchMessage):
             "project_id": message.project_id,
             "dispatch_type": message.dispatch_type,
             "requested_by": message.requested_by,
+            "request_mode": message.request_mode,
             "selected_region_id": message.selected_region_id,
             "preserve_clip_id": message.preserve_clip_id,
+            "selected_region_selections": [
+                selection.model_dump(mode="python")
+                for selection in message.selected_region_selections
+            ],
             "issue_id": message.issue_id,
             "action_type": message.action_type,
             "action_payload": message.action_payload,

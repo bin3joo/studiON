@@ -938,7 +938,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
   >
    <div 
       :aria-label="`${track.name} 컨트롤 패널`"
-      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 border-r py-2 px-3 transition-colors duration-200 group-hover:bg-[#282828]"
+      class="sticky left-0 z-60 flex shrink-0 flex-col gap-1.5 [@media(max-height:500px)]:gap-0.5 border-r py-2 [@media(max-height:500px)]:py-1 px-3 transition-colors duration-200 group-hover:bg-[#282828]"
       :class="[
         track.isSelected ? 'bg-[#2a2a2b] border-r-[#FF8F1A]' : 'bg-[#1c1c1c] border-border',
         isMaster ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
@@ -1027,10 +1027,10 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
       </div>
 
       <!-- 볼륨 / 팬 컨트롤 영역 교체 -->
-      <div class="mt-auto flex flex-col gap-2">
+      <div class="mt-auto flex flex-col gap-2 [@media(max-height:500px)]:gap-0.5">
         
         <!-- 볼륨 조절 -->
-<div aria-label="볼륨 조절" class="flex items-center gap-2" @mousedown.stop @dragstart.prevent.stop>
+<div aria-label="볼륨 조절" class="flex items-center gap-2 [@media(max-height:500px)]:gap-1" @mousedown.stop @dragstart.prevent.stop>
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">VOL</span>
           
           <!-- 1. 볼륨 커스텀 슬라이더 (드래그 조작용) -->
@@ -1052,7 +1052,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           <!-- 2. 수치 입력 박스 (키보드 직접 입력용) -->
           <div 
             aria-label="현재 볼륨 수치" 
-            class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5 cursor-text hover:border-primary/50 transition-colors"
+            class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5 [@media(max-height:500px)]:py-0 cursor-text hover:border-primary/50 transition-colors"
             @click.stop="startEditVolume"
           >
             <input
@@ -1074,7 +1074,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
         </div>
 
         <!-- 패닝 조절 -->
-        <div aria-label="패닝 조절" class="flex items-center gap-2" @mousedown.stop @dragstart.prevent.stop>
+        <div aria-label="패닝 조절" class="flex items-center gap-2 [@media(max-height:500px)]:gap-1" @mousedown.stop @dragstart.prevent.stop>
           <span aria-hidden="true" class="w-7 shrink-0 font-mono text-[9px] tracking-widest text-muted-foreground">PAN</span>
           
           <!-- 1. 팬 커스텀 슬라이더 (드래그 조작용) -->
@@ -1096,7 +1096,7 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           <!-- 2. 수치 입력 박스 (키보드 직접 입력용) -->
           <div 
             aria-label="현재 패닝 수치" 
-            class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5 cursor-text hover:border-primary/50 transition-colors"
+            class="flex w-10 shrink-0 items-center justify-center rounded-[4px] border border-white/20 bg-black/20 py-0.5 [@media(max-height:500px)]:py-0 cursor-text hover:border-primary/50 transition-colors"
             @click.stop="startEditPan"
           >
             <input
@@ -1156,7 +1156,10 @@ const commentCursorSvg = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.or
           <div
             v-for="conflict in aiAnalysisItems"
             :key="conflict.id"
-            v-show="activeAiAnalysisId === conflict.id"
+            v-show="activeAiAnalysisId === conflict.id && (
+              String(conflict.targetTrackId) === String(track.trackId) ||
+              (conflict.involvedTrackIds && conflict.involvedTrackIds.some((id: any) => String(id) === String(track.trackId)))
+            )"
             class="pointer-events-none absolute top-0 bottom-0 z-40 border-x border-red-500 bg-red-500/20"
             :style="{
               left: getConflictLeft(conflict) + 'px',

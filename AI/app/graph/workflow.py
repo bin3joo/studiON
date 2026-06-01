@@ -57,6 +57,7 @@ RANKING_PATH_MAP = {
 
 PLAN_INPUT_PATH_MAP = {
     "planning_agent": "planning_agent",
+    "batch_plan_candidates": "batch_plan_candidates",
 }
 
 VALIDATOR_PATH_MAP = {
@@ -152,6 +153,7 @@ def build_workflow_graph():
     graph.add_node("candidate_ranking", nodes.candidate_ranking)
     graph.add_node("wait_user_plan_input", nodes.wait_user_plan_input)
     graph.add_node("planning_agent", nodes.planning_agent)
+    graph.add_node("batch_plan_candidates", nodes.batch_plan_candidates)
     graph.add_node("plan_rule_validator", nodes.plan_rule_validator)
     graph.add_node("plan_critic", nodes.plan_critic)
     graph.add_node("approve_plan", nodes.approve_plan)
@@ -200,6 +202,7 @@ def build_workflow_graph():
         edges.route_after_plan_input,
         PLAN_INPUT_PATH_MAP,
     )
+    graph.add_edge("batch_plan_candidates", "persist_analysis_result")
     graph.add_edge("planning_agent", "plan_rule_validator")
     graph.add_conditional_edges(
         "plan_rule_validator",

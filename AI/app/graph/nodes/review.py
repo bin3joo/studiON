@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import logging
 import json
-from app.graph.nodes.common import artifact_id, decide_validation_result, workflow_update
+from app.graph.nodes.common import (
+    artifact_id,
+    build_selection_context,
+    decide_validation_result,
+    resolve_clip_track_id,
+    workflow_update,
+)
 from app.graph.nodes.runtime import fail_workflow
 from app.graph.state import WorkflowState
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
@@ -83,7 +89,7 @@ def plan_critic(state: WorkflowState) -> WorkflowState:
             selected_region_id=int(selected_region["id"]),
             preserve_clip_id=int(preserve_clip_id),
             user_feedback_message=state.get("user_feedback_message"),
-            selection_context=_build_selection_context(state, selected_region, int(preserve_clip_id)),
+            selection_context=build_selection_context(state, selected_region, int(preserve_clip_id)),
             region=selected_region,
             plan_payload=state.get("plan_payload") or {},
             revision_notes=[*state.get("plan_revision_notes", [])],
@@ -265,7 +271,7 @@ def _validate_plan_payload(state: WorkflowState, plan_payload: dict[str, object]
         return "Plan payload preserveClipId did not match the selected preserve clip."
 
     preserve_track_id = (
-        _resolve_clip_track_id(state, int(preserve_clip_id))
+        resolve_clip_track_id(state, int(preserve_clip_id))
         if preserve_clip_id
         else None
     )
@@ -292,46 +298,6 @@ def _resolve_selected_region(state: WorkflowState) -> dict[str, object] | None:
         selected_region_id = state["analysis_regions"][0]["id"]
     region = region_map.get(selected_region_id) if selected_region_id else None
     return dict(region) if isinstance(region, dict) else None
-
-
-def _resolve_clip_track_id(state: WorkflowState, clip_id: int) -> int | None:
-    for clip in state.get("clip_index", []):
-        if int(clip.get("clip_id") or 0) == int(clip_id):
-            return int(clip["track_id"])
-    return None
-
-
-def _build_selection_context(
-    state: WorkflowState,
-    region: dict[str, object],
-    preserve_clip_id: int,
-) -> dict[str, object]:
-    preserve_track_id = _resolve_clip_track_id(state, preserve_clip_id)
-    involved_track_ids = [int(track_id) for track_id in region.get("involved_track_ids", [])]
-    non_preserve_track_ids = [
-        track_id
-        for track_id in involved_track_ids
-        if preserve_track_id is None or track_id != preserve_track_id
-    ]
-    track_name_map = {
-        int(track_id): _track_name(state, int(track_id))
-        for track_id in involved_track_ids
-    }
-    return {
-        "selectedTrackId": preserve_track_id,
-        "preserveTrackId": preserve_track_id,
-        "selectedTrackIsProtected": preserve_track_id is not None,
-        "selectedClipId": preserve_clip_id,
-        "preserveClipId": preserve_clip_id,
-        "primaryTrackId": region.get("track_id"),
-        "secondaryTrackId": region.get("secondary_track_id"),
-        "bandOverlapSubtype": region.get("band_overlap_subtype"),
-        "bandFocusLabel": region.get("band_focus_label"),
-        "trackBodyContributions": region.get("track_body_contributions") or {},
-        "trackNameMap": track_name_map,
-        "nonPreserveOverlappingTrackIds": non_preserve_track_ids,
-    }
-
 
 def _supplement_critic_decision(
     *,
@@ -424,14 +390,6 @@ def _merge_critic_notes(primary: str, supplemental: str) -> str:
     if primary and supplemental:
         return f"{primary} {supplemental}".strip()
     return primary or supplemental
-
-
-def _track_name(state: WorkflowState, track_id: int) -> str | None:
-    track_name_map = state.get("track_name_map") or {}
-    track_name = track_name_map.get(int(track_id))
-    if isinstance(track_name, str) and track_name.strip():
-        return track_name.strip()
-    return None
 
 
 def _band_overlap_gain_limit_db(subtype: str) -> float | None:

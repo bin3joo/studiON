@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { X, Loader2, Download } from 'lucide-vue-next'
-import { useAudioExport } from '../composables/useAudioExport'
+import { computed, ref } from 'vue'
+import { Download, Loader2, X } from 'lucide-vue-next'
+import { calculateMasterRenderDurationSec, useAudioExport } from '../composables/useAudioExport'
 import { useTrackStore } from '../store/useTrackStore'
 
 const props = defineProps<{
@@ -19,21 +19,13 @@ const { exportMasterAudio } = useAudioExport()
 const trackStore = useTrackStore()
 
 const expectedSizeMB = computed(() => {
-  const tracks = trackStore.trackList
+  const renderDurationSec = calculateMasterRenderDurationSec(
+    trackStore.trackList,
+    trackStore.secondsPerBar,
+  )
 
-  let maxDurationBar = 0
-  tracks.forEach((track) => {
-    track.clips.forEach((clip) => {
-      const end = clip.start + clip.duration
-      if (end > maxDurationBar) maxDurationBar = end
-    })
-  })
+  if (renderDurationSec === 0) return '0.00'
 
-  if (maxDurationBar === 0) return '0.00'
-
-  const secondsPerBar = trackStore.secondsPerBar
-  // 여유 공간(Reverb/Delay Tail 등) 1초 반영
-  const renderDurationSec = maxDurationBar * secondsPerBar + 1.0
   const sampleRate = 48000
   const channels = 2 // 스테레오 고정
   const bytesPerSample = 3 // 24-bit
@@ -108,14 +100,14 @@ async function handleExport() {
   >
     <div class="relative w-full max-w-md rounded-2xl border border-white/10 bg-card p-7 shadow-2xl transition-all">
       <div class="mb-6 flex items-center justify-between">
-        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-          <Download class="w-5 h-5 text-zinc-300" />
+        <h2 class="flex items-center gap-2 text-xl font-bold text-white">
+          <Download class="h-5 w-5 text-zinc-300" />
           오디오 다운로드
         </h2>
         <button
           v-if="!isExporting"
           @click="emit('close')"
-          class="rounded-full p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+          class="rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
         >
           <X class="h-5 w-5" />
         </button>
@@ -134,7 +126,7 @@ async function handleExport() {
           </h3>
           <div class="space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-sm text-zinc-400">포맷</span>
+              <span class="text-sm text-zinc-400">형식</span>
               <span class="text-sm font-medium text-white">WAV</span>
             </div>
             <div class="flex items-center justify-between">
@@ -149,23 +141,23 @@ async function handleExport() {
               <span class="text-sm text-zinc-400">비트뎁스</span>
               <span class="text-sm font-medium text-white">24 bit</span>
             </div>
-            <div class="flex items-center justify-between mt-2 pt-3 border-t border-white/10">
-              <span class="text-sm font-medium text-zinc-300">용량</span>
+            <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-3">
+              <span class="text-sm font-medium text-zinc-300">예상 용량</span>
               <span class="text-sm font-bold text-white">{{ expectedSizeMB }} MB</span>
             </div>
           </div>
         </div>
-        
-        <div v-if="errorMessage" class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400 border border-red-500/20">
+
+        <div v-if="errorMessage" class="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
           {{ errorMessage }}
         </div>
       </div>
 
-      <div class="flex justify-center mt-2">
+      <div class="mt-2 flex justify-center">
         <button
           @click="handleExport"
           :disabled="isExporting"
-          class="flex items-center justify-center gap-2 rounded-lg bg-zinc-200 px-8 py-3 text-sm font-medium text-black transition-all hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500 w-full shadow-lg shadow-black/20"
+          class="flex w-full items-center justify-center gap-2 rounded-lg bg-zinc-200 px-8 py-3 text-sm font-medium text-black shadow-lg shadow-black/20 transition-all hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500"
         >
           <template v-if="isExporting">
             <Loader2 class="h-4 w-4 animate-spin" />

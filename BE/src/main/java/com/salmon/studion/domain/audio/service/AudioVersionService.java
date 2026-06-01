@@ -1,6 +1,7 @@
 package com.salmon.studion.domain.audio.service;
 
 import com.salmon.studion.domain.audio.dto.request.AudioVersionCreateRequest;
+import com.salmon.studion.domain.audio.dto.request.AudioVersionUploadedCreateRequest;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionDeleteResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionDownloadUrlResponse;
@@ -51,6 +52,31 @@ public class AudioVersionService {
                         request.getName(),
                         request.getMemo(),
                         snapshotJson
+                )
+        );
+
+        return new AudioVersionCreateResponse(
+                audioVersion.getId(),
+                audioVersion.getName(),
+                audioVersion.getStatus(),
+                audioVersion.getCreatedAt()
+        );
+    }
+
+    @Transactional
+    public AudioVersionCreateResponse createUploadedAudioVersion(
+            Integer projectId,
+            AudioVersionUploadedCreateRequest request,
+            AudioMetadata audioMetadata
+    ) {
+        Project project = projectService.getProjectOrThrow(projectId);
+
+        ProjectMasterAudioVersion audioVersion = audioVersionRepository.saveAndFlush(
+                ProjectMasterAudioVersion.createReady(
+                        project,
+                        request.getName(),
+                        request.getMemo(),
+                        audioMetadata
                 )
         );
 

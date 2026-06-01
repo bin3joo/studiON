@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Camera, X, Check } from 'lucide-vue-next'
+import { Camera, Check, X } from 'lucide-vue-next'
+import { calculateMasterRenderDurationSec, useAudioExport } from '../composables/useAudioExport'
+import { useTrackStore } from '../store/useTrackStore'
 import { useAudioVersionStore } from '../store/useAudioVersionStore'
 
 interface Props {
@@ -14,6 +16,8 @@ const emit = defineEmits<{
 }>()
 
 const audioVersionStore = useAudioVersionStore()
+const trackStore = useTrackStore()
+const { exportMasterAudio } = useAudioExport()
 
 const name = ref('')
 const memo = ref('')
@@ -31,7 +35,7 @@ watch(
       showSuccess.value = false
       errorMessage.value = ''
     }
-  }
+  },
 )
 
 async function handleSave() {
@@ -44,22 +48,46 @@ async function handleSave() {
   }
 
   if (trimmedName.length > 50) {
-    errorMessage.value = '버전 이름은 50자를 넘을 수 없습니다.'
+    errorMessage.value = '버전 이름은 50자를 초과할 수 없습니다.'
     return
   }
 
   if (trimmedMemo.length > 255) {
-    errorMessage.value = '메모는 255자를 넘을 수 없습니다.'
+    errorMessage.value = '메모는 255자를 초과할 수 없습니다.'
+    return
+  }
+
+  const renderDurationSec = calculateMasterRenderDurationSec(
+    trackStore.trackList,
+    trackStore.secondsPerBar,
+  )
+
+  if (renderDurationSec === 0) {
+    errorMessage.value = '내보낼 오디오 클립이 없습니다.'
     return
   }
 
   isSaving.value = true
   errorMessage.value = ''
 
-  const success = await audioVersionStore.saveVersion(props.projectId, {
-    name: trimmedName,
-    memo: trimmedMemo
-  })
+  let success = false
+
+  try {
+    const blob = await exportMasterAudio(false)
+    const durationMs = Math.max(1, Math.round(renderDurationSec * 1000))
+
+    success = await audioVersionStore.saveVersion(
+      props.projectId,
+      {
+        name: trimmedName,
+        memo: trimmedMemo,
+      },
+      blob,
+      durationMs,
+    )
+  } catch (error: any) {
+    errorMessage.value = error?.message || '버전 저장용 오디오 생성에 실패했습니다.'
+  }
 
   isSaving.value = false
 
@@ -68,7 +96,7 @@ async function handleSave() {
     setTimeout(() => {
       emit('close')
     }, 2000)
-  } else {
+  } else if (!errorMessage.value) {
     errorMessage.value = '버전 생성 요청에 실패했습니다.'
   }
 }
@@ -109,7 +137,7 @@ function handleClose() {
       </div>
 
       <div v-if="!showSuccess">
-        <div class="space-y-4 mb-6">
+        <div class="mb-6 space-y-4">
           <div class="space-y-2">
             <label class="text-sm font-medium text-muted-foreground">버전 이름 <span class="text-primary">*</span></label>
             <input
@@ -128,14 +156,14 @@ function handleClose() {
             <textarea
               v-model="memo"
               rows="3"
-              placeholder="변경 사항이나 설명을 적어주세요."
+              placeholder="변경 사항이나 설명을 적어주세요"
               class="w-full resize-none rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-50"
               :disabled="isSaving"
               maxlength="255"
             ></textarea>
             <div class="text-right text-[10px] text-muted-foreground">{{ memo.length }}/255</div>
           </div>
-          
+
           <p v-if="errorMessage" class="text-sm text-destructive">{{ errorMessage }}</p>
         </div>
 
@@ -159,15 +187,14 @@ function handleClose() {
           </button>
         </div>
       </div>
-      
-      <!-- 성공 메시지 화면 -->
+
       <div v-else class="flex flex-col items-center justify-center py-8 text-center animate-fade-in">
         <div class="mb-4 grid h-16 w-16 place-items-center rounded-full bg-primary/20 text-primary">
           <Check class="h-8 w-8" />
         </div>
-        <h3 class="mb-2 text-lg font-bold text-foreground">버전 생성이 시작되었습니다</h3>
+        <h3 class="mb-2 text-lg font-bold text-foreground">버전 저장이 완료되었습니다.</h3>
         <p class="text-sm text-muted-foreground">
-          백엔드 처리가 진행 중입니다.<br>잠시 후 버전 기록에서 확인하실 수 있습니다.
+          현재 상태의 WAV 음원을 저장했습니다.<br>이제 버전 기록에서 바로 확인할 수 있습니다.
         </p>
       </div>
     </div>

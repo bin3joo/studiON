@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from app.graph.nodes.common import append_transition, artifact_id, clear_raw_dsp_state, workflow_update
+from app.graph.nodes.common import (
+    append_transition,
+    artifact_id,
+    clear_raw_dsp_state,
+    resolve_preserve_clip_id_for_track,
+    workflow_update,
+)
 from app.graph.state import WorkflowState, utc_now
 from app.services.workflow_artifacts import WorkflowArtifactDocument, get_workflow_artifact_store
 from app.services.workflow_jobs import WorkflowDispatchMessage, get_workflow_job_store
@@ -52,6 +58,47 @@ def wait_user_plan_input(state: WorkflowState) -> WorkflowState:
 
 
 def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
+    normalized_selections, batch_validation_error = _normalize_batch_plan_input(state)
+    if batch_validation_error is not None:
+        return fail_workflow(
+            {
+                **state,
+                "failure_code": batch_validation_error[0],
+                "failure_message": batch_validation_error[1],
+            }
+        )
+    if len(normalized_selections) > 1:
+        notes = [*state.get("notes", [])]
+        notes.append(
+            f"User submitted batch plan input for {len(normalized_selections)} region(s)."
+        )
+        if state.get("user_feedback_message"):
+            notes.append(f"User feedback: {state['user_feedback_message']}")
+        return workflow_update(
+            state,
+            node="resume_after_plan_input",
+            phase="user_plan_input_resolved",
+            progress=64,
+            runtime_status="running",
+            durable_status="RUNNING",
+            extra={
+                "request_mode": "batch",
+                "selected_region_selections": normalized_selections,
+                "selected_region_id": None,
+                "preserve_clip_id": None,
+                "notes": notes,
+            },
+        )
+    if len(normalized_selections) == 1:
+        selection = normalized_selections[0]
+        state = {
+            **state,
+            "request_mode": "single",
+            "selected_region_selections": normalized_selections,
+            "selected_region_id": int(selection["region_id"]),
+            "preserve_clip_id": int(selection["preserve_clip_id"]),
+        }
+
     if not state.get("selected_region_id"):
         return fail_workflow(
             {
@@ -91,7 +138,7 @@ def resume_after_plan_input(state: WorkflowState) -> WorkflowState:
         progress=64,
         runtime_status="running",
         durable_status="RUNNING",
-        extra={"notes": notes},
+        extra={"request_mode": "single", "notes": notes},
     )
 
 
@@ -406,8 +453,8 @@ def apply_selected_edit_recipe(state: WorkflowState) -> WorkflowState:
                 **state,
                 "failure_code": "INVALID_PREVIEW_BAND_SPEC_COUNT",
                 "failure_message": (
-                    "대표 레시피를 적용하기 전에 "
-                    "Spring 저장용 preview band spec 1개가 필요합니다."
+                    "선택된 제안을 적용하기 전에 "
+                    "Spring 저장용 preview band spec이 최소 1개 필요합니다."
                 ),
             }
         )
@@ -559,8 +606,10 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "project_id": state["project_id"],
             "dispatch_type": state["dispatch_type"],
             "requested_by": state.get("requested_by"),
+            "request_mode": state.get("request_mode"),
             "selected_region_id": state.get("selected_region_id"),
             "preserve_clip_id": state.get("preserve_clip_id"),
+            "selected_region_selections": state.get("selected_region_selections", []),
             "issue_id": state.get("issue_id"),
             "action_type": state.get("action_type"),
             "action_payload": state.get("action_payload"),
@@ -581,6 +630,7 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
             "requested_by": dispatch.requested_by
             if dispatch.requested_by is not None
             else restored.get("requested_by"),
+            "request_mode": dispatch.request_mode or restored.get("request_mode"),
             "runtime_status": "running",
             "durable_status": "RUNNING",
             "heartbeat_at": utc_now(),
@@ -592,6 +642,11 @@ def _load_worker_entry_context(state: WorkflowState) -> WorkflowState:
         restored["selected_region_id"] = dispatch.selected_region_id
     if dispatch.preserve_clip_id is not None:
         restored["preserve_clip_id"] = dispatch.preserve_clip_id
+    if dispatch.selected_region_selections:
+        restored["selected_region_selections"] = [
+            selection.model_dump(mode="python")
+            for selection in dispatch.selected_region_selections
+        ]
     if dispatch.issue_id is not None:
         restored["issue_id"] = dispatch.issue_id
     if dispatch.action_type is not None:
@@ -623,6 +678,26 @@ def _validate_dispatch(
                 "INVALID_RESUME_PHASE",
                 f"Plan-input resume expected 'waiting_for_user_plan_input', got '{phase}'.",
             )
+        if dispatch.selected_region_selections:
+            if len(dispatch.selected_region_selections) > 1 and not str(
+                dispatch.user_feedback_message or ""
+            ).strip():
+                return (
+                    "MISSING_BATCH_USER_PROMPT",
+                    "userPrompt is required for batch plan-input resume.",
+                )
+            restored_snapshot = deepcopy(snapshot)
+            restored_snapshot["selected_region_selections"] = [
+                selection.model_dump(mode="python")
+                for selection in dispatch.selected_region_selections
+            ]
+            restored_snapshot["request_mode"] = (
+                "batch" if len(dispatch.selected_region_selections) > 1 else "single"
+            )
+            selection_error = _normalize_batch_plan_input(restored_snapshot)[1]
+            if selection_error is not None:
+                return selection_error
+            return None
         if dispatch.selected_region_id is None:
             return (
                 "MISSING_SELECTED_REGION",
@@ -706,6 +781,69 @@ def _validate_plan_input_selection(state: WorkflowState) -> tuple[str, str] | No
         )
     return None
 
+
+def _normalize_batch_plan_input(
+    state: WorkflowState,
+) -> tuple[list[dict[str, object]], tuple[str, str] | None]:
+    selections = state.get("selected_region_selections") or []
+    if not selections:
+        return [], None
+
+    region_map = {
+        int(region["id"]): region
+        for region in state.get("analysis_regions", [])
+        if region.get("id") is not None
+    }
+    ranked_candidate_ids = {int(region_id) for region_id in state.get("ranked_candidate_ids", [])}
+    seen_region_ids: set[int] = set()
+    normalized: list[dict[str, object]] = []
+
+    for selection in selections:
+        region_id = int(selection["region_id"])
+        preserve_track_id = int(selection["preserve_track_id"])
+        if region_id in seen_region_ids:
+            return [], (
+                "DUPLICATE_REGION_SELECTION",
+                "regionSelections must not contain duplicate regionId values.",
+            )
+        seen_region_ids.add(region_id)
+
+        region = region_map.get(region_id)
+        if not isinstance(region, dict):
+            return [], (
+                "INVALID_SELECTED_REGION",
+                f"regionId {region_id} did not match a known analysis region.",
+            )
+        if region_id not in ranked_candidate_ids:
+            return [], (
+                "INVALID_SELECTED_REGION",
+                f"regionId {region_id} must reference a ranked user-action candidate.",
+            )
+        if not bool(region.get("requires_user_action")):
+            return [], (
+                "INVALID_SELECTED_REGION",
+                f"regionId {region_id} must reference a user-action issue.",
+            )
+
+        preserve_clip_id = selection.get("preserve_clip_id")
+        if preserve_clip_id is None:
+            preserve_clip_id = resolve_preserve_clip_id_for_track(state, region, preserve_track_id)
+        if preserve_clip_id is None:
+            return [], (
+                "INVALID_PRESERVE_TRACK",
+                f"preserveTrackId {preserve_track_id} must belong to regionId {region_id}.",
+            )
+
+        normalized.append(
+            {
+                "region_id": region_id,
+                "preserve_track_id": preserve_track_id,
+                "preserve_clip_id": int(preserve_clip_id),
+            }
+        )
+
+    return normalized, None
+
 # 프리뷰 렌더링을 위한 대표 action 복원 함수
 def _resolve_preview_action(state: WorkflowState) -> dict[str, object]:
     plan_payload = state.get("plan_payload") or {}
@@ -749,6 +887,15 @@ def _resolve_preview_focus_region_id(state: WorkflowState) -> int:
     selected_region_id = state.get("selected_region_id")
     if selected_region_id is not None:
         return int(selected_region_id)
+    payload = state.get("suggestion_payload") or {}
+    active_issue_id = payload.get("activeIssueId")
+    if active_issue_id:
+        for issue in payload.get("issues", []):
+            if not isinstance(issue, dict) or str(issue.get("issueId")) != str(active_issue_id):
+                continue
+            source_region_ids = issue.get("sourceRegionIds") or []
+            if source_region_ids:
+                return int(source_region_ids[0])
     auto_preview_region_id = _resolve_auto_preview_region_id(state)
     if auto_preview_region_id is not None:
         return int(auto_preview_region_id)

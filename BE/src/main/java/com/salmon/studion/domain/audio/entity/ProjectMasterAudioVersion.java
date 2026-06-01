@@ -58,6 +58,23 @@ public class ProjectMasterAudioVersion extends BaseEntity {
         return audioVersion;
     }
 
+    public static ProjectMasterAudioVersion createReady(
+            Project project,
+            String name,
+            String memo,
+            AudioMetadata audioMetadata
+    ) {
+        ProjectMasterAudioVersion audioVersion = new ProjectMasterAudioVersion();
+        audioVersion.project = project;
+        audioVersion.name = name;
+        audioVersion.memo = memo;
+        audioVersion.audioMetadata = audioMetadata;
+        audioVersion.status = AudioVersionStatus.READY;
+        audioVersion.failedReason = null;
+        audioVersion.renderSnapshotJson = null;
+        return audioVersion;
+    }
+
     public void markReady(AudioMetadata audioMetadata) {
         this.audioMetadata = audioMetadata;
         this.status = AudioVersionStatus.READY;

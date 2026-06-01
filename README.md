@@ -8,7 +8,7 @@
 
 AI 기반 음악 협업 플랫폼
 
-[서비스 소개](#) · [시연 영상](#) · [📄 발표 자료](./FE/public/studiON.pdf)
+[📄 발표 자료](./FE/public/studiON.pdf)
 
 </div>
 
@@ -107,7 +107,10 @@ AI가 믹싱 과정에서 발생하는 문제를 자동으로 분석합니다.
 * 사용자 판단 보조
 
 <p align="center">
-<img src="./docs/eq.png" width="90%">
+<img src="./FE/public/prompt1.png" width="90%">
+</p>
+<p align="center">
+<img src="./FE/public/prompt2.png" width="90%">
 </p>
 
 ---
@@ -116,7 +119,7 @@ AI가 믹싱 과정에서 발생하는 문제를 자동으로 분석합니다.
 # 🏗 시스템 아키텍처
 
 <p align="center">
-<img src="./docs/architecture.png" width="100%">
+<img src="./FE/public/studiON_architecture.png" width="100%">
 </p>
 
 studiON은 Frontend, Backend, AI Server가 분리된 구조로 구성되어 있습니다.

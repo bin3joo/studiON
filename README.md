@@ -110,7 +110,7 @@ AI가 믹싱 과정에서 발생하는 문제를 자동으로 분석합니다.
 <img src="./FE/public/prompt1.png" width="90%">
 </p>
 <p align="center">
-<img src="./FE/public/prompt2.png" width="90%">
+<img src="./FE/public/prompt3.png" width="90%">
 </p>
 
 ---

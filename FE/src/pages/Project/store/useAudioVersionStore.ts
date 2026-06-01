@@ -1,12 +1,14 @@
+import axios from 'axios'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
-  getAudioVersionList,
-  createAudioVersion,
+  createUploadedAudioVersion,
   deleteAudioVersion,
   getAudioVersionDownloadUrl,
+  getAudioVersionList,
+  getAudioVersionUploadUrl,
+  type AudioVersionCreateRequest,
   type AudioVersionSummary,
-  type AudioVersionCreateRequest
 } from '../api/audioVersion.api'
 
 export const useAudioVersionStore = defineStore('audioVersion', () => {
@@ -18,7 +20,6 @@ export const useAudioVersionStore = defineStore('audioVersion', () => {
       isLoading.value = true
       const res = await getAudioVersionList(projectId)
       if (res && res.data) {
-        // 백엔드 응답이 { data: { versions: [...] } } 인지 { data: [...] } 인지 확인
         versions.value = res.data.versions || []
       }
     } catch (error) {
@@ -28,10 +29,37 @@ export const useAudioVersionStore = defineStore('audioVersion', () => {
     }
   }
 
-  const saveVersion = async (projectId: number, payload: AudioVersionCreateRequest) => {
+  const saveVersion = async (
+    projectId: number,
+    payload: AudioVersionCreateRequest,
+    blob: Blob,
+    durationMs: number,
+  ) => {
     try {
-      const res = await createAudioVersion(projectId, payload)
-      return res.isSuccess !== false // 성공 여부 반환
+      const originalName = `${payload.name}.wav`
+      const uploadUrlResponse = await getAudioVersionUploadUrl(projectId, {
+        originalName,
+        mimeType: 'WAV',
+        sizeBytes: blob.size,
+      })
+
+      await axios.put(uploadUrlResponse.data.uploadUrl, blob, {
+        headers: {
+          'Content-Type': 'audio/wav',
+        },
+      })
+
+      const res = await createUploadedAudioVersion(projectId, {
+        ...payload,
+        objectKey: uploadUrlResponse.data.objectKey,
+        originalName,
+        storedName: uploadUrlResponse.data.storedName,
+        mimeType: 'WAV',
+        sizeBytes: blob.size,
+        durationMs,
+      })
+
+      return res.isSuccess !== false
     } catch (error) {
       console.error('버전 저장 중 오류 발생:', error)
       return false
@@ -54,7 +82,6 @@ export const useAudioVersionStore = defineStore('audioVersion', () => {
       const res = await getAudioVersionDownloadUrl(projectId, versionId)
       if (res && res.data && res.data.downloadUrl) {
         const url = res.data.downloadUrl
-        // presigned URL을 통해 다운로드 유도
         const link = document.createElement('a')
         link.href = url
         link.download = fileName.endsWith('.wav') ? fileName : `${fileName}.wav`
@@ -75,6 +102,6 @@ export const useAudioVersionStore = defineStore('audioVersion', () => {
     fetchVersions,
     saveVersion,
     removeVersion,
-    downloadVersion
+    downloadVersion,
   }
 })

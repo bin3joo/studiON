@@ -1,10 +1,13 @@
 package com.salmon.studion.domain.audio.controller;
 
+import com.salmon.studion.domain.audio.dto.request.AudioUploadUrlRequest;
 import com.salmon.studion.domain.audio.dto.request.AudioVersionCreateRequest;
+import com.salmon.studion.domain.audio.dto.request.AudioVersionUploadedCreateRequest;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionCreateResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionDeleteResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionDownloadUrlResponse;
 import com.salmon.studion.domain.audio.dto.response.AudioVersionListResponse;
+import com.salmon.studion.domain.audio.dto.response.AudioVersionUploadUrlResponse;
 import com.salmon.studion.domain.audio.facade.AudioVersionFacade;
 import com.salmon.studion.global.auth.CustomOAuth2User;
 import com.salmon.studion.global.common.response.ApiResponse;
@@ -32,6 +35,24 @@ public class AudioVersionController {
             @AuthenticationPrincipal CustomOAuth2User user
     ) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.success(audioVersionFacade.createAudioVersion(projectId, request, user.getUserId())));
+    }
+
+    @PostMapping("/upload-url")
+    public ResponseEntity<ApiResponse<AudioVersionUploadUrlResponse>> getAudioVersionUploadUrl(
+            @PathVariable Integer projectId,
+            @Valid @RequestBody AudioUploadUrlRequest request,
+            @AuthenticationPrincipal CustomOAuth2User user
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(audioVersionFacade.getAudioVersionUploadUrl(projectId, request, user.getUserId())));
+    }
+
+    @PostMapping("/uploaded")
+    public ResponseEntity<ApiResponse<AudioVersionCreateResponse>> createUploadedAudioVersion(
+            @PathVariable Integer projectId,
+            @Valid @RequestBody AudioVersionUploadedCreateRequest request,
+            @AuthenticationPrincipal CustomOAuth2User user
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(audioVersionFacade.createUploadedAudioVersion(projectId, request, user.getUserId())));
     }
 
     @GetMapping()

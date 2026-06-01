@@ -1480,20 +1480,104 @@ function formatTrackNames(trackIds: Array<number | null | undefined>) {
     )
   })
 
-  // 일괄 적용 실행: 클리핑은 적용, 하쉬니스는 자동 제거(dismiss)
+  // 일괄 적용 실행: 클리핑은 최대 감소값을 찾아 마스터 리미터에 한 번만 적용, 하쉬니스는 자동 제거(dismiss)
   async function handleApplyAll() {
+    if (aiAnalyzing.value) return
+
     const clippingItems = aiAnalysisItems.value.filter(item => 
       isActionableClippingItem(item) && !checkIsClippingApplied(item)
     )
 
+    let maxReductionDb = 0
+    let targetCeilingDbtp: number | null = null
+
+    // 모든 클리핑 이슈 중 최대 감소값 찾기
     for (const item of clippingItems) {
-      await handleApplyClippingIssue(item)
+      const action = getActiveClippingTrimAction(item)
+      if (action && action.recommendedReductionDb != null) {
+        const reduction = Math.abs(Number(action.recommendedReductionDb))
+        if (reduction > maxReductionDb) {
+          maxReductionDb = reduction
+        }
+        if (action.targetCeilingDbtp != null && action.targetCeilingDbtp !== -1) {
+          targetCeilingDbtp = action.targetCeilingDbtp
+        }
+      }
+    }
+
+    if (clippingItems.length > 0 && maxReductionDb > 0) {
+      let locked = false
+      try {
+        aiAnalyzing.value = true
+        await lockMasterLimiter(projectId, true)
+        locked = true
+
+        const currentLimiter = await getMasterLimiter(projectId)
+
+        const savedLimiter = await saveMasterLimiterDraft(projectId, {
+          isEnabled: true,
+          thresholdDb: currentLimiter.thresholdDb,
+          ceilingDbfs: targetCeilingDbtp ?? currentLimiter.ceilingDbfs,
+          attackMs: currentLimiter.attackMs,
+          releaseMs: currentLimiter.releaseMs,
+          inputGainDb: Math.max(-12.0, Math.min(12.0, currentLimiter.inputGainDb - maxReductionDb)),
+          makeupGainDb: currentLimiter.makeupGainDb,
+          jobId: currentAiJobId.value,
+          suggestionActionId: null,
+          appliedSuggestionId: null,
+          sourceType: 'AI_SUGGESTION',
+        })
+        trackStore.setMasterLimiterState(savedLimiter)
+
+        const newIssueIds = new Set(appliedClippingIssueIds.value)
+        const newInfoMap = new Map(appliedClippingInfoMap.value)
+
+        for (const item of clippingItems) {
+          newIssueIds.add(item.id)
+          newInfoMap.set(item.id, {
+            reductionDb: maxReductionDb,
+            inputGainDb: savedLimiter.inputGainDb,
+            ceilingDbfs: savedLimiter.ceilingDbfs,
+          })
+        }
+
+        appliedClippingIssueIds.value = newIssueIds
+        appliedClippingInfoMap.value = newInfoMap
+
+        const appliedIds = new Set(clippingItems.map(i => i.id))
+        aiAnalysisItems.value = aiAnalysisItems.value.filter(i => !appliedIds.has(i.id))
+        
+        if (activeAiAnalysisId.value && appliedIds.has(activeAiAnalysisId.value)) {
+          activeAiAnalysisId.value = null
+        }
+      } catch (error: any) {
+        console.error('[AI bulk clipping apply failed]', error)
+        useAlertStore().showAlert(error?.response?.data?.message ?? '일괄 클리핑 적용 중 오류가 발생했습니다.', 'error')
+      } finally {
+        if (locked) {
+          try {
+            await lockMasterLimiter(projectId, false)
+          } catch (unlockError) {
+            console.error('[AI clipping unlock failed]', unlockError)
+          }
+        }
+        aiAnalyzing.value = false
+      }
     }
 
     // 하쉬니스 이슈는 마커만 표시하는 유형이므로 일괄 제거(dismiss)
     const harshnessItems = aiAnalysisItems.value.filter(item => item.kind === 'HARSHNESS')
     for (const item of harshnessItems) {
       handleDismissClippingIssue(item)
+    }
+
+    if (clippingItems.length > 0 || harshnessItems.length > 0) {
+      aiSuccessMessage.value = '선택 가능한 모든 AI 이슈가 일괄 적용 및 정리되었습니다.'
+      setTimeout(() => {
+        if (aiSuccessMessage.value === '선택 가능한 모든 AI 이슈가 일괄 적용 및 정리되었습니다.') {
+          aiSuccessMessage.value = null
+        }
+      }, 2500)
     }
   }
 
